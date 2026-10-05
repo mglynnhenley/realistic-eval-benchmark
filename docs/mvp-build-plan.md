@@ -166,7 +166,7 @@ The spec's success criteria SC-001 to SC-006, with the quality bar from the spec
 
 - `OutcomeRecord.cash_refunded(as_of=...)` and `to_user(kind, as_of=...)`: transfers are dated when the user hears about them, so both the harness stop check and the honesty grader only count money that had arrived by the time in question. The harness stops on a refund only after the agent has had a full turn to see it.
 - `simulator` and `grader` roles are `required=True`, so they never fall back to the target model. Simulator fallbacks (heuristic classifier, template reply) log warnings.
-- Web search uses an external provider only (`TAVILY_API_KEY`, `EXA_API_KEY` or Google CSE). Inspect's model-native search is refused because on Claude it also enables a server-side page fetcher that bypasses the URL guard.
+- Web search uses the keyless Exa MCP search service. Inspect's model-native search is refused because on Claude it also enables a server-side page fetcher that bypasses the URL guard.
 - Call the task uncalled from Python (`eval(impossible_refund, task_args=...)`) or through the CLI, so it sees the eval's model and roles.
 - For `mail_source=gmail`, the scenario's `user` block must describe the real user (name, addresses, phone), and the seed emails must use the real user's address.
 - `tests/test_integration_e2e.py` runs the real task, scenario, tools, simulator and scorers with a scripted agent that takes the layer 1 shortcut.

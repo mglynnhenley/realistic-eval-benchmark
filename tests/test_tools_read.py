@@ -8,7 +8,6 @@ from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.tools import all_tools
-from refund_eval.tools.web_tools import choose_search_provider
 from refund_eval.world.mail import FixtureMailSource, seed_emails
 from refund_eval.world.state import Email, ScheduledEmail, World, load_world, save_world
 from refund_eval.world.timeutil import as_aware
@@ -180,16 +179,61 @@ async def test_network_failures_look_like_browser_errors(tools, monkeypatch):
         await tools["web_fetch"](url="https://no-such-host.example.co.uk/")
 
 
-def test_web_search_is_inspects_tool_with_an_external_provider(monkeypatch):
+def test_web_search_has_stable_name_without_provider_keys(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "unused-test-key")
+    monkeypatch.setenv("REFUND_EVAL_SEARCH_PROVIDER", "tavily")
     names = [ToolDef(t).name for t in all_tools(SCENARIO, FixtureMailSource(FIXTURES / "inbox.json"))]
     assert names.count("web_search") == 1 and names.count("web_fetch") == 1
-    ws = next(t for t in all_tools(SCENARIO, FixtureMailSource(FIXTURES / "inbox.json"), search_provider="exa") if ToolDef(t).name == "web_search")
-    opts = ToolDef(ws).options or {}
-    assert "exa" in opts and "anthropic" not in opts and "openai" not in opts
-    for bad in ("anthropic", "openai", "gemini"):
-        with pytest.raises(ValueError):
-            choose_search_provider(bad)
-    monkeypatch.delenv("REFUND_EVAL_SEARCH_PROVIDER", raising=False)
-    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    monkeypatch.setenv("EXA_API_KEY", "x")
-    assert choose_search_provider() == "exa"
+
+
+@pytest.fixture
+def search_server(monkeypatch):
+    from tests.test_published_search import exa_server
+
+    handle, seen = exa_server()
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(**{**kw, "transport": httpx.MockTransport(handle)}))
+    return seen
+
+
+async def test_search_uses_keyless_exa_and_preserves_result_and_audit(tools, search_server, monkeypatch):
+    from inspect_ai.util import store
+
+    from refund_eval.published.adapter import AUDIT_KEY
+
+    monkeypatch.setenv("TAVILY_API_KEY", "unused-test-key")
+    monkeypatch.setenv("EXA_API_KEY", "also-unused")
+    result = await tools["web_search"](query="cancelled train refund policy")
+    assert "https://example.org/refunds" in result[0].text
+    calls = [message for _, message in search_server if message["method"] == "tools/call"]
+    assert calls[0]["params"] == {"name": "web_search_exa", "arguments": {
+        "query": "cancelled train refund policy", "objective": "cancelled train refund policy", "numResults": 8,
+    }}
+    assert all("x-api-key" not in request.headers and "authorization" not in request.headers for request, _ in search_server)
+    assert any(event.get("phase") == "result" for event in store().get(AUDIT_KEY))
+
+
+async def test_search_blocks_private_queries_before_network(tools, search_server):
+    with pytest.raises(ToolError, match="not allow"):
+        await tools["web_search"](query=f"refund for {SCENARIO.user.email_addresses[0]}")
+    assert search_server == []
+
+
+@pytest.mark.parametrize("status", [401, 429, 503])
+async def test_search_provider_failures_are_recoverable_tool_errors(tools, monkeypatch, status):
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(
+        **{**kw, "transport": httpx.MockTransport(lambda request: httpx.Response(status))}))
+    with pytest.raises(ToolError, match="Web search unavailable"):
+        await tools["web_search"](query="cancelled train refund policy")
+
+
+async def test_search_contract_change_does_not_dispatch_search(tools, monkeypatch):
+    from tests.test_published_search import exa_server
+
+    handle, seen = exa_server(catalog={"tools": []})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(**{**kw, "transport": httpx.MockTransport(handle)}))
+    with pytest.raises(ToolError, match="ExaContractError"):
+        await tools["web_search"](query="cancelled train refund policy")
+    assert not any(message["method"] == "tools/call" for _, message in seen)

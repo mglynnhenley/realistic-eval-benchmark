@@ -318,3 +318,110 @@ def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path
         assert not manager.list()
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize(('settings', 'message'), [
+    ({'execution': 'local', 'trials': 2}, 'multiple trials'),
+    ({'execution': 'modal', 'tool_profile': 'published'}, 'legacy tools'),
+    ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
+    ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
+    ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),
+    ({'execution': 'modal', 'experiment_manifest': 'comparison.json'}, 'local only'),
+])
+def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, message):
+    manager = server.RunManager(tmp_path)
+    try:
+        with pytest.raises(server.APIError, match=message):
+            manager.start(server.RunConfig(**settings))
+        assert not manager.list() and not manager.processes
+    finally:
+        manager.close()
+
+
+def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(server.subprocess, 'Popen', lambda command, **kwargs: (
+        commands.append(command) or SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0)))
+    monkeypatch.setattr(server.RunManager, '_monitor', lambda *args: None)
+    monkeypatch.setattr(server.shutil, 'which', lambda executable: '/usr/bin/uv')
+    manager = server.RunManager(tmp_path)
+    try:
+        record = manager.start(server.RunConfig(execution='modal', trials=4, concurrency=2))
+        directory = manager.directory(record['id'])
+        assert commands[0][0].endswith('/scripts/harbor')
+        assert commands[0][3] == 'refund_eval.harbor.dashboard'
+        assert json.loads((directory / 'rubrics.json').read_text()) == manager.behaviours()
+        assert record['config']['trials'] == 4 and record['config']['concurrency'] == 2
+    finally:
+        manager.close()
+
+
+def test_dead_batch_controller_finalizes_active_children(tmp_path):
+    manager = server.RunManager(tmp_path)
+    parent = 'abcdef123456'
+    child = 'abcdef123457'
+    try:
+        for run_id, extra in [(parent, {'config': {'execution': 'modal'}}),
+                              (child, {'parent_batch_id': parent})]:
+            directory = tmp_path / run_id
+            directory.mkdir()
+            server.write_json(directory / 'run.json', {'id': run_id, 'status': 'running', **extra})
+        server.write_json(tmp_path / child / 'snapshot.json', {'phase': 'running', 'messages': ['partial']})
+        server.write_json(tmp_path / parent / 'snapshot.json', {'phase': 'running', 'batch': {
+            'counts': {'running': 1, 'queued': 2}, 'trials': [{'id': child, 'status': 'running'}],
+            'models': [{'model': 'openrouter/a/b', 'counts': {'running': 1, 'queued': 2}}],
+        }})
+        manager._monitor(parent, SimpleNamespace(wait=lambda: 9))
+        assert manager.describe(parent)['status'] == 'failed'
+        detail = manager.detail(child)
+        assert detail['run']['status'] == 'failed'
+        assert detail['snapshot']['messages'] == ['partial']
+        assert manager.detail(parent)['snapshot']['batch']['counts']['failed'] == 3
+        assert manager.detail(parent)['snapshot']['batch']['models'][0]['counts']['failed'] == 3
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('settings', [
+    {'models': []}, {'models': ['openrouter/a/b', 'openrouter/a/b']},
+    {'models': ['anthropic/a']}, {'models': ['openrouter/a/b'] * 17},
+])
+def test_invalid_model_list_is_rejected(settings):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        server.RunConfig(**settings)
+
+
+@pytest.mark.parametrize('settings, message', [
+    ({'mode': 'model', 'execution': 'local'}, 'Harbor model batch'),
+    ({'mode': 'demo', 'execution': 'modal'}, 'Harbor model batch'),
+    ({'mode': 'model', 'execution': 'modal', 'trials': 51}, '100 total trials'),
+])
+def test_multi_model_scope_and_total_limits(tmp_path, settings, message):
+    manager = server.RunManager(tmp_path)
+    try:
+        with pytest.raises(server.APIError, match=message):
+            manager.start(server.RunConfig(models=['openrouter/a/first', 'openrouter/a/second'], **settings))
+        assert not manager.processes
+    finally:
+        manager.close()
+
+
+def test_multi_model_launch_counts_trials_and_checks_all_models(tmp_path, monkeypatch):
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'test-only-key')
+    monkeypatch.setattr(server.shutil, 'which', lambda command: '/usr/bin/uv')
+    monkeypatch.setattr(server, 'sdk_available', lambda provider: True)
+    monkeypatch.setattr(server.subprocess, 'Popen', lambda *a, **k: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
+    monkeypatch.setattr(server.RunManager, '_monitor', lambda *a: None)
+    manager = server.RunManager(tmp_path)
+    try:
+        models = ['openrouter/a/first', 'openrouter/b/second']
+        record = manager.start(server.RunConfig(mode='model', execution='modal', models=models,
+                                               trials=1, concurrency=2))
+        assert record['config']['models'] == models
+        assert record['model'] == models[0]
+        batch = manager.detail(record['id'])['snapshot']['batch']
+        assert batch['total'] == 2 and batch['counts']['queued'] == 2
+    finally:
+        manager.close()

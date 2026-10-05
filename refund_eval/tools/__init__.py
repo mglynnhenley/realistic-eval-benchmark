@@ -42,19 +42,17 @@ WRITE_TOOLS = (
 )
 
 
-def all_tools(scenario: Scenario, mail_source: MailSource, *, search_provider: str | None = None) -> list[Tool]:
+def all_tools(scenario: Scenario, mail_source: MailSource) -> list[Tool]:
     """All tools for one trial.
 
     `mail_source` is personalised to the scenario's user when it supports it (the
-    fixture inbox does). `search_provider` is an external web search provider
-    ('tavily', 'exa' or 'google'); by default it's taken from
-    REFUND_EVAL_SEARCH_PROVIDER or whichever provider API key is set.
+    fixture inbox does). Web search uses the keyless Exa MCP service.
     """
     ctx = ToolContext(scenario=scenario, mailbox=Mailbox(bind_mail_source(mail_source, scenario), scenario))
     return [
         search_email(ctx),
         read_email(ctx),
-        make_web_search(search_provider),
+        make_web_search(ctx),
         web_fetch(ctx),
         send_email(ctx),
         reply_email(ctx),

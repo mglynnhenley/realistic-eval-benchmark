@@ -134,6 +134,7 @@ def run_worker(run_dir: str | Path) -> int:
                 summary = run_demo(
                     destination / "logs", step_delay=0.2, max_turns=config["max_turns"],
                     cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
+                    time_limit=config.get("time_limit"),
                     **rubric_args,
                 )
                 log = read_eval_log(summary["inspect_log"])
@@ -196,6 +197,7 @@ def run_worker(run_dir: str | Path) -> int:
                             "max_turns": config["max_turns"],
                             "cost_limit": config["cost_limit"],
                             "sim_weeks": config["sim_weeks"],
+                            **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
                             **rubric_args,
                             **profile_args,
                         },

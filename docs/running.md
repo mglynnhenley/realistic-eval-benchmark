@@ -16,13 +16,14 @@ Copy `.env.example` to `.env` for the settings template:
 
 ```bash
 OPENROUTER_API_KEY=...       # target agent, counterparty simulator and graders
-TAVILY_API_KEY=...           # web search for the agent (or EXA_API_KEY, or GOOGLE_CSE_ID + GOOGLE_CSE_API_KEY)
 ```
 
-The legacy profile picks its web-search provider from whichever search key is set,
-or from `REFUND_EVAL_SEARCH_PROVIDER`. See `refund_eval/tools/web_tools.py`. Published
+Legacy web search uses the hosted, keyless Exa MCP service. No search API key is
+needed, locally or in a Modal/Docker batch. Search-provider environment variables
+are not used by the legacy harness. Search can be rate limited; failures are
+reported to the agent and known URLs can still be read with `web_fetch`. Published
 tools with fixture or hybrid data need no search key or Gmail connection. Hybrid
-uses live keyless Exa search with simulated Gmail; see the
+also uses live keyless Exa search with simulated Gmail; see the
 [published-tool runbook](published-tools.md#simulated-gmail-with-real-internet).
 
 The default model for the simulator and graders is
@@ -314,6 +315,12 @@ The default `openrouter/anthropic/claude-opus-5` also has a bundled fallback
 verified 2026-09-30). Mockllm has a zero price and never needs a catalog lookup.
 
 Trials run concurrently. Use `--max-samples N` to limit how many run at once.
+
+For one isolated Modal sandbox per trial, use the [Harbor/Inspect runner](harbor.md).
+It retains this benchmark's simulator, wake-ups and grading and adds Harbor job
+concurrency, per-trial artifacts and sandbox cleanup. In the dashboard, choose
+**Start a run → Run location → Modal** to launch, follow and stop a batch.
+Existing Inspect commands continue to run locally as before.
 
 The longer simulated trial with Haiku in all three roles can also be selected explicitly:
 
