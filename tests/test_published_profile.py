@@ -104,7 +104,6 @@ async def test_adapter_preserves_explicit_fixture_selection_and_lifetime(monkeyp
             events.append("closed")
 
     monkeypatch.setattr(profile, "published_tools", scope)
-    monkeypatch.setattr(adapters, "build_tools", lambda *a: pytest.fail("Legacy fallback used"))
     with pytest.raises(RuntimeError, match="consumer stopped"):
         async with adapters.tool_scope(scenario, "fixture", profile="published",
                                        published_data="fixture", published_config="unused.json") as tools:

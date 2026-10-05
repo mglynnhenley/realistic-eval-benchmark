@@ -49,17 +49,19 @@ def test_delivered_mail_is_never_dated_in_the_future():
 
 def test_tool_calls_cost_simulated_minutes():
     w = _world()
-    clock.charge(w, "phone_call")
-    assert w.now == T0 + timedelta(minutes=20)
-    clock.charge(w, "send_email")
-    clock.charge(w, "submit_web_form")
-    clock.charge(w, "live_chat")
-    assert w.now == T0 + timedelta(minutes=37)
+    clock.charge(w, "send_message")
+    assert w.now == T0 + timedelta(minutes=2)
+    clock.charge(w, "reply")
+    assert w.now == T0 + timedelta(minutes=4)
+    clock.charge(w, "search_threads")  # unlisted tools cost the 1-minute default
+    assert w.now == T0 + timedelta(minutes=5)
+    clock.charge(w, "browser_navigate")
+    assert w.now == T0 + timedelta(minutes=6)
 
 
 def test_charge_delivers_replies_due_within_the_call():
     w = _world(("ack", timedelta(minutes=1)))
-    arrived = clock.charge(w, "send_email")
+    arrived = clock.charge(w, "send_message")
     assert [e.id for e in arrived] == ["ack"]
 
 

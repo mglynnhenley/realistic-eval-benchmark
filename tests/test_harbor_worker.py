@@ -11,6 +11,10 @@ from refund_eval.harbor.worker import run_trial
 from refund_eval.scenario.schema import load_scenario
 
 
+def published_settings(**kwargs):
+    return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
+
+
 @pytest.mark.browser
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_SUBPROCESS_BROWSER_SMOKE") != "1", reason="Requires packaged subprocess Chromium runtime")
 def test_real_inspect_worker_exports_complete_scripted_trial(tmp_path, monkeypatch):
@@ -18,7 +22,7 @@ def test_real_inspect_worker_exports_complete_scripted_trial(tmp_path, monkeypat
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     request = TrialRequest(
         instruction=load_scenario("train_refund").task_text, model="mockllm/model",
-        settings=TrialSettings(smoke=True, tool_profile="published", data_mode="fixture", browser_runtime="subprocess"), trial_id="worker-smoke",
+        settings=published_settings(smoke=True, data_mode="fixture"), trial_id="worker-smoke",
     )
     output = tmp_path / "artifacts"
     result = run_trial(request, output)
@@ -49,13 +53,13 @@ def test_real_inspect_worker_exports_complete_scripted_trial(tmp_path, monkeypat
 
 def test_smoke_cannot_enable_paid_roles():
     with pytest.raises(ValueError, match="scripted"):
-        TrialSettings(smoke=True, grader_model="openrouter/paid")
+        published_settings(smoke=True, grader_model="openrouter/paid")
 
 
 def test_worker_rejects_changed_instructions(tmp_path):
     request = TrialRequest(
         instruction="Do a different task", model="mockllm/model",
-        settings=TrialSettings(smoke=True), trial_id="wrong-task",
+        settings=published_settings(smoke=True), trial_id="wrong-task",
     )
     with pytest.raises(ValueError, match="exactly"):
         run_trial(request, tmp_path)
@@ -84,7 +88,7 @@ def test_worker_reports_grader_failure_and_passes_inspect_rubrics(tmp_path, monk
     monkeypatch.setattr(worker, "eval", evaluate)
     request = TrialRequest(
         instruction=load_scenario("train_refund").task_text, model="openrouter/example/model",
-        settings=TrialSettings(rubric_set={"version": "frozen"}), trial_id="failed-grader",
+        settings=published_settings(rubric_set={"version": "frozen"}), trial_id="failed-grader",
     )
     result = run_trial(request, tmp_path / "artifacts")
     assert not result["passed"] and result["grading_status"] == "failed"

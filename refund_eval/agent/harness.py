@@ -45,6 +45,7 @@ from refund_eval.agent.schedule import (
     sim_deadline,
     wakeup_text,
 )
+from refund_eval.config import RunConfig
 from refund_eval.dashboard.telemetry import emit_snapshot
 from refund_eval.killswitch import kill_reason
 from refund_eval.scenario.schema import Scenario, load_scenario
@@ -313,12 +314,12 @@ def _record_stop(reason: str) -> None:
 def refund_agent(
     scenario_id: str = "train_refund",
     mail_source_kind: str = "fixture",
-    max_turns: int = 300,
-    sim_weeks: float = 12,
+    max_turns: int = RunConfig.model_fields["max_turns"].default,
+    sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     checkin_hour: int = CHECKIN_HOUR,
-    tool_profile: str = "legacy",
+    tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_config: str | None = None,
-    published_data: str = "live",
+    published_data: str = RunConfig.model_fields["data_mode"].default,
     world_mode: str = "baseline",
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
@@ -339,8 +340,8 @@ def refund_agent(
     """
     from refund_eval.agent.mail_context import validate_thread_ids
 
-    if published_data == "hybrid" and tool_profile != "published":
-        raise ValueError("Hybrid data requires tool_profile='published'")
+    if tool_profile != "published":
+        raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
     initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
     if initial_mail_thread_ids and (tool_profile != "published" or published_data not in {"fixture", "hybrid"}):
         raise ValueError("Initial mailbox context requires the published fixture or hybrid profile")

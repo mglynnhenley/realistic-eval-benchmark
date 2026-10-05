@@ -26,7 +26,7 @@ def batch_directory(tmp_path):
     dashboard.write(directory / "config.json", {
         "execution": "modal", "trials": 2, "concurrency": 1, "mode": "demo",
         "max_turns": 20, "sim_weeks": 1, "cost_limit": 1, "time_limit": 1800,
-        "world_mode": "baseline",
+        "world_mode": "baseline", "tool_profile": "published", "data_mode": "fixture", "browser_runtime": "subprocess",
     })
     dashboard.write(directory / "rubrics.json", {"version": "test-snapshot"})
     return directory

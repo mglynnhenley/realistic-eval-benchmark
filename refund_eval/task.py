@@ -25,13 +25,13 @@ from inspect_ai.model import (
 
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
+from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.scenario.schema import load_scenario
 
 # The target is the eval model (--model). These roles are used by the
 # counterparty simulator and the graders (--model-role simulator=... etc).
 MODEL_ROLES = ("simulator", "grader")
-DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5"
 # With a mockllm target (dry run) the roles default to mockllm too, so a dry
 # run never calls a real API unless you ask it to with --model-role.
 DRY_RUN_ROLE_MODEL = "mockllm/model"
@@ -120,20 +120,20 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
 
 @task
 def impossible_refund(
-    trials: int = 20,
+    trials: int = RunConfig.model_fields["trials"].default,
     scenario: str = "train_refund",
     mail_source: str = "fixture",
-    max_turns: int = 300,
-    cost_limit: float | None = 40.0,
-    sim_weeks: float = 12,
+    max_turns: int = RunConfig.model_fields["max_turns"].default,
+    cost_limit: float | None = RunConfig.model_fields["cost_limit"].default,
+    sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     message_limit: int | None = None,
     token_limit: int | None = None,
-    time_limit: int | None = None,
+    time_limit: int | None = RunConfig.model_fields["time_limit"].default,
     working_limit: int | None = None,
     rubric_set: dict | None = None,
-    tool_profile: str = "legacy",
+    tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_config: str | None = None,
-    published_data: str = "live",
+    published_data: str = RunConfig.model_fields["data_mode"].default,
     world_mode: str = "baseline",
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
@@ -145,7 +145,7 @@ def impossible_refund(
     Args:
       trials: Number of trials (Inspect epochs of the single sample).
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
-      mail_source: "fixture" (bundled test inbox) or "gmail" (the user's real inbox, read-only).
+      mail_source: Bundled fixture, or fixture:path alias; real Gmail uses published_data=live.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
       cost_limit: Per-trial model spend cap in dollars (Inspect cost_limit;
         counts every model call in the trial, including the simulator).
@@ -154,7 +154,7 @@ def impossible_refund(
       token_limit: Optional Inspect token limit.
       time_limit: Optional Inspect wall-clock limit in seconds.
       working_limit: Optional Inspect working-time limit in seconds.
-      tool_profile: "legacy" or "published" MCP tool profile.
+      tool_profile: Published MCP tools; legacy execution returns a migration error.
       published_data: "fixture" for local data, "hybrid" for local mail and live public web,
         or "live" for configured providers.
       world_mode: "baseline" or "friction" for a simulated world with service delays and follow-ups.
@@ -165,14 +165,20 @@ def impossible_refund(
         raise ValueError("trials must be at least 1")
     if browser_runtime not in {"docker", "subprocess"}:
         raise ValueError("browser_runtime must be docker or subprocess")
-    if tool_profile not in {"legacy", "published"}:
-        raise ValueError("tool_profile must be 'legacy' or 'published'")
+    if tool_profile != "published":
+        raise ValueError("Legacy execution is retired. Use tool_profile=published with published_data=fixture or hybrid. Frozen legacy jobs require their original runner and source snapshot.")
+    if published_data == "live" and browser_runtime != "docker":
+        raise ValueError("Live Gmail is local-only; use fixture or hybrid data in a sandbox.")
     if published_data not in {"fixture", "hybrid", "live"}:
         raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
     if published_data == "hybrid" and tool_profile != "published":
         raise ValueError("Hybrid data requires tool_profile='published'")
     if world_mode not in {"baseline", "friction"}:
         raise ValueError("world_mode must be 'baseline' or 'friction'")
+    if mail_source == "gmail":
+        raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
+    if mail_source.startswith("fixture:") and fixture_path is None:
+        fixture_path = mail_source.split(":", 1)[1]
     from refund_eval.agent.mail_context import validate_thread_ids
 
     initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
@@ -190,11 +196,16 @@ def impossible_refund(
             path = PROJECT_ROOT / path
         fixture_path = validate_fixture_path(str(path), data_mode=published_data)
     if world_mode == "friction" and (
-        (tool_profile == "published" and published_data not in {"fixture", "hybrid"})
-        or (tool_profile == "legacy" and not mail_source.startswith("fixture"))
+        published_data not in {"fixture", "hybrid"}
     ):
         raise ValueError("Realistic friction requires simulated data")
     if tool_profile == "published":
+        from inspect_ai.model._model import active_model
+
+        from refund_eval.published.provider import check_published_model
+
+        if active_model() is not None:
+            check_published_model(active_model())
         from refund_eval.published.profile import (
             fixture_readiness,
             hybrid_readiness,
@@ -234,7 +245,7 @@ def impossible_refund(
                           **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
-                             if tool_profile != "legacy" else {}),
+                             if tool_profile == "published" else {}),
                           **({"world_mode": world_mode} if world_mode != "baseline" else {}),
                           **({"rubric_set": rubric_set} if rubric_set is not None else {})},
             )
@@ -272,7 +283,7 @@ def impossible_refund(
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"world_mode": world_mode} if world_mode != "baseline" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
-               if tool_profile != "legacy" else {}),
+               if tool_profile == "published" else {}),
             **({"rubric_set": rubric_set} if rubric_set is not None else {}),
         },
     )

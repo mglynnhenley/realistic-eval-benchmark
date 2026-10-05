@@ -126,7 +126,7 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=4, help="Trials per selected model")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--tool-profile", choices=["published", "legacy"], default="published")
+    parser.add_argument("--tool-profile", choices=["published"], default="published")
     parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default=None)
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")

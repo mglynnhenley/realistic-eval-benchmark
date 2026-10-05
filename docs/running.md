@@ -244,7 +244,7 @@ uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus
 
 Use `-T published_data=fixture` for authored search/pages or follow the
 [advanced live setup](published-tools.md#configure-live-data). Omitting `trials`
-uses 20 epochs. Native optional fields require `-M strict_tools=false` for
+uses one trial. Native optional fields require `-M strict_tools=false` for
 OpenRouter and `openai-api` targets; dashboard and Harbor workers set it
 explicitly. The adapter validates every returned argument against the full
 native schema before dispatch. Scripted smoke tests do not prove paid provider
@@ -260,9 +260,13 @@ acceptance; provider-family model checks require separate approval.
 
 ### Task parameters (`-T name=value`)
 
+New task and dashboard defaults come from `refund_eval.config.RunConfig`.
+Scripted demos select fixture data unless another supported mode is explicit;
+new model runs default to hybrid. Frozen jobs keep their recorded settings.
+
 | Parameter | Default | What it does |
 | --- | --- | --- |
-| `trials` | `20` | Number of trials: Inspect epochs of the one sample. |
+| `trials` | `1` | Number of trials: Inspect epochs of the one sample. |
 | `scenario` | `train_refund` | Scenario name in `refund_eval/scenario/`, or a path to a YAML file. |
 | `tool_profile` | `published` | Compatibility parameter. Explicit `legacy` requests return a migration error. |
 | `published_data` | `hybrid` | `hybrid`: simulated Gmail + live web; `fixture`: simulated inbox/search/websites; `live`: configured Gmail and reviewed pages, local-only. |
@@ -271,9 +275,9 @@ acceptance; provider-family model checks require separate approval.
 | `artifact_dir` | `.context/artifacts` | Persistent artifact root, including browser audit JSONL. Dashboard/Harbor supply per-run directories. |
 | `published_config` | none | Optional live published-profile configuration path; unnecessary for fixture and hybrid modes. |
 | `world_mode` | `baseline` | `friction` adds recorded service delays, handoffs and offer reminders. Requires simulated Gmail (fixture or hybrid data). |
-| `max_turns` | `300` | Per-trial cap on the target model's generations. The harness enforces it. |
-| `cost_limit` | `40.0` | Per-trial target and simulator spend cap in dollars (Inspect `cost_limit`). Final grading is billed separately. |
-| `sim_weeks` | `12` | Per-trial cap on simulated time. |
+| `max_turns` | `20` | Per-trial cap on the target model's generations. The harness enforces it. |
+| `cost_limit` | `1.0` | Per-trial target and simulator spend cap in dollars (Inspect `cost_limit`). Final grading is billed separately. |
+| `sim_weeks` | `1` | Per-trial cap on simulated time. |
 | `message_limit` | none | Optional Inspect message limit. |
 | `token_limit` | none | Optional Inspect token limit. |
 | `time_limit` | none | Optional wall-clock limit per trial, in seconds. |

@@ -18,6 +18,7 @@ from pathlib import Path
 from inspect_ai.util import store
 from pydantic import BaseModel, ConfigDict, Field
 
+from refund_eval.config import RunConfig
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
@@ -168,7 +169,7 @@ def search_policy(scenario: Scenario):
 
 @asynccontextmanager
 async def published_tools(
-    scenario: Scenario, *, config_path: str | None = None, data_mode: str = "live",
+    scenario: Scenario, *, config_path: str | None = None, data_mode: str = RunConfig.model_fields["data_mode"].default,
     fixture_path: str | None = None, browser_runtime: str = "docker",
     artifact_dir: str | None = None,
 ):
@@ -301,7 +302,8 @@ async def published_tools(
         tools.extend(await inspect_tools(browser, source="playwright"))
         manifest = getattr(browser, "security_manifest", {}) or {}
         profile = store().get(PROFILE_KEY)
-        profile["browser_network"] = "none" if manifest.get("verified") else "unverified"
+        profile["browser_network"] = manifest.get("network_mode", "unverified")
+        profile["browser_audit"] = str(network_audit.relative_to(artifacts.parent))
         profile["browser_runtime"] = browser_runtime
         profile["browser_boundary"] = manifest
         if manifest.get("evidence_version") == 2:

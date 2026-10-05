@@ -205,6 +205,8 @@ class GmailService:
         if self._tools is None:
             catalog = copy.deepcopy(await self.remote.list_tools())
             _complete_catalog(catalog)
+            if self.fixture and self.snapshot is not None and self.snapshot.get("catalog_sha256") != catalog_sha256(catalog):
+                raise GmailSetupError("Fixture Gmail catalog changed; review the native contract and its pinned hash.")
             if not self.fixture:
                 if str(getattr(self.remote, "endpoint", "")) != GMAIL_ENDPOINT:
                     raise GmailSetupError("Gmail remote must be the first-party MCP endpoint.")

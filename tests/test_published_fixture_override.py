@@ -56,10 +56,15 @@ def test_task_resolves_fixture_path_and_records_it_without_changing_the_file(tmp
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("tool_profile,published_data", [("legacy", "fixture"), ("legacy", "live"), ("published", "live")])
-def test_task_rejects_fixture_override_outside_published_fixture_mode(tool_profile, published_data):
+@pytest.mark.parametrize("published_data", ["fixture", "live"])
+def test_task_rejects_fixture_override_with_retired_legacy_profile(published_data):
+    with pytest.raises(ValueError, match="Legacy execution is retired"):
+        impossible_refund(tool_profile="legacy", published_data=published_data, fixture_path="unused.json")
+
+
+def test_task_rejects_fixture_override_outside_published_fixture_mode():
     with pytest.raises(ValueError, match="fixture_path requires"):
-        impossible_refund(tool_profile=tool_profile, published_data=published_data, fixture_path="unused.json")
+        impossible_refund(tool_profile="published", published_data="live", fixture_path="unused.json")
 
 
 @pytest.mark.parametrize("contents", [None, "not json", "{}", "[]"])
@@ -97,8 +102,13 @@ async def test_adapter_forwards_override_explicitly(monkeypatch, tmp_path):
         pass
     assert calls == [{"config_path": None, "data_mode": "fixture", "fixture_path": path}]
     with pytest.raises(ValueError, match="fixture_path requires"):
-        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", fixture_path=path):
-            pytest.fail("Legacy override was accepted")
+        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", published_data="live", fixture_path=path):
+            pytest.fail("Live override was accepted")
+    with pytest.raises(ValueError, match="Legacy execution is retired"):
+        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", profile="legacy", fixture_path=path):
+            pytest.fail("Retired legacy profile was accepted")
+    # Both rejections happen before any published tool connection is opened.
+    assert len(calls) == 1
 
 
 async def test_profile_constructs_isolated_mail_sources_and_records_content_hash(tmp_path, monkeypatch):

@@ -10,6 +10,7 @@ from inspect_ai.model._providers.openrouter import OpenRouterAPI
 from inspect_ai.solver import solver
 
 from refund_eval import task as task_module
+from refund_eval.published.provider import published_model_args
 
 FABLE = "openrouter/anthropic/claude-fable-5"
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
@@ -68,7 +69,10 @@ def test_task_registers_selected_model_costs_before_inspect_checks_budget(
     monkeypatch.setattr(task_module, "refund_agent", lambda **kwargs: exercise_models())
     monkeypatch.setattr(task_module.adapters, "load_scorers", list)
 
-    target = get_model(FABLE if fable_target else "mockllm/target", memoize=False)
+    # The published task rejects OpenRouter targets that still use strict tool
+    # generation, so build the target with the same provider args the workers use.
+    target_name = FABLE if fable_target else "mockllm/target"
+    target = get_model(target_name, memoize=False, **published_model_args(target_name))
     role_name = "mockllm/role" if fable_target else FABLE
     (log,) = eval(
         task_module.impossible_refund,

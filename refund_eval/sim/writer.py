@@ -337,10 +337,10 @@ async def write_reply(
         if not problems:
             if mode == "chat":
                 # Keep the text; use the same authoritative duration as the tool clock.
-                from refund_eval.world.clock import TOOL_COST_MINUTES
+                from refund_eval.world.clock import CHAT_DURATION_MINUTES
 
                 draft.body = re.sub(r"(?m)^\s*\d{1,2}:\d{2}\s+", "", draft.body)
-                end = now + timedelta(minutes=TOOL_COST_MINUTES["live_chat"])
+                end = now + timedelta(minutes=CHAT_DURATION_MINUTES)
                 draft.body = f"[Chat {now:%H:%M}–{end:%H:%M}]\n" + draft.body
             return draft, "llm" if attempt == 0 else "llm_retry"
         logger.info("reply writer broke the decision (attempt %d): %s", attempt + 1, problems)
