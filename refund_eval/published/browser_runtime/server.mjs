@@ -8,15 +8,18 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 
-const spool = '/exchange';
+const spool = process.env.REFUND_EVAL_BROWSER_EXCHANGE || '/exchange';
+const home = process.env.HOME || '/tmp/home';
+const output = process.env.REFUND_EVAL_BROWSER_OUTPUT || '/tmp/output';
+const workspace = process.env.REFUND_EVAL_BROWSER_WORKSPACE || '/tmp/workspace';
 const MAX_BODY = 2_000_000;
 const MAX_RESPONSE = 8_000_000;
 const REQUEST_TIMEOUT = 45_000;
 let activeCall = null;
-await mkdir('/tmp/home', { recursive: true });
-await mkdir('/tmp/output', { recursive: true });
-await mkdir('/tmp/workspace', { recursive: true });
-process.chdir('/tmp/workspace');
+await mkdir(home, { recursive: true });
+await mkdir(output, { recursive: true });
+await mkdir(workspace, { recursive: true });
+process.chdir(workspace);
 
 async function exchange(request) {
   const id = randomUUID();
@@ -155,7 +158,7 @@ const server = await createConnection({
   timeouts: { action: 60_000, navigation: 60_000 },
   webmcp: false,
   saveSession: false,
-  outputDir: '/tmp/output',
+  outputDir: output,
 }, async () => context);
 
 // Correlation belongs to the transport envelope, never to tool arguments.
