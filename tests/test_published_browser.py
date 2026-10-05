@@ -200,7 +200,7 @@ async def test_aclose_under_cancelled_scope_still_releases_client_and_runtime(tm
     assert service._closed is True
 
 
-def admitted_after_return(tmp_path, release):
+def admitted_after_return(tmp_path, release, *, queued=1):
     """Playwright returns while a request admitted to its call still awaits policy."""
     records = []
     entered = asyncio.Event()
@@ -215,7 +215,8 @@ def admitted_after_return(tmp_path, release):
 
     class Client:
         async def call_tool(self, name, arguments, *, meta):
-            write_request(service, tool_call_id=meta["refund-eval/tool-call-id"], method="GET")
+            for _ in range(queued):  # One spool listing; the first is admitted and awaits policy.
+                write_request(service, tool_call_id=meta["refund-eval/tool-call-id"], method="GET")
             await asyncio.wait_for(entered.wait(), 5)
             return {"content": [{"type": "text", "text": "Navigated"}]}
 
@@ -245,6 +246,24 @@ async def test_request_admitted_before_call_returns_records_decision_before_tool
     assert events.index("request") < events.index("browser_decision") < events.index("response") < events.index(
         "browser_tool_end")
     assert len(end["request_ids"]) == 1 and end["completed"] is True
+
+
+async def test_requests_queued_behind_an_ending_call_are_audited_after_tool_end(tmp_path):
+    """Page resources still queued when the call returns are not part of its evidence window."""
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.sleep(0), queued=4)
+    try:
+        await service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1")
+        while sum(record["event"] == "response" for record in records) < 4:
+            await asyncio.sleep(0)
+    finally:
+        await service.aclose()
+    end_index = next(n for n, record in enumerate(records) if record["event"] == "browser_tool_end")
+    requests = [(n, record["request"]) for n, record in enumerate(records) if record["event"] == "request"]
+    admitted = [(n, r) for n, r in requests if r["attribution"] == "active_tool_window"]
+    stale = [(n, r) for n, r in requests if r["attribution"] == "background_or_stale"]
+    assert len(admitted) == 1 and len(stale) == 3
+    assert records[end_index]["request_ids"] == [admitted[0][1]["request_id"]]
+    assert admitted[0][0] < end_index and all(n > end_index for n, _ in stale)
 
 
 async def test_cancelled_drain_closes_browser_and_still_ends_the_call(tmp_path):
