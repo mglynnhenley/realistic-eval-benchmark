@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
                      profile: str = "legacy", published_config: str | None = None,
-                     published_data: str = "live", fixture_path: str | None = None):
+                     published_data: str = "live", fixture_path: str | None = None,
+                     browser_runtime: str = "docker", artifact_dir: str | None = None):
     """Own all tool connections for one trial, including exception cleanup."""
     if published_data == "hybrid" and profile != "published":
         raise ValueError("Hybrid data requires the published tool profile")
@@ -39,6 +40,8 @@ async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
 
         async with published_tools(scenario, config_path=published_config,
                                    data_mode=published_data,
+                                   **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                                   **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                    **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
             yield tools
     else:
