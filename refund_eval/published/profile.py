@@ -157,11 +157,11 @@ def search_policy(scenario: Scenario):
         if not all(isinstance(value, str) and value.strip() for value in values):
             return False
         text = " ".join(values).casefold()
+        # Other people's and organisations' addresses are ordinary search terms;
+        # only the user's own details and credential-shaped text are withheld.
         return not (
             any(value in text for value in private)
-            or re.search(
-                r"[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:token|password|secret)\s*[:=]", text
-            )
+            or re.search(r"(?:token|password|secret)\s*[:=]", text)
         )
 
     return allow

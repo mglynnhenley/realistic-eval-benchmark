@@ -155,6 +155,20 @@ def test_search_policy_checks_objective_and_query(ctx):
     )
 
 
+def test_search_policy_allows_other_addresses_but_not_the_users_or_credentials(ctx):
+    allow = search_policy(ctx.scenario)
+    # Queries refused in real trials: a company's public address is an ordinary search term.
+    assert allow({"arguments": {
+        "query": "Trainline customer service email address support@thetrainline.com refund complaints 2026",
+        "objective": "Check that this support address is real"}})
+    assert allow({"arguments": {
+        "query": "Jody Ford Trainline CEO",
+        "objective": "Confirm jody.ford@trainline.com is a valid escalation contact"}})
+    assert not allow({"arguments": {
+        "query": f"refund for {ctx.user_email} support@thetrainline.com", "objective": "Find rules"}})
+    assert not allow({"arguments": {"query": "trainline login", "objective": "password: hunter2"}})
+
+
 def public_req(url, method="GET", *, resource="document", navigation=True, body=""):
     return {**req(url, method, body, navigation), "resource_type": resource}
 
