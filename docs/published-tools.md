@@ -204,6 +204,28 @@ own log/provider serializers may omit dialect annotations. Text/image results
 are projected into Inspect content, while the complete MCP envelope is preserved
 in the audit. Unsupported result blocks fail explicitly.
 
+## Model-provider schema compatibility
+
+Dashboard and Harbor workers pass `strict_tools=False` for OpenRouter and other
+Inspect `openai-api` targets. Their native tool schemas contain optional
+properties; OpenAI strict function calling requires every property to be
+required and every object to reject additional properties. Converting optional
+fields into required nullable fields would change the published contracts, so
+these runs explicitly disable strict generation and retain local validation.
+See the [official OpenAI function-calling documentation](https://developers.openai.com/api/docs/guides/function-calling#strict-mode).
+
+When launching Inspect directly with an OpenRouter or `openai-api` target, add
+`-M strict_tools=false`. Direct OpenAI uses Inspect's existing non-strict tool
+encoding. The simulator and grader use separate structured-output contracts;
+this setting changes only function-tool generation.
+
+The raw catalogs and their hashes remain unchanged. Inspect's provider encoding
+can omit extended constraints such as `minLength` or `minimum`; the published
+adapter validates every returned argument against the complete native schema
+before dispatch. Offline serializer tests cover OpenRouter's Anthropic, OpenAI
+and Google routes, plus direct OpenAI. They verify request construction, not
+provider acceptance; paid provider smoke tests remain a separate approval step.
+
 ## Validation
 
 ```sh
