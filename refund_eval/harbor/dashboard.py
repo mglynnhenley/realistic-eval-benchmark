@@ -99,7 +99,14 @@ class BatchProgress:
                 status = "stopping" if self.phase == "stopping" else (
                     "grading" if row.get("stage") == "Verifying artifacts" else
                     "running" if snapshot or row.get("stage") == "Running Inspect" else "starting")
-            row.update(status=status, turns=(snapshot.get("world") or {}).get("turn", 0))
+            worker_stages = {"starting_browser": "Starting browser", "checking_tools": "Checking tools",
+                             "running": "Running Inspect", "grading": "Grading", "collecting": "Collecting results"}
+            if not ended and self.phase != "stopping" and snapshot.get("phase") in worker_stages:
+                row["stage"] = worker_stages[snapshot["phase"]]
+            row.update(status=status, turns=(snapshot.get("world") or {}).get("turn", 0),
+                       tool_profile=self.config.get("tool_profile", "legacy"),
+                       browser_runtime=self.config.get("browser_runtime", "subprocess"),
+                       data_mode=self.config.get("data_mode", "fixture"))
             record = read(child / "run.json", {})
             record.update(status=status, updated_at=now())
             if status == "failed":
@@ -114,6 +121,8 @@ class BatchProgress:
                 if not target.exists():
                     shutil.copyfile(logs[-1], target)
                 snapshot["inspect_log"] = str(target)
+            if ended and (artifacts / "browser").is_dir():
+                shutil.copytree(artifacts / "browser", child / "browser", dirs_exist_ok=True)
             snapshot.update(phase=status, error=record.get("error"), updated_at=now())
             write(child / "snapshot.json", snapshot)
             console = trial / "agent/worker.log"
@@ -156,6 +165,9 @@ async def run_batch(directory: Path) -> int:
         config = read(directory / "config.json")
         settings = TrialSettings(
             smoke=config["mode"] == "demo", max_turns=config["max_turns"],
+            tool_profile=config.get("tool_profile", "legacy"),
+            data_mode=config.get("data_mode", "fixture"),
+            browser_runtime=config.get("browser_runtime", "subprocess"),
             cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
             time_limit=config.get("time_limit") or 1800, world_mode=config["world_mode"],
             simulator_model=config["simulator_model"] if config["mode"] == "model" else None,
