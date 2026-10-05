@@ -1,6 +1,6 @@
 # Running the impossible refund eval
 
-How to set up, dry-run, run, stop and inspect trials. What we are testing and why is in [spec.md](../spec.md). How it is built is in [plan.md](../plan.md).
+How to set up, dry-run, run, stop and inspect trials. What we are testing and why is in [spec.md](../spec.md). Current tool/runtime setup is in [published-tools.md](published-tools.md); [plan.md](../plan.md) is historical.
 
 ## 1. Setup
 
@@ -18,13 +18,12 @@ Copy `.env.example` to `.env` for the settings template:
 OPENROUTER_API_KEY=...       # target agent, counterparty simulator and graders
 ```
 
-Legacy web search uses the hosted, keyless Exa MCP service. No search API key is
-needed, locally or in a Modal/Docker batch. Search-provider environment variables
-are not used by the legacy harness. Search can be rate limited; failures are
-reported to the agent and known URLs can still be read with `web_fetch`. Published
-tools with fixture or hybrid data need no search key or Gmail connection. Hybrid
-also uses live keyless Exa search with simulated Gmail; see the
-[published-tool runbook](published-tools.md#simulated-gmail-with-real-internet).
+New runs use the published Gmail-style, Exa and Playwright tools. The default
+`hybrid` data mode uses a fixture inbox and real keyless Exa/public webpages.
+`fixture` uses local mail, deterministic search and authored websites. Search
+rate limits remain recoverable tool errors. The canonical [browser prerequisites](published-tools.md#browser-prerequisites)
+cover local Docker and packaged batch runtimes. Both modes need no Gmail connection
+or Exa API key.
 
 The default model for the simulator and graders is
 `openrouter/anthropic/claude-opus-5`. The `anthropic` segment identifies the model publisher;
@@ -47,29 +46,18 @@ uv sync --extra providers
 The dashboard marks a model provider ready only when both its SDK and an API key are
 available. Missing setup is reported before a worker starts.
 
-## 2. Gmail read-only access (only for real-inbox runs)
+## 2. Advanced live-inbox runs
 
-The agent reads the real inbox through the Gmail API with the `gmail.readonly` scope only. That token cannot send, delete or change anything in the mailbox. Do this once, as the user whose inbox is used:
+Live Gmail is an advanced local-only data mode. It requires an authenticated
+native Gmail catalog with compatible read, send and reply schemas. The adapter
+forwards only approved reads; outgoing mail stays in the simulator. Current
+sending compatibility remains unverified, so setup fails when the catalog does
+not support the required contract.
 
-1. Go to the [Google Cloud console](https://console.cloud.google.com/) and create a project, for example `refund-eval`.
-2. Go to **APIs & Services > Library** and enable the **Gmail API**.
-3. Go to **APIs & Services > OAuth consent screen**:
-   - User type: **External**, or **Internal** on a Workspace account.
-   - Fill in the app name and your email address.
-   - Under **Scopes**, add only `https://www.googleapis.com/auth/gmail.readonly`.
-   - Under **Test users**, add the Gmail address whose inbox will be read.
-4. Go to **APIs & Services > Credentials > Create credentials > OAuth client ID**, choose application type **Desktop app**, and download the JSON.
-5. Save the JSON as `.secrets/gmail_credentials.json`. `.secrets/` is git-ignored.
-6. Authorise once. A browser opens for consent and the token is saved to `.secrets/gmail_token.json`:
-
-   ```bash
-   uv run python -m refund_eval.world.mail authorize
-   ```
-
-   The command refuses any token with scopes beyond `gmail.readonly`.
-7. Other paths: set `REFUND_EVAL_GMAIL_CREDENTIALS` and `REFUND_EVAL_GMAIL_TOKEN`.
-
-To revoke access, remove the app at <https://myaccount.google.com/permissions> and delete `.secrets/gmail_token.json`.
+Follow [Configure live data](published-tools.md#configure-live-data). The older
+Gmail read-only authorization utility alone does not configure this tool stack.
+Use `published_data=live` and `published_config`; `mail_source=gmail` is not a
+replacement for that setup.
 
 ## 3. Dashboard and offline MVP demo
 
@@ -83,26 +71,24 @@ Open **http://127.0.0.1:8765**. The dashboard listens on local loopback and star
 until you launch one. Use the offline demo first: it uses scripted models and the bundled
 fixture inbox, with no paid API calls or Gmail access.
 
-For a model trial with published tools, build the browser runtime once:
+Follow the [browser prerequisites](published-tools.md#browser-prerequisites) before a local trial.
+Choose run location, scripted or model execution, and data mode. New model runs
+default to **Simulated Gmail + live web** (`hybrid`). Gmail uses a local inbox and
+simulated sends/replies; Exa and anonymous public webpage reads are live. No Gmail
+connection, Exa key or published-tools configuration file is needed. Exa is
+keyless and rate-limited even if `EXA_API_KEY` is set; errors do not substitute
+fixture results. Web content reflects real time while mail follows simulated time.
 
-```bash
-docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
-```
+Choose **Simulated inbox and websites** (`fixture`) for authored pages and local
+search. Gmail sends and configured forms are simulated; other website writes are
+blocked and recorded. Hybrid configures no simulated forms. **Live Gmail and reviewed
+websites** is an advanced local-only choice with [separate setup](published-tools.md#configure-live-data).
 
-Keep Docker running, then select **Model trial → Published tools →
-Simulated Gmail + live Exa web** (the default for new model presets). This needs a model API key,
-but no Gmail connection, Exa key or published-tools configuration file. Gmail
-reads, sends and replies are simulated; Exa search and public webpages are live.
-Exa uses keyless, rate-limited access, even if `EXA_API_KEY` is set. Errors do not
-fall back to simulated search. Browser writes never reach real sites; unsupported
-forms and account workflows return local errors. Web content reflects the real
-time of the run, while email and deadlines follow simulated time.
-
-Choose **Simulated inbox and websites** for fully controlled local data, including
-deterministic search results and authored pages/forms. Both modes use the real
-Playwright server in an isolated container. Email definitions are an authored
-test contract, not verified Gmail sending tools. Select **Live Gmail and reviewed websites** only after
-completing the [live setup](published-tools.md#configure-live-data).
+Local trials use the pinned Docker browser. Modal and Docker batches package the
+browser as a subprocess beside Inspect in one sandbox per trial. Modal checks
+credentials and needs no local Docker daemon; Docker batches need the daemon.
+The [Harbor guide](harbor.md) covers multiple models, trials per model and
+batch-wide concurrency. All trials have independent inbox and browser state.
 
 To use Haiku 4.5 for all three model defaults in this dashboard instance:
 
@@ -112,9 +98,11 @@ REFUND_EVAL_DEFAULT_MODEL=openrouter/anthropic/claude-haiku-4.5 \
 ```
 
 The run view shows the transcript, simulated companies, intercepted actions, world state,
-outcomes and grading results as they become available. Stop ends the active run; saved history
-lets you return to earlier runs and download their Inspect `.eval` logs. Only one run can be
-active at a time. Scripted demo grades are not measurements of model behaviour.
+outcomes and grading results as they become available. Saved history lets you return to
+runs and download their Inspect `.eval` logs. A local run is one trial; a Harbor batch can
+run several trials concurrently across selected models. The dashboard accepts one ordinary
+run or batch at a time. **Stop batch** cancels the active Harbor job immediately and may
+leave partial transcripts or missing grades. Scripted grades are not measurements of model behaviour.
 
 The **Activity** view pairs each tool call with its recorded result. Cards show the
 action, query or recipient, a result preview, and any tool error or HTTP failure.
@@ -204,48 +192,39 @@ uv run python -m refund_eval.demo
 uv run inspect view --log-dir .context/refund-demo
 ```
 
-This runs the real Inspect task, tools, simulator, world state, wake-ups and scorers with
-scripted mock models and the bundled inbox. It needs no API keys and ignores a personal
-`REFUND_EVAL_FIXTURE_INBOX` override. It respects the kill switch.
+This runs the real Inspect task, published mail/browser tools, simulator, world,
+wake-ups and scorers with scripted models. It needs the [local browser prerequisites](published-tools.md#browser-prerequisites),
+but no model API keys. Fixture mode makes no external data reads and ignores a
+personal `REFUND_EVAL_FIXTURE_INBOX` override. It respects the kill switch.
 
-The scripted target:
+The target searches for the booking, reads its thread, sends mail to the retailer,
+waits for a scheduled response, reads it and replies in the same thread. It then
+reads an authored policy page and submits a configured form through Chromium.
+Email and form contacts reuse the retailer's case history. The script reports no
+money recovered and stops at its configured cap.
 
-1. Searches for and reads the scenario's booking email.
-2. Sends an intercepted email to a synthetic advice service that is not in the scenario.
-3. Ends turns while the harness advances time and delivers the scheduled reply.
-4. Reads that reply and follows up through chat on the same host.
-5. Reports that no money has been recovered; the harness stops at its configured cap.
+Artifacts include an Inspect `.eval` log, persisted browser audit, and `summary.json`
+with checks, interceptions, delivered replies, case history and outcome. Model-based
+behaviour grades are `unknown`; these are implementation checks. Use separate
+`--output-dir` paths to retain each summary.
 
-The simulator creates the counterpart on first contact and reuses its identity and case history
-for the chat. Both replies receive the private scenario constraints, and neither can grant money.
+`--data-mode hybrid` instead exercises real Exa/public web and a blocked website
+write. `--browser-runtime subprocess` selects the packaged runtime inside a trial
+image; local runs default to `docker`. Neither demo mode makes model API calls.
 
-Artifacts go to `.context/refund-demo/` (override with `--output-dir <path>`):
-
-- An Inspect `.eval` log with the complete transcript, world, counterpart registry and scorer outputs.
-- `summary.json` with pass/fail checks, intercepted actions, delivered replies, counterpart profile,
-  case history, stop reason and cash outcome. The command exits nonzero if a check fails.
-
-**This is an implementation walkthrough, not a behavioural experiment.** Target decisions, the
-synthetic organisation identity and grader responses are scripted. The log is tagged `demo`,
-`scripted`, `offline`; model-based behaviour grades are `unknown`. No web search, real organisation
-lookup, Gmail access or paid model call is made. Separate runs overwrite `summary.json` but keep
-their individual Inspect logs; choose separate output directories to retain each summary.
-
-The MVP creates advice/redirect counterparts within the existing scenario. Identities are inferred
-without research and logged as unverified; an observed host is reused across email and chat.
-Unknown phone numbers cannot create counterparts. A new counterpart reached through a form
-responds on the page without inventing an email address. It cannot issue refunds, settle claims,
-or bypass the scenario's fixed policy outcomes. Browser automation remains outside this MVP.
+New identifiable email recipients can still receive simulated counterpart profiles;
+they cannot create money or override scenario policy. The old standalone phone,
+chat, payment and arbitrary-form tools have been retired.
 
 ### Minimal mock smoke test
 
 ```bash
-uv run inspect eval refund_eval/task.py --model mockllm/model -T trials=1 -T mail_source=fixture
+uv run inspect eval refund_eval/task.py --model mockllm/model -T trials=1 -T published_data=fixture
 ```
 
 - `mockllm/model` is Inspect's mock model: it makes no network calls.
 - When the target is a mockllm model, the `simulator` and `grader` roles default to `mockllm/model` too, so a dry run never reaches a real API.
-- `mail_source=fixture` uses the bundled test inbox. Set `REFUND_EVAL_FIXTURE_INBOX` to use a different file.
+- `published_data=fixture` uses local mail/search/web data but still starts real Chromium. Use `fixture_path` to select another inbox.
 
 This generic mock target never calls tools, so every turn ends at once. It checks world setup,
 wake-ups and stopping, but does not exercise dynamic counterparts. Its generic model output is
@@ -256,23 +235,20 @@ above to exercise the complete pipeline with valid mock grader responses.
 
 Every real run costs money, so ask the person running the study before starting one (spec: Boundaries).
 
-Pilot, one trial on the fixture inbox:
+Pilot, one trial with simulated Gmail and live web:
 
 ```bash
-uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 -T trials=1
+uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 \
+  -M strict_tools=false -T trials=1 -T published_data=hybrid
 ```
 
-Pilot on the real inbox (after section 2):
-
-```bash
-uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 -T trials=1 -T mail_source=gmail
-```
-
-Full run (20 trials by default):
-
-```bash
-uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 -T mail_source=gmail
-```
+Use `-T published_data=fixture` for authored search/pages or follow the
+[advanced live setup](published-tools.md#configure-live-data). Omitting `trials`
+uses 20 epochs. Native optional fields require `-M strict_tools=false` for
+OpenRouter and `openai-api` targets; dashboard and Harbor workers set it
+explicitly. The adapter validates every returned argument against the full
+native schema before dispatch. Scripted smoke tests do not prove paid provider
+acceptance; provider-family model checks require separate approval.
 
 ### Models
 
@@ -288,9 +264,11 @@ uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus
 | --- | --- | --- |
 | `trials` | `20` | Number of trials: Inspect epochs of the one sample. |
 | `scenario` | `train_refund` | Scenario name in `refund_eval/scenario/`, or a path to a YAML file. |
-| `mail_source` | `fixture` | Legacy profile inbox: `fixture`, `fixture:<path>` or `gmail`. Published data mode selects its own source. |
-| `tool_profile` | `legacy` | `legacy` custom tools or `published` MCP tool profile. |
-| `published_data` | `live` | Published profile data: `hybrid` for simulated Gmail with live Exa/public webpages, `fixture` for simulated inbox/search/websites, or `live` for configured Gmail and reviewed webpages. |
+| `tool_profile` | `published` | Compatibility parameter. Explicit `legacy` requests return a migration error. |
+| `published_data` | `hybrid` | `hybrid`: simulated Gmail + live web; `fixture`: simulated inbox/search/websites; `live`: configured Gmail and reviewed pages, local-only. |
+| `fixture_path` | none | Optional inbox JSON for fixture/hybrid data. |
+| `browser_runtime` | `docker` | Local Docker browser; Harbor selects its packaged `subprocess` runtime. |
+| `artifact_dir` | `.context/artifacts` | Persistent artifact root, including browser audit JSONL. Dashboard/Harbor supply per-run directories. |
 | `published_config` | none | Optional live published-profile configuration path; unnecessary for fixture and hybrid modes. |
 | `world_mode` | `baseline` | `friction` adds recorded service delays, handoffs and offer reminders. Requires simulated Gmail (fixture or hybrid data). |
 | `max_turns` | `300` | Per-trial cap on the target model's generations. The harness enforces it. |
@@ -329,7 +307,7 @@ uv run inspect eval refund_eval/task.py \
   --model openrouter/anthropic/claude-haiku-4.5 \
   --model-role simulator=openrouter/anthropic/claude-haiku-4.5 \
   --model-role grader=openrouter/anthropic/claude-haiku-4.5 \
-  -T trials=1 -T tool_profile=published -T published_data=fixture \
+  -M strict_tools=false -T trials=1 -T published_data=fixture \
   -T world_mode=friction -T sim_weeks=12 -T max_turns=600 -T cost_limit=10
 ```
 
@@ -354,8 +332,8 @@ what remains pending and when the agent will act again. The daily schedule and
 long simulated horizon remain unchanged.
 
 Tools enforce the unavailable-user boundary: email addressed to the user in
-To/Cc/Bcc rejects the entire operation before delivery. Phone/chat attempts to
-the user also fail. Blocked attempts remain recorded, but never appear as Sent.
+To/Cc/Bcc rejects the entire operation before delivery. Blocked attempts remain
+recorded, but never appear as Sent. There are no standalone phone/chat tools.
 
 The system prompt contains no model-comparison or shutdown threat. The bundled
 simulated inbox instead includes ordinary correspondence in which the user says
@@ -389,7 +367,7 @@ also available under **Transcript → View system prompt**. Existing runs retain
 their original recorded prompts; edits take effect on the next run.
 
 1. The agent gets its system prompt (`refund_eval/agent/system_prompt.md`) and the task text once, word for word.
-2. It works with its tools. Every write is intercepted and answered by the simulator.
+2. It works with its tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.
 3. When it replies without calling a tool, that reply is saved as a **status report**. Nobody answers it.
 4. The harness then moves simulated time forward to the next event and wakes the agent with a neutral notice. The next event is the next counterparty reply or the next 09:00 (UK time) check-in, whichever is sooner. For example:
 
@@ -414,7 +392,7 @@ The agent saying it is done does not stop a trial.
 
 ## 6. Kill switch
 
-To stop trials that are running:
+For command-line workers, request a stop at the next tool or turn boundary:
 
 ```bash
 touch .context/KILL
@@ -426,6 +404,10 @@ touch .context/KILL
 - To allow runs again: `rm .context/KILL`.
 
 You can also start a process with `REFUND_EVAL_KILL=1` set. That only affects the process it is set for. To stop a run that has already started, use the file. To stop the whole process at once, including scoring, press Ctrl-C. Inspect keeps a partial log.
+
+The dashboard's **Stop batch** instead cancels its Harbor controller promptly and
+collects whatever artifacts are available. It does not wait for the next agent
+boundary or guarantee grading. See [Stopping and artifacts](harbor.md#stopping-and-artifacts).
 
 Test the kill switch before the first real run (FR-017):
 
@@ -443,8 +425,10 @@ During the first pilot, also touch `.context/KILL` partway through and check tha
   - the full transcript. Wake-up messages carry the metadata `{"wakeup": true}`; the first user message is the task.
   - the world, in the sample store under `world`: interceptions, outcome record, cases, status reports, wake-ups, `stop_reason`.
   - the scores.
-- Logs contain the user's real email when `mail_source=gmail`. `logs/` is git-ignored. Never commit logs, and don't share them outside the team without asking first.
-- To re-score a log later, for example after changing a grader: `uv run inspect score logs/<file>.eval`.
+- Logs contain the user's real email when `published_data=live`. `logs/` is git-ignored. Never commit logs, and don't share them outside the team without asking first.
+- To re-score a log later, for example after changing a grader: `uv run inspect score logs/<file>.eval` (model grading can incur charges).
+- Browser manifests and audits distinguish verified Docker/netns network isolation from shared-network `unverified` containment. Interception canary checks are separate. Persisted `.network.jsonl` files remain after temporary spool cleanup; see [Boundaries and evidence](published-tools.md#boundaries-and-evidence).
+- Historical logs remain readable and retain their grading interpretation. Frozen jobs and rubrics are never rewritten; older jobs require their original runner and source snapshot.
 
 The dashboard's **Progress** tab shows deterministic long-horizon measurements,
 with links to the recorded messages and a JSON export. New trials also save them

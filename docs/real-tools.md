@@ -1,5 +1,7 @@
 # Published tools for the refund experiment
 
+> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [published-tools.md](published-tools.md).
+
 Research checked 2026-09-30. The integration now lives in `refund_eval/published/`;
 see [setup and current limitations](published-tools.md). Authenticated Gmail sending remains unverified.
 
@@ -40,9 +42,10 @@ attempts then happen through the browser rather than invented refund-specific to
 [Playwright MCP](https://github.com/microsoft/playwright-mcp)
 
 Interception must cover browser network traffic, not just named tool calls: navigating or clicking can
-cause page scripts, redirects and background requests to act. The existing
-[containment review](../.context/browser-containment-redteam.md) supplies unresolved acceptance cases;
-this recommendation does not establish that its design has been built or tested.
+cause page scripts, redirects and background requests to act. The original private
+containment review (`.context/browser-containment-redteam.md`, not distributed
+with this checkout) listed acceptance cases; this recommendation alone did not
+establish that its design had been built or tested.
 
 Exa's separate fetch tool sends URLs to its Contents service, which may fetch uncached pages remotely.
 A local browser proxy cannot intercept those downstream requests. Start with search only and mediate
@@ -51,18 +54,14 @@ checks. A tool being called a read is not proof that its network effects are har
 [Exa fetch source](https://github.com/exa-labs/exa-mcp-server/blob/main/src/tools/webFetch.ts),
 [Contents behavior](https://exa.ai/docs/reference/get-contents)
 
-## What is actually built
+## Implementation status as of 2026-10-04
 
-The legacy tool list in [tools/__init__.py](../refund_eval/tools/__init__.py) contains eleven bespoke
-tools and Inspect's published `web_search`. The transcript's claim that all twelve were invented was
-too broad. Selecting Exa in that legacy profile calls Inspect's Exa `/answer` adapter, which parses an answer and
-citations. It does not load `web_search_exa`. No claim about Exa generally returning unlinked prose
-follows from this adapter. The direct page fetcher, email and action tools remain custom.
-
-The dashboard, editable rubrics and dynamic simulated counterparties remain in place. The explicit
-`published` profile now adds native MCP discovery/transport, a Gmail interception adapter, Exa search,
-and a network-disabled Playwright container. Selecting that profile requires the separate setup and
-capability checks in the runbook; changing a search environment variable does not enable it.
+The earlier custom tools and Inspect `web_search` adapter are retired from new
+runs. The current stack uses Gmail-style mail, the native Exa `web_search_exa`
+catalog and Playwright MCP. Dashboard, editable rubrics and simulated counterparts
+remain. Harbor packages the browser in the same sandbox as Inspect. The
+[current runbook](published-tools.md) describes supported modes and evidence;
+this research document preserves the reasoning that led to the implementation.
 
 ## Email and client fidelity
 
