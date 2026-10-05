@@ -17,14 +17,17 @@ import copy
 import json
 import os
 import re
+import shutil
 import signal
+import subprocess
 import tempfile
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Self
 from urllib.parse import urlsplit
 
+import anyio
 import httpx
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
@@ -61,6 +64,72 @@ def _decode(value: bytes | str) -> dict[str, Any]:
     if not isinstance(parsed, dict) or parsed.get("jsonrpc") != "2.0":
         raise MCPProtocolError("Invalid JSON-RPC message from MCP server")
     return parsed
+
+
+def process_parents() -> dict[int, int]:
+    """Map every visible pid to its parent pid, from /proc or portable ps(1) output.
+
+    Returns an empty mapping where neither source exists, so callers degrade to
+    process-group signalling alone.
+    """
+    parents: dict[int, int] = {}
+    proc = Path("/proc")
+    if proc.is_dir():
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                status = (entry / "stat").read_text()
+            except OSError:
+                continue
+            # The command name may contain spaces or parentheses; fields follow it.
+            _, _, fields = status.rpartition(")")
+            parts = fields.split()
+            if len(parts) > 1 and parts[1].isdigit():
+                parents[int(entry.name)] = int(parts[1])
+        if parents:
+            return parents
+    ps = shutil.which("ps")
+    if ps is None:
+        return {}
+    try:
+        output = subprocess.run([ps, "-eo", "pid=,ppid="], capture_output=True,
+                                text=True, timeout=10, check=False).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            parents[int(parts[0])] = int(parts[1])
+    return parents
+
+
+def descendant_pids(pid: int) -> set[int]:
+    """Snapshot every descendant of ``pid`` right now, through any wrapper.
+
+    Playwright starts Chromium detached in its own process group, so signalling
+    the server's group alone can leave the browser alive; record its tree first.
+    """
+    children: dict[int, list[int]] = {}
+    for child, parent in process_parents().items():
+        children.setdefault(parent, []).append(child)
+    found: set[int] = set()
+    pending = [pid]
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in found and child != pid:
+                found.add(child)
+                pending.append(child)
+    return found
+
+
+def kill_processes(pids: Iterable[int]) -> None:
+    """SIGKILL recorded descendants that outlived their group; ignore the gone."""
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def _result(message: dict[str, Any], request_id: int) -> dict[str, Any]:
@@ -418,31 +487,43 @@ class MCPStdioClient(_MCPClient):
             pass
 
     async def _stop(self) -> None:
-        process = self._process
-        if process:
-            if process.stdin:
-                process.stdin.close()
-            self._signal(signal.SIGTERM)
-            try:
-                await asyncio.wait_for(process.wait(), self.shutdown_timeout)
-            except TimeoutError:
-                self._signal(signal.SIGKILL)
-                await asyncio.wait_for(process.wait(), self.shutdown_timeout)
-            finally:
-                # Also reap descendants that outlived the original executable.
-                self._signal(signal.SIGKILL)
-        if self._stderr_task:
-            try:
-                await asyncio.wait_for(self._stderr_task, self.shutdown_timeout)
-            except TimeoutError:
-                self._stderr_task.cancel()
-                await asyncio.gather(self._stderr_task, return_exceptions=True)
-        if self._temporary_home:
-            self._temporary_home.cleanup()
+        # Shutdown often runs inside a cancelled anyio scope (Inspect time
+        # limits, operator cancellation, Ctrl-C), which re-cancels every await.
+        # Shield it: an unsignalled child and its browser would outlive the trial.
+        with anyio.CancelScope(shield=True):
+            process = self._process
+            if process:
+                # Record the tree before signalling; once the server dies, its
+                # detached Chromium is reparented and no longer reachable from it.
+                descendants = descendant_pids(process.pid) if os.name == "posix" else set()
+                if process.stdin:
+                    process.stdin.close()
+                self._signal(signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(process.wait(), self.shutdown_timeout)
+                except TimeoutError:
+                    self._signal(signal.SIGKILL)
+                    await asyncio.wait_for(process.wait(), self.shutdown_timeout)
+                finally:
+                    # Also reap descendants that outlived the original executable,
+                    # including those in their own process group.
+                    self._signal(signal.SIGKILL)
+                    kill_processes(descendants)
+            if self._stderr_task:
+                try:
+                    await asyncio.wait_for(self._stderr_task, self.shutdown_timeout)
+                except TimeoutError:
+                    self._stderr_task.cancel()
+                    await asyncio.gather(self._stderr_task, return_exceptions=True)
+            if self._temporary_home:
+                self._temporary_home.cleanup()
 
     async def aclose(self) -> None:
-        async with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            await self._stop()
+        with anyio.CancelScope(shield=True):
+            async with self._lock:
+                if self._closed:
+                    return
+                # Mark closed only once teardown finished, so a failed attempt
+                # is retried by the next caller instead of silently skipped.
+                await self._stop()
+                self._closed = True

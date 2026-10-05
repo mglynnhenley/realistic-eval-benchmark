@@ -1,6 +1,6 @@
 """Tools -> counterparty simulator boundary. SHARED CONTRACT: change only by agreement.
 
-Tools (refund_eval/tools) intercept a write action, then call `dispatch()` from
+Published mail and configured browser forms intercept a write action, then call `dispatch()` from
 refund_eval/sim/router.py with an Inbound. The simulator decides and writes the
 reply, updates the world (cases, claims, offers, transfers, pending mail) and
 returns a SimResult telling the tool what to show the agent right now.

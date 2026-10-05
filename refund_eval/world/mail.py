@@ -47,8 +47,6 @@ SECRETS_DIR = PROJECT_ROOT / ".secrets"
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SCOPES = [GMAIL_READONLY_SCOPE]
 
-SENT_MAIL_TOOLS = ("send_email", "reply_email", "forward_email")
-
 
 @runtime_checkable
 class MailSource(Protocol):
@@ -473,7 +471,7 @@ def sent_mail(world: World) -> list[Email]:
     """Mail the agent sent, as it would appear in the Sent folder."""
     out: dict[str, Email] = {}
     for i in world.interceptions:
-        if i.channel != "email" or i.tool not in SENT_MAIL_TOOLS:
+        if i.channel != "email":
             continue
         p = i.payload
         if p.get("blocked"):

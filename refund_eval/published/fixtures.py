@@ -15,12 +15,14 @@ from collections.abc import Callable
 from typing import Any
 
 from refund_eval.published.mail import GmailService, _visible_id
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource
 from refund_eval.world.mailquery import MatchContext, parse_query
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, load_world
 from refund_eval.world.timeutil import as_aware
+
+FIXTURE_MAIL_CATALOG_SHA256 = "6dab6a33935078b2adac36b14c9a1514233ee2005b138c5f35c9a69dd0e56517"
 
 FIXTURE_MAIL_PROVENANCE = {
     "fixture": True,
@@ -232,4 +234,5 @@ def make_fixture_mail(
     if audit is not None:
         audit({"event": "fixture_mail_provenance", **copy.deepcopy(FIXTURE_MAIL_PROVENANCE)})
     return GmailService(remote, ctx, fixture=True, audit=audit,
+                        catalog_snapshot={"fixture": True, "catalog_sha256": FIXTURE_MAIL_CATALOG_SHA256},
                         message_times={_visible_id(email.id): email.sent_at for email in remote.source.emails})

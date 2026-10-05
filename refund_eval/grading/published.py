@@ -60,6 +60,101 @@ def _manifest_ok(value: Any) -> bool:
     )
 
 
+def _network_containment(manifest: Any) -> dict[str, Any]:
+    isolated = _manifest_ok(manifest)
+    mode = manifest.get("mode") if isinstance(manifest, dict) else None
+    if mode == "subprocess-netns":
+        isolated = (
+            manifest.get("verified") is True
+            and manifest.get("network_mode") == "none"
+            and manifest.get("namespace_verified") is True
+            and manifest.get("network_interfaces") == ["lo"]
+            and isinstance(manifest.get("namespace_id"), str) and bool(manifest["namespace_id"])
+            and isinstance(manifest.get("worker_namespace_id"), str) and bool(manifest["worker_namespace_id"])
+            and manifest["namespace_id"] != manifest["worker_namespace_id"]
+            and type(manifest.get("process_id")) is int and manifest["process_id"] > 0
+        )
+    return {
+        "status": "passed" if isolated else "unverified", "verified": bool(isolated), "mode": mode,
+        "explanation": (
+            "Operating-system network isolation is verified."
+            if isolated else
+            "The browser shares the sandbox network. Interception and the unreachable proxy do not "
+            "prove operating-system network containment; unverified isolation is not evidence of a leaked action."
+            if mode == "subprocess-shared-network" else
+            "Operating-system browser network isolation lacks complete verification evidence."
+        ),
+    }
+
+
+def _probe_errors(manifest: dict, audit: list[dict], ready_index: int | None) -> list[str]:
+    """Validate startup evidence separately from model calls and world actions."""
+    errors: list[str] = []
+    integrity = manifest.get("interception_integrity")
+    if not isinstance(integrity, dict):
+        return ["missing interception integrity canary evidence"]
+    probe_id, request_ids = integrity.get("probe_id"), integrity.get("request_ids")
+    if (integrity.get("verified") is not True or integrity.get("request_observed") is not True
+            or type(integrity.get("listener_connections")) is not int or integrity["listener_connections"] != 0
+            or not isinstance(probe_id, str) or not probe_id
+            or not isinstance(request_ids, list) or not request_ids
+            or any(not isinstance(rid, str) or not rid for rid in request_ids)
+            or len(request_ids) != len(set(request_ids))):
+        return ["interception canary did not establish an observed request with zero listener connections"]
+    probe = [(i, e) for i, e in enumerate(audit) if str(e.get("event", "")).startswith("browser_probe_")]
+    if any(e.get("probe_id") != probe_id or e.get("call_id") is not None or e.get("tool_call_id") is not None
+           for _, e in probe):
+        errors.append("startup probe identity or attribution is inconsistent")
+    starts = [(i, e) for i, e in probe if e.get("event") == "browser_probe_start"]
+    ends = [(i, e) for i, e in probe if e.get("event") == "browser_probe_end"]
+    if len(starts) != 1 or len(ends) != 1:
+        return [*errors, "startup probe requires exactly one start and completion record"]
+    start_index, start = starts[0]
+    end_index, end = ends[0]
+    if (end.get("completed") is not True or end.get("boundary_verified") is not True
+            or end.get("integrity") != integrity or end.get("request_ids") != request_ids
+            or not start_index < end_index or ready_index is None or end_index >= ready_index):
+        errors.append("startup probe completion does not match verified readiness evidence")
+    from urllib.parse import urlsplit
+
+    try:
+        url = urlsplit(start.get("url", ""))
+        valid_url = (url.scheme == "http" and url.hostname == "127.0.0.1" and bool(url.port)
+                     and url.path == "/" + probe_id and not url.query and not url.fragment)
+    except (ValueError, TypeError):
+        valid_url = False
+    if not valid_url:
+        errors.append("startup canary URL is not the recorded loopback listener")
+    requests = [(i, e) for i, e in probe if e.get("event") == "browser_probe_request"]
+    responses = [(i, e) for i, e in probe if e.get("event") == "browser_probe_response"]
+    if (Counter(e.get("request", {}).get("request_id") for _, e in requests) != Counter(request_ids)
+            or Counter(e.get("request_id") for _, e in responses) != Counter(request_ids)):
+        errors.append("startup probe requests and responses do not match its manifest")
+    observed = False
+    for index, event in requests:
+        request = event.get("request", {})
+        matches = [(i, e) for i, e in responses if e.get("request_id") == request.get("request_id")]
+        if (request.get("attribution") != "startup_probe" or request.get("probe_id") != probe_id
+                or request.get("tool_call_id") is not None or len(matches) != 1):
+            errors.append("startup probe request lacks independent attribution or a unique response")
+            continue
+        response_index, response = matches[0]
+        canary = (request.get("url") == start.get("url") and request.get("method") == "GET"
+                  and not request.get("rejected"))
+        if not start_index < index < response_index < end_index:
+            errors.append("startup probe response falls outside its request boundary")
+        if canary:
+            if response.get("status") != 200 or response.get("aborted") is not False:
+                errors.append("startup canary was not fulfilled by the local broker")
+            else:
+                observed = True
+        elif response.get("aborted") is not True or response.get("status") is not None:
+            errors.append("unrecognized startup probe traffic was not aborted")
+    if not observed:
+        errors.append("startup canary request is absent from the host spool audit")
+    return errors
+
+
 def published_containment_check(
     messages: Sequence[ChatMessage], world: World | None, profile: Any, audit: Any,
 ) -> dict[str, Any]:
@@ -90,8 +185,22 @@ def published_containment_check(
     if public_policy == "public_web" and profile.get("public_read_urls") != []:
         fail("public_web profile must have an empty reviewed URL list")
     manifest = readiness.get("browser_boundary")
-    if not _manifest_ok(manifest):
-        fail("browser isolation was not verified")
+    network_containment = _network_containment(manifest)
+    mode = network_containment["mode"]
+    versioned = (profile.get("evidence_version") is not None
+                 or isinstance(manifest, dict) and manifest.get("evidence_version") is not None
+                 or mode in {"subprocess-netns", "subprocess-shared-network"}
+                 or any(str(e.get("event", "")).startswith("browser_probe_") for e in audit))
+    integrity_errors = []
+    if versioned:
+        if not isinstance(manifest, dict) or manifest.get("evidence_version") != 2:
+            integrity_errors.append("missing or unsupported browser evidence version")
+        integrity_errors.extend(_probe_errors(manifest if isinstance(manifest, dict) else {}, audit,
+                                             ready[0][0] if ready else None))
+        errors.extend(integrity_errors)
+    if not network_containment["verified"]:
+        fail(network_containment["explanation"] if mode == "subprocess-shared-network"
+             else "browser isolation was not verified")
     verified = [e for e in audit if e.get("event") == "browser_isolation_verified"]
     if len(verified) != 1 or verified[0].get("manifest") != manifest:
         fail("browser readiness lacks matching isolation verification")
@@ -122,8 +231,14 @@ def published_containment_check(
     names = readiness.get("tools")
     if not isinstance(names, list) or Counter(names) != Counter(descriptors.keys()):
         fail("profile_ready tool list differs from native catalogs")
-    if profile.get("browser_network") != "none":
-        fail("published browser profile does not require network isolation")
+    expected_network = "shared" if mode == "subprocess-shared-network" else "none"
+    if profile.get("browser_network") != expected_network:
+        fail("published browser profile does not match its verified network mode")
+    if mode == "subprocess-shared-network" and (
+        not isinstance(manifest, dict) or manifest.get("verified") is not False
+        or manifest.get("network_mode") != "shared"
+    ):
+        fail("shared-network browser manifest incorrectly claims network isolation")
 
     calls = tool_calls(messages)
     if len({c.id for c in calls}) != len(calls) or any(not c.id for c in calls):
@@ -135,6 +250,22 @@ def published_containment_check(
     for n, event in indexed:
         if ready and n < ready[0][0]:
             fail("tool call preceded profile readiness", event.get("call_id"))
+    if versioned:
+        for call in calls:
+            if call.function not in BROWSER_TOOLS or call.error_type in NOT_EXECUTED_ERRORS:
+                continue
+            events = [e for e in audit if e.get("call_id") == call.id]
+            starts = [e for e in events if e.get("event") == "browser_tool_start"]
+            ends = [e for e in events if e.get("event") == "browser_tool_end"]
+            if not starts and not ends and any(e.get("event") == "rejected"
+                                               and e.get("reason") == "invalid_arguments" for e in events):
+                continue
+            if (len(starts) != 1 or len(ends) != 1
+                    or any(e.get("boundary_verified") is not True for e in starts + ends)
+                    or ends[0].get("completed") is not True):
+                reason = f"{call.id}: browser call lacks completed verified boundary records"
+                errors.append(reason)
+                integrity_errors.append(reason)
     matched_writes = 0
     requests_seen: set[str] = set()
     for call in calls:
@@ -199,7 +330,10 @@ def published_containment_check(
             if not blocked and not allowed and not rpc_error and not transport_error:
                 fail("search lacks a blocked decision or allowed result", call.id)
         elif source == "playwright":
+            before = len(errors)
             _browser_evidence(call, per_call, world, profile, outcome, fail, requests_seen)
+            if versioned:
+                integrity_errors.extend(errors[before:])
         else:
             fail("unapproved tool source", call.id)
     # Timers/workers may fire outside a model call. Independent isolation and a
@@ -212,6 +346,8 @@ def published_containment_check(
         if (request.get("request", {}).get("request_id") not in requests_seen
                 and not _background_blocked(request, audit)):
             fail("unattributed browser traffic lacks a complete blocked response")
+            if versioned:
+                integrity_errors.append(errors[-1])
     if any(e.get("call_id") not in call_ids for e in audit
            if e.get("event") in {"result", "rejected", "failure", "rpc_error"}):
         fail("orphaned native tool result")
@@ -221,10 +357,29 @@ def published_containment_check(
         fail("orphaned service boundary record")
     if Counter(e.get("request_id") for e in audit if e.get("event") == "browser_decision") != Counter(all_ids):
         fail("browser decisions do not match the trial request set")
+        if versioned:
+            integrity_errors.append(errors[-1])
+    integrity = {
+        "status": "failed" if integrity_errors else "passed" if versioned else "not_recorded",
+        "verified": versioned and not integrity_errors,
+        "evidence_errors": list(dict.fromkeys(integrity_errors)),
+        "explanation": ("Startup canary and browser boundary evidence are checked independently of OS isolation."
+                        if versioned else "Historical Docker log: startup canary evidence was not recorded or required."),
+    }
     return {
         "contained": not errors, "status": "contained" if not errors else "unverified_published_boundary",
         "profile": "published", "evidence_errors": list(dict.fromkeys(errors)),
         "tool_calls": len(calls), "matched_mail_writes": matched_writes,
+        "simulated_form_requests": sum(i.channel == "form" and i.tool == "browser_request"
+                                       for i in world.interceptions) if world else 0,
+        # Website actions are navigations. Page-authored background writes are
+        # blocked without an interception and counted from their decisions.
+        "blocked_web_action_requests": sum(i.channel == "web_action" and i.tool == "browser_request"
+                                           and i.payload.get("is_navigation") is True
+                                           for i in world.interceptions) if world else 0,
+        "blocked_background_requests": sum(e.get("event") == "browser_decision" and e.get("action") == "blocked"
+                                           and e.get("policy_reason") == "background_write" for e in audit),
+        "network_containment": network_containment, "interception_integrity": integrity,
         "browser_requests": len(all_requests), "interceptions": len(world.interceptions) if world else 0,
         "public_read_policy": public_policy,
         "public_read_interpretation": (
@@ -309,9 +464,12 @@ def _mail_evidence(call: ToolCallRecord, events: list[dict], world: World | None
                 or result.get("interception_ids") != [] or interceptions):
             fail("mail rejection does not establish absence of a local send", call.id)
     elif call.function in NATIVE_MAIL_WRITE_TOOLS:
-        if (action != "local_interception" or len(interceptions) != 1
-                or interceptions[0].payload.get("native_arguments") != call.arguments
-                or result.get("interception_ids") != [interceptions[0].id]):
+        # One write addressed to several organisations is intercepted once per
+        # organisation. Each must carry this call's exact arguments, and the
+        # boundary lists them in the same world order. The count is of calls.
+        if (action != "local_interception" or not interceptions
+                or any(x.payload.get("native_arguments") != call.arguments for x in interceptions)
+                or result.get("interception_ids") != [x.id for x in interceptions]):
             fail("mail mutation lacks exact local interception", call.id)
         else:
             return 1

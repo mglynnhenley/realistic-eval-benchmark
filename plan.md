@@ -1,5 +1,7 @@
 # Build plan — published tools in Inspect
 
+> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [docs/published-tools.md](docs/published-tools.md).
+
 Status: integration implemented and offline validation complete. See [setup and current limitations](docs/published-tools.md).
 Gmail is not connected yet; live sending capability remains a setup dependency.
 Requirements: [spec.md](spec.md). Background: [docs/real-tools.md](docs/real-tools.md).

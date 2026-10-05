@@ -13,7 +13,7 @@ from inspect_ai.model import ChatMessageAssistant, ChatMessageTool, execute_tool
 from inspect_ai.tool import ToolCall, ToolDef
 from inspect_ai.util import LimitExceededError, store
 
-from refund_eval.tools._base import DISPATCH_LIMIT_KEY
+from refund_eval.world.interception import DISPATCH_LIMIT_KEY
 
 CONTEXT_METADATA = "startup_mail_context"
 

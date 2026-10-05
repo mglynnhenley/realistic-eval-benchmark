@@ -28,8 +28,8 @@ from typing import Any, Protocol
 from bs4 import BeautifulSoup
 from jsonschema import Draft202012Validator, ValidationError
 
-from refund_eval.tools._base import ToolContext, remember_links
-from refund_eval.tools.mail_tools import _send
+from refund_eval.sim.mail import send_message
+from refund_eval.world.interception import ToolContext, remember_links
 from refund_eval.world.mailquery import MatchContext, parse_query
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, load_world, world_tx
@@ -205,6 +205,8 @@ class GmailService:
         if self._tools is None:
             catalog = copy.deepcopy(await self.remote.list_tools())
             _complete_catalog(catalog)
+            if self.fixture and self.snapshot is not None and self.snapshot.get("catalog_sha256") != catalog_sha256(catalog):
+                raise GmailSetupError("Fixture Gmail catalog changed; review the native contract and its pinned hash.")
             if not self.fixture:
                 if str(getattr(self.remote, "endpoint", "")) != GMAIL_ENDPOINT:
                     raise GmailSetupError("Gmail remote must be the first-party MCP endpoint.")
@@ -567,9 +569,11 @@ class GmailService:
                  "native_thread_id": native_tid,
                  "native_remote_thread": native_tid not in self._local_thread_ids and native_tid != mid}
         try:
-            await _send(self.ctx, tool_name=name, to=to, cc=cc, bcc=bcc, subject=subject, body=body,
-                        thread_id=raw_tid, in_reply_to=raw_original_id if local_original else original_id, extra=extra,
-                        charge_clock=False)
+            await send_message(
+                self.ctx, tool_name=name, to=to, cc=cc, bcc=bcc, subject=subject, body=body,
+                thread_id=raw_tid, in_reply_to=raw_original_id if local_original else original_id,
+                extra=extra, charge_clock=False,
+            )
         except Exception as exc:
             # Interception and simulator errors must never become successful
             # Sent entries. Inspect limits are deliberately propagated.

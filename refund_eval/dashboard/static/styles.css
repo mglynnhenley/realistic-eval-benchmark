@@ -659,3 +659,33 @@ textarea{font:inherit}textarea:focus-visible{outline:2px solid var(--green);outl
   .progress-metric { padding: 12px; }
   .progress-section { padding: 12px; }
 }
+
+.batch-panel { border: 1px solid var(--border, #d9ddd7); border-radius: 12px; padding: 24px; margin-bottom: 24px; background: var(--panel, #fff); }
+.batch-panel h3 { margin: 0 0 12px; }
+.batch-trials { display: grid; gap: 8px; margin-top: 16px; }
+.batch-trial-tools { width: 100%; font-size: 12px; color: var(--muted); }
+.batch-trial { display: flex; justify-content: space-between; gap: 12px; text-align: left; flex-wrap: wrap; }
+#batch-settings { margin-top: 16px; }
+
+.batch-console { margin-top: 20px; }
+.batch-console pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; font-size: 12px; }
+
+#model-picker-field { margin: 20px 0; }
+.model-picker { border: 1px solid var(--border, #d9ddd7); border-radius: 8px; background: white; }
+.model-picker > summary { cursor: pointer; display: flex; justify-content: space-between; padding: 12px; font-size: 13px; }
+.model-picker-body { padding: 0 12px 12px; }
+.model-options { max-height: 220px; overflow-y: auto; border-top: 1px solid #e5e9e3; }
+.model-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #e5e9e3; cursor: pointer; }
+.model-option input { margin-top: 3px; accent-color: #315b48; }
+.model-option span { min-width: 0; }
+.model-option strong, .model-option small { display: block; overflow-wrap: anywhere; }
+.model-option strong { font-size: 13px; }
+.model-option small { font-size: 11px; color: #687668; margin-top: 4px; }
+.selected-models { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.model-chip { border: 1px solid #b8cbb8; border-radius: 16px; background: #f0f5eb; color: #315b48; padding: 6px 10px; cursor: pointer; font-size: 11px; overflow-wrap: anywhere; max-width: 100%; }
+.custom-model-row { display: flex; gap: 8px; }
+.custom-model-row input { min-width: 0; }
+.batch-models { display: grid; gap: 8px; margin-top: 16px; }
+.batch-model { display: grid; gap: 6px; padding: 12px; background: #f5f8f0; border-radius: 8px; overflow-wrap: anywhere; font-size: 12px; }
+
+.demo-explanation #demo-runtime-status { margin-top: 8px; }

@@ -16,8 +16,8 @@ from refund_eval.published.fixtures import (
 )
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
 from refund_eval.world.clock import advance
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import (
     Email,
@@ -140,7 +140,7 @@ async def test_send_search_read_delayed_reply_never_reaches_remote_write(ctx, mo
             )))
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     events = []
     service = make_fixture_mail(ctx, audit=events.append)
     sent = await service.call_tool("send_message", {
@@ -177,7 +177,7 @@ async def test_existing_fixture_thread_reply_joins_original_conversation(ctx, mo
     async def dispatch(inbound):
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     service = make_fixture_mail(ctx)
     found = await service.call_tool("search_threads", {"query": "from:maya.robinson subject:brunch"})
     original = found["structuredContent"]["threads"][0]
@@ -217,3 +217,15 @@ def test_factory_rejects_any_nonfixture_mail_source(ctx):
 
     with pytest.raises(TypeError, match="local FixtureMailSource"):
         make_fixture_mail(ToolContext(SCENARIO, Mailbox(DangerousSource(), SCENARIO)))
+
+
+async def test_changed_fixture_contract_is_rejected_before_tool_execution(ctx, monkeypatch):
+    from refund_eval.published import fixtures
+    from refund_eval.published.mail import GmailSetupError
+
+    changed = fixture_mail_catalog()
+    changed["tools"][0]["inputSchema"]["properties"]["query"]["description"] = "Changed contract"
+    service = make_fixture_mail(ctx)
+    monkeypatch.setattr(fixtures, "fixture_mail_catalog", lambda: changed)
+    with pytest.raises(GmailSetupError, match="pinned hash"):
+        await service.list_tools()

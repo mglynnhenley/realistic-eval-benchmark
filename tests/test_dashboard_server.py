@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import queue
 import re
 import signal
@@ -115,6 +116,8 @@ def dashboard(tmp_path_factory) -> DashboardProcess:
     server.close()
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_offline_demo_progress_artifact_and_persistent_history(dashboard: DashboardProcess) -> None:
     status, config, _ = dashboard.request("/api/config")
     assert status == 200 and isinstance(config, dict)
@@ -134,8 +137,8 @@ def test_offline_demo_progress_artifact_and_persistent_history(dashboard: Dashbo
     snapshot = finished["snapshot"]
     assert snapshot["messages"]
     assert snapshot["world"]["interceptions"]
-    assert snapshot["counterparts"]
-    assert all(record["identity_verified"] is False for record in snapshot["counterparts"].values())
+    assert snapshot["world"]["cases"]["trainline"]["contacts"] == 3
+    assert snapshot["published_tool_profile"]["browser_network"] == "none"
 
     status, artifact, headers = dashboard.request(f"/api/runs/{run_id}/artifact")
     assert status == 200 and zipfile.is_zipfile(io.BytesIO(artifact))
@@ -151,6 +154,8 @@ def test_offline_demo_progress_artifact_and_persistent_history(dashboard: Dashbo
     assert restored["snapshot"]["counterparts"] == snapshot["counterparts"]
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_one_active_run_and_stop(dashboard: DashboardProcess) -> None:
     status, created, _ = dashboard.request("/api/runs", payload={"mode": "demo"})
     assert status == 201
@@ -165,6 +170,8 @@ def test_one_active_run_and_stop(dashboard: DashboardProcess) -> None:
     assert status == 200 and stopped_again["run"]["status"] == "stopped"
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_second_server_cannot_change_an_active_run(dashboard: DashboardProcess) -> None:
     status, created, _ = dashboard.request("/api/runs", payload={"mode": "demo"})
     assert status == 201
@@ -182,6 +189,8 @@ def test_second_server_cannot_change_an_active_run(dashboard: DashboardProcess) 
     assert dashboard.wait_for_terminal(run_id)["run"]["status"] == "completed"
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_sigterm_stops_active_worker_and_preserves_history(dashboard: DashboardProcess) -> None:
     status, created, _ = dashboard.request("/api/runs", payload={"mode": "demo"})
     assert status == 201

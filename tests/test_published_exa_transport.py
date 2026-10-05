@@ -15,7 +15,7 @@ from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
 from refund_eval.published.adapter import AUDIT_KEY, audit, inspect_tools
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG, ExaSearchService
-from refund_eval.tools._base import current_tool_call_id
+from refund_eval.world.interception import current_tool_call_id
 
 
 def transport_failure(kind, request):

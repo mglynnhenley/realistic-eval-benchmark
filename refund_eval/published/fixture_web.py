@@ -28,7 +28,7 @@ from refund_eval.published.search import (
     SearchAudit,
     SearchPolicy,
 )
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 
 FIXTURE_WEB_DATASET = "train-refund-web-v1"
 TRAINLINE_POLICY_URL = (

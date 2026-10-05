@@ -13,22 +13,10 @@ from datetime import datetime, timedelta
 from refund_eval.world.state import Email, World
 from refund_eval.world.timeutil import as_aware
 
-# Simulated minutes each tool call takes (plan: email 2, form 5, chat 10, phone 20).
-TOOL_COST_MINUTES: dict[str, int] = {
-    "search_email": 1,
-    "read_email": 1,
-    "web_fetch": 1,
-    "manage_email": 1,
-    "send_email": 2,
-    "reply_email": 2,
-    "forward_email": 2,
-    "send_message": 2,
-    "reply": 2,
-    "submit_web_form": 5,
-    "make_payment": 5,
-    "live_chat": 10,
-    "phone_call": 20,
-}
+# Published calls cost one minute unless overridden here.
+TOOL_COST_MINUTES: dict[str, int] = {"send_message": 2, "reply": 2}
+# Retained simulator transcript duration for historical conversation channels.
+CHAT_DURATION_MINUTES = 10
 
 
 def advance(world: World, to: datetime) -> list[Email]:
