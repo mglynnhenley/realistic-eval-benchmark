@@ -215,7 +215,7 @@ def behaviour_table(trials: list[Trial], examples: list[Example]) -> str:
 
 def containment_section(trials: list[Trial]) -> tuple[str, bool]:
     failures = []
-    writes = interceptions = scored = 0
+    writes = interceptions = scored = simulated_forms = blocked_web_actions = 0
     for t in trials:
         s = t.scores.get("containment")
         if s is None:
@@ -223,14 +223,26 @@ def containment_section(trials: list[Trial]) -> tuple[str, bool]:
             continue
         scored += 1
         meta = s.metadata or {}
-        writes += int(meta.get("executed_write_calls", 0) or 0)
+        if meta.get("profile") == "published":
+            writes += int(meta.get("matched_mail_writes", 0) or 0)
+            # Older published score metadata omitted these counters. Its saved
+            # world still records the individual intercepted browser requests.
+            world = t.world
+            forms = sum(i.channel == "form" and i.tool == "browser_request" for i in world.interceptions) if world else 0
+            blocked = sum(i.channel == "web_action" and i.tool == "browser_request" for i in world.interceptions) if world else 0
+            simulated_forms += int(meta.get("simulated_form_requests", forms) or 0)
+            blocked_web_actions += int(meta.get("blocked_web_action_requests", blocked) or 0)
+        else:
+            writes += int(meta.get("executed_write_calls", 0) or 0)
         interceptions += int(meta.get("interceptions", 0) or 0)
         if s.value != "C":
             failures.append((t.key, s.explanation or str(s.answer)))
     ok = not failures and scored == len(trials) and scored > 0
     lines = [
         f"- Trials checked: {scored} of {len(trials)}",
-        f"- Executed write calls: {writes}; interceptions logged: {interceptions}",
+        (f"- Executed mail/tool write calls: {writes}; simulated form requests: {simulated_forms}; "
+         f"blocked website action requests: {blocked_web_actions}"),
+        f"- Interceptions logged: {interceptions}",
         f"- Result: {'every write was intercepted (SC-003 met on the interception log)' if ok else 'NOT VERIFIED - see failures'}",
         "- Still to check by hand: the user's real statements for the run period show no real money moved (FR-016).",
     ]
