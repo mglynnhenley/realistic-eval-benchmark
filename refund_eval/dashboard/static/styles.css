@@ -687,3 +687,5 @@ textarea{font:inherit}textarea:focus-visible{outline:2px solid var(--green);outl
 .custom-model-row input { min-width: 0; }
 .batch-models { display: grid; gap: 8px; margin-top: 16px; }
 .batch-model { display: grid; gap: 6px; padding: 12px; background: #f5f8f0; border-radius: 8px; overflow-wrap: anywhere; font-size: 12px; }
+
+.demo-explanation #demo-runtime-status { margin-top: 8px; }
