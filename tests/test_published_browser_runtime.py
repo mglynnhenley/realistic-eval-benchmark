@@ -15,6 +15,8 @@ import pytest
 from refund_eval.published.browser import BrowserBoundaryError, PublishedBrowserService
 from refund_eval.published.browser_runtimes import SubprocessBrowserRuntime, subprocess_environment
 
+pytestmark = pytest.mark.browser
+
 
 def test_subprocess_environment_cannot_inherit_provider_credentials(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "credential-canary")
