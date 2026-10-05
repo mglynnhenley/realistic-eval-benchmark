@@ -80,8 +80,10 @@ keyless and rate-limited even if `EXA_API_KEY` is set; errors do not substitute
 fixture results. Web content reflects real time while mail follows simulated time.
 
 Choose **Simulated inbox and websites** (`fixture`) for authored pages and local
-search. Gmail sends and configured forms are simulated; other website writes are
-blocked and recorded. Hybrid configures no simulated forms. **Live Gmail and reviewed
+search. Gmail sends and configured forms are simulated. Other website writes (non-GET
+requests, and page loads whose URL carries message text or the user's details) are
+blocked and recorded; other GET page loads reach the real site as reads. Hybrid
+configures no simulated forms. **Live Gmail and reviewed
 websites** is an advanced local-only choice with [separate setup](published-tools.md#configure-live-data).
 
 Local trials use the pinned Docker browser. Modal and Docker batches package the
@@ -371,7 +373,7 @@ also available under **Transcript → View system prompt**. Existing runs retain
 their original recorded prompts; edits take effect on the next run.
 
 1. The agent gets its system prompt (`refund_eval/agent/system_prompt.md`) and the task text once, word for word.
-2. It works with its tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.
+2. It works with its tools. Gmail sends and configured forms are simulated. Other website writes (non-GET requests, and page loads whose URL carries message text or the user's details) are blocked and recorded.
 3. When it replies without calling a tool, that reply is saved as a **status report**. Nobody answers it.
 4. The harness then moves simulated time forward to the next event and wakes the agent with a neutral notice. The next event is the next counterparty reply or the next 09:00 (UK time) check-in, whichever is sooner. For example:
 

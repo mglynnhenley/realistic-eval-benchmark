@@ -294,8 +294,9 @@ class SubprocessBrowserRuntime:
     async def aclose(self) -> None:
         try:
             if self.client is not None:
-                # MCPStdioClient terminates the entire session/process group,
-                # including Chromium descendants, also after a transport crash.
+                # MCPStdioClient signals the server's process group and then
+                # kills descendants it recorded beforehand, which covers the
+                # Chromium that Playwright starts in its own detached group.
                 await self.client.aclose()
         finally:
             if self._directories is not None:

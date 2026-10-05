@@ -1,11 +1,18 @@
 """Paid launch failures are reported before any worker or model call starts."""
 
 import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from refund_eval.dashboard import server
+
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "refund_eval" / "dashboard" / "static"
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +144,7 @@ def test_published_profile_status_is_local_and_not_connected(tmp_path, monkeypat
     assert profiles["published"]["default_data_mode"] == "hybrid"
     assert modes["fixture"]["configured"] is True
     assert modes["hybrid"]["configured"] is True
-    assert modes["hybrid"]["label"] == "Simulated Gmail + live Exa web"
+    assert modes["hybrid"]["label"] == "Simulated Gmail + live web"
     assert modes["live"]["configured"] is False
     assert "config file" in modes["live"]["reason"]
 
@@ -212,7 +219,7 @@ def test_demo_cannot_request_retired_legacy_tools(tmp_path):
 
 @pytest.mark.parametrize("data_mode,label", [
     ("fixture", "Published tools · simulated data"),
-    ("hybrid", "Simulated Gmail + live Exa web"),
+    ("hybrid", "Simulated Gmail + live web"),
 ])
 def test_simulated_gmail_never_reads_live_config(tmp_path, monkeypatch, data_mode, label):
     from refund_eval.published import profile
@@ -448,3 +455,52 @@ def test_multi_model_launch_counts_trials_and_checks_all_models(tmp_path, monkey
         assert batch['total'] == 2 and batch['counts']['queued'] == 2
     finally:
         manager.close()
+
+
+def test_hybrid_data_mode_label_matches_the_picker_everywhere(tmp_path, monkeypatch):
+    """The saved-run label, /api/config and every app.js subtitle read exactly as the data picker does."""
+    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "missing.json"))
+    picker = re.search(r'<option value="hybrid"[^>]*>([^<]+)</option>', (STATIC / "index.html").read_text()).group(1)
+    assert picker == "Simulated Gmail + live web"
+    modes = {item["name"]: item for item in server.public_config()["tool_profiles"][0]["data_modes"]}
+    assert modes["hybrid"]["label"] == picker
+    app_source = (STATIC / "app.js").read_text()
+    assert picker in app_source
+    for source in (app_source, Path(server.__file__).read_text()):
+        assert "live Exa web" not in source
+
+
+def contact_attempts(attempts: list[dict]) -> list[bool]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to exercise dashboard contact classification")
+    result = subprocess.run(
+        [node, "-e", """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = {window: {}}; // No document: the pure helpers must stand alone.
+vm.runInNewContext(fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8'), context);
+const attempts = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(attempts.map((attempt) => context.window.RefundActivity.contactAttempt(attempt))));
+"""],
+        input=json.dumps(attempts), capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
+    )
+    return json.loads(result.stdout)
+
+
+def test_published_interceptions_count_as_organisation_contact():
+    """Published sends, replies and simulated form posts appear on the counterpart cards; blocked and inbox-only actions do not."""
+    org = "trainline"
+    attempts = [
+        {"tool": "send_message", "channel": "email", "target": "refunds@trainline.example", "org": org},
+        {"tool": "reply", "channel": "email", "target": "refunds@trainline.example", "org": org},
+        {"tool": "browser_request", "channel": "form", "target": "https://www.trainline.example/contact", "org": org},
+        {"tool": "send_email", "channel": "email", "target": "refunds@trainline.example", "org": org},  # saved legacy run
+        {"tool": "browser_request", "channel": "web_action", "target": "https://www.trainline.example/api", "org": org},  # blocked POST
+        {"tool": "manage_email", "channel": "inbox_change", "target": "Follow up", "org": None},
+        {"tool": "send_message", "channel": "email", "target": "me@example.com", "org": None, "to_user": True},
+        {"tool": "search_threads", "channel": "email", "target": "", "org": None},
+    ]
+    assert contact_attempts(attempts) == [True, True, True, True, False, False, False, False]
+    # The rendered "On the other side" cards must use this same classification.
+    assert "window.RefundActivity.contactAttempt(attempt)" in (STATIC / "app.js").read_text()

@@ -171,6 +171,35 @@ async def test_native_rpc_error_preserves_browser_for_a_followup(tmp_path, monke
     assert all(record["completed"] for record in records if record["event"] == "browser_tool_end")
 
 
+async def test_aclose_under_cancelled_scope_still_releases_client_and_runtime(tmp_path):
+    """Inspect time limits and operator cancels unwind teardown inside a cancelled scope (C2)."""
+    import anyio
+
+    released = []
+
+    class Closeable:
+        def __init__(self, name):
+            self.name = name
+
+        async def aclose(self):
+            await asyncio.sleep(0)  # A real await that an unshielded cancel would interrupt.
+            released.append(self.name)
+
+    async def never_called(_):
+        pytest.fail("Teardown must not request the network")
+
+    service = prepare_service(tmp_path, never_called)
+    service._client = Closeable("client")
+    service._runtime = Closeable("runtime")
+    service._server_task = asyncio.create_task(asyncio.sleep(3600))
+    with anyio.CancelScope() as scope:
+        scope.cancel()
+        await service.aclose()
+    assert released == ["client", "runtime"]
+    assert service._server_task.cancelled()
+    assert service._closed is True
+
+
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
                     reason="Requires the locally built pinned browser container")
 async def test_real_browser_form_and_network_bypass_canary(tmp_path):

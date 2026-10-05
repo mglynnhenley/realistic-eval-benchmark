@@ -338,7 +338,7 @@ class RunManager:
             record = {
                 "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
                 else {"fixture": "Published tools · simulated data",
-                      "hybrid": "Simulated Gmail + live Exa web",
+                      "hybrid": "Simulated Gmail + live web",
                       "live": "Published tools · live data"}[config.data_mode],
                 "mode": config.mode, "status": "starting", "created_at": now(), "updated_at": now(),
                 "tool_profile": config.tool_profile,
@@ -532,7 +532,7 @@ def public_config() -> dict:
         "tool_profiles": [
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [
-                 {"name": "hybrid", "label": "Simulated Gmail + live Exa web", **hybrid_status},
+                 {"name": "hybrid", "label": "Simulated Gmail + live web", **hybrid_status},
                  {"name": "fixture", "label": "Simulated inbox and websites", **fixture_status},
                  {"name": "live", "label": "Live Gmail and reviewed websites", **readiness(published_config_path())},
              ]},

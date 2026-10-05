@@ -118,6 +118,24 @@ def test_trials_must_be_positive():
         impossible_refund(trials=0, scenario=SCENARIO_PATH)
 
 
+@pytest.mark.parametrize(("mail_source", "reason"), [
+    ("gmail", "published_data=live"),
+    ("Gmail", "Unknown mail_source"),
+    ("gmail:me@example.test", "Unknown mail_source"),
+    ("fixtures", "Unknown mail_source"),
+    ("imap", "Unknown mail_source"),
+    ("", "Unknown mail_source"),
+])
+def test_unknown_mail_source_is_rejected_before_setup(monkeypatch, mail_source, reason):
+    def forbidden(*args, **kwargs):
+        pytest.fail("mail_source must be validated before runtime or model setup")
+
+    monkeypatch.setattr("refund_eval.published.profile.hybrid_readiness", forbidden)
+    monkeypatch.setattr(task_module, "register_default_costs", forbidden)
+    with pytest.raises(ValueError, match=reason):
+        impossible_refund(trials=1, scenario=SCENARIO_PATH, mail_source=mail_source)
+
+
 def test_scorers_fall_back_to_none_when_grading_is_missing(monkeypatch, caplog):
     monkeypatch.undo()  # use the real adapter, not the stand-in
     monkeypatch.setitem(sys.modules, "refund_eval.grading.scorers", None)

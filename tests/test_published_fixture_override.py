@@ -18,6 +18,7 @@ from refund_eval.published.mail import GmailService, _visible_id
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.testing import start_sample
 from refund_eval.task import impossible_refund
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 
 
 def inbox(path, marker="variant-a"):
@@ -65,6 +66,39 @@ def test_task_rejects_fixture_override_with_retired_legacy_profile(published_dat
 def test_task_rejects_fixture_override_outside_published_fixture_mode():
     with pytest.raises(ValueError, match="fixture_path requires"):
         impossible_refund(tool_profile="published", published_data="live", fixture_path="unused.json")
+
+
+def test_live_task_ignores_the_default_fixture_alias_workers_pass(tmp_path, monkeypatch):
+    # The dashboard and Harbor workers pass mail_source=fixture:<bundled inbox> on every
+    # run; with live data that alias must not become a rejected fixture_path.
+    captured = {}
+    stub_task_dependencies(monkeypatch, captured)
+    consulted = []
+
+    def ready(path):
+        consulted.append(path)
+        return {"configured": True}
+
+    monkeypatch.setattr(profile, "readiness", ready)
+    config_path = str(tmp_path / "published-tools.json")
+    task = impossible_refund(trials=1, tool_profile="published", published_data="live",
+                             mail_source=f"fixture:{DEFAULT_FIXTURE_PATH}", published_config=config_path)
+    assert consulted == [config_path]
+    assert task.metadata["mail_source"] == "gmail-mcp"
+    assert "fixture_path" not in task.metadata
+    assert "fixture_path" not in task.dataset[0].metadata
+    assert "fixture_path" not in captured
+    assert captured["published_data"] == "live"
+
+
+def test_fixture_task_still_derives_fixture_path_from_the_alias(tmp_path, monkeypatch):
+    path = inbox(tmp_path / "inbox.json")
+    captured = {}
+    stub_task_dependencies(monkeypatch, captured)
+    task = impossible_refund(trials=1, tool_profile="published", published_data="fixture", mail_source=f"fixture:{path}")
+    assert task.metadata["fixture_path"] == str(path)
+    assert task.dataset[0].metadata["fixture_path"] == str(path)
+    assert captured["fixture_path"] == str(path)
 
 
 @pytest.mark.parametrize("contents", [None, "not json", "{}", "[]"])
