@@ -22,6 +22,8 @@ from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, load_world
 from refund_eval.world.timeutil import as_aware
 
+FIXTURE_MAIL_CATALOG_SHA256 = "6dab6a33935078b2adac36b14c9a1514233ee2005b138c5f35c9a69dd0e56517"
+
 FIXTURE_MAIL_PROVENANCE = {
     "fixture": True,
     "native_contract_verified": False,
@@ -232,4 +234,5 @@ def make_fixture_mail(
     if audit is not None:
         audit({"event": "fixture_mail_provenance", **copy.deepcopy(FIXTURE_MAIL_PROVENANCE)})
     return GmailService(remote, ctx, fixture=True, audit=audit,
+                        catalog_snapshot={"fixture": True, "catalog_sha256": FIXTURE_MAIL_CATALOG_SHA256},
                         message_times={_visible_id(email.id): email.sent_at for email in remote.source.emails})

@@ -236,11 +236,38 @@ async def test_adapter_preserves_explicit_hybrid_mode(tmp_path, monkeypatch):
     assert captured == [{"config_path": None, "data_mode": "hybrid", "fixture_path": str(inbox)}]
 
 
-async def test_hybrid_cannot_silently_use_legacy_tools():
-    with pytest.raises(ValueError, match="Hybrid data requires"):
-        impossible_refund(published_data="hybrid")
-    with pytest.raises(ValueError, match="Hybrid data requires"):
-        refund_agent(published_data="hybrid")
-    with pytest.raises(ValueError, match="Hybrid data requires"):
-        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", published_data="hybrid"):
-            pytest.fail("Hybrid silently selected legacy tools")
+async def test_explicit_legacy_request_cannot_run_hybrid():
+    with pytest.raises(ValueError, match="Legacy execution is retired"):
+        impossible_refund(tool_profile="legacy", published_data="hybrid")
+    with pytest.raises(ValueError, match="Legacy execution is retired"):
+        refund_agent(tool_profile="legacy", published_data="hybrid")
+    with pytest.raises(ValueError, match="Legacy execution is retired"):
+        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", profile="legacy",
+                                       published_data="hybrid"):
+            pytest.fail("Retired legacy profile ran hybrid data")
+
+
+def test_default_task_runs_published_hybrid(monkeypatch):
+    captured = {}
+
+    def agent(**kwargs):
+        captured.update(kwargs)
+        return generate()
+
+    monkeypatch.setattr(task_module, "refund_agent", agent)
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
+    monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a: [])
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda **kw: {"configured": True})
+    monkeypatch.setattr(profile, "fixture_readiness", lambda **kw: pytest.fail("Default consulted fixture readiness"))
+    monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Default consulted live Gmail readiness"))
+    task = impossible_refund()
+    for metadata in (task.metadata, task.dataset[0].metadata):
+        assert metadata["tool_profile"] == "published"
+        assert metadata["published_data"] == "hybrid"
+        assert metadata["mail_source"] == "gmail-fixture"
+        assert metadata["mail_data_mode"] == "fixture"
+        assert metadata["web_data_mode"] == "live"
+    assert captured["tool_profile"] == "published"
+    assert captured["published_data"] == "hybrid"
+    assert "fixture_path" not in captured

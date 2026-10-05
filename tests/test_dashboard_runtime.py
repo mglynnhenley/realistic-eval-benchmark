@@ -21,6 +21,13 @@ from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 from refund_eval.world.state import world_tx
 
 
+@pytest.fixture(autouse=True)
+def ready_runtime_for_unit_tests(monkeypatch):
+    from refund_eval.published import profile
+    monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "test runtime"})
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "test runtime"})
+
+
 def read_snapshot(run_dir: Path) -> dict | None:
     path = run_dir / "snapshot.json"
     return json.loads(path.read_text()) if path.exists() else None
@@ -91,6 +98,8 @@ def test_measurement_import_failure_is_isolated(monkeypatch):
     assert "unavailable" in analysis["error"]
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_worker_streams_demo_progress_then_saves_final_artifact(tmp_path):
     process = start_worker(tmp_path)
     observed_turns: set[int] = set()
@@ -114,12 +123,14 @@ def test_worker_streams_demo_progress_then_saves_final_artifact(tmp_path):
     assert len(observed_turns) >= 3 and observed_live_messages
     assert snapshot["summary"]["passed"] is True
     assert Path(snapshot["inspect_log"]).is_file()
-    assert snapshot["world"]["turn"] > 0 and len(snapshot["counterparts"]) == 1
+    assert snapshot["world"]["turn"] > 0 and snapshot["world"]["cases"]["trainline"]["contacts"] == 3
     assert snapshot["scores"]["behaviour_honesty"]["answer"] == "unknown"
     assert snapshot["scores"]["behaviour_honesty"]["value"] is None
     assert any(message["role"] == "tool" for message in snapshot["messages"])
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
 def test_worker_honours_per_run_stop_file_and_preserves_transcript(tmp_path):
     process = start_worker(tmp_path)
     deadline = time.monotonic() + 15
@@ -172,6 +183,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
     assert call["task_args"] == {
         "trials": 1, "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
         "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5,
+        "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
     }
     assert RUN_DIR_ENV not in os.environ
 
@@ -181,7 +193,7 @@ def test_published_worker_passes_explicit_profile_and_rechecks_readiness(tmp_pat
 
     config_path = str(tmp_path / "published.json")
     (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "published_config": config_path,
+        "mode": "model", "tool_profile": "published", "data_mode": "live", "published_config": config_path,
         "model": "mockllm/target", "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
     }))
     checked = []
@@ -209,7 +221,7 @@ def test_published_worker_fails_before_model_when_configuration_disappears(tmp_p
     from refund_eval.published import profile
 
     (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "model": "mockllm/target",
+        "mode": "model", "tool_profile": "published", "data_mode": "live", "model": "mockllm/target",
         "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
     }))
     monkeypatch.setattr(profile, "readiness", lambda path: {"configured": False, "reason": "Gmail is not connected"})
@@ -310,7 +322,7 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     {"mode": "model", "model": "mockllm/model"},
     {"mode": "demo", "cost_limit": float("nan")},
     {"mode": "demo", "max_turns": 0},
-    {"mode": "demo", "tool_profile": "published"},
+    {"mode": "demo", "tool_profile": "legacy"},
     {"mode": "demo", "tool_profile": "unknown"},
     {"mode": "demo", "data_mode": "unknown"},
     {"mode": "demo", "data_mode": "live"},

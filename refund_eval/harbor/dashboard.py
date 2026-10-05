@@ -165,6 +165,8 @@ async def run_batch(directory: Path) -> int:
         config = read(directory / "config.json")
         settings = TrialSettings(
             smoke=config["mode"] == "demo", max_turns=config["max_turns"],
+            # Older frozen batches without tool_profile are legacy and fail with the migration error;
+            # they run only from their original snapshot.
             tool_profile=config.get("tool_profile", "legacy"),
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),

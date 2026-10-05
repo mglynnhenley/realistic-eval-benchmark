@@ -28,13 +28,13 @@ def test_world_mode_cannot_change_on_resume():
         init_world(scenario, world_mode="baseline")
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"world_mode": "unknown"},
-    {"world_mode": "friction", "mail_source": "gmail"},
-    {"world_mode": "friction", "tool_profile": "published", "published_data": "live"},
+@pytest.mark.parametrize(("kwargs", "reason"), [
+    ({"world_mode": "unknown"}, "world_mode"),
+    ({"world_mode": "friction", "mail_source": "gmail"}, "published_data=live"),
+    ({"world_mode": "friction", "tool_profile": "published", "published_data": "live"}, "simulated data"),
 ])
-def test_unsupported_world_selection_fails_before_setup_or_model_calls(kwargs):
-    with pytest.raises(ValueError, match="world_mode|simulated data"):
+def test_unsupported_world_selection_fails_before_setup_or_model_calls(kwargs, reason):
+    with pytest.raises(ValueError, match=reason):
         impossible_refund(trials=1, **kwargs)
 
 

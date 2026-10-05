@@ -18,11 +18,12 @@ import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import ValidationError
 
+from refund_eval.config import RunConfig, dashboard_default_model
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.grading.behaviours import (
     BehaviourEdit,
@@ -32,7 +33,6 @@ from refund_eval.grading.behaviours import (
 )
 from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.task import DEFAULT_ROLE_MODEL
 
 STATIC_DIR = Path(__file__).parent / "static"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -70,46 +70,6 @@ def write_json(path: Path, data: Any) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(data, indent=2, allow_nan=False) + "\n")
     temp.replace(path)
-
-
-def dashboard_default_model() -> str:
-    return os.environ.get("REFUND_EVAL_DEFAULT_MODEL", "").strip() or DEFAULT_ROLE_MODEL
-
-
-class RunConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    mode: Literal["demo", "model"] = "demo"
-    tool_profile: Literal["legacy", "published"] = "legacy"
-    data_mode: Literal["fixture", "hybrid", "live"] = "fixture"
-    world_mode: Literal["baseline", "friction"] = "baseline"
-    model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                       pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    simulator_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                                 pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    grader_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                              pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    models: list[Annotated[str, Field(min_length=1, max_length=160,
-                                     pattern=r"^openrouter/[A-Za-z0-9._:/-]+$")]] | None = Field(
-        default=None, min_length=1, max_length=16)
-
-    @field_validator("models")
-    @classmethod
-    def unique_models(cls, value):
-        if value and len(set(value)) != len(value):
-            raise ValueError("Choose each model only once")
-        return value
-
-    max_turns: int = Field(default=20, ge=1, le=1000, strict=True)
-    cost_limit: float = Field(default=1.0, gt=0, le=40)
-    sim_weeks: float = Field(default=1.0, gt=0, le=12)
-    execution: Literal["local", "modal", "docker"] = "local"
-    trials: int = Field(default=1, ge=1, le=100, strict=True)
-    concurrency: int = Field(default=1, ge=1, le=16, strict=True)
-    time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
-    experiment_manifest: str | None = Field(default=None, min_length=1)
-    experiment_replicate: int = Field(default=0, ge=0, le=3, strict=True)
-    all_role_cost_limit: float | None = Field(default=None, gt=0, le=40)
-    experiment_budget_file: str | None = Field(default=None, min_length=1)
 
 
 class APIError(Exception):
@@ -177,9 +137,7 @@ def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
 
 
 def run_presets() -> list[dict]:
-    model = dashboard_default_model()
-    shared = {"mode": "model", "tool_profile": "published", "data_mode": "hybrid",
-              "model": model, "simulator_model": model, "grader_model": model}
+    shared = RunConfig(mode="model").model_dump()
     return [
         {"name": "quick", "label": "Quick test", "settings": {
             **shared, "world_mode": "baseline", "max_turns": 20, "cost_limit": 1.0, "sim_weeks": 1.0,
@@ -327,8 +285,8 @@ class RunManager:
                 )
             except (OSError, ValueError, KeyError, TypeError) as error:
                 raise APIError(422, f"Experiment preflight failed: {error}") from error
-        if config.mode == "demo" and config.tool_profile != "legacy":
-            raise APIError(422, "The offline demo uses legacy tools. Select a model trial for published tools.")
+        if config.mode == "demo" and config.data_mode != "fixture":
+            raise APIError(422, "The dashboard scripted demo requires fixture data. Use the hybrid smoke CLI for scripted live-web checks.")
         if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
             raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
         if config.world_mode == "friction" and (config.mode != "model" or config.data_mode == "live"):
@@ -378,11 +336,10 @@ class RunManager:
             if published_path:
                 settings["published_config"] = published_path
             record = {
-                "id": run_id, "label": "Scripted demo · legacy tools" if config.mode == "demo"
+                "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
                 else {"fixture": "Published tools · simulated data",
                       "hybrid": "Simulated Gmail + live Exa web",
-                      "live": "Published tools · live data"}[config.data_mode]
-                if config.tool_profile == "published" else "Legacy model trial",
+                      "live": "Published tools · live data"}[config.data_mode],
                 "mode": config.mode, "status": "starting", "created_at": now(), "updated_at": now(),
                 "tool_profile": config.tool_profile,
                 "data_mode": config.data_mode,
@@ -561,6 +518,8 @@ def public_config() -> dict:
     return {
         "default_model": dashboard_default_model(),
         "run_presets": run_presets(),
+        "run_defaults": RunConfig().model_dump(),
+        "model_defaults": RunConfig(mode="model").model_dump(),
         "execution_readiness": {name: execution_readiness(name) for name in ("local", "modal", "docker")},
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
@@ -571,8 +530,6 @@ def public_config() -> dict:
                                        for org in scenario.orgs]},
         "modes": ["demo", "model"],
         "tool_profiles": [
-            {"name": "legacy", "label": "Legacy tools", "configured": True,
-             "reason": "Existing custom tools and fixture inbox; used by the offline demo."},
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [
                  {"name": "hybrid", "label": "Simulated Gmail + live Exa web", **hybrid_status},

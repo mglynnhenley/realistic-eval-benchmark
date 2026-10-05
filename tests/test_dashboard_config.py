@@ -8,6 +8,14 @@ import pytest
 from refund_eval.dashboard import server
 
 
+@pytest.fixture(autouse=True)
+def ready_runtime_for_unit_tests(monkeypatch):
+    from refund_eval.published import profile
+    monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "test runtime"})
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "test runtime"})
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test location"})
+
+
 def test_old_run_detail_adds_measurements_without_rewriting_recorded_files(tmp_path):
     run_id = "abcdef123456"
     run_dir = tmp_path / run_id
@@ -123,7 +131,7 @@ def test_published_profile_status_is_local_and_not_connected(tmp_path, monkeypat
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "Browser ready"})
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "Docker ready; Exa verified at startup"})
     profiles = {item["name"]: item for item in server.public_config()["tool_profiles"]}
-    assert profiles["legacy"]["configured"] is True
+    assert set(profiles) == {"published"}
     assert profiles["published"]["configured"] is True
     modes = {item["name"]: item for item in profiles["published"]["data_modes"]}
     assert profiles["published"]["default_data_mode"] == "hybrid"
@@ -179,11 +187,24 @@ def test_published_selection_persists_server_config_path_without_fallback(tmp_pa
         manager.close()
 
 
-def test_demo_cannot_claim_to_use_published_tools(tmp_path):
+def test_scripted_demo_is_labelled_with_published_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
+    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        record = manager.start(server.RunConfig(mode="demo"))
+        assert record["label"] == "Scripted demo · published tools"
+        assert record["tool_profile"] == "published"
+        assert record["data_mode"] == "fixture"
+    finally:
+        manager.close()
+
+
+def test_demo_cannot_request_retired_legacy_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(server.APIError, match="offline demo uses legacy"):
-            manager.start(server.RunConfig(mode="demo", tool_profile="published"))
+        with pytest.raises(ValueError, match="Legacy execution is retired"):
+            manager.start(server.RunConfig(mode="demo", tool_profile="legacy"))
         assert not manager.list()
     finally:
         manager.close()
@@ -241,7 +262,7 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
 def test_legacy_cannot_claim_live_data(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(server.APIError, match=f"{data_mode.title()} data requires"):
+        with pytest.raises(ValueError, match="Legacy execution is retired"):
             manager.start(server.RunConfig(mode="model", tool_profile="legacy", data_mode=data_mode))
         assert not manager.list()
     finally:
@@ -324,7 +345,7 @@ def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path
 
 @pytest.mark.parametrize(('settings', 'message'), [
     ({'execution': 'local', 'trials': 2}, 'multiple trials'),
-    ({'execution': 'modal', 'tool_profile': 'published'}, 'legacy tools'),
+    ({'execution': 'modal', 'data_mode': 'live'}, 'Live Gmail is local-only'),
     ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
     ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
     ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),

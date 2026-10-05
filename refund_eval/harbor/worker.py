@@ -11,6 +11,7 @@ from inspect_ai.log import read_eval_log
 
 from refund_eval.harbor.artifacts import finite_json, grading_errors
 from refund_eval.harbor.config import TrialRequest
+from refund_eval.published.provider import published_model_args
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import impossible_refund
 from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
@@ -58,6 +59,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
                 **rubric_args,
             },
             model=request.model,
+            model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
             model_roles={
                 "simulator": settings.simulator_model or request.model,
                 "grader": settings.grader_model or request.model,

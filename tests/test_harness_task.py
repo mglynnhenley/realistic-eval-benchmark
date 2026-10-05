@@ -39,7 +39,11 @@ def test_task_dry_run_with_mockllm(tmp_path):
     assert len(log.samples) == 2
     for sample in log.samples:
         assert sample.input == scenario().task_text
-        assert sample.metadata == {"scenario": SCENARIO_PATH, "mail_source": "fixture"}
+        assert sample.metadata == {
+            "scenario": SCENARIO_PATH, "mail_source": "gmail-fixture",
+            "tool_profile": "published", "published_data": "hybrid",
+            "mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock",
+        }
         world = world_of(sample)
         assert world.stop_reason == "max_turns" and world.turn == 6
         assert "world_scorer" in sample.scores
@@ -50,13 +54,15 @@ def test_task_dry_run_with_mockllm(tmp_path):
         "simulator": "mockllm/model",
         "grader": "mockllm/model",
     }
-    # the default $40 cost_limit is active (it needs cost data, registered for mockllm)
-    assert log.eval.config.cost_limit == 40.0
+    # The shared $1 default cap is active; mockllm has explicitly registered zero prices.
+    assert log.eval.config.cost_limit == 1.0
     assert log.eval.metadata == {
         "scenario": SCENARIO_PATH,
-        "mail_source": "fixture",
+        "mail_source": "gmail-fixture",
+        "tool_profile": "published", "published_data": "hybrid",
+        "mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock",
         "max_turns": 6,
-        "sim_weeks": 12,
+        "sim_weeks": 1,
     }
 
 
@@ -73,9 +79,13 @@ def test_task_respects_explicit_model_roles(tmp_path):
 
 
 def test_roles_default_to_openrouter_for_a_real_target():
-    roles = copy_context().run(
-        task_module.default_model_roles, "openrouter/anthropic/claude-opus-5"
-    )
+    from inspect_ai.model._model import init_model_roles
+
+    def with_no_roles() -> dict[str, str]:
+        init_model_roles({})
+        return task_module.default_model_roles("openrouter/anthropic/claude-opus-5")
+
+    roles = copy_context().run(with_no_roles)
     assert roles == {
         "simulator": "openrouter/anthropic/claude-opus-5",
         "grader": "openrouter/anthropic/claude-opus-5",
@@ -116,8 +126,18 @@ def test_scorers_fall_back_to_none_when_grading_is_missing(monkeypatch, caplog):
     assert "all_scorers is not available yet" in caplog.text
 
 
-def test_missing_tools_give_a_clear_error(monkeypatch):
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "refund_eval.world.mail", None)
-    with pytest.raises(RuntimeError, match="workstream A"):
-        adapters.build_tools(scenario(), "fixture")
+@pytest.mark.parametrize("entrypoint", ["task", "tool_scope"])
+async def test_explicit_legacy_request_fails_before_starting_published_tools(monkeypatch, entrypoint):
+    monkeypatch.undo()  # Exercise real routing and validation.
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("A legacy request must not launch the replacement tool stack")
+
+    monkeypatch.setattr("refund_eval.published.profile.published_tools", forbidden)
+    monkeypatch.setattr("refund_eval.published.profile.hybrid_readiness", forbidden)
+    with pytest.raises(ValueError, match="(?i)(retired|migration|no longer supported)"):
+        if entrypoint == "task":
+            impossible_refund(tool_profile="legacy", scenario=SCENARIO_PATH)
+        else:
+            async with adapters.tool_scope(scenario(), "fixture", profile="legacy"):
+                pytest.fail("Retired tool scope entered")

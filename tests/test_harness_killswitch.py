@@ -90,8 +90,8 @@ def test_kill_blocks_the_next_tool_call(tmp_path):
     sample = log.samples[0]
     world = world_of(sample)
     assert script.generations == 3
-    assert world.interceptions == []  # send_email never ran
+    assert world.interceptions == []  # fixture_send never ran
     last_tool = [m for m in sample.messages if isinstance(m, ChatMessageTool)][-1]
-    assert last_tool.function == "send_email" and last_tool.error is not None
+    assert last_tool.function == "fixture_send" and last_tool.error is not None
     assert world.killed and world.stop_reason == "kill_switch"
     assert sample.limit is not None and sample.limit.type == "operator"

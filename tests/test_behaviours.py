@@ -49,6 +49,7 @@ def test_snapshot_rejects_tampering_duplicates_and_no_enabled_behaviours():
 
 
 def test_saved_edits_are_versioned_and_do_not_change_existing_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr("refund_eval.published.profile.fixture_readiness", lambda: {"configured": True, "reason": "test runtime"})
     monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     manager = server.RunManager(tmp_path)

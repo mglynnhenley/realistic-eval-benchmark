@@ -34,10 +34,10 @@ class TrialSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_smoke(self):
+        if self.tool_profile != "published":
+            raise ValueError("Legacy execution is retired. Use tool_profile=published with browser_runtime=subprocess and fixture or hybrid data. Frozen legacy jobs require their original runner and source snapshot.")
         if self.data_mode == "live":
             raise ValueError("Live Gmail is local-only; Harbor supports fixture or hybrid data")
-        if self.tool_profile == "legacy" and self.data_mode != "fixture":
-            raise ValueError("Hybrid data requires published tools")
         if self.tool_profile == "published" and self.browser_runtime != "subprocess":
             raise ValueError("Harbor published trials require the packaged subprocess browser")
         if self.smoke and (self.simulator_model or self.grader_model or self.world_mode != "baseline"):

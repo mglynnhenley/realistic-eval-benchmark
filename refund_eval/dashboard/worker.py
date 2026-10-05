@@ -14,9 +14,11 @@ from typing import Any
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
+from refund_eval.config import RunConfig
 from refund_eval.dashboard.telemetry import EMPTY_SNAPSHOT, RUN_DIR_ENV, write_snapshot
 from refund_eval.demo import run_demo
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
+from refund_eval.published.provider import published_model_args
 from refund_eval.sim.counterparts import REGISTRY_KEY
 from refund_eval.task import impossible_refund
 from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
@@ -29,12 +31,10 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
     if not isinstance(config, dict) or config.get("mode") not in {"demo", "model"}:
         raise ValueError("Run mode must be 'demo' or 'model'.")
-    config = {"max_turns": 30, "cost_limit": 5.0, "sim_weeks": 1.0, "tool_profile": "legacy",
-              "world_mode": "baseline", **config}
-    if config["tool_profile"] not in {"legacy", "published"}:
-        raise ValueError("tool_profile must be 'legacy' or 'published'.")
-    # Existing published run files predate simulated data support and mean live.
-    config.setdefault("data_mode", "live" if config["tool_profile"] == "published" else "fixture")
+    config = {**RunConfig(mode=config["mode"]).model_dump(), **config}
+    if config["tool_profile"] != "published":
+        raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
+    # Execution records from the dashboard carry explicit data mode and runtime.
     if config["data_mode"] not in {"fixture", "hybrid", "live"}:
         raise ValueError("data_mode must be 'fixture', 'hybrid' or 'live'.")
     if config["data_mode"] in {"live", "hybrid"} and config["tool_profile"] != "published":
@@ -43,8 +43,8 @@ def load_config(run_dir: Path) -> dict[str, Any]:
         raise ValueError("world_mode must be 'baseline' or 'friction'.")
     if config["world_mode"] == "friction" and (config["mode"] != "model" or config["data_mode"] == "live"):
         raise ValueError("Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
-    if config["mode"] == "demo" and config["tool_profile"] != "legacy":
-        raise ValueError("The offline demo uses legacy tools.")
+    if config["mode"] == "demo" and config["data_mode"] != "fixture":
+        raise ValueError("The dashboard scripted demo requires fixture data.")
     if "published_config" in config and not isinstance(config["published_config"], str):
         raise ValueError("published_config must be a file path.")
     turns = config["max_turns"]
@@ -203,6 +203,7 @@ def run_worker(run_dir: str | Path) -> int:
                             **profile_args,
                         },
                         model=config["model"],
+                        model_args=published_model_args(config["model"]) if config["tool_profile"] == "published" else {},
                         model_roles={"simulator": config["simulator_model"], "grader": config["grader_model"]},
                         log_dir=str(destination / "logs"), log_format="eval", display="none",
                         metadata={"dashboard": True, "world_mode": config["world_mode"],

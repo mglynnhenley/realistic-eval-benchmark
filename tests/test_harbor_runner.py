@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -14,15 +15,29 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.task import Task
 
-from refund_eval.harbor.__main__ import prepare
+from refund_eval.harbor.__main__ import main, prepare
 from refund_eval.harbor.agent import RefundInspectAgent
 from refund_eval.harbor.config import TrialSettings
 from refund_eval.scenario.schema import load_scenario
 
 
+def published_settings(**kwargs):
+    return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
+
+
+def test_cli_rejects_retired_legacy_tool_profile(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"),
+                                      "--smoke", "--tool-profile", "legacy"])
+    with pytest.raises(SystemExit) as exited:
+        main()
+    assert exited.value.code == 2
+    assert "invalid choice: 'legacy'" in capsys.readouterr().err
+    assert not (tmp_path / "job").exists()
+
+
 def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_path):
     output = tmp_path / "frozen"
-    config = prepare(output, settings=TrialSettings(smoke=True), model="mockllm/model")
+    config = prepare(output, settings=published_settings(smoke=True), model="mockllm/model")
     job = JobConfig.model_validate_json(config.read_text())
     task = Task(job.tasks[0].path)
     assert job.n_attempts == 4 and job.n_concurrent_trials == 2
@@ -43,12 +58,12 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert not any(p.name in {".env", ".secrets", "node_modules", ".venv", ".context"}
                    for p in source.rglob("*"))
     with pytest.raises(FileExistsError):
-        prepare(output, settings=TrialSettings(smoke=True), model="mockllm/model")
+        prepare(output, settings=published_settings(smoke=True), model="mockllm/model")
 
 
 def test_paid_config_uses_named_secrets_without_values(tmp_path):
     config = prepare(
-        tmp_path / "paid", settings=TrialSettings(), model="openrouter/example/model",
+        tmp_path / "paid", settings=published_settings(), model="openrouter/example/model",
         secrets=["refund-model-keys"],
     )
     job = json.loads(config.read_text())
@@ -90,7 +105,7 @@ class FakeEnvironment:
 
 async def test_agent_propagates_host_kill_and_collects_usage(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: "test stop")
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True)
+    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True, tool_profile="published", browser_runtime="subprocess")
     environment = FakeEnvironment()
     context = AgentContext()
     await agent.run(load_scenario("train_refund").task_text, environment, context)
@@ -102,7 +117,7 @@ async def test_agent_propagates_host_kill_and_collects_usage(tmp_path, monkeypat
 
 async def test_cancellation_releases_pending_exec(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True)
+    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True, tool_profile="published", browser_runtime="subprocess")
     environment = FakeEnvironment(wait=True)
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(
@@ -114,7 +129,7 @@ async def test_cancellation_releases_pending_exec(tmp_path, monkeypatch):
 
 async def test_worker_failure_is_reported_to_harbor(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True)
+    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="mockllm/model", smoke=True, tool_profile="published", browser_runtime="subprocess")
     with pytest.raises(RuntimeError, match="exited 7"):
         await agent.run(
             load_scenario("train_refund").task_text, FakeEnvironment(return_code=7), AgentContext(),
@@ -126,7 +141,7 @@ async def test_multi_model_job_interleaves_models_with_one_concurrency_limit(tmp
     from harbor.job import Job
 
     models = ['openrouter/provider/first', 'openrouter/provider/second']
-    path = prepare(tmp_path / 'multi', settings=TrialSettings(
+    path = prepare(tmp_path / 'multi', settings=published_settings(
         simulator_model='openrouter/provider/simulator', grader_model='openrouter/provider/grader'),
         models=models, trials=3, concurrency=2)
     config = JobConfig.model_validate_json(path.read_text())
@@ -144,5 +159,5 @@ async def test_multi_model_job_interleaves_models_with_one_concurrency_limit(tmp
 @pytest.mark.parametrize('models', [[], ['openrouter/provider/model'] * 2])
 def test_invalid_model_selection_does_not_create_job(tmp_path, models):
     with pytest.raises(ValueError, match='duplicates'):
-        prepare(tmp_path / 'multi', settings=TrialSettings(), models=models)
+        prepare(tmp_path / 'multi', settings=published_settings(), models=models)
     assert not (tmp_path / 'multi').exists()

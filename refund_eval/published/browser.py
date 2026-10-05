@@ -22,20 +22,20 @@ from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE,
     MAX_REQUEST_BYTES,
     MAX_RESPONSE_BYTES,
+    PLAYWRIGHT_MCP_VERSION,
+    RUNTIME_DIR,
     BrowserBoundaryError,
     DockerBrowserRuntime,
     SubprocessBrowserRuntime,
-)
-from refund_eval.published.browser_runtimes import (
-    PLAYWRIGHT_MCP_VERSION as PLAYWRIGHT_MCP_VERSION,
-)
-from refund_eval.published.browser_runtimes import (
-    RUNTIME_DIR as RUNTIME_DIR,
-)
-from refund_eval.published.browser_runtimes import (
-    docker_command as docker_command,
+    docker_command,
 )
 from refund_eval.published.mcp import MCPRPCError, MCPStdioClient
+
+# Preserve the established imports while lifecycle implementation lives separately.
+__all__ = [
+    "BROWSER_TOOLS", "DEFAULT_IMAGE", "PLAYWRIGHT_MCP_VERSION", "RUNTIME_DIR",
+    "BrowserBoundaryError", "PublishedBrowserService", "docker_command", "validate_response",
+]
 
 REQUEST_FILE = re.compile(r"^[a-f0-9-]{36}\.json$")
 
