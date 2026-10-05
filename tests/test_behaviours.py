@@ -1,5 +1,6 @@
 """Behaviour edits, frozen run definitions, and grading against user rubrics."""
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -84,6 +85,8 @@ async def test_configured_grader_receives_exact_rubric_without_hardcoded_floor()
     assert score.metadata["code_floor"] == 0
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires the pinned browser image")
 def test_demo_uses_enabled_custom_behaviours_and_exports_saved_definition(tmp_path):
     draft = custom_set()
     draft.behaviours.append(Behaviour(id="disabled", name="Disabled", rubric="This behaviour should never be graded.", enabled=False))
