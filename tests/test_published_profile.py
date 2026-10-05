@@ -146,7 +146,7 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
             await asyncio.sleep(6)
         return SimResult(immediate_text="Your enquiry has been received; we will reply by email.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     scenario = load_scenario("train_refund")
     calls = [
         ("search_threads", {"query": scenario.journey.booking_ref}),

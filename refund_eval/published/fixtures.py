@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from refund_eval.published.mail import GmailService, _visible_id
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource
 from refund_eval.world.mailquery import MatchContext, parse_query
 from refund_eval.world.orgs import parse_address

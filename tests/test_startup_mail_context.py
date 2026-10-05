@@ -30,7 +30,7 @@ from refund_eval.grading.scorers import resource_counts
 from refund_eval.published.adapter import inspect_tools
 from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox
 from refund_eval.world.state import load_world, save_world
 

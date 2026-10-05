@@ -17,7 +17,7 @@ from refund_eval.published.network import (
 from refund_eval.published.profile import search_policy
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import Mailbox, make_mail_source
 from refund_eval.world.state import load_world, save_world
 
@@ -79,7 +79,7 @@ async def test_post_and_action_get_are_simulated_and_visible_on_reload(
         simulated.append(inbound)
         return SimResult(immediate_text="Your case is open.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     boundary = BrowserBoundary(
         ctx,
         public_read_urls=[],

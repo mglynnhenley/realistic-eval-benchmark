@@ -95,7 +95,7 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
         dispatched.append(inbound)
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", simulate)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", simulate)
     async with profile.published_tools(scenario, data_mode="hybrid", fixture_path=str(inbox),
                                        config_path="/nonexistent/explicit.json"):
         services = offline_profile["services"]

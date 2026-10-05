@@ -10,7 +10,7 @@ from refund_eval.sim.counterparts import REGISTRY_KEY, registered_orgs
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch, resolve_org
 from refund_eval.sim.testing import MockSim, install_mock_models, start_sample
-from refund_eval.tools._base import intercept
+from refund_eval.world.interception import intercept
 from refund_eval.world.state import CaseState, load_world, world_tx
 
 SC = load_scenario("train_refund")

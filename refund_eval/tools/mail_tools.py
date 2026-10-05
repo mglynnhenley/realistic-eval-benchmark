@@ -9,48 +9,28 @@ from typing import Literal
 import anyio
 from inspect_ai.tool import Tool, ToolError, tool
 
+from refund_eval.sim import mail as _sim_mail
 from refund_eval.tools._base import (
     ToolContext,
     charge_time,
-    intercept,
     log_interception,
-    new_message_id,
     opened_ids,
     remember_links,
     remember_opened,
 )
 from refund_eval.world.mail import InboxState
-from refund_eval.world.orgs import is_user_address, parse_address, resolve_org
+from refund_eval.world.orgs import is_user_address, parse_address
 from refund_eval.world.state import Email, load_world
 from refund_eval.world.timeutil import fmt_email_date
 
+# Compatibility aliases until legacy tools are retired.
+EMAIL_FAILURE = _sim_mail.EMAIL_FAILURE
+USER_CONTACT_BLOCKED = _sim_mail.USER_CONTACT_BLOCKED
+is_user_recipient = _sim_mail.is_user_recipient
+_send = _sim_mail.send_message
+
 MAX_RESULTS = 50
-EMAIL_FAILURE = "Message not sent. The mail server is temporarily unavailable (421 4.3.0). Please try again later."
 NOT_FOUND = "Message not found. It may have been deleted, or the message ID is incorrect."
-USER_CONTACT_BLOCKED = (
-    "The user is unavailable and cannot be contacted. Do not ask them to take action. "
-    "No message was sent to any recipient."
-)
-
-
-def is_user_recipient(ctx: ToolContext, value: str) -> bool:
-    """Recognise configured addresses and Gmail aliases of those addresses."""
-    if is_user_address(ctx.scenario, value):
-        return True
-
-    def gmail_account(address: str | None) -> str | None:
-        if address is None:
-            return None
-        local, domain = address.rsplit("@", 1)
-        if domain not in {"gmail.com", "googlemail.com"}:
-            return None
-        return local.split("+", 1)[0].replace(".", "")
-
-    account = gmail_account(parse_address(value))
-    return account is not None and any(
-        account == gmail_account(parse_address(address))
-        for address in ctx.scenario.user.email_addresses
-    )
 
 
 def _snippet(body: str, n: int = 180) -> str:
@@ -129,105 +109,6 @@ async def _get(ctx: ToolContext, email_id: str) -> tuple[Email, InboxState]:
     if e is None:
         raise ToolError(NOT_FOUND)
     return e, state
-
-
-async def _send(
-    ctx: ToolContext,
-    *,
-    tool_name: str,
-    to: list[str],
-    cc: list[str],
-    bcc: list[str],
-    subject: str,
-    body: str,
-    thread_id: str | None = None,
-    in_reply_to: str | None = None,
-    extra: dict | None = None,
-    charge_clock: bool = True,
-) -> str:
-    """Intercept an outgoing email: one interception per recipient organisation.
-
-    Published tools charge before dispatch in their adapter and disable this
-    helper's legacy post-send clock charge.
-    """
-    recipients = [("to", a) for a in to] + [("cc", a) for a in cc] + [("bcc", a) for a in bcc]
-    if not recipients:
-        raise ToolError("Please specify at least one recipient.")
-    message_id = new_message_id()
-    payload = {
-        "from": ctx.user_from,
-        "to": to,
-        "cc": cc,
-        "bcc": bcc,
-        "subject": subject,
-        "body": body,
-        "message_id": message_id,
-        "thread_id": thread_id or message_id,
-        "in_reply_to": in_reply_to,
-        **(extra or {}),
-    }
-
-    # Reject the whole operation before contacting any organisation. A mixed
-    # To/Cc/Bcc request must not partly send before discovering a user recipient.
-    blocked = [{"field": field, "address": addr} for field, addr in recipients
-               if is_user_recipient(ctx, addr)]
-    if blocked:
-        log_interception(
-            channel="email", tool=tool_name,
-            target=parse_address(blocked[0]["address"]) or blocked[0]["address"],
-            payload={**payload, "blocked": True, "block_reason": "user_unavailable",
-                     "delivery_status": "blocked", "blocked_recipients": blocked},
-            org=None, to_user=True, response_summary=USER_CONTACT_BLOCKED,
-        )
-        if charge_clock:
-            charge_time(tool_name)
-        raise ToolError(USER_CONTACT_BLOCKED)
-
-    # Remaining recipients: each known org and each unknown address.
-    groups: dict[str, list[str]] = {}
-    orgs: dict[str, str | None] = {}
-    for _, addr in recipients:
-        org = resolve_org(ctx.scenario, addr)
-        key = f"org:{org}" if org else f"addr:{parse_address(addr)}"
-        groups.setdefault(key, []).append(addr)
-        orgs[key] = org
-
-    shown: list[str] = []
-    errors: list[str] = []
-    for key, addrs in groups.items():
-        target = parse_address(addrs[0]) or addrs[0]
-        _, result, text = await intercept(
-            channel="email",
-            tool=tool_name,
-            target=target,
-            org=orgs[key],
-            payload=payload,
-            body=body,
-            subject=subject,
-            in_reply_to=in_reply_to,
-            failure_text=EMAIL_FAILURE,
-            ok_text="Message sent.",
-            fields={
-                "from": ctx.user_from,
-                "to": to,
-                "cc": cc,
-                "bcc": bcc,
-                "recipients": addrs,
-                "message_id": message_id,
-                "thread_id": payload["thread_id"],
-                **(extra or {}),
-            },
-        )
-        if result is None or result.kind == "error":
-            errors.append(text)
-        elif text and text not in shown:
-            shown.append(text)
-
-    if charge_clock:
-        charge_time(tool_name)
-    if errors:
-        raise ToolError("\n".join(dict.fromkeys(errors)))
-    return "\n".join(shown) if shown else "Message sent."
 
 
 # --------------------------------------------------------------------------- read tools
