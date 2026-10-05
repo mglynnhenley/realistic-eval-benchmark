@@ -108,6 +108,10 @@ class PublishedBrowserService:
         # Set unless _handle_request is running. Requests are served serially.
         self._request_idle = asyncio.Event()
         self._request_idle.set()
+        # Cleared while a call records its end: requests arriving then are not
+        # part of that call and must not be audited inside its evidence window.
+        self._call_settled = asyncio.Event()
+        self._call_settled.set()
         self._active_probe: dict[str, Any] | None = None
         self._runtime = (DockerBrowserRuntime(self.spool_dir, image=image, timeout=timeout,
                                               audit_path=self.audit_path) if runtime == "docker" else
@@ -197,6 +201,7 @@ class PublishedBrowserService:
                 raise
             finally:
                 self._active_call = None
+                self._call_settled.clear()
                 try:
                     await self._drain_admitted_request()
                 except BaseException:
@@ -206,6 +211,7 @@ class PublishedBrowserService:
                     self._audit({"event": "browser_tool_end", **call, "completed": completed,
                                  "request_ids": list(self._active_request_ids),
                                  "boundary_verified": self.security_manifest.get("interception_integrity", {}).get("verified", False)})
+                    self._call_settled.set()
 
     async def _drain_admitted_request(self) -> None:
         """Let a request admitted to the ending call record its decision first.
@@ -318,6 +324,9 @@ class PublishedBrowserService:
                     if not REQUEST_FILE.fullmatch(filename.name):
                         self._audit({"event": "invalid_spool_filename", "filename": filename.name})
                         raise BrowserBoundaryError("Invalid browser request filename")
+                    # Hold later requests until the ending call has written
+                    # browser_tool_end; they are served as unattributed after it.
+                    await self._call_settled.wait()
                     await self._handle_request(filename)
                 await asyncio.sleep(0.01)
         except asyncio.CancelledError:
