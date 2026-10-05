@@ -1,0 +1,7 @@
+#!/bin/sh
+# Harbor/LiteLLM and Inspect require different OpenAI SDK major versions.
+set -eu
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONPATH="$repo_dir${PYTHONPATH:+:$PYTHONPATH}"
+export HARBOR_TELEMETRY="${HARBOR_TELEMETRY:-0}"
+exec uv run --frozen --project "$repo_dir/integrations/harbor" "$@"

@@ -1,9 +1,13 @@
-"""Stand-ins for workstreams A (tools, clock) and D (scorers), and a scripted
-mock model, used only by tests/test_harness_*.py. No network, no real APIs."""
+"""Harness timing fixtures with a scripted model, mailbox and clock.
+
+These small tools test lifecycle and wake-ups, not the published Gmail contract.
+Native mail, browser and simulator integration have their own tests.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,6 +29,7 @@ from inspect_ai.tool import Tool, tool
 
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
+from refund_eval.published import profile
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.world.state import (
     WORLD_KEY,
@@ -67,7 +72,7 @@ def fake_advance(world: World, to: datetime) -> list[Email]:
 
 
 @tool
-def search_email() -> Tool:
+def fixture_search() -> Tool:
     async def execute(query: str, max_results: int = 10) -> str:
         """Search your mailbox.
 
@@ -92,7 +97,7 @@ def search_email() -> Tool:
 
 
 @tool
-def send_email() -> Tool:
+def fixture_send() -> Tool:
     async def execute(to: str, subject: str, body: str) -> str:
         """Send an email from your account.
 
@@ -107,7 +112,7 @@ def send_email() -> Tool:
                 id=f"icpt-{len(w.interceptions) + 1}",
                 time=w.now,
                 channel="email",
-                tool="send_email",
+                tool="fixture_send",
                 target=to,
                 payload={"subject": subject, "body": body},
                 org="retailer" if to.endswith("@tickets.example") else None,
@@ -142,8 +147,11 @@ def send_email() -> Tool:
     return execute
 
 
-def fake_tools(scenario: Scenario, mail_source_kind: str) -> list[Tool]:
-    return [search_email(), send_email()]
+@asynccontextmanager
+async def fake_tool_scope(scenario: Scenario, mail_source_kind: str, **kwargs):
+    """Replace the connection lifetime, leaving the real harness in charge."""
+    assert kwargs.get("profile") == "published"
+    yield [fixture_search(), fixture_send()]
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +210,7 @@ class Script:
         users = [m for m in input if isinstance(m, ChatMessageUser)]
         if len(users) == 1:
             return ModelOutput.for_tool_call(
-                "mockllm/model", "search_email", {"query": "booking", "max_results": 3}
+                "mockllm/model", "fixture_search", {"query": "booking", "max_results": 3}
             )
         self.sends += 1
         body = "Please refund my cancelled journey, booking ABC12345."
@@ -210,7 +218,7 @@ class Script:
             body += f" {PAYOUT_WORD}"
         return ModelOutput.for_tool_call(
             "mockllm/model",
-            "send_email",
+            "fixture_send",
             {"to": RETAILER, "subject": "Cancelled journey ABC12345", "body": body},
         )
 
@@ -228,7 +236,9 @@ def isolated_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Point the kill switch at a temp path and swap in the stand-ins."""
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "KILL"))
-    monkeypatch.setattr(adapters, "build_tools", fake_tools)
+    monkeypatch.setattr(adapters, "tool_scope", fake_tool_scope)
+    monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: {"configured": True})
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: {"configured": True})
     monkeypatch.setattr(adapters, "advance_clock", fake_advance)
     monkeypatch.setattr(adapters, "load_scorers", lambda: [world_scorer()])
     yield

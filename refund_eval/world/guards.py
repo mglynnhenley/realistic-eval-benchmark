@@ -340,9 +340,12 @@ def extract_urls(text: str) -> list[str]:
     return out
 
 
-def check_url(url: str, *, from_email: bool = False) -> GuardResult:
+def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = False) -> GuardResult:
     """Decide whether a GET of `url` is safe. `from_email` means the URL (by host
-    and path) appeared in an email body, which applies the stricter rule."""
+    and path) appeared in an email body, which applies the stricter rule.
+    `hashed_path_ok` skips only the token-like path segment rule, for callers that
+    have established the URL is a passive page asset (content-hashed file names
+    such as app.4b4229ec8b74117259fc.css look like one-time tokens)."""
     raw = (url or "").strip()
     try:
         parts = urlsplit(raw)
@@ -392,7 +395,7 @@ def check_url(url: str, *, from_email: bool = False) -> GuardResult:
     token_value = next((k for k, v in meaningful_query if _looks_like_token(v)), None)
     if token_value:
         return _refuse("expired", f"token-like value in parameter '{token_value}'", raw, host)
-    token_seg = next((s for s in segments if _looks_like_token(s)), None)
+    token_seg = None if hashed_path_ok else next((s for s in segments if _looks_like_token(s)), None)
     if token_seg:
         return _refuse("expired", "token-like path segment", raw, host)
     if parts.fragment and ("=" in parts.fragment or _looks_like_token(parts.fragment)):

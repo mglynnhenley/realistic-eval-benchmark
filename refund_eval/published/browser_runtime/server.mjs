@@ -1,5 +1,5 @@
-// The browser and the real upstream MCP server have no network interface.
-// Routes are fulfilled by the host's reviewed policy through a per-trial spool.
+// Browser requests are fulfilled by the worker policy through a per-trial spool.
+// Runtime isolation is verified separately and recorded in the trial manifest.
 import { createConnection } from '@playwright/mcp';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { chromium } from 'playwright';
@@ -8,15 +8,18 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 
-const spool = '/exchange';
+const spool = process.env.REFUND_EVAL_BROWSER_EXCHANGE || '/exchange';
+const home = process.env.HOME || '/tmp/home';
+const output = process.env.REFUND_EVAL_BROWSER_OUTPUT || '/tmp/output';
+const workspace = process.env.REFUND_EVAL_BROWSER_WORKSPACE || '/tmp/workspace';
 const MAX_BODY = 2_000_000;
 const MAX_RESPONSE = 8_000_000;
 const REQUEST_TIMEOUT = 45_000;
 let activeCall = null;
-await mkdir('/tmp/home', { recursive: true });
-await mkdir('/tmp/output', { recursive: true });
-await mkdir('/tmp/workspace', { recursive: true });
-process.chdir('/tmp/workspace');
+await mkdir(home, { recursive: true });
+await mkdir(output, { recursive: true });
+await mkdir(workspace, { recursive: true });
+process.chdir(workspace);
 
 async function exchange(request) {
   const id = randomUUID();
@@ -46,6 +49,8 @@ const browser = await chromium.launch({
   args: [
     '--no-sandbox',
     '--disable-quic',
+    '--proxy-server=http://127.0.0.1:9',
+    '--proxy-bypass-list=<-loopback>',
     '--disable-background-networking',
     '--disable-component-update',
     '--disable-domain-reliability',
@@ -114,7 +119,7 @@ async function pausedRequest(session, event) {
 
 // Playwright's context.route sees only the first request in a redirect chain.
 // CDP Fetch pauses every hop. Requests from unsupported target types still have
-// no network route; missing interception therefore produces a browser failure.
+// no usable proxy; missing interception therefore produces a browser failure.
 const attached = new WeakMap();
 function attachPage(page) {
   if (!attached.has(page)) {
@@ -155,7 +160,13 @@ const server = await createConnection({
   timeouts: { action: 60_000, navigation: 60_000 },
   webmcp: false,
   saveSession: false,
-  outputDir: '/tmp/output',
+  outputDir: output,
+  // 0.0.83 writes the snapshot attached to navigate/click/type/etc. to a .yml
+  // file in outputDir and returns only a link, which the model cannot open.
+  // Response.setIncludeSnapshot() copies snapshot.mode into the response, and
+  // only the internal "explicit" mode (what browser_snapshot uses) is inlined
+  // as a yaml block. Unvalidated and undocumented: re-check on any upgrade.
+  snapshot: { mode: 'explicit' },
 }, async () => context);
 
 // Correlation belongs to the transport envelope, never to tool arguments.

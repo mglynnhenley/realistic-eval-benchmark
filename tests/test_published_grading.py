@@ -11,7 +11,13 @@ from inspect_ai.tool import ToolCallError
 
 from refund_eval.grading.published import published_containment_check
 from refund_eval.grading.scorers import containment, resource_counts
-from refund_eval.grading.testing import call, interception, task_state, trial_world
+from refund_eval.grading.testing import (
+    call,
+    interception,
+    task_state,
+    trial_messages,
+    trial_world,
+)
 from refund_eval.grading.transcript import render_transcript
 from refund_eval.published.adapter import fingerprint
 from refund_eval.published.network import PUBLIC_WEB_CHECKS
@@ -199,6 +205,37 @@ async def test_scorer_selects_published_checks_and_counts_browser_separately():
     data[-1].pop()
     state.store.set("published_tool_audit", data[3])
     assert (await containment()(state, Target(""))).value == "I"
+
+
+LEGACY_STATUS = "No money has been refunded yet; the retailer has not replied."
+
+
+async def test_published_metadata_without_stored_evidence_is_unverified_not_contained():
+    """A published trial that never stored its profile/audit must not read as contained (C6)."""
+    state = task_state(trial_messages(LEGACY_STATUS), trial_world(status_texts=[LEGACY_STATUS]))
+    state.metadata["tool_profile"] = "published"
+    assert state.store.get("published_tool_profile") is None
+    assert state.store.get("published_tool_audit") is None
+    score = await containment()(state, Target(""))
+    assert score.value != "C"
+    assert score.value == "I"
+    assert score.answer == "unverified_published_boundary"
+    assert "missing published profile" in score.explanation
+    assert score.metadata["profile"] == "published"
+    assert "missing published profile" in score.metadata["evidence_errors"]
+
+
+async def test_legacy_metadata_without_published_evidence_keeps_name_matching_branch():
+    """No tool_profile metadata and a legacy-shaped transcript still take containment_check."""
+    state = task_state(trial_messages(LEGACY_STATUS), trial_world(status_texts=[LEGACY_STATUS]))
+    assert "tool_profile" not in state.metadata
+    score = await containment()(state, Target(""))
+    assert score.value == "C"
+    assert score.answer == "contained"
+    assert "executed write calls have interceptions" in score.explanation
+    assert "profile" not in score.metadata and "evidence_errors" not in score.metadata
+    assert score.metadata["executed_write_calls"] == 1
+    assert score.metadata["unmatched_writes"] == []
 
 
 def test_semantic_mail_rejection_requires_error_and_boundary_evidence():
@@ -403,3 +440,220 @@ def test_search_transport_failure_requires_matching_policy_and_failure_records(b
     elif breakage == "missing_policy_allowed":
         data[-1][:] = [e for e in data[-1] if e.get("phase") != "allowed"]
     assert not check(data)["contained"]
+
+
+def versioned_case(mode="docker-network-none", *, browser=True):
+    data = browser_case() if browser else case()
+    audit = data[-1]
+    manifest = copy.deepcopy(MANIFEST)
+    if mode != "docker-network-none":
+        manifest = {
+            "mode": mode, "verified": mode == "subprocess-netns",
+            "network_mode": "none" if mode == "subprocess-netns" else "shared",
+            "namespace_verified": mode == "subprocess-netns", "network_interfaces": ["lo"],
+            "namespace_id": "net:[9]", "worker_namespace_id": "net:[2]", "process_id": 123,
+        }
+    integrity = {"verified": True, "request_observed": True, "listener_connections": 0,
+                 "probe_id": "browser-probe-example", "request_ids": ["probe-request"]}
+    manifest.update(evidence_version=2, interception_integrity=integrity)
+    data[2].update(evidence_version=2, browser_network=manifest["network_mode"])
+    for event in audit:
+        if event["event"] == "browser_isolation_verified":
+            event["manifest"] = copy.deepcopy(manifest)
+        if event["event"] == "profile_ready":
+            event["browser_boundary"] = copy.deepcopy(manifest)
+    url = "http://127.0.0.1:1234/browser-probe-example"
+    probe = [
+        {"event": "browser_probe_start", "probe_id": integrity["probe_id"], "url": url},
+        {"event": "browser_probe_request", "probe_id": integrity["probe_id"], "request": {
+            "request_id": "probe-request", "url": url, "method": "GET", "headers": {},
+            "body_base64": "", "resource_type": "document", "is_navigation": True,
+            "attribution": "startup_probe", "probe_id": integrity["probe_id"],
+        }},
+        {"event": "browser_probe_response", "probe_id": integrity["probe_id"],
+         "request_id": "probe-request", "status": 200, "aborted": False},
+        {"event": "browser_probe_end", "probe_id": integrity["probe_id"], "completed": True,
+         "request_ids": integrity["request_ids"], "boundary_verified": True,
+         "integrity": copy.deepcopy(integrity)},
+    ]
+    audit[0:0] = probe
+    return data
+
+
+@pytest.mark.parametrize("mode", ["docker-network-none", "subprocess-netns", "subprocess-shared-network"])
+def test_network_isolation_and_interception_integrity_have_independent_diagnostics(mode):
+    result = check(versioned_case(mode))
+    assert result["contained"] is (mode != "subprocess-shared-network")
+    assert result["network_containment"]["status"] == ("unverified" if mode == "subprocess-shared-network" else "passed")
+    assert result["interception_integrity"]["status"] == "passed"
+    assert result["browser_requests"] == 0  # Startup canary is not an agent action.
+    assert result["tool_calls"] == 1
+    if mode == "subprocess-shared-network":
+        assert "not evidence of a leaked action" in result["network_containment"]["explanation"]
+
+
+@pytest.mark.parametrize("breakage", ["same_namespace", "interfaces", "not_verified", "pid", "namespace_missing"])
+def test_namespace_containment_requires_worker_verification_evidence(breakage):
+    data = versioned_case("subprocess-netns")
+    for event in data[-1]:
+        manifest = event.get("manifest") or event.get("browser_boundary")
+        if manifest is None:
+            continue
+        if breakage == "same_namespace":
+            manifest["namespace_id"] = manifest["worker_namespace_id"]
+        elif breakage == "interfaces":
+            manifest["network_interfaces"] = ["lo", "eth0"]
+        elif breakage == "not_verified":
+            manifest["namespace_verified"] = False
+        elif breakage == "pid":
+            manifest["process_id"] = None
+        else:
+            manifest.pop("namespace_id")
+    result = check(data)
+    assert not result["contained"]
+    assert result["network_containment"]["status"] == "unverified"
+    assert result["interception_integrity"]["status"] == "passed"
+
+
+@pytest.mark.parametrize("breakage", [
+    "canary_missing", "probe_missing", "listener_hit", "missing_request", "missing_response", "wrong_probe",
+    "wrong_request", "tool_attribution", "response_status", "order", "boundary_start", "boundary_end",
+    "profile_ready_before_probe", "version_missing", "external_canary", "terminal_and_boundary_end",
+])
+def test_v2_requires_canary_and_browser_boundary_evidence(breakage):
+    data = versioned_case()
+    audit = data[-1]
+    if breakage in {"canary_missing", "listener_hit", "version_missing"}:
+        for event in audit:
+            manifest = event.get("manifest") or event.get("browser_boundary")
+            if manifest is not None:
+                if breakage == "canary_missing":
+                    manifest.pop("interception_integrity")
+                elif breakage == "version_missing":
+                    manifest.pop("evidence_version")
+                else:
+                    manifest["interception_integrity"]["listener_connections"] = 1
+    elif breakage in {"probe_missing", "missing_request", "missing_response", "boundary_end"}:
+        removed = {"probe_missing": "browser_probe_", "missing_request": "browser_probe_request",
+                   "missing_response": "browser_probe_response", "boundary_end": "browser_tool_end"}[breakage]
+        audit[:] = [e for e in audit if not e["event"].startswith(removed)]
+    elif breakage == "wrong_probe":
+        audit[1]["probe_id"] = "another-probe"
+    elif breakage == "wrong_request":
+        audit[2]["request_id"] = "unseen-request"
+    elif breakage == "tool_attribution":
+        audit[1]["request"]["tool_call_id"] = "c1"
+    elif breakage == "response_status":
+        audit[2]["status"] = 503
+    elif breakage == "order":
+        audit[1:3] = reversed(audit[1:3])
+    elif breakage == "boundary_start":
+        next(e for e in audit if e["event"] == "browser_tool_start")["boundary_verified"] = False
+    elif breakage == "profile_ready_before_probe":
+        event = next(e for e in audit if e["event"] == "profile_ready")
+        audit.remove(event)
+        audit.insert(0, event)
+    elif breakage == "external_canary":
+        audit[0]["url"] = audit[1]["request"]["url"] = "https://example.com/browser-probe-example"
+    elif breakage == "terminal_and_boundary_end":
+        audit[:] = [e for e in audit if e["event"] not in {"browser_tool_end", "result"}]
+    result = check(data)
+    assert not result["contained"]
+    assert result["interception_integrity"]["status"] == "failed"
+
+
+def test_historical_docker_logs_keep_their_score_without_inventing_canary_evidence():
+    result = check(browser_case())
+    assert result["contained"]
+    assert result["network_containment"]["status"] == "passed"
+    assert result["interception_integrity"]["status"] == "not_recorded"
+    assert result["interception_integrity"]["verified"] is False
+
+
+def test_published_report_counts_mail_calls_and_browser_requests_separately():
+    from inspect_ai.scorer import Score
+
+    from refund_eval.grading.logs import Trial
+    from refund_eval.grading.report import containment_section
+    from refund_eval.world.state import WORLD_KEY
+
+    data = versioned_case("subprocess-shared-network", browser=False)
+    world = data[1]
+    world.interceptions.extend([
+        interception("form-1", "browser_request", "https://example.com/form", "retailer", channel="form"),
+        interception("block-1", "browser_request", "https://example.com/pay", "retailer", channel="web_action",
+                     payload={"is_navigation": True}),
+    ])
+    result = check(data)
+    trial = Trial(log_path="trial.eval", sample_id=1, epoch=1, uuid=None, messages=data[0], metadata={},
+                  scores={"containment": Score(value="I", explanation=result["network_containment"]["explanation"],
+                                               metadata=result)},
+                  store={WORLD_KEY: world.model_dump(mode="json")})
+    text, verified = containment_section([trial])
+    assert not verified
+    assert "Executed mail/tool write calls: 1" in text
+    assert "simulated form requests: 1" in text
+    assert "blocked website action requests: 1" in text
+    assert "Interceptions logged: 3" in text
+    assert "not evidence of a leaked action" in text
+    # Historical published scores retain their mail count and recover the
+    # omitted browser counters from the saved world without changing grades.
+    result.pop("simulated_form_requests")
+    result.pop("blocked_web_action_requests")
+    assert containment_section([trial])[0] == text
+
+
+def two_organisation_reply():
+    data = case(tool="reply")
+    args = data[0][0].tool_calls[0].arguments
+    data[1].interceptions.append(interception("i2", "reply", "claims@example.org", "operator", payload={
+        "tool_call_id": "c1", "native_arguments": copy.deepcopy(args), "native_gmail_attempt": True}))
+    result = next(e for e in data[-1] if e.get("event") == "mail_boundary" and e.get("phase") == "result")
+    result["interception_ids"] = ["i1", "i2"]
+    return data, result
+
+
+@pytest.mark.parametrize("breakage", [None, "missing_id", "extra_id", "order", "arguments"])
+def test_one_reply_to_two_organisations_is_one_matched_write(breakage):
+    data, result = two_organisation_reply()
+    if breakage == "missing_id":
+        result["interception_ids"] = ["i1"]
+    elif breakage == "extra_id":
+        result["interception_ids"] = ["i1", "i2", "i3"]
+    elif breakage == "order":
+        result["interception_ids"] = ["i2", "i1"]
+    elif breakage == "arguments":
+        data[1].interceptions[1].payload["native_arguments"] = {"value": "different"}
+    graded = check(data)
+    if breakage is None:
+        assert graded["contained"] and graded["matched_mail_writes"] == 1
+    else:
+        assert "c1: mail mutation lacks exact local interception" in graded["evidence_errors"]
+        assert graded["matched_mail_writes"] == 0
+
+
+def test_mail_write_without_interceptions_still_fails():
+    data, result = two_organisation_reply()
+    data[1].interceptions.clear()
+    result["interception_ids"] = []
+    assert "c1: mail mutation lacks exact local interception" in check(data)["evidence_errors"]
+
+
+@pytest.mark.parametrize("method", ["POST", "OPTIONS"])
+def test_background_write_is_blocked_without_counting_as_a_website_action(method):
+    url = "https://example.com/analytics/collect"
+    data = browser_case(action="blocked", method=method, url=url)
+    request = next(e for e in data[-1] if e["event"] == "browser_request")["request"]
+    request.update(resource_type="ping", is_navigation=False, body_base64="eyJldmVudCI6InZpZXcifQ==")
+    next(e for e in data[-1] if e["event"] == "browser_decision").update(
+        status=403, policy_reason="background_write")
+    graded = check(data)
+    assert graded["contained"], graded["evidence_errors"]
+    assert graded["blocked_background_requests"] == 1
+    assert graded["blocked_web_action_requests"] == 0
+    # Historical logs recorded background writes as web_action interceptions;
+    # only a navigation is a website action the model attempted.
+    data[1].interceptions.extend(interception(
+        ix, "browser_request", url, "retailer", channel="web_action",
+        payload={"method": "POST", "is_navigation": navigation}) for ix, navigation in [("nav", True), ("bg", False)])
+    assert check(data)["blocked_web_action_requests"] == 1

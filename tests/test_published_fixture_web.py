@@ -24,7 +24,7 @@ from refund_eval.published.profile import search_policy
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG, ExaPolicyDenied
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import Mailbox, make_mail_source
 from refund_eval.world.state import load_world, save_world
 
@@ -102,7 +102,7 @@ async def test_fixture_form_flows_to_simulator_and_reloads_acknowledgement(ctx, 
     async def forbidden_fetch(request):
         pytest.fail("Fixture browser attempted an external fetch")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     config = fixture_web_config(ctx)
     assert config["public_read_urls"] == []
     boundary = BrowserBoundary(ctx, fetch=forbidden_fetch, **config)
@@ -149,7 +149,7 @@ async def test_real_browser_submits_fixture_contact_form(ctx, tmp_path, monkeypa
         calls.append(inbound)
         return SimResult(immediate_text="Your enquiry has been received; we will reply by email.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     boundary = BrowserBoundary(ctx, **fixture_web_config(ctx))
     async with PublishedBrowserService(boundary, spool_dir=tmp_path / "exchange") as browser:
         await browser.call_tool("browser_navigate", {"url": TRAINLINE_CONTACT_URL}, tool_call_id="contact")

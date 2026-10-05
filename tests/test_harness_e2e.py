@@ -78,12 +78,12 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
     assert world.status_reports[0].time == scenario().start_time + timedelta(minutes=1)
 
     # no submit tool, only the scenario's tools (FR-030)
-    assert script.tool_names_seen == {"search_email", "send_email"}
+    assert script.tool_names_seen == {"fixture_search", "fixture_send"}
 
     # the stand-in tools really ran through the kill-switch guard, with typed args
     tool_msgs = [m for m in sample.messages if isinstance(m, ChatMessageTool)]
     assert (
-        tool_msgs[0].function == "search_email" and "seed-booking" in tool_msgs[0].text
+        tool_msgs[0].function == "fixture_search" and "seed-booking" in tool_msgs[0].text
     )
     assert len(world.interceptions) == 5
     assert world.overlay_inbox[-1].id == "reply-icpt-2"

@@ -171,6 +171,117 @@ async def test_native_rpc_error_preserves_browser_for_a_followup(tmp_path, monke
     assert all(record["completed"] for record in records if record["event"] == "browser_tool_end")
 
 
+async def test_aclose_under_cancelled_scope_still_releases_client_and_runtime(tmp_path):
+    """Inspect time limits and operator cancels unwind teardown inside a cancelled scope (C2)."""
+    import anyio
+
+    released = []
+
+    class Closeable:
+        def __init__(self, name):
+            self.name = name
+
+        async def aclose(self):
+            await asyncio.sleep(0)  # A real await that an unshielded cancel would interrupt.
+            released.append(self.name)
+
+    async def never_called(_):
+        pytest.fail("Teardown must not request the network")
+
+    service = prepare_service(tmp_path, never_called)
+    service._client = Closeable("client")
+    service._runtime = Closeable("runtime")
+    service._server_task = asyncio.create_task(asyncio.sleep(3600))
+    with anyio.CancelScope() as scope:
+        scope.cancel()
+        await service.aclose()
+    assert released == ["client", "runtime"]
+    assert service._server_task.cancelled()
+    assert service._closed is True
+
+
+def admitted_after_return(tmp_path, release, *, queued=1):
+    """Playwright returns while a request admitted to its call still awaits policy."""
+    records = []
+    entered = asyncio.Event()
+
+    async def handler(request):
+        entered.set()
+        while service._active_call is not None:  # The MCP call has returned.
+            await asyncio.sleep(0)
+        await release()
+        records.append({"event": "browser_decision", "request_id": request["request_id"]})
+        return response("Late page resource")
+
+    class Client:
+        async def call_tool(self, name, arguments, *, meta):
+            for _ in range(queued):  # One spool listing; the first is admitted and awaits policy.
+                write_request(service, tool_call_id=meta["refund-eval/tool-call-id"], method="GET")
+            await asyncio.wait_for(entered.wait(), 5)
+            return {"content": [{"type": "text", "text": "Navigated"}]}
+
+        async def aclose(self):
+            records.append({"event": "client_closed"})
+
+    async def no_catalog_start():
+        return {"tools": []}
+
+    service = prepare_service(tmp_path, handler)
+    service._audit_callback = records.append
+    service._client = Client()
+    service.security_manifest["interception_integrity"] = {"verified": True}
+    service.list_tools = no_catalog_start
+    service._server_task = asyncio.create_task(service._serve_requests())
+    return service, records
+
+
+async def test_request_admitted_before_call_returns_records_decision_before_tool_end(tmp_path):
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.sleep(0.05))
+    try:
+        await service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1")
+    finally:
+        await service.aclose()
+    events = [record["event"] for record in records]
+    end = next(record for record in records if record["event"] == "browser_tool_end")
+    assert events.index("request") < events.index("browser_decision") < events.index("response") < events.index(
+        "browser_tool_end")
+    assert len(end["request_ids"]) == 1 and end["completed"] is True
+
+
+async def test_requests_queued_behind_an_ending_call_are_audited_after_tool_end(tmp_path):
+    """Page resources still queued when the call returns are not part of its evidence window."""
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.sleep(0), queued=4)
+    try:
+        await service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1")
+        while sum(record["event"] == "response" for record in records) < 4:
+            await asyncio.sleep(0)
+    finally:
+        await service.aclose()
+    end_index = next(n for n, record in enumerate(records) if record["event"] == "browser_tool_end")
+    requests = [(n, record["request"]) for n, record in enumerate(records) if record["event"] == "request"]
+    admitted = [(n, r) for n, r in requests if r["attribution"] == "active_tool_window"]
+    stale = [(n, r) for n, r in requests if r["attribution"] == "background_or_stale"]
+    assert len(admitted) == 1 and len(stale) == 3
+    assert records[end_index]["request_ids"] == [admitted[0][1]["request_id"]]
+    assert admitted[0][0] < end_index and all(n > end_index for n, _ in stale)
+
+
+async def test_cancelled_drain_closes_browser_and_still_ends_the_call(tmp_path):
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.Event().wait())
+    service._runtime = type("Runtime", (), {"aclose": staticmethod(lambda: asyncio.sleep(0))})()
+    call = asyncio.create_task(
+        service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1"))
+    while not any(record["event"] == "request" for record in records) or service._active_call is not None:
+        await asyncio.sleep(0)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(call, 5)
+    events = [record["event"] for record in records]
+    assert service._closed and service._server_task.done()
+    assert "browser_decision" not in events  # A cancelled policy call decides nothing.
+    assert events.index("client_closed") < events.index("browser_tool_end")
+
+
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
                     reason="Requires the locally built pinned browser container")
 async def test_real_browser_form_and_network_bypass_canary(tmp_path):
@@ -311,7 +422,7 @@ async def test_real_browser_with_inspect_adapter_and_scenario_boundary(tmp_path,
     from refund_eval.published.network import BrowserBoundary
     from refund_eval.scenario.schema import load_scenario
     from refund_eval.sim.interface import SimResult
-    from refund_eval.tools._base import ToolContext
+    from refund_eval.world.interception import ToolContext
     from refund_eval.world.mail import Mailbox, make_mail_source
     from refund_eval.world.state import load_world, save_world
 
@@ -330,7 +441,7 @@ async def test_real_browser_with_inspect_adapter_and_scenario_boundary(tmp_path,
         dispatched.append(inbound)
         return SimResult(immediate_text="Your case is open.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     boundary = BrowserBoundary(ctx, public_read_urls=[], simulated_form_urls=[form_url],
         fetch=forbidden_fetch,
         fixtures={initial_url: response(f'<form action="{form_url}" method="post"><input name="booking" id="booking"><button>Submit claim</button></form>')})

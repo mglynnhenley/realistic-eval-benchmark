@@ -1,138 +1,86 @@
 # Published tools in Inspect
 
-The `published` profile keeps the existing Inspect agent, prompt, wake-ups, limits,
-simulator and grading. The dashboard defaults to **Simulated Gmail + live Exa web**:
-a local inbox with simulated sends and replies, live Exa search, and real public
-webpages. Fully simulated and live-Gmail modes remain available. All use the real
-Microsoft `@playwright/mcp@0.0.83` server in an isolated browser container. No
-OpenClaw runtime is used.
+New runs use one tool stack: Gmail-style tools over a fixture inbox, Exa `web_search_exa`, and the pinned Microsoft `@playwright/mcp@0.0.83` browser. Inspect retains the prompt, wake-ups, simulator, limits and grading. Explicit `tool_profile=legacy` requests fail with a migration error; they never silently select another experiment.
 
-**Hybrid and fully simulated trials do not need Gmail access, an Exa key, or
-`.secrets/published-tools.json`.** Fully simulated trials use deterministic search
-results and authored website pages. Model trials in every mode still call paid model APIs.
+| Data mode | Mail | Search and websites | Website writes |
+| --- | --- | --- | --- |
+| `fixture` — simulated inbox and websites | Local inbox; simulated sends and replies | Deterministic search and authored pages, rendered by real Chromium | Two configured retailer/operator contact forms reach the simulator; other writes are blocked |
+| `hybrid` — simulated Gmail + live web (default) | Local inbox; simulated sends and replies | Real keyless Exa and anonymous public-page reads | Blocked and recorded; no simulated form endpoints are configured |
+| `live` — advanced, local-only | Configured authenticated Gmail reads; sends/replies intercepted locally | Exa and an exact allowlist of reviewed URLs | Only explicitly configured simple forms are simulated; other writes are blocked |
 
-Live trials require a connected Gmail account and a verified native send/reply
-catalog. Google's documented preview lacks those operations. Live setup fails if
-the actual catalog does not supply supported native sending tools; an offline
-email contract does not establish live Gmail compatibility.
+Fixture and hybrid modes need no Gmail access, Exa key or `.secrets/published-tools.json`. Their Gmail definitions are an **authored Gmail-compatible contract**, not proof of an authenticated first-party sending API. Live setup fails if the discovered catalog lacks supported send/reply schemas. No provider is substituted automatically.
 
-The original `legacy` profile remains the CLI default and supplies the scripted
-demo. Dashboard Model trial presets use **Published tools** and
-**Simulated Gmail + live Exa web**. The separate **Live Gmail and reviewed websites** option keeps
-the live configuration checks.
+## Browser prerequisites
 
-## Setup
-
-Install Python dependencies and build the pinned browser runtime:
+This is the canonical browser setup for local runs, demos and smoke tests. Install Python 3.12 and uv, then build the pinned image and keep Docker running:
 
 ```sh
 uv sync
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
 ```
 
-Docker must be running for every published data mode. Simulated pages still execute in
-real Chromium through the published Playwright tools; there is no lightweight
-browser substitute if the container is unavailable.
+Every local data mode uses real Chromium in this Docker container. A missing daemon or image is a setup error; there is no simulated-browser fallback.
+
+Harbor batches package Node, the pinned Playwright package, Chromium and Inspect in their trial image. The browser runs as a subprocess **inside the same Modal or Docker sandbox as the worker**. No nested Docker daemon or second sandbox is needed. Modal launch checks credentials on the host; Docker batches check the local daemon. The worker checks Node, package version, Chromium, catalogs, browser startup and the interception canary before target generation. See [Harbor setup](harbor.md#setup).
+
+`browser_runtime=docker` is the local task default. `browser_runtime=subprocess` is for the packaged trial environment; setting it on an ordinary host does not install that environment.
 
 ## Simulated Gmail with real internet
 
-Select **Model trial → Published tools → Simulated Gmail + live Exa web**. This is
-the default for new model presets. It combines:
-
-- A fixture inbox, with local Sent history and simulated company replies.
-- The real published Exa `web_search_exa` tool, with its pinned native schema.
-- Real public webpage reads through the isolated Playwright browser.
-
-The equivalent CLI selection is:
+Select **Model trial → Simulated Gmail + live web** in the dashboard. The equivalent local CLI selection is:
 
 ```sh
-uv run inspect eval refund_eval/task.py --model <provider/model> \
-  -T trials=1 -T tool_profile=published -T published_data=hybrid
+uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 \
+  -M strict_tools=false -T trials=1 -T published_data=hybrid
 ```
 
-[Exa MCP](https://exa.ai/docs/get-started/exa-mcp) supports keyless, rate-limited
-access. Hybrid mode always uses this keyless endpoint, even if `EXA_API_KEY` is
-set. Rate limits and service errors are visible as tool errors; there is no
-fallback to authored search results. Search arguments and results are retained
-in the audit.
+The target and simulator use paid model APIs in model mode. For OpenRouter, native optional tool fields require `strict_tools=false`; dashboard and Harbor launches apply it automatically. This preserves the native optional-field contract. The adapter still checks schema compatibility, validates calls and records the original catalog. Scripted tests do not establish compatibility with every paid provider/model combination.
 
-Public browser reads are anonymous GET/HEAD requests checked by the URL,
-scenario-data and public-IP guards. Credentials and cookies are not forwarded.
-Browser mutation requests are handled locally, and hybrid mode does not configure
-simulated website form endpoints: unsupported forms, logins and payment flows
-return errors. Gmail sends and replies still use the simulator. Some sites may
-fail because of bot protection or unsupported browser workflows.
+Hybrid always uses keyless Exa, even when `EXA_API_KEY` is set. Search rate limits and transport errors remain recoverable tool errors; no authored results are substituted. Concurrent sandboxes may share egress and encounter rate limits. Queries, objectives and results are retained in the audit.
 
-Email, scheduled replies and deadlines follow the simulated clock. Search and
-webpages reflect the real internet at the time of the run; they are not historical
-snapshots and are not frozen across trials. Audit metadata records this distinction.
-Realistic friction and matched startup-email context work in this mode.
+The browser broker checks anonymous GET/HEAD requests against URL, scenario-data and public-IP rules. Browser credentials and cookies are not forwarded. **Gmail sends and configured forms are simulated. Other website writes are blocked and recorded: every non-GET request, and every page navigation whose URL carries message fields (`message`, `comment`, `body`, `feedback`, `enquiry` and similar), personal fields, or the scenario user's email, name, phone or booking reference.** Background GETs that fail the same checks are blocked without a recorded interception, because the page rather than the model issued them. Every other GET page load reaches the real site as a read. Hybrid has no configured form endpoints. A blocked login, payment or form returns a local error rather than a fabricated acknowledgement. Some sites fail because of bot protection or unsupported workflows. A permitted GET is not proof that the remote service assigns it no side effects.
+
+Mail, scheduled replies and deadlines follow simulated time. Search and webpages reflect the real internet during the run; they are not historical snapshots or frozen across trials. The recorded data mode distinguishes these sources.
 
 ## Test with simulated data
 
-Open the dashboard, select **Model trial → Published tools → Simulated inbox and
-websites**, choose a model and limits, then start the trial. Gmail setup is not
-needed. To set this dashboard instance's target, simulator and grader defaults:
+Choose **Simulated inbox and websites**, or run the fixture demo without model API calls:
 
 ```sh
-REFUND_EVAL_DEFAULT_MODEL=openrouter/anthropic/claude-haiku-4.5 \
-  uv run python -m refund_eval.dashboard
+uv run python -m refund_eval.demo --data-mode fixture
+uv run inspect view --log-dir .context/refund-demo
 ```
 
-`REFUND_EVAL_DEFAULT_MODEL` changes dashboard defaults only. It does not change
-the command-line benchmark defaults. A model API key is still required for a
-model trial; the scripted **Offline demo** remains free and uses legacy tools.
+The demo uses `search_threads`, `get_thread`, `send_message`, scheduled time advancement, `get_message` and `reply`, then reads an authored page and submits a configured form through Chromium. Checks inspect simulator dispatch, shared retailer case state and the recorded world. It ignores a personal `REFUND_EVAL_FIXTURE_INBOX` override. Use `--output-dir` for separate artifacts.
 
-Choose **Longer stress test** for up to 12 simulated weeks, 600 target turns and
-a $10 target/simulator budget, with all three models reset to this instance's
-default. Grading costs are additional, and another limit may end the run sooner.
-This preset enables **Realistic friction**: missed reply deadlines, staff handoffs,
-repeated requests for details, and reminders before goodwill offers expire. The
-existing conflicting retailer/operator positions remain in force. Offer expiry is
-enforced by the policy engine. The same recorded, versioned rules apply to every
-model; the mode requires simulated Gmail (fixture or hybrid data). See the [runbook](running.md#local-dashboard)
-for details and the equivalent CLI command.
-
-The equivalent simulated-data CLI selection is:
+The same script can exercise real Exa/public web and a blocked website write:
 
 ```sh
-uv run inspect eval refund_eval/task.py --model <provider/model> \
-  -T trials=1 -T tool_profile=published -T published_data=fixture
+uv run python -m refund_eval.demo --data-mode hybrid --output-dir .context/refund-demo-hybrid
 ```
 
-The fixture inbox is personalized to the scenario and includes its booking and
-cancellation emails. Successful intercepted sends appear in Sent and in their
-conversation; scheduled company replies become visible as simulated time moves.
-The fixture email tool definitions are an **authored Gmail-compatible test
-contract**, not a captured or verified first-party sending API. Their provenance
-is recorded in the audit. The Exa search tool uses its captured published schema
-with deterministic local results, and browser pages are authored fixtures. No
-Gmail, Exa search or website backend is contacted in this mode. These trials
-exercise the harness and tools with controlled data; they do not validate live
-connector behavior or the accuracy of current websites.
+In a packaged trial image use `--browser-runtime subprocess`. Both modes use scripted target, simulator and grader models; their grades are not behavioural measurements. Hybrid makes external data reads. Modal execution also incurs compute charges.
+
+For a model trial with fixture data:
+
+```sh
+uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 \
+  -M strict_tools=false -T trials=1 -T published_data=fixture
+```
+
+The fixture inbox includes booking and cancellation messages. Successful simulated sends appear in Sent and their conversation; failed sends do not. Scheduled replies become visible as the clock advances. Search uses the captured Exa schema with local deterministic results. Authored pages and configured form responses are served without external data connections. This validates the benchmark's controlled data path, not live Gmail compatibility or current website accuracy.
 
 ## Configure live data
 
-Provision Gmail MCP access using [Google's setup guide](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server).
-Put the access token in `GMAIL_MCP_ACCESS_TOKEN` and the quota project in
-`GOOGLE_CLOUD_PROJECT`. Use read-only authorization where the server supports it;
-the adapter independently forwards only its explicit read allowlist. Tokens are
-supplied through headers and never recorded in the audit. An expired token fails
-the run; this integration does not launch interactive consent or refresh tokens.
+Live data is local-only and remains dependent on a compatible authenticated native Gmail catalog. Provision access using [Google's Gmail MCP setup guide](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server). Set `GMAIL_MCP_ACCESS_TOKEN` and `GOOGLE_CLOUD_PROJECT`. The adapter forwards only its explicit read allowlist; send/reply calls stay local. Tokens are supplied through headers, not recorded in the audit. Token expiry fails the run; this path does not perform interactive consent or token refresh.
 
-Discover definitions without reading messages or sending anything:
+Discover the complete tool definitions without reading mail or sending anything:
 
 ```sh
 uv run python -m refund_eval.published.mail --output .secrets/gmail-catalog.json
 ```
 
-This saves the complete catalog, server identity and hash. Review it before using
-it. The adapter requires supported native input and output schemas, including the
-send result format. A send tool's presence alone does not establish compatibility.
-If sending is unavailable, choosing another published connector is a separate
-decision; no fallback is automatic.
-
-Create `.secrets/published-tools.json`:
+Review the catalog, server identity, hash and input/output schemas. A send tool name alone does not establish compatibility. Create `.secrets/published-tools.json`:
 
 ```json
 {
@@ -143,76 +91,69 @@ Create `.secrets/published-tools.json`:
 }
 ```
 
-`public_read_urls` is an exact list of reviewed public page/asset URLs. An empty
-list enables no live browser reads. Add the pages and assets needed for a trial
-after checking that requesting them has no account or transaction effect. This
-initial boundary intentionally limits live browsing; it is not unrestricted web
-access. Redirect targets need separate entries. `simulated_form_urls` selects
-tested simple HTML form endpoints; only navigation POSTs with URL-encoded fields
-receive simulated acknowledgement pages. Other writes fail locally, including
-unsupported XHR, chat and payment protocols. Optionally set `EXA_API_KEY` for
-authenticated Exa search (otherwise it is keyless and rate-limited)
-and optionally `REFUND_EVAL_PUBLISHED_CONFIG` for a different configuration path.
+An empty `public_read_urls` allows no live browser reads. Populate it with exact reviewed page and asset URLs; redirects need separate entries. Configured forms require navigation POSTs with URL-encoded fields and a reviewed response contract. Unsupported XHR, chat and payment flows fail locally. Successful form response pages are retained for reloads; they do not reproduce authentication or a website's complete backend.
 
-Once the authenticated catalog and browser setup pass, a model run uses:
+Live mode optionally accepts `EXA_API_KEY`. `REFUND_EVAL_PUBLISHED_CONFIG` can select another config path. Once the authenticated catalog and browser checks pass:
 
 ```sh
-uv run inspect eval refund_eval/task.py --model <provider/model> \
-  -T trials=1 -T tool_profile=published -T published_data=live \
+uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 \
+  -M strict_tools=false -T trials=1 -T published_data=live \
   -T published_config=/absolute/path/to/published-tools.json
 ```
 
-This runs paid target/simulator/grader calls according to the normal task settings.
-Every model in a comparison must use the same data mode, profile configuration
-and catalog snapshots. There is no model-specific tool selection.
+Use the same data mode, configuration and catalog snapshots for models being compared.
 
 ## Boundaries and evidence
 
-- In live mode, Gmail reads go to the first-party server. Selected send/reply calls go only to
-  the local simulator. Successful simulated sends appear in Sent and threads;
-  failed sends do not. Delayed mail becomes visible when the simulated clock
-  delivers it. Real message dates and query arguments are retained.
-- In hybrid and live modes, Exa is restricted to its published search tool. Every query and objective is
-  checked before forwarding. Its full catalog is pinned and rechecked. Search
-  results, dates and links come from Exa, with raw results retained. The basic
-  disclosure policy detects known identity/booking strings and email addresses;
-  it is not a guarantee against arbitrary encodings of private information.
-- The actual Playwright server and Chromium run in a fresh Docker container with
-  `--network none`, no credentials and a single per-trial request/response mount.
-  The host broker permits guarded public GET/HEAD reads in hybrid mode and exact
-  reviewed URLs in live-Gmail mode. It strips browser credentials,
-  validates the IP addresses used by the socket, and never follows redirects
-  itself. Configured form submissions are simulated; unapproved navigations and
-  unsupported mutation requests receive local errors;
-  unapproved background assets are denied. GET alone never establishes safety.
-  In fixture mode, the broker serves local pages and intercepted form responses
-  without external network reads.
-- Browser response pages are generated by the simulator and retained locally
-  for reloads. This does not reproduce an entire website's backend, authentication
-  or complex multi-step application state. File upload, browser installation,
-  server execution and remote Exa fetch/research tools are excluded.
+The browser pauses network requests through CDP and exchanges requests/responses with the worker through a per-trial filesystem spool. The worker records each request and decides whether to serve a fixture, make a guarded read, simulate a configured form or block it. Chromium also blocks service workers and WebSockets and disables direct DNS, QUIC and non-proxied WebRTC paths.
 
-Inspect logs contain `published_tool_profile` and `published_tool_audit`: catalogs,
-hashes, original arguments, native results, tool-call IDs and boundary decisions.
-Containment grading checks this evidence rather than accepting familiar tool
-names as proof. Logs can contain private message content; keep them private.
+Runtime evidence distinguishes three cases:
 
-Inspect applies normal provider-specific tool encoding. The adapter checks for
-loss of schema constraints and rejects unsupported schemas. Native root schema
-metadata is retained in parameter serialization and the raw catalog; Inspect's
-own log/provider serializers may omit dialect annotations. Text/image results
-are projected into Inspect content, while the complete MCP envelope is preserved
-in the audit. Unsupported result blocks fail explicitly.
+| Manifest mode | Network evidence |
+| --- | --- |
+| `docker-network-none` | Strict Docker inspection: network `none`, read-only root, dropped capabilities, loopback-only interfaces and image/container IDs |
+| `subprocess-netns` | Worker verifies the browser's network namespace differs from its own and contains only `lo` |
+| `subprocess-shared-network` | Namespace unavailable; Chromium uses an unreachable proxy. OS network containment is **unverified**, even if interception checks pass |
+
+A subprocess network namespace isolates networking, not files. Browser and worker share the trial sandbox's filesystem and OS permissions. It does not reproduce the separate Docker browser's read-only filesystem boundary. The child receives an allowlisted environment, but that is not a filesystem isolation claim.
+
+New runs perform a startup canary: the worker opens a loopback listener, drives a real browser request, verifies it appeared in the host spool, and checks that the listener accepted no connection. Probe events are separate from model calls and simulator actions. `interception_integrity` checks this evidence and verified browser-call records independently of `network_containment`. Unverified isolation is not evidence that an action leaked. Historical Docker logs retain their original containment grading; they do not acquire invented canary evidence.
+
+The sample store contains `published_tool_profile` and `published_tool_audit`: catalog hashes, arguments, native results, call IDs and decisions. Browser `.network.jsonl` audits persist under the trial artifact directory's `browser/` subdirectory; direct CLI runs without `artifact_dir` use `.context/artifacts/browser/`. The manifest records the path. Harbor exports these alongside the Inspect log and world. Reports count mail write calls, simulated form requests and blocked website action requests separately.
+
+File uploads, browser installation, server execution and Exa fetch/research tools are excluded. Exa query checks detect the user's own identity/booking strings and credential-shaped text, not other addresses; they do not prove privacy against arbitrary encodings. Logs may contain private message content.
+
+## Model-provider schema compatibility
+
+Dashboard and Harbor workers pass `strict_tools=False` for OpenRouter and other
+Inspect `openai-api` targets. Their native tool schemas contain optional
+properties; OpenAI strict function calling requires every property to be
+required and every object to reject additional properties. Converting optional
+fields into required nullable fields would change the published contracts, so
+these runs explicitly disable strict generation and retain local validation.
+See the [official OpenAI function-calling documentation](https://developers.openai.com/api/docs/guides/function-calling#strict-mode).
+
+When launching Inspect directly with an OpenRouter or `openai-api` target, add
+`-M strict_tools=false`. Direct OpenAI uses Inspect's existing non-strict tool
+encoding. The simulator and grader use separate structured-output contracts;
+this setting changes only function-tool generation.
+
+The raw catalogs and their hashes remain unchanged. Inspect's provider encoding
+can omit extended constraints such as `minLength` or `minimum`; the published
+adapter validates every returned argument against the complete native schema
+before dispatch. Offline serializer tests cover OpenRouter's Anthropic, OpenAI
+and Google routes, plus direct OpenAI. They verify request construction, not
+provider acceptance; paid provider smoke tests remain a separate approval step.
 
 ## Validation
 
 ```sh
 uv run pytest -q
-REFUND_EVAL_BROWSER_SMOKE=1 uv run pytest -q tests/test_published_browser.py
+REFUND_EVAL_BROWSER_SMOKE=1 uv run pytest -q tests/test_demo.py tests/test_behaviours.py \
+  tests/test_published_browser.py tests/test_published_browser_runtime.py \
+  tests/test_published_hybrid_browser.py tests/test_published_fixture_web.py
+REFUND_EVAL_HYBRID_SMOKE=1 uv run pytest -q tests/test_demo_hybrid.py
+scripts/harbor python -m pytest tests/test_harbor_runner.py tests/test_harbor_dashboard.py
 ```
 
-Routine tests use clearly marked fake Gmail catalogs and mocked Exa responses;
-they are not evidence of an authenticated Gmail send API. Browser integration
-tests exercise the real pinned server and Chromium with controlled pages and
-network canaries. No real email sends or paid model calls are needed for these
-checks.
+Pytest registers `browser`, `hybrid` and `harbor` markers. Real browser smoke is opt-in through `REFUND_EVAL_BROWSER_SMOKE`. The in-sandbox subprocess browser tests (in `tests/test_published_browser_runtime.py`, `tests/test_harbor_worker.py` and `tests/test_published_provider.py`) also need `REFUND_EVAL_SUBPROCESS_BROWSER_SMOKE=1` and the pinned runtime (inside the trial image, or with `REFUND_EVAL_BROWSER_SERVER` pointing at `server.mjs`); without it they are skipped. `tests/test_demo_hybrid.py` selects its browser runtime with `REFUND_EVAL_SMOKE_BROWSER_RUNTIME`; real Exa/public-web smoke uses `REFUND_EVAL_HYBRID_SMOKE`. The fixture demo tests block Python socket connections while exercising real tools, simulator dispatch and world updates. Routine tests use explicit fixture catalogs and mocked upstream services. Paid model/provider schema checks require separate approval and are not implied by these tests.

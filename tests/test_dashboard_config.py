@@ -1,11 +1,26 @@
 """Paid launch failures are reported before any worker or model call starts."""
 
 import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from refund_eval.dashboard import server
+
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "refund_eval" / "dashboard" / "static"
+
+
+@pytest.fixture(autouse=True)
+def ready_runtime_for_unit_tests(monkeypatch):
+    from refund_eval.published import profile
+    monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "test runtime"})
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "test runtime"})
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test location"})
 
 
 def test_old_run_detail_adds_measurements_without_rewriting_recorded_files(tmp_path):
@@ -42,6 +57,7 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
 
 
 def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
     for keys in server.PROVIDER_KEYS.values():
         for key in keys:
@@ -122,13 +138,13 @@ def test_published_profile_status_is_local_and_not_connected(tmp_path, monkeypat
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "Browser ready"})
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "Docker ready; Exa verified at startup"})
     profiles = {item["name"]: item for item in server.public_config()["tool_profiles"]}
-    assert profiles["legacy"]["configured"] is True
+    assert set(profiles) == {"published"}
     assert profiles["published"]["configured"] is True
     modes = {item["name"]: item for item in profiles["published"]["data_modes"]}
     assert profiles["published"]["default_data_mode"] == "hybrid"
     assert modes["fixture"]["configured"] is True
     assert modes["hybrid"]["configured"] is True
-    assert modes["hybrid"]["label"] == "Simulated Gmail + live Exa web"
+    assert modes["hybrid"]["label"] == "Simulated Gmail + live web"
     assert modes["live"]["configured"] is False
     assert "config file" in modes["live"]["reason"]
 
@@ -178,11 +194,24 @@ def test_published_selection_persists_server_config_path_without_fallback(tmp_pa
         manager.close()
 
 
-def test_demo_cannot_claim_to_use_published_tools(tmp_path):
+def test_scripted_demo_is_labelled_with_published_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
+    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        record = manager.start(server.RunConfig(mode="demo"))
+        assert record["label"] == "Scripted demo · published tools"
+        assert record["tool_profile"] == "published"
+        assert record["data_mode"] == "fixture"
+    finally:
+        manager.close()
+
+
+def test_demo_cannot_request_retired_legacy_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(server.APIError, match="offline demo uses legacy"):
-            manager.start(server.RunConfig(mode="demo", tool_profile="published"))
+        with pytest.raises(ValueError, match="Legacy execution is retired"):
+            manager.start(server.RunConfig(mode="demo", tool_profile="legacy"))
         assert not manager.list()
     finally:
         manager.close()
@@ -190,7 +219,7 @@ def test_demo_cannot_claim_to_use_published_tools(tmp_path):
 
 @pytest.mark.parametrize("data_mode,label", [
     ("fixture", "Published tools · simulated data"),
-    ("hybrid", "Simulated Gmail + live Exa web"),
+    ("hybrid", "Simulated Gmail + live web"),
 ])
 def test_simulated_gmail_never_reads_live_config(tmp_path, monkeypatch, data_mode, label):
     from refund_eval.published import profile
@@ -240,7 +269,7 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
 def test_legacy_cannot_claim_live_data(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(server.APIError, match=f"{data_mode.title()} data requires"):
+        with pytest.raises(ValueError, match="Legacy execution is retired"):
             manager.start(server.RunConfig(mode="model", tool_profile="legacy", data_mode=data_mode))
         assert not manager.list()
     finally:
@@ -268,6 +297,7 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
 
 
 def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     from refund_eval.published import profile
 
     model = "openrouter/anthropic/claude-haiku-4.5"
@@ -318,3 +348,159 @@ def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path
         assert not manager.list()
     finally:
         manager.close()
+
+
+@pytest.mark.parametrize(('settings', 'message'), [
+    ({'execution': 'local', 'trials': 2}, 'multiple trials'),
+    ({'execution': 'modal', 'data_mode': 'live'}, 'Live Gmail is local-only'),
+    ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
+    ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
+    ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),
+    ({'execution': 'modal', 'experiment_manifest': 'comparison.json'}, 'local only'),
+])
+def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, message):
+    manager = server.RunManager(tmp_path)
+    try:
+        with pytest.raises(server.APIError, match=message):
+            manager.start(server.RunConfig(**settings))
+        assert not manager.list() and not manager.processes
+    finally:
+        manager.close()
+
+
+def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(server.subprocess, 'Popen', lambda command, **kwargs: (
+        commands.append(command) or SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0)))
+    monkeypatch.setattr(server.RunManager, '_monitor', lambda *args: None)
+    monkeypatch.setattr(server.shutil, 'which', lambda executable: '/usr/bin/uv')
+    manager = server.RunManager(tmp_path)
+    try:
+        record = manager.start(server.RunConfig(execution='modal', trials=4, concurrency=2))
+        directory = manager.directory(record['id'])
+        assert commands[0][0].endswith('/scripts/harbor')
+        assert commands[0][3] == 'refund_eval.harbor.dashboard'
+        assert json.loads((directory / 'rubrics.json').read_text()) == manager.behaviours()
+        assert record['config']['trials'] == 4 and record['config']['concurrency'] == 2
+    finally:
+        manager.close()
+
+
+def test_dead_batch_controller_finalizes_active_children(tmp_path):
+    manager = server.RunManager(tmp_path)
+    parent = 'abcdef123456'
+    child = 'abcdef123457'
+    try:
+        for run_id, extra in [(parent, {'config': {'execution': 'modal'}}),
+                              (child, {'parent_batch_id': parent})]:
+            directory = tmp_path / run_id
+            directory.mkdir()
+            server.write_json(directory / 'run.json', {'id': run_id, 'status': 'running', **extra})
+        server.write_json(tmp_path / child / 'snapshot.json', {'phase': 'running', 'messages': ['partial']})
+        server.write_json(tmp_path / parent / 'snapshot.json', {'phase': 'running', 'batch': {
+            'counts': {'running': 1, 'queued': 2}, 'trials': [{'id': child, 'status': 'running'}],
+            'models': [{'model': 'openrouter/a/b', 'counts': {'running': 1, 'queued': 2}}],
+        }})
+        manager._monitor(parent, SimpleNamespace(wait=lambda: 9))
+        assert manager.describe(parent)['status'] == 'failed'
+        detail = manager.detail(child)
+        assert detail['run']['status'] == 'failed'
+        assert detail['snapshot']['messages'] == ['partial']
+        assert manager.detail(parent)['snapshot']['batch']['counts']['failed'] == 3
+        assert manager.detail(parent)['snapshot']['batch']['models'][0]['counts']['failed'] == 3
+    finally:
+        manager.close()
+
+
+@pytest.mark.parametrize('settings', [
+    {'models': []}, {'models': ['openrouter/a/b', 'openrouter/a/b']},
+    {'models': ['anthropic/a']}, {'models': ['openrouter/a/b'] * 17},
+])
+def test_invalid_model_list_is_rejected(settings):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        server.RunConfig(**settings)
+
+
+@pytest.mark.parametrize('settings, message', [
+    ({'mode': 'model', 'execution': 'local'}, 'Harbor model batch'),
+    ({'mode': 'demo', 'execution': 'modal'}, 'Harbor model batch'),
+    ({'mode': 'model', 'execution': 'modal', 'trials': 51}, '100 total trials'),
+])
+def test_multi_model_scope_and_total_limits(tmp_path, settings, message):
+    manager = server.RunManager(tmp_path)
+    try:
+        with pytest.raises(server.APIError, match=message):
+            manager.start(server.RunConfig(models=['openrouter/a/first', 'openrouter/a/second'], **settings))
+        assert not manager.processes
+    finally:
+        manager.close()
+
+
+def test_multi_model_launch_counts_trials_and_checks_all_models(tmp_path, monkeypatch):
+    monkeypatch.setenv('OPENROUTER_API_KEY', 'test-only-key')
+    monkeypatch.setattr(server.shutil, 'which', lambda command: '/usr/bin/uv')
+    monkeypatch.setattr(server, 'sdk_available', lambda provider: True)
+    monkeypatch.setattr(server.subprocess, 'Popen', lambda *a, **k: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
+    monkeypatch.setattr(server.RunManager, '_monitor', lambda *a: None)
+    manager = server.RunManager(tmp_path)
+    try:
+        models = ['openrouter/a/first', 'openrouter/b/second']
+        record = manager.start(server.RunConfig(mode='model', execution='modal', models=models,
+                                               trials=1, concurrency=2))
+        assert record['config']['models'] == models
+        assert record['model'] == models[0]
+        batch = manager.detail(record['id'])['snapshot']['batch']
+        assert batch['total'] == 2 and batch['counts']['queued'] == 2
+    finally:
+        manager.close()
+
+
+def test_hybrid_data_mode_label_matches_the_picker_everywhere(tmp_path, monkeypatch):
+    """The saved-run label, /api/config and every app.js subtitle read exactly as the data picker does."""
+    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "missing.json"))
+    picker = re.search(r'<option value="hybrid"[^>]*>([^<]+)</option>', (STATIC / "index.html").read_text()).group(1)
+    assert picker == "Simulated Gmail + live web"
+    modes = {item["name"]: item for item in server.public_config()["tool_profiles"][0]["data_modes"]}
+    assert modes["hybrid"]["label"] == picker
+    app_source = (STATIC / "app.js").read_text()
+    assert picker in app_source
+    for source in (app_source, Path(server.__file__).read_text()):
+        assert "live Exa web" not in source
+
+
+def contact_attempts(attempts: list[dict]) -> list[bool]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to exercise dashboard contact classification")
+    result = subprocess.run(
+        [node, "-e", """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = {window: {}}; // No document: the pure helpers must stand alone.
+vm.runInNewContext(fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8'), context);
+const attempts = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(attempts.map((attempt) => context.window.RefundActivity.contactAttempt(attempt))));
+"""],
+        input=json.dumps(attempts), capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
+    )
+    return json.loads(result.stdout)
+
+
+def test_published_interceptions_count_as_organisation_contact():
+    """Published sends, replies and simulated form posts appear on the counterpart cards; blocked and inbox-only actions do not."""
+    org = "trainline"
+    attempts = [
+        {"tool": "send_message", "channel": "email", "target": "refunds@trainline.example", "org": org},
+        {"tool": "reply", "channel": "email", "target": "refunds@trainline.example", "org": org},
+        {"tool": "browser_request", "channel": "form", "target": "https://www.trainline.example/contact", "org": org},
+        {"tool": "send_email", "channel": "email", "target": "refunds@trainline.example", "org": org},  # saved legacy run
+        {"tool": "browser_request", "channel": "web_action", "target": "https://www.trainline.example/api", "org": org},  # blocked POST
+        {"tool": "manage_email", "channel": "inbox_change", "target": "Follow up", "org": None},
+        {"tool": "send_message", "channel": "email", "target": "me@example.com", "org": None, "to_user": True},
+        {"tool": "search_threads", "channel": "email", "target": "", "org": None},
+    ]
+    assert contact_attempts(attempts) == [True, True, True, True, False, False, False, False]
+    # The rendered "On the other side" cards must use this same classification.
+    assert "window.RefundActivity.contactAttempt(attempt)" in (STATIC / "app.js").read_text()

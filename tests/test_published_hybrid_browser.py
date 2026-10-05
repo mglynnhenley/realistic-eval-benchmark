@@ -79,7 +79,7 @@ def test_hybrid_native_tools_read_public_pages_but_never_forward_forms(tmp_path,
     monkeypatch.setattr("refund_eval.published.search.ExaSearchService", exa_service)
     monkeypatch.setattr("refund_eval.published.network.public_read", public_read)
     monkeypatch.setattr("refund_eval.published.network.aiohttp.ClientSession", forbidden)
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     monkeypatch.setenv("EXA_API_KEY", "must-not-be-used")
     monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
     scenario = load_scenario("train_refund")

@@ -8,19 +8,22 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import threading
+import tomllib
 import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
+from refund_eval.config import RunConfig, dashboard_default_model
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.grading.behaviours import (
     BehaviourEdit,
@@ -28,8 +31,8 @@ from refund_eval.grading.behaviours import (
     BehaviourSnapshot,
     default_behaviours,
 )
+from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.task import DEFAULT_ROLE_MODEL
 
 STATIC_DIR = Path(__file__).parent / "static"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -69,36 +72,50 @@ def write_json(path: Path, data: Any) -> None:
     temp.replace(path)
 
 
-def dashboard_default_model() -> str:
-    return os.environ.get("REFUND_EVAL_DEFAULT_MODEL", "").strip() or DEFAULT_ROLE_MODEL
-
-
-class RunConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    mode: Literal["demo", "model"] = "demo"
-    tool_profile: Literal["legacy", "published"] = "legacy"
-    data_mode: Literal["fixture", "hybrid", "live"] = "fixture"
-    world_mode: Literal["baseline", "friction"] = "baseline"
-    model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                       pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    simulator_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                                 pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    grader_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
-                              pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    max_turns: int = Field(default=20, ge=1, le=1000, strict=True)
-    cost_limit: float = Field(default=1.0, gt=0, le=40)
-    sim_weeks: float = Field(default=1.0, gt=0, le=12)
-    experiment_manifest: str | None = Field(default=None, min_length=1)
-    experiment_replicate: int = Field(default=0, ge=0, le=3, strict=True)
-    all_role_cost_limit: float | None = Field(default=None, gt=0, le=40)
-    experiment_budget_file: str | None = Field(default=None, min_length=1)
-
-
 class APIError(Exception):
     def __init__(self, status: int, message: str):
         self.status = status
         self.message = message
         super().__init__(message)
+
+
+def execution_readiness(execution: str) -> dict:
+    """Check the launch host; packaged browser checks run inside each trial."""
+    if execution == "local":
+        return {"configured": True, "reason": "Local browser readiness is checked for the selected data mode."}
+    if not shutil.which("uv"):
+        return {"configured": False, "reason": "Install uv before launching Harbor batches."}
+    if execution == "modal":
+        configured = bool(os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET"))
+        if not configured:
+            try:
+                profiles = tomllib.loads((Path.home() / ".modal.toml").read_text())
+                selected = os.environ.get("MODAL_PROFILE")
+                candidates = [profiles.get(selected, {})] if selected else [
+                    value for value in profiles.values() if isinstance(value, dict) and value.get("active")
+                ] or list(profiles.values())[:1]
+                configured = any(isinstance(value, dict) and value.get("token_id") and value.get("token_secret")
+                                 for value in candidates)
+            except (OSError, ValueError):
+                pass
+        return {"configured": bool(configured), "reason": (
+            "Modal credentials found; the packaged browser is checked inside the sandbox."
+            if configured else "Modal credentials missing. Run scripts/harbor modal token new, or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET."
+        )}
+    if execution != "docker":
+        return {"configured": False, "reason": f"Unknown run location: {execution}"}
+    if not shutil.which("docker"):
+        return {"configured": False, "reason": "Install Docker to launch local Harbor sandboxes."}
+    try:
+        result = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
+                                capture_output=True, timeout=5, check=False)
+        configured = result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        configured = False
+    return {"configured": configured, "reason": (
+        "Docker is ready; the browser is packaged in each trial image." if configured
+        else "Docker daemon is unavailable. Start Docker and retry."
+    )}
 
 
 def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
@@ -120,9 +137,7 @@ def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
 
 
 def run_presets() -> list[dict]:
-    model = dashboard_default_model()
-    shared = {"mode": "model", "tool_profile": "published", "data_mode": "hybrid",
-              "model": model, "simulator_model": model, "grader_model": model}
+    shared = RunConfig(mode="model").model_dump()
     return [
         {"name": "quick", "label": "Quick test", "settings": {
             **shared, "world_mode": "baseline", "max_turns": 20, "cost_limit": 1.0, "sim_weeks": 1.0,
@@ -197,7 +212,8 @@ class RunManager:
                 record["status"] = "grading"
         record.update(turns=world.get("turn", 0), stop_reason=world.get("stop_reason"))
         record["error"] = record.get("error") or snapshot.get("error")
-        record["has_artifact"] = self._artifact(directory, snapshot) is not None
+        batch = record.get("config", {}).get("execution", "local") != "local" and not record.get("parent_batch_id")
+        record["has_artifact"] = not batch and self._artifact(directory, snapshot) is not None
         return record
 
     def list(self) -> list[dict]:
@@ -226,6 +242,30 @@ class RunManager:
                     "rubrics": read_json(directory / "rubrics.json")}
 
     def start(self, config: RunConfig) -> dict:
+        if config.models is not None and (config.execution == "local" or config.mode != "model"):
+            raise APIError(422, "Model selection requires a Harbor model batch on Modal or Docker.")
+        targets = batch_models(config.model_dump())
+        total = batch_total(config.model_dump())
+        if total > 100:
+            raise APIError(422, "A batch can contain at most 100 total trials across all models.")
+        if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
+            raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
+        if config.execution != "local":
+            if config.data_mode == "live":
+                raise APIError(422, "Live Gmail is local-only; choose fixture or hybrid data for Harbor.")
+            if config.experiment_manifest or config.all_role_cost_limit or config.experiment_budget_file:
+                raise APIError(422, "Comparison experiments are currently local only.")
+            if config.concurrency > total:
+                raise APIError(422, "Concurrency cannot exceed the number of trials.")
+            if config.mode == "demo" and config.max_turns < 12:
+                raise APIError(422, "Scripted Harbor trials need at least 12 turns.")
+            if config.mode == "model" and any(not name.startswith("openrouter/") for name in (
+                *targets, config.simulator_model, config.grader_model,
+            )):
+                raise APIError(422, "Harbor batches currently support OpenRouter for all three model roles.")
+            status = execution_readiness(config.execution)
+            if not status["configured"]:
+                raise APIError(422, status["reason"])
         experiment = None
         if config.experiment_manifest:
             from refund_eval.experiments.protocol import experiment_settings
@@ -245,14 +285,14 @@ class RunManager:
                 )
             except (OSError, ValueError, KeyError, TypeError) as error:
                 raise APIError(422, f"Experiment preflight failed: {error}") from error
-        if config.mode == "demo" and config.tool_profile != "legacy":
-            raise APIError(422, "The offline demo uses legacy tools. Select a model trial for published tools.")
+        if config.mode == "demo" and config.data_mode != "fixture":
+            raise APIError(422, "The dashboard scripted demo requires fixture data. Use the hybrid smoke CLI for scripted live-web checks.")
         if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
             raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
         if config.world_mode == "friction" and (config.mode != "model" or config.data_mode == "live"):
             raise APIError(422, "Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
         published_path = None
-        if config.tool_profile == "published":
+        if config.tool_profile == "published" and config.execution == "local":
             from refund_eval.published.profile import (
                 fixture_readiness,
                 hybrid_readiness,
@@ -269,7 +309,7 @@ class RunManager:
             if not status["configured"]:
                 raise APIError(422, f"Published tools are not configured. {status['reason']}")
         if config.mode == "model":
-            for model in (config.model, config.simulator_model, config.grader_model):
+            for model in (*targets, config.simulator_model, config.grader_model):
                 provider = model.split("/", 1)[0]
                 if provider == "mockllm":
                     continue
@@ -290,24 +330,28 @@ class RunManager:
             directory = self.root / run_id
             directory.mkdir()
             settings = config.model_dump()
+            settings["browser_runtime"] = "docker" if config.execution == "local" else "subprocess"
+            if config.mode == "model":
+                settings["model"] = targets[0]
             if published_path:
                 settings["published_config"] = published_path
             record = {
-                "id": run_id, "label": "Scripted demo · legacy tools" if config.mode == "demo"
+                "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
                 else {"fixture": "Published tools · simulated data",
-                      "hybrid": "Simulated Gmail + live Exa web",
-                      "live": "Published tools · live data"}[config.data_mode]
-                if config.tool_profile == "published" else "Legacy model trial",
+                      "hybrid": "Simulated Gmail + live web",
+                      "live": "Published tools · live data"}[config.data_mode],
                 "mode": config.mode, "status": "starting", "created_at": now(), "updated_at": now(),
                 "tool_profile": config.tool_profile,
                 "data_mode": config.data_mode,
                 "world_mode": config.world_mode,
-                "model": "mockllm/model" if config.mode == "demo" else config.model,
+                "model": targets[0],
                 "config": settings, "error": None,
                 "rubric_version": rubrics["version"],
             }
             if config.world_mode == "friction":
                 record["label"] += " · realistic friction"
+            if config.execution != "local":
+                record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
             if experiment:
                 phase = f"Repeat {config.experiment_replicate}" if config.experiment_replicate else "Pilot"
                 record["label"] = f"{experiment['arm']} · {phase} · {experiment['label']}"
@@ -319,13 +363,24 @@ class RunManager:
             write_json(directory / "run.json", record)
             write_json(directory / "config.json", settings)
             write_json(directory / "rubrics.json", rubrics)
+            if config.execution != "local":
+                write_json(directory / "snapshot.json", {
+                    "phase": "starting", "batch": {
+                        "total": total, "trials_per_model": config.trials, "concurrency": config.concurrency,
+                        "environment": config.execution, "counts": {"queued": total}, "trials": [],
+                    },
+                })
             env = dict(os.environ)
             env["REFUND_EVAL_KILL_FILE"] = str(directory / "KILL")
             env["PYTHONUNBUFFERED"] = "1"
+            command = [sys.executable, "-m", "refund_eval.dashboard.worker", "--run-dir", str(directory)]
+            if config.execution != "local":
+                command = [str(PROJECT_ROOT / "scripts/harbor"), "python", "-m",
+                           "refund_eval.harbor.dashboard", "--run-dir", str(directory)]
             try:
                 with (directory / "console.log").open("wb") as console:
                     process = subprocess.Popen(
-                        [sys.executable, "-m", "refund_eval.dashboard.worker", "--run-dir", str(directory)],
+                        command,
                         cwd=PROJECT_ROOT, env=env, stdout=console, stderr=subprocess.STDOUT, start_new_session=True,
                     )
             except OSError as ex:
@@ -350,24 +405,55 @@ class RunManager:
                 error = f"Worker exited with code {code}. Open the run console for details."
             record.update(status=status, updated_at=now(), error=error, exit_code=code)
             write_json(directory / "run.json", record)
+            if record.get("config", {}).get("execution", "local") != "local":
+                # A killed/crashed controller cannot finalize its child records.
+                # Preserve partial snapshots but release the dashboard's active state.
+                for path in self.root.glob("*/run.json"):
+                    child = read_json(path, {})
+                    if child.get("parent_batch_id") != run_id or child.get("status") not in ACTIVE:
+                        continue
+                    child_status = "stopped" if stopped else "failed"
+                    child_error = "Batch controller exited before this trial's results were finalized."
+                    child.update(status=child_status, error=child_error, updated_at=now())
+                    write_json(path, child)
+                    partial = read_json(path.parent / "snapshot.json", {})
+                    partial.update(phase=child_status, error=child_error, updated_at=now())
+                    write_json(path.parent / "snapshot.json", partial)
+                if phase not in TERMINAL:
+                    batch = snapshot.get("batch", {})
+                    terminal = "stopped" if stopped else "failed"
+                    for counts in [batch.get("counts", {}), *[group["counts"] for group in batch.get("models", [])]]:
+                        unfinished = sum(counts.pop(key, 0) for key in (*ACTIVE, "queued"))
+                        counts[terminal] = counts.get(terminal, 0) + unfinished
+                    for row in batch.get("trials", []):
+                        if row.get("status") in ACTIVE:
+                            row.update(status=terminal, stage="Controller exited")
+                    snapshot.update(phase=status, error=error, updated_at=now())
+                    write_json(directory / "snapshot.json", snapshot)
 
     def stop(self, run_id: str) -> dict:
         with self.lock:
             directory = self.directory(run_id)
             record = read_json(directory / "run.json", {})
+            if record.get("parent_batch_id"):
+                self.stop(record["parent_batch_id"])
+                return self.describe(run_id)
             process = self.processes.get(run_id)
             final_phase = read_json(directory / "snapshot.json", {}).get("phase") in TERMINAL
             if process is not None and process.poll() is None and record.get("status") != "stopping" and not final_phase:
                 (directory / "KILL").touch()
                 record.update(status="stopping", updated_at=now())
                 write_json(directory / "run.json", record)
-                threading.Thread(target=self._escalate_stop, args=(process,), daemon=True).start()
+                cloud = record.get("config", {}).get("execution", "local") != "local"
+                threading.Thread(target=self._escalate_stop, args=(process, cloud), daemon=True).start()
             return self.describe(run_id)
 
     @staticmethod
-    def _escalate_stop(process: subprocess.Popen) -> None:
+    def _escalate_stop(process: subprocess.Popen, cloud: bool = False) -> None:
         # Give the tool/turn kill switch a chance to finish the Inspect log.
-        for delay, sig in ((3, signal.SIGINT), (5, signal.SIGTERM), (2, signal.SIGKILL)):
+        delays = ((60, signal.SIGINT), (60, signal.SIGTERM), (60, signal.SIGKILL)) if cloud else (
+            (3, signal.SIGINT), (5, signal.SIGTERM), (2, signal.SIGKILL))
+        for delay, sig in delays:
             try:
                 process.wait(timeout=delay)
                 return
@@ -390,6 +476,9 @@ class RunManager:
 
     def artifact(self, run_id: str) -> Path:
         directory = self.directory(run_id)
+        record = read_json(directory / "run.json", {})
+        if record.get("config", {}).get("execution", "local") != "local" and not record.get("parent_batch_id"):
+            raise APIError(404, "Open an individual trial to download its Inspect log.")
         path = self._artifact(directory, read_json(directory / "snapshot.json", {}))
         if path is None:
             raise APIError(404, "The Inspect log is not available yet.")
@@ -429,6 +518,9 @@ def public_config() -> dict:
     return {
         "default_model": dashboard_default_model(),
         "run_presets": run_presets(),
+        "run_defaults": RunConfig().model_dump(),
+        "model_defaults": RunConfig(mode="model").model_dump(),
+        "execution_readiness": {name: execution_readiness(name) for name in ("local", "modal", "docker")},
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
                       for name, keys in PROVIDER_KEYS.items()],
@@ -438,11 +530,9 @@ def public_config() -> dict:
                                        for org in scenario.orgs]},
         "modes": ["demo", "model"],
         "tool_profiles": [
-            {"name": "legacy", "label": "Legacy tools", "configured": True,
-             "reason": "Existing custom tools and fixture inbox; used by the offline demo."},
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [
-                 {"name": "hybrid", "label": "Simulated Gmail + live Exa web", **hybrid_status},
+                 {"name": "hybrid", "label": "Simulated Gmail + live web", **hybrid_status},
                  {"name": "fixture", "label": "Simulated inbox and websites", **fixture_status},
                  {"name": "live", "label": "Live Gmail and reviewed websites", **readiness(published_config_path())},
              ]},
@@ -518,6 +608,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/config":
                 self._json(200, public_config())
+            elif path == "/api/models":
+                from refund_eval.dashboard.models import model_catalog
+
+                self._json(200, model_catalog())
             elif path == "/api/behaviours":
                 self._json(200, self.server.manager.behaviours())
             elif path == "/api/runs":
