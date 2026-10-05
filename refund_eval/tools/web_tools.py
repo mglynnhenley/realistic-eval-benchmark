@@ -1,26 +1,25 @@
-"""Web tools: search (Inspect's web_search, external provider) and page loading.
+"""Web tools: keyless Exa search and direct page loading.
 
 web_fetch is GET only, sends no cookies or credentials, and checks every URL,
 including every redirect hop, with the URL guard (FR-015). A refused load is
 logged as an intercepted web action and the agent sees an ordinary browser error.
 
-Why web_search uses an external provider only: Inspect's internal providers
-(e.g. Anthropic's) also give the model a server-side page fetcher that would
-load URLs outside the URL guard, and its tool name collides with web_fetch.
+Search reuses the project's search-only Exa MCP client, without API keys.
+Page navigation remains in web_fetch so URL checks stay in the harness.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-from inspect_ai.tool import Tool, ToolError, tool, web_search
+from inspect_ai.tool import Tool, ToolError, ToolResult, tool
 
 from refund_eval.tools._base import (
     ToolContext,
     charge_time,
+    current_tool_call_id,
     link_urls,
     log_interception,
 )
@@ -47,37 +46,52 @@ HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
 }
 
-EXTERNAL_SEARCH_PROVIDERS = ("tavily", "exa", "google")
-
-
 # --------------------------------------------------------------------------- web search
 
 
-def choose_search_provider(provider: str | None = None) -> str:
-    """Pick an external search provider: explicit, REFUND_EVAL_SEARCH_PROVIDER,
-    or whichever API key is set (TAVILY_API_KEY, EXA_API_KEY, GOOGLE_CSE_*)."""
-    choice = (provider or os.environ.get("REFUND_EVAL_SEARCH_PROVIDER") or "").strip().lower()
-    if not choice:
-        if os.environ.get("TAVILY_API_KEY"):
-            choice = "tavily"
-        elif os.environ.get("EXA_API_KEY"):
-            choice = "exa"
-        elif os.environ.get("GOOGLE_CSE_ID") and os.environ.get("GOOGLE_CSE_API_KEY"):
-            choice = "google"
-        else:
-            choice = "tavily"
-    if choice not in EXTERNAL_SEARCH_PROVIDERS:
-        raise ValueError(
-            f"Search provider {choice!r} is not allowed. Use one of {EXTERNAL_SEARCH_PROVIDERS}: "
-            "model-internal search providers fetch pages server-side, outside the URL guard."
+@tool(name="web_search")
+def make_web_search(ctx: ToolContext) -> Tool:
+    """Search public websites through the keyless Exa MCP connection."""
+    async def execute(query: str, objective: str = "", num_results: int = 8) -> ToolResult:
+        """Search the public web for relevant pages, then use web_fetch to read a URL.
+
+        Args:
+            query: A public-information search query. Do not include personal details or secrets.
+            objective: What information you need from the results; defaults to the query.
+            num_results: Number of results to request, from 1 to 10.
+        """
+        from refund_eval.published.adapter import audit, model_content
+        from refund_eval.published.mcp import MCPRPCError
+        from refund_eval.published.profile import search_policy
+        from refund_eval.published.search import (
+            EXA_SEARCH_TOOL,
+            ExaContractError,
+            ExaPolicyDenied,
+            ExaSearchService,
         )
-    return choice
 
+        if not query.strip():
+            raise ToolError("Provide a nonempty search query.")
+        if not 1 <= num_results <= 10:
+            raise ToolError("num_results must be between 1 and 10.")
 
-def make_web_search(provider: str | None = None) -> Tool:
-    choice = choose_search_provider(provider)
-    options: dict = {"max_results": 8} if choice == "tavily" else {}
-    return web_search({choice: options or True})
+        def search_audit(event):
+            audit({"event": "search_boundary", "call_id": current_tool_call_id(), **event})
+
+        charge_time("web_search")
+        try:
+            async with ExaSearchService(policy=search_policy(ctx.scenario), audit=search_audit) as search:
+                result = await search.call_tool(EXA_SEARCH_TOOL, {
+                    "query": query, "objective": objective or query, "numResults": num_results,
+                })
+        except ExaPolicyDenied as error:
+            raise ToolError(str(error)) from error
+        except (httpx.HTTPError, MCPRPCError, ExaContractError) as error:
+            raise ToolError(f"Web search unavailable ({type(error).__name__}). No results returned. "
+                            "You can still use web_fetch for known public URLs.") from error
+        return model_content(result)
+
+    return execute
 
 
 # --------------------------------------------------------------------------- page loading

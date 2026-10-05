@@ -18,6 +18,7 @@ show an immediate response on the page; they do not invent an email address for 
 - What must be true: [spec.md](spec.md)
 - How it's built: [plan.md](plan.md)
 - How to run it: [docs/running.md](docs/running.md)
+- Parallel Inspect trials on Modal or Docker (CLI and dashboard): [Harbor runbook](docs/harbor.md).
 - Published-tool setup and limitations: [docs/published-tools.md](docs/published-tools.md). Use simulated Gmail with live Exa search and public webpages, or fully simulated data. Live Gmail connection and native sending capability remain unverified. The original demo uses legacy tools.
 
 ## Quick start

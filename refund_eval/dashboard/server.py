@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,10 +17,10 @@ import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.grading.behaviours import (
@@ -28,6 +29,7 @@ from refund_eval.grading.behaviours import (
     BehaviourSnapshot,
     default_behaviours,
 )
+from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import DEFAULT_ROLE_MODEL
 
@@ -85,9 +87,24 @@ class RunConfig(BaseModel):
                                  pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     grader_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
                               pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
+    models: list[Annotated[str, Field(min_length=1, max_length=160,
+                                     pattern=r"^openrouter/[A-Za-z0-9._:/-]+$")]] | None = Field(
+        default=None, min_length=1, max_length=16)
+
+    @field_validator("models")
+    @classmethod
+    def unique_models(cls, value):
+        if value and len(set(value)) != len(value):
+            raise ValueError("Choose each model only once")
+        return value
+
     max_turns: int = Field(default=20, ge=1, le=1000, strict=True)
     cost_limit: float = Field(default=1.0, gt=0, le=40)
     sim_weeks: float = Field(default=1.0, gt=0, le=12)
+    execution: Literal["local", "modal", "docker"] = "local"
+    trials: int = Field(default=1, ge=1, le=100, strict=True)
+    concurrency: int = Field(default=1, ge=1, le=16, strict=True)
+    time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
     experiment_manifest: str | None = Field(default=None, min_length=1)
     experiment_replicate: int = Field(default=0, ge=0, le=3, strict=True)
     all_role_cost_limit: float | None = Field(default=None, gt=0, le=40)
@@ -197,7 +214,8 @@ class RunManager:
                 record["status"] = "grading"
         record.update(turns=world.get("turn", 0), stop_reason=world.get("stop_reason"))
         record["error"] = record.get("error") or snapshot.get("error")
-        record["has_artifact"] = self._artifact(directory, snapshot) is not None
+        batch = record.get("config", {}).get("execution", "local") != "local" and not record.get("parent_batch_id")
+        record["has_artifact"] = not batch and self._artifact(directory, snapshot) is not None
         return record
 
     def list(self) -> list[dict]:
@@ -226,6 +244,29 @@ class RunManager:
                     "rubrics": read_json(directory / "rubrics.json")}
 
     def start(self, config: RunConfig) -> dict:
+        if config.models is not None and (config.execution == "local" or config.mode != "model"):
+            raise APIError(422, "Model selection requires a Harbor model batch on Modal or Docker.")
+        targets = batch_models(config.model_dump())
+        total = batch_total(config.model_dump())
+        if total > 100:
+            raise APIError(422, "A batch can contain at most 100 total trials across all models.")
+        if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
+            raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
+        if config.execution != "local":
+            if config.tool_profile != "legacy" or config.data_mode != "fixture":
+                raise APIError(422, "Harbor batches currently require legacy tools and fixture data.")
+            if config.experiment_manifest or config.all_role_cost_limit or config.experiment_budget_file:
+                raise APIError(422, "Comparison experiments are currently local only.")
+            if config.concurrency > total:
+                raise APIError(422, "Concurrency cannot exceed the number of trials.")
+            if config.mode == "demo" and config.max_turns < 12:
+                raise APIError(422, "Scripted Harbor trials need at least 12 turns.")
+            if config.mode == "model" and any(not name.startswith("openrouter/") for name in (
+                *targets, config.simulator_model, config.grader_model,
+            )):
+                raise APIError(422, "Harbor batches currently support OpenRouter for all three model roles.")
+            if not shutil.which("uv"):
+                raise APIError(422, "Install uv before launching Harbor batches.")
         experiment = None
         if config.experiment_manifest:
             from refund_eval.experiments.protocol import experiment_settings
@@ -269,7 +310,7 @@ class RunManager:
             if not status["configured"]:
                 raise APIError(422, f"Published tools are not configured. {status['reason']}")
         if config.mode == "model":
-            for model in (config.model, config.simulator_model, config.grader_model):
+            for model in (*targets, config.simulator_model, config.grader_model):
                 provider = model.split("/", 1)[0]
                 if provider == "mockllm":
                     continue
@@ -290,6 +331,8 @@ class RunManager:
             directory = self.root / run_id
             directory.mkdir()
             settings = config.model_dump()
+            if config.mode == "model":
+                settings["model"] = targets[0]
             if published_path:
                 settings["published_config"] = published_path
             record = {
@@ -302,12 +345,14 @@ class RunManager:
                 "tool_profile": config.tool_profile,
                 "data_mode": config.data_mode,
                 "world_mode": config.world_mode,
-                "model": "mockllm/model" if config.mode == "demo" else config.model,
+                "model": targets[0],
                 "config": settings, "error": None,
                 "rubric_version": rubrics["version"],
             }
             if config.world_mode == "friction":
                 record["label"] += " · realistic friction"
+            if config.execution != "local":
+                record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
             if experiment:
                 phase = f"Repeat {config.experiment_replicate}" if config.experiment_replicate else "Pilot"
                 record["label"] = f"{experiment['arm']} · {phase} · {experiment['label']}"
@@ -319,13 +364,24 @@ class RunManager:
             write_json(directory / "run.json", record)
             write_json(directory / "config.json", settings)
             write_json(directory / "rubrics.json", rubrics)
+            if config.execution != "local":
+                write_json(directory / "snapshot.json", {
+                    "phase": "starting", "batch": {
+                        "total": total, "trials_per_model": config.trials, "concurrency": config.concurrency,
+                        "environment": config.execution, "counts": {"queued": total}, "trials": [],
+                    },
+                })
             env = dict(os.environ)
             env["REFUND_EVAL_KILL_FILE"] = str(directory / "KILL")
             env["PYTHONUNBUFFERED"] = "1"
+            command = [sys.executable, "-m", "refund_eval.dashboard.worker", "--run-dir", str(directory)]
+            if config.execution != "local":
+                command = [str(PROJECT_ROOT / "scripts/harbor"), "python", "-m",
+                           "refund_eval.harbor.dashboard", "--run-dir", str(directory)]
             try:
                 with (directory / "console.log").open("wb") as console:
                     process = subprocess.Popen(
-                        [sys.executable, "-m", "refund_eval.dashboard.worker", "--run-dir", str(directory)],
+                        command,
                         cwd=PROJECT_ROOT, env=env, stdout=console, stderr=subprocess.STDOUT, start_new_session=True,
                     )
             except OSError as ex:
@@ -350,24 +406,55 @@ class RunManager:
                 error = f"Worker exited with code {code}. Open the run console for details."
             record.update(status=status, updated_at=now(), error=error, exit_code=code)
             write_json(directory / "run.json", record)
+            if record.get("config", {}).get("execution", "local") != "local":
+                # A killed/crashed controller cannot finalize its child records.
+                # Preserve partial snapshots but release the dashboard's active state.
+                for path in self.root.glob("*/run.json"):
+                    child = read_json(path, {})
+                    if child.get("parent_batch_id") != run_id or child.get("status") not in ACTIVE:
+                        continue
+                    child_status = "stopped" if stopped else "failed"
+                    child_error = "Batch controller exited before this trial's results were finalized."
+                    child.update(status=child_status, error=child_error, updated_at=now())
+                    write_json(path, child)
+                    partial = read_json(path.parent / "snapshot.json", {})
+                    partial.update(phase=child_status, error=child_error, updated_at=now())
+                    write_json(path.parent / "snapshot.json", partial)
+                if phase not in TERMINAL:
+                    batch = snapshot.get("batch", {})
+                    terminal = "stopped" if stopped else "failed"
+                    for counts in [batch.get("counts", {}), *[group["counts"] for group in batch.get("models", [])]]:
+                        unfinished = sum(counts.pop(key, 0) for key in (*ACTIVE, "queued"))
+                        counts[terminal] = counts.get(terminal, 0) + unfinished
+                    for row in batch.get("trials", []):
+                        if row.get("status") in ACTIVE:
+                            row.update(status=terminal, stage="Controller exited")
+                    snapshot.update(phase=status, error=error, updated_at=now())
+                    write_json(directory / "snapshot.json", snapshot)
 
     def stop(self, run_id: str) -> dict:
         with self.lock:
             directory = self.directory(run_id)
             record = read_json(directory / "run.json", {})
+            if record.get("parent_batch_id"):
+                self.stop(record["parent_batch_id"])
+                return self.describe(run_id)
             process = self.processes.get(run_id)
             final_phase = read_json(directory / "snapshot.json", {}).get("phase") in TERMINAL
             if process is not None and process.poll() is None and record.get("status") != "stopping" and not final_phase:
                 (directory / "KILL").touch()
                 record.update(status="stopping", updated_at=now())
                 write_json(directory / "run.json", record)
-                threading.Thread(target=self._escalate_stop, args=(process,), daemon=True).start()
+                cloud = record.get("config", {}).get("execution", "local") != "local"
+                threading.Thread(target=self._escalate_stop, args=(process, cloud), daemon=True).start()
             return self.describe(run_id)
 
     @staticmethod
-    def _escalate_stop(process: subprocess.Popen) -> None:
+    def _escalate_stop(process: subprocess.Popen, cloud: bool = False) -> None:
         # Give the tool/turn kill switch a chance to finish the Inspect log.
-        for delay, sig in ((3, signal.SIGINT), (5, signal.SIGTERM), (2, signal.SIGKILL)):
+        delays = ((60, signal.SIGINT), (60, signal.SIGTERM), (60, signal.SIGKILL)) if cloud else (
+            (3, signal.SIGINT), (5, signal.SIGTERM), (2, signal.SIGKILL))
+        for delay, sig in delays:
             try:
                 process.wait(timeout=delay)
                 return
@@ -390,6 +477,9 @@ class RunManager:
 
     def artifact(self, run_id: str) -> Path:
         directory = self.directory(run_id)
+        record = read_json(directory / "run.json", {})
+        if record.get("config", {}).get("execution", "local") != "local" and not record.get("parent_batch_id"):
+            raise APIError(404, "Open an individual trial to download its Inspect log.")
         path = self._artifact(directory, read_json(directory / "snapshot.json", {}))
         if path is None:
             raise APIError(404, "The Inspect log is not available yet.")
@@ -518,6 +608,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/config":
                 self._json(200, public_config())
+            elif path == "/api/models":
+                from refund_eval.dashboard.models import model_catalog
+
+                self._json(200, model_catalog())
             elif path == "/api/behaviours":
                 self._json(200, self.server.manager.behaviours())
             elif path == "/api/runs":

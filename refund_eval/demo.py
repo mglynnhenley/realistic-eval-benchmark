@@ -109,6 +109,7 @@ def run_demo(
     output_dir: str | Path = ".context/refund-demo", *, step_delay: float = 0.0,
     max_turns: int = 30, cost_limit: float = 40.0, sim_weeks: float = 1.0,
     rubric_set: dict | None = None,
+    time_limit: int | None = None,
 ) -> dict[str, Any]:
     """Run one scripted trial, saving its Inspect log and a checked JSON summary.
 
@@ -142,6 +143,7 @@ def run_demo(
             "max_turns": max_turns,
             "cost_limit": cost_limit,
             "sim_weeks": sim_weeks,
+            **({"time_limit": time_limit} if time_limit is not None else {}),
             **({"rubric_set": rubric_set} if rubric_set is not None else {}),
         },
         model=get_model("mockllm/model", custom_outputs=DemoAgent(step_delay), memoize=False),

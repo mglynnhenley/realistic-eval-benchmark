@@ -338,11 +338,12 @@
     $("submit-run").type = setupMissing || worldProblem ? "button" : "submit";
     $("submit-run").textContent = state.starting ? "Starting…"
       : worldProblem ? "Review world settings" : setupMissing ? "Check tool setup"
-        : $("run-form").elements.mode.value === "model" ? "Start paid model trial ↗" : "Start offline demo ↗";
+        : $("execution").value !== "local" ? "Start batch ↗"
+          : $("run-form").elements.mode.value === "model" ? "Start paid model trial ↗" : "Start offline demo ↗";
     const active = ACTIVE.has(state.run?.status);
     $("stop-run").hidden = !active;
     $("stop-run").disabled = state.stopping || state.run?.status === "stopping";
-    $("stop-run").textContent = state.stopping || state.run?.status === "stopping" ? "Stopping…" : "Stop run";
+    $("stop-run").textContent = state.stopping || state.run?.status === "stopping" ? "Stopping…" : state.run?.parent_batch_id || state.run?.config?.execution && state.run.config.execution !== "local" ? "Stop batch" : "Stop run";
   }
 
   function selectRun(id) {
@@ -373,8 +374,10 @@
     const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live Exa web"
       : dataMode === "fixture" ? "Simulated data" : "Live data";
     const worldMode = run.world_mode || run.config?.world_mode || "baseline";
+    const targetLabel = !run.parent_batch_id && run.config?.models?.length > 1
+      ? `${run.config.models.length} target models` : run.model || "Model trial";
     const model = run.mode === "demo" ? "Scripted offline demo · Legacy tools · No API calls"
-      : `${run.model || "Model trial"} · ${profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools"} · ${worldMode === "friction" ? "Realistic friction" : "Standard world"}`;
+      : `${targetLabel} · ${profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools"} · ${worldMode === "friction" ? "Realistic friction" : "Standard world"}`;
     const stopping = run.stop_reason ? ` · ${title(run.stop_reason)}` : "";
     $("selected-subtitle").textContent = `${model} · ${date(run.created_at)}${stopping}`;
     $("selected-dot").className = `status-dot ${run.status}`;
@@ -1035,9 +1038,60 @@
     container.replaceChildren(fragment);
   }
 
+  function renderBatch() {
+    const container = $("batch-progress");
+    const batch = state.snapshot?.batch;
+    const parent = state.run?.parent_batch_id;
+    const isBatch = !parent && state.run?.config?.execution && state.run.config.execution !== "local";
+    container.hidden = !isBatch && !parent;
+    document.querySelector(".lab-layout").hidden = Boolean(isBatch);
+    if (container.hidden) return;
+    const fragment = document.createDocumentFragment();
+    if (parent) {
+      const back = element("button", "button button-small", "← Back to batch");
+      back.type = "button";
+      back.addEventListener("click", () => selectRun(parent));
+      fragment.append(back, element("p", "field-help", "Stop batch cancels all remaining trials in this batch."));
+    } else {
+      fragment.append(element("h3", "", "Inspect batch progress"));
+      const counts = batch?.counts || {};
+      const total = batch?.total || state.run.config.trials * (state.run.config.models?.length || 1);
+      const active = ["starting", "running", "grading", "stopping"].reduce((sum, status) => sum + (counts[status] || 0), 0);
+      fragment.append(element("p", "", batch ? `${counts.completed || 0} / ${total} completed · ${active} active · ${counts.failed || 0} failed · ${counts.stopped || 0} stopped · ${counts.queued || 0} queued` : "Loading batch progress…"));
+      fragment.append(element("p", "field-help", state.run.status === "stopping"
+        ? "Cancelling queued trials and cleaning up active sandboxes…"
+        : `${title(state.run.config.execution)} · up to ${state.run.config.concurrency} trials at once. Open a trial to view activity, scores and its Inspect log.`));
+      const groups = element("div", "batch-models");
+      for (const group of batch?.models || []) {
+        const active = ["starting", "running", "grading", "stopping"].reduce((sum, status) => sum + (group.counts[status] || 0), 0);
+        const card = element("div", "batch-model");
+        card.append(element("strong", "", group.model.replace(/^openrouter\//, "")),
+          element("span", "", `${group.counts.completed || 0}/${group.total} completed · ${active} active · ${group.counts.queued || 0} queued · ${group.counts.failed || 0} failed · ${group.counts.stopped || 0} stopped`));
+        groups.append(card);
+      }
+      fragment.append(groups);
+      const list = element("div", "batch-trials");
+      for (const trial of batch?.trials || []) {
+        const button = element("button", "button batch-trial");
+        button.type = "button";
+        button.append(element("strong", "", trial.label), element("span", "", `${title(trial.status)} · ${trial.turns || 0} turns · ${trial.stage || "Queued"}`));
+        button.addEventListener("click", () => selectRun(trial.id));
+        list.append(button);
+      }
+      fragment.append(list);
+      const consoleDetails = element("details", "batch-console");
+      consoleDetails.open = Boolean(container.querySelector(".batch-console")?.open);
+      consoleDetails.append(element("summary", "", "Process output"), element("pre", "", $("process-console").textContent));
+      fragment.append(consoleDetails);
+      if (state.run.error) fragment.append(element("p", "form-error", state.run.error));
+    }
+    container.replaceChildren(fragment);
+  }
+
   function renderDetail(force = false) {
     renderBanner();
     renderWorldSummary();
+    renderBatch();
     const key = JSON.stringify([state.selected, state.snapshot, state.run?.status, state.runRubrics?.version]);
     if (!force && key === state.detailKey) return;
     state.detailKey = key;
@@ -1406,6 +1460,134 @@
     updatePresetHelp();
   }
 
+  const selectedModels = new Set();
+  let modelChoices = [];
+  let modelCatalogLoading = false;
+  let modelCatalogLoaded = false;
+  let modelSelectionInitialized = false;
+
+  function renderModelSelection() {
+    $("model-selection-count").textContent = `${selectedModels.size} model${selectedModels.size === 1 ? "" : "s"} selected`;
+    const chips = document.createDocumentFragment();
+    for (const id of selectedModels) {
+      const chip = element("button", "model-chip", `${id.replace(/^openrouter\//, "")} ×`);
+      chip.type = "button";
+      chip.setAttribute("aria-label", `Remove ${id}`);
+      chip.addEventListener("click", () => {
+        selectedModels.delete(id);
+        renderModelSelection();
+        updateBatchSettings();
+      });
+      chips.append(chip);
+    }
+    $("selected-models").replaceChildren(chips);
+    $("model-options").querySelectorAll("input").forEach((input) => { input.checked = selectedModels.has(input.value); });
+  }
+
+  function selectModel(id) {
+    $("model-picker-error").hidden = true;
+    if (!/^openrouter\/[A-Za-z0-9._:/-]+$/.test(id) || id.length > 160) {
+      $("model-picker-error").textContent = "Enter a model ID such as openrouter/provider/model.";
+      $("model-picker-error").hidden = false;
+      return false;
+    }
+    if (!selectedModels.has(id) && selectedModels.size >= 16) {
+      $("model-picker-error").textContent = "Choose at most 16 models.";
+      $("model-picker-error").hidden = false;
+      return false;
+    }
+    selectedModels.add(id);
+    renderModelSelection();
+    updateBatchSettings();
+    return true;
+  }
+
+  function renderModelOptions() {
+    const query = $("model-search").value.toLowerCase().trim();
+    const choices = modelChoices.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(query));
+    const fragment = document.createDocumentFragment();
+    for (const model of choices) {
+      const label = element("label", "model-option");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = model.id;
+      input.checked = selectedModels.has(model.id);
+      input.addEventListener("change", () => {
+        if (input.checked) { if (!selectModel(model.id)) input.checked = false; }
+        else { selectedModels.delete(model.id); renderModelSelection(); updateBatchSettings(); }
+      });
+      const caption = element("span");
+      caption.append(element("strong", "", model.name), element("small", "", model.id.replace(/^openrouter\//, "")));
+      label.append(input, caption);
+      fragment.append(label);
+    }
+    if (!choices.length) fragment.append(element("p", "field-help", modelCatalogLoading ? "Loading…" : "No matches. You can add a model ID below."));
+    $("model-options").replaceChildren(fragment);
+  }
+
+  async function loadModelCatalog() {
+    if (modelCatalogLoading || modelCatalogLoaded) return;
+    modelCatalogLoading = true;
+    try {
+      const data = await request("/api/models");
+      modelChoices = data.models || [];
+      $("model-catalog-status").textContent = data.error || `${modelChoices.length} models with tool support from OpenRouter. Availability depends on your account.`;
+    } catch {
+      $("model-catalog-status").textContent = "Catalog unavailable. Add an OpenRouter model ID below.";
+    } finally {
+      modelCatalogLoading = false;
+      modelCatalogLoaded = true;
+      renderModelOptions();
+    }
+  }
+
+  $("model-search").addEventListener("input", renderModelOptions);
+  $("model-search").addEventListener("keydown", (event) => { if (event.key === "Enter") event.preventDefault(); });
+  $("add-model").addEventListener("click", () => { if (selectModel($("custom-model").value.trim())) $("custom-model").value = ""; });
+  $("custom-model").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); $("add-model").click(); }
+  });
+
+  function updateBatchSettings() {
+    const batch = $("execution").value !== "local";
+    $("batch-settings").hidden = !batch;
+    document.querySelector(".mini-badge").textContent = batch ? "NO MODEL COST" : "FREE";
+    $("batch-settings").querySelectorAll("input").forEach((input) => { input.disabled = !batch; });
+    if (batch) {
+      $("run-preset").value = "custom";
+      $("tool-profile").value = "legacy";
+      $("data-mode").value = "fixture";
+    }
+    $("batch-help").textContent = "Batches use legacy tools and fixture data. Each trial gets its own sandbox and your saved rubrics. " + ($("execution").value === "modal"
+      ? "Modal compute charges apply, including for scripted demos. Configure Modal credentials on this computer first."
+      : "Docker must be running on this computer.");
+    const paid = $("run-form").elements.mode.value === "model";
+    const multi = batch && paid;
+    $("model-picker-field").hidden = !multi;
+    $("single-model-field").hidden = multi;
+    $("model").disabled = !paid || multi;
+    $("model").required = paid && !multi;
+    $("batch-trials-label").textContent = multi ? "Trials per model" : "Trials";
+    if (multi) {
+      const initial = $("model").value.trim() || state.config?.default_model;
+      if (!modelSelectionInitialized && initial) {
+        modelSelectionInitialized = true;
+        selectedModels.add(initial);
+        renderModelSelection();
+      }
+      loadModelCatalog();
+    }
+    const count = multi ? selectedModels.size : 1;
+    const total = count * Number($("batch-trials").value);
+    const budget = total * Number($("cost-limit").value);
+    $("batch-budget").textContent = paid
+      ? `${count} models × ${$("batch-trials").value} trials = ${total} total trials; up to ${Math.min(total, Number($("batch-concurrency").value))} running at once. Agent and simulator budgets total $${budget.toFixed(2)}, plus final grading and compute. Maximum 100 total trials.`
+      : "Scripted trials make no model API calls. Their grades are pipeline checks, not behavioural measurements.";
+  }
+
+  $("execution").addEventListener("change", () => { updateMode(); });
+  ["batch-trials", "batch-concurrency", "cost-limit"].forEach((id) => $(id).addEventListener("input", updateBatchSettings));
+
   function updateMode() {
     const isModel = $("run-form").elements.mode.value === "model";
     $("model-settings").hidden = !isModel;
@@ -1419,13 +1601,16 @@
   }
 
   function updateProfileStatus() {
+    updateBatchSettings();
+    const batch = $("execution").value !== "local";
     const name = $("tool-profile").value;
     const isPublished = name === "published";
     const isModel = $("run-form").elements.mode.value === "model";
     const fixture = $("data-mode").value === "fixture";
     const hybrid = $("data-mode").value === "hybrid";
     const simulated = !isPublished || fixture || hybrid;
-    $("run-preset").disabled = !isModel || !state.config?.run_presets;
+    $("run-preset").disabled = batch || !isModel || !state.config?.run_presets;
+    $("tool-profile").disabled = batch || !isModel;
     $("world-mode-field").hidden = !isModel || !simulated;
     $("world-mode").disabled = !isModel || !simulated;
     $("data-mode").querySelector('[value="live"]').disabled = $("world-mode").value === "friction";
@@ -1475,12 +1660,26 @@
       return;
     }
     const mode = $("run-form").elements.mode.value;
-    const payload = {mode};
+    const payload = {mode, execution: $("execution").value};
+    if (payload.execution !== "local") {
+      payload.trials = Number($("batch-trials").value);
+      payload.concurrency = Number($("batch-concurrency").value);
+      payload.time_limit = Number($("batch-time-limit").value);
+    }
     if (mode === "model") {
       payload.tool_profile = $("tool-profile").value;
       payload.data_mode = payload.tool_profile === "published" ? $("data-mode").value : "fixture";
       payload.world_mode = $("world-mode").value;
       payload.model = $("model").value.trim();
+      if (payload.execution !== "local") {
+        if (!selectedModels.size) {
+          $("form-error").textContent = "Choose at least one target model.";
+          $("form-error").hidden = false;
+          return;
+        }
+        payload.models = [...selectedModels];
+        payload.model = payload.models[0];
+      }
       payload.max_turns = Number($("max-turns").value);
       payload.cost_limit = Number($("cost-limit").value);
       payload.sim_weeks = Number($("sim-weeks").value);
