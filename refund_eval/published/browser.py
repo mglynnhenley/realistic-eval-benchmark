@@ -18,6 +18,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Self
 
+import anyio
+
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE,
     MAX_REQUEST_BYTES,
@@ -366,16 +368,21 @@ class PublishedBrowserService:
     async def aclose(self) -> None:
         if self._closed:
             return
-        self._closed = True
-        self._active_call = None
-        if self._server_task is not None:
-            self._server_task.cancel()
-            await asyncio.gather(self._server_task, return_exceptions=True)
-        try:
-            if self._client is not None:
-                await self._client.aclose()
-        finally:
-            await self._runtime.aclose()
+        # Teardown usually runs inside a cancelled anyio scope (Inspect time
+        # limits, operator cancellation, Ctrl-C) that re-cancels every await.
+        # Shield it so the MCP child, the container and the runtime tempdir are
+        # always released; mark closed only after teardown so a failure retries.
+        with anyio.CancelScope(shield=True):
+            self._active_call = None
+            if self._server_task is not None:
+                self._server_task.cancel()
+                await asyncio.gather(self._server_task, return_exceptions=True)
+            try:
+                if self._client is not None:
+                    await self._client.aclose()
+            finally:
+                await self._runtime.aclose()
+            self._closed = True
 
     async def __aenter__(self) -> Self:
         await self._ensure_started()

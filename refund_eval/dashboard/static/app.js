@@ -134,7 +134,16 @@
     return {calls, byMessage, usedResults};
   }
 
-  window.RefundActivity = Object.freeze({build, describe, status, preview, text, short});
+  // Outgoing contact with an organisation. Published tools (send_message, reply, and browser_request
+  // for simulated form posts) sit beside the retired legacy names so saved runs still display.
+  const CONTACT_TOOLS = new Set(["send_message", "reply", "browser_request", "send_email", "reply_email",
+    "forward_email", "submit_web_form", "phone_call", "live_chat", "make_payment"]);
+  function contactAttempt(attempt) {
+    return Boolean(attempt) && !attempt.to_user && CONTACT_TOOLS.has(attempt.tool)
+      && !["inbox_change", "web_action"].includes(attempt.channel);
+  }
+
+  window.RefundActivity = Object.freeze({build, describe, status, preview, text, short, contactAttempt});
 })();
 
 "use strict";
@@ -143,7 +152,6 @@
   if (typeof document === "undefined") return; // Pure activity helpers also run in Node tests.
   const $ = (id) => document.getElementById(id);
   const ACTIVE = new Set(["starting", "running", "grading", "stopping"]);
-  const CONTACT_TOOLS = new Set(["send_email", "reply_email", "forward_email", "submit_web_form", "phone_call", "live_chat", "make_payment"]);
   const state = {config: null, defaultsApplied: false, dataModeEdited: false, runs: [], selected: null, run: null, snapshot: null,
     tab: "transcript", listKey: "", detailKey: "", promptKey: "", starting: false, stopping: false,
     listOnline: false, detailOnline: true, listError: "", detailError: "", runRubrics: null,
@@ -383,7 +391,7 @@
     $("selected-title").textContent = run.label || `${title(run.mode)} run`;
     const profile = run.tool_profile || run.config?.tool_profile || "legacy";
     const dataMode = run.data_mode || run.config?.data_mode || "live";
-    const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live Exa web"
+    const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
       : dataMode === "fixture" ? "Simulated data" : "Live data";
     const worldMode = run.world_mode || run.config?.world_mode || "baseline";
     const targetLabel = !run.parent_batch_id && run.config?.models?.length > 1
@@ -877,8 +885,7 @@
       return contacted.get(key);
     }
     for (const attempt of world?.interceptions || []) {
-      if (attempt.to_user || !CONTACT_TOOLS.has(attempt.tool)
-        || ["inbox_change", "web_action"].includes(attempt.channel)) continue;
+      if (!window.RefundActivity.contactAttempt(attempt)) continue;
       const key = attempt.org || registryByInterception.get(attempt.id);
       if (key) include(key).attempts.push(attempt);
     }
@@ -1455,7 +1462,7 @@
   function worldSelectionProblem() {
     return $("run-form").elements.mode.value === "model" && $("world-mode").value === "friction"
       && selectedDataMode() === "live"
-      ? "Realistic friction requires simulated Gmail. Choose Simulated Gmail + live Exa web, simulated inbox and websites, or use the Standard world." : "";
+      ? "Realistic friction requires simulated Gmail. Choose Simulated Gmail + live web, simulated inbox and websites, or use the Standard world." : "";
   }
 
   function showWorldRequirement() {

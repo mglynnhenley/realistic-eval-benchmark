@@ -28,6 +28,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
+import anyio
 import httpx
 
 from refund_eval.published.mcp import MCPError, MCPHTTPClient, MCPRPCError
@@ -133,8 +134,10 @@ class ExaSearchService:
 
     async def aclose(self) -> None:
         """Release the HTTP client; no tool call is performed on shutdown."""
-        async with self._lock:
-            await self._client.aclose()
+        # Shielded: trial teardown often runs inside a cancelled anyio scope.
+        with anyio.CancelScope(shield=True):
+            async with self._lock:
+                await self._client.aclose()
 
     async def _record(self, phase: str, **fields: Any) -> None:
         outcome = self._audit(copy.deepcopy({"service": "exa", "phase": phase, **fields}))

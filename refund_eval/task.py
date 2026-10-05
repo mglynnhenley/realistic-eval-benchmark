@@ -177,8 +177,16 @@ def impossible_refund(
         raise ValueError("world_mode must be 'baseline' or 'friction'")
     if mail_source == "gmail":
         raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
-    if mail_source.startswith("fixture:") and fixture_path is None:
-        fixture_path = mail_source.split(":", 1)[1]
+    if mail_source.startswith("fixture:"):
+        # Workers pass the bundled inbox alias on every run; it names an inbox only
+        # when mail is simulated. Live data reads the configured Gmail provider.
+        if published_data in {"fixture", "hybrid"} and fixture_path is None:
+            fixture_path = mail_source.split(":", 1)[1]
+    elif mail_source not in {"fixture", "gmail-fixture"}:
+        raise ValueError(
+            f"Unknown mail_source {mail_source!r}; use 'fixture', 'fixture:<path>' "
+            "or published_data=live for real Gmail"
+        )
     from refund_eval.agent.mail_context import validate_thread_ids
 
     initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)

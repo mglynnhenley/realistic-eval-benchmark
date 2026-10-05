@@ -31,7 +31,17 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
     if not isinstance(config, dict) or config.get("mode") not in {"demo", "model"}:
         raise ValueError("Run mode must be 'demo' or 'model'.")
-    config = {**RunConfig(mode=config["mode"]).model_dump(), **config}
+    if config["mode"] == "model":
+        # A model run must say which experiment it is: never back-fill paid role
+        # models, or reinterpret an older record as published hybrid.
+        missing = [name for name in ("tool_profile", "data_mode", "model", "simulator_model", "grader_model")
+                   if name not in config]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} must be specified for a model run.")
+    # Merge only fixed defaults; default_factory fields (the role models) stay explicit.
+    defaults = {name: value for name, value in RunConfig(mode=config["mode"]).model_dump().items()
+                if RunConfig.model_fields[name].default_factory is None}
+    config = {**defaults, **config}
     if config["tool_profile"] != "published":
         raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
     # Execution records from the dashboard carry explicit data mode and runtime.

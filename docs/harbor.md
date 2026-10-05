@@ -8,7 +8,9 @@ budgets and grading. Existing local runs and their saved logs remain available.
 New model batches use the published tool stack and `hybrid` data: simulated Gmail,
 keyless Exa search and real Chromium public-page reads. `fixture` uses a simulated
 inbox, deterministic search and authored websites. Gmail sends and configured
-forms are simulated; other website writes are blocked and recorded. Hybrid has
+forms are simulated. Other website writes (non-GET requests, and page loads
+whose URL carries message text or the user's details) are blocked and recorded;
+other GET page loads reach the real site as reads. Hybrid has
 no simulated form endpoints. Baseline and friction worlds and OpenRouter models
 are supported. Live Gmail and comparison experiments remain local-only.
 
@@ -215,6 +217,9 @@ uv run pytest tests/test_harness_e2e.py tests/test_harness_killswitch.py \
   tests/test_harbor_worker.py tests/test_dashboard_config.py
 scripts/harbor python -m pytest tests/test_harbor_runner.py tests/test_harbor_dashboard.py
 ```
+
+The subprocess-browser export test in `tests/test_harbor_worker.py` is skipped
+unless `REFUND_EVAL_SUBPROCESS_BROWSER_SMOKE=1` is set inside the packaged trial image.
 
 The isolated Harbor suite checks job schemas, source snapshots, secrets,
 cancellation, dashboard result imports and worker failure propagation.

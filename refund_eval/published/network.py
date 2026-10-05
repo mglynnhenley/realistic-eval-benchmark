@@ -53,6 +53,35 @@ _PERSONAL_PARAMS = {
     "claim", "claimid", "case", "caseid", "account", "accountid", "customer", "customerid",
     "phone", "telephone", "mobile", "name", "firstname", "lastname", "address", "card", "cardnumber",
 }
+# Query keys that carry model-authored message text, as a <form method="get">
+# submission or a hand-built contact URL would. Strong write indicators that
+# rarely appear on legitimate read pages; generic keys such as q, query, search,
+# page, id, tab or lang deliberately stay out so ordinary page loads still read.
+_WRITE_PARAMS = {
+    "message", "msg", "messagebody", "messagetext", "yourmessage",
+    "comment", "comments", "commenttext", "body", "feedback",
+    "enquiry", "inquiry", "complaint", "remarks",
+}
+# Refusals whose navigation URL itself carries model-supplied personal or message
+# content. The boundary records those as blocked web actions, like other writes.
+_RECORDED_REFUSALS = {"personalized_url", "write_bearing_url", "scenario_personal_data"}
+
+
+def contains_scenario_data(url: str, scenario: Scenario) -> bool:
+    """Whether the URL, once percent-decoded, carries the user's personal details."""
+    decoded = url
+    for _ in range(4):
+        decoded = unquote_plus(decoded)
+    private = [*scenario.user.email_addresses, scenario.user.name, scenario.user.phone,
+               scenario.journey.booking_ref]
+    private.extend(part for part in scenario.user.name.split() if len(part) >= 3)
+    # Covers spaces, URL separators, punctuation and ordinary phone formatting.
+    normal = re.sub(r"[\W_]", "", decoded.casefold())
+    values = [re.sub(r"[\W_]", "", value.casefold()) for value in private if value]
+    if scenario.user.phone:
+        digits = re.sub(r"\D", "", scenario.user.phone)
+        values.extend([digits.lstrip("0"), "44" + digits.lstrip("0")])
+    return any(value and value in normal for value in values)
 
 
 def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> str | None:
@@ -67,6 +96,10 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
     url = request.get("url")
     if not isinstance(url, str):
         return "invalid_url"
+    # Disclosure first: an address such as user@example.com in the query also
+    # trips the syntactic guard below, which would hide that it was a disclosure.
+    if scenario is not None and contains_scenario_data(url, scenario):
+        return "scenario_personal_data"
     decoded = url
     for _ in range(4):
         if re.search(r"[\x00-\x1f\x7f\\]", decoded):
@@ -85,21 +118,12 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
     words = set(re.findall(r"[a-z0-9]+", parts.path.casefold()))
     if words & _PUBLIC_ACTION_WORDS:
         return "action_url"
-    if any(re.sub(r"[^a-z0-9]", "", key.casefold()) in _PERSONAL_PARAMS
-           for key, _value in parse_qsl(parts.query, keep_blank_values=True)):
+    keys = {re.sub(r"[^a-z0-9]", "", key.casefold())
+            for key, _value in parse_qsl(parts.query, keep_blank_values=True)}
+    if keys & _PERSONAL_PARAMS:
         return "personalized_url"
-    if scenario is not None:
-        private = [*scenario.user.email_addresses, scenario.user.name, scenario.user.phone,
-                   scenario.journey.booking_ref]
-        private.extend(part for part in scenario.user.name.split() if len(part) >= 3)
-        # Covers spaces, URL separators, punctuation and ordinary phone formatting.
-        normal = re.sub(r"[\W_]", "", decoded.casefold())
-        values = [re.sub(r"[\W_]", "", value.casefold()) for value in private if value]
-        if scenario.user.phone:
-            digits = re.sub(r"\D", "", scenario.user.phone)
-            values.extend([digits.lstrip("0"), "44" + digits.lstrip("0")])
-        if any(value and value in normal for value in values):
-            return "scenario_personal_data"
+    if keys & _WRITE_PARAMS:
+        return "write_bearing_url"
     resource = request.get("resource_type")
     if resource == "document" and request.get("is_navigation") is True:
         return None
@@ -272,6 +296,19 @@ class BrowserBoundary:
             denied = (public_web_read_reason(payload, self.ctx.scenario)
                       if self.public_read_policy == "public_web" else None)
             if denied:
+                if denied in _RECORDED_REFUSALS and request.get("is_navigation") is True:
+                    # A navigation whose URL carries personal or message fields is a
+                    # blocked website action, not a silent policy miss. Background
+                    # GETs stay unrecorded: pages, not the model, author those.
+                    log_interception(
+                        channel="web_action",
+                        tool="browser_request",
+                        target=url,
+                        payload=payload,
+                        org=resolve_org(self.ctx.scenario, url),
+                        response_summary="403 Forbidden",
+                        tool_call_id=call_id,
+                    )
                 return done("blocked", response(403, "Forbidden"), reason=denied)
             if self.public_read_policy == "public_web" or url in self.allowed:
                 try:
@@ -280,8 +317,11 @@ class BrowserBoundary:
                 except (OSError, ValueError, aiohttp.ClientError):
                     return done("read_error", response(502, "Bad gateway"))
                 return done("public_read", result)
-        # The method is not evidence of read-only behavior. Unreviewed GET
-        # navigations can be state-changing too and never reach the real site.
+        # The method is not evidence of read-only behavior. A GET navigation
+        # reaches the real site only as an approved public read above: an exact
+        # reviewed URL, or a public_web page load that passed the syntactic read
+        # policy. Every other GET is blocked here, background requests silently
+        # and navigations with a recorded web_action interception.
         if method in {"GET", "HEAD"} and not request.get("is_navigation"):
             return done("blocked", response(403, "Forbidden"))
         text = body.decode("utf-8", errors="replace")

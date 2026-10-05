@@ -211,6 +211,75 @@ async def test_public_web_rejects_scenario_identity_even_with_repeated_url_encod
     assert (await boundary(public_req(url)))["status"] == 403
 
 
+@pytest.mark.parametrize(("url", "reason"), [
+    ("https://example.org/contact?topic=refund&message=My+train+was+cancelled", "write_bearing_url"),
+    ("https://example.org/contact?Message=My+train+was+cancelled&topic=refund", "write_bearing_url"),
+    ("https://example.org/feedback?msg=Please+refund+me", "write_bearing_url"),
+    ("https://example.org/mail?subject=Refund&body=I+did+not+travel", "write_bearing_url"),
+    ("https://example.org/support?enquiry=Refund+for+cancelled+train", "write_bearing_url"),
+    ("https://example.org/help?booking_reference=OTHER123", "personalized_url"),
+])
+async def test_public_web_get_navigation_carrying_message_or_personal_fields_is_blocked_and_recorded(
+    ctx, url, reason
+):
+    async def fetch(request):
+        pytest.fail(f"Model-authored GET content reached the network: {request['url']}")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    assert (await boundary(public_req(url)))["status"] == 403
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "blocked"
+    assert decision["policy_reason"] == reason
+    [recorded] = load_world().interceptions
+    assert recorded.channel == "web_action" and recorded.tool == "browser_request"
+    assert recorded.target == url
+    assert recorded.payload["tool_call_id"] == "call1"
+    assert recorded.payload["request_id"] == "request1"
+    assert recorded.response_summary == "403 Forbidden"
+
+
+async def test_public_web_scenario_data_in_navigation_url_is_recorded_as_web_action(ctx):
+    async def fetch(request):
+        pytest.fail("Scenario data reached the network")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    url = "https://example.org/search?q=" + quote(ctx.user_email, safe="")
+    assert (await boundary(public_req(url)))["status"] == 403
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "scenario_personal_data"
+    assert [x.channel for x in load_world().interceptions] == ["web_action"]
+
+
+async def test_public_web_background_get_with_message_field_is_blocked_without_interception(ctx):
+    async def fetch(request):
+        pytest.fail("Background GET with a message field reached the network")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    request = public_req("https://example.org/api/contact?message=hello", resource="fetch", navigation=False)
+    assert (await boundary(request))["status"] == 403
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "write_bearing_url"
+    # Pages, not the model, author background requests: block silently as before.
+    assert load_world().interceptions == []
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.org/refunds?tab=policy",
+    "https://example.org/search?q=train+refund",
+    "https://example.org/help?query=delay+repay&page=2&lang=en&id=42",
+])
+async def test_public_web_plain_query_page_loads_remain_unrecorded_public_reads(ctx, url):
+    calls = []
+
+    async def fetch(request):
+        calls.append(request)
+        return response(200, "Public rules")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    assert (await boundary(public_req(url)))["status"] == 200
+    assert calls == [{"url": url, "method": "GET"}]
+    assert store().get(AUDIT_KEY)[-1]["action"] == "public_read"
+    assert load_world().interceptions == []
+
+
 @pytest.mark.parametrize(("resource", "path"), [
     ("script", "/assets/main.js"), ("stylesheet", "/assets/main.css"),
     ("image", "/logo.svg"), ("font", "/assets/main.woff2"),

@@ -159,8 +159,9 @@ def test_worker_honours_per_run_stop_file_and_preserves_transcript(tmp_path):
 
 def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypatch):
     config = {
-        "mode": "model", "model": "mockllm/target", "simulator_model": "mockllm/simulator",
-        "grader_model": "mockllm/grader", "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5,
+        "mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/target",
+        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5,
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
@@ -332,6 +333,12 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     {"mode": "demo", "world_mode": "unknown"},
     {"mode": "demo", "max_turns": 1001},
     {"mode": "model", "tool_profile": "published", "data_mode": "live", "world_mode": "friction"},
+    # Model runs never back-fill paid role models or reinterpret older records (C4).
+    {"mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/model"},
+    {"mode": "model", "tool_profile": "published", "model": "mockllm/target",
+     "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader"},
+    {"mode": "model", "data_mode": "fixture", "model": "mockllm/target",
+     "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader"},
 ])
 def test_worker_records_config_errors_without_running_models(tmp_path, monkeypatch, config):
     (tmp_path / "config.json").write_text(json.dumps(config))
