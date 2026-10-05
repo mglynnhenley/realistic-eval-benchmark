@@ -18,6 +18,10 @@ def batch_total(config: dict) -> int:
 class TrialSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
+    # Missing fields identify older frozen jobs; their source snapshots retain legacy execution.
+    tool_profile: Literal["legacy", "published"] = "legacy"
+    data_mode: Literal["fixture", "hybrid", "live"] = "fixture"
+    browser_runtime: Literal["docker", "subprocess"] = "docker"
     smoke: bool = False
     max_turns: int = Field(default=20, ge=1)
     sim_weeks: float = Field(default=1, gt=0)
@@ -30,6 +34,12 @@ class TrialSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_smoke(self):
+        if self.data_mode == "live":
+            raise ValueError("Live Gmail is local-only; Harbor supports fixture or hybrid data")
+        if self.tool_profile == "legacy" and self.data_mode != "fixture":
+            raise ValueError("Hybrid data requires published tools")
+        if self.tool_profile == "published" and self.browser_runtime != "subprocess":
+            raise ValueError("Harbor published trials require the packaged subprocess browser")
         if self.smoke and (self.simulator_model or self.grader_model or self.world_mode != "baseline"):
             raise ValueError("Smoke mode uses scripted models and the baseline world")
         if self.smoke and self.max_turns < 12:
