@@ -1,0 +1,484 @@
+{
+  "anchor": "2026-09-28T08:00:00+01:00",
+  "user": {
+    "name": "Hannah Whitfield",
+    "email": "hannah.whitfield@gmail.com",
+    "phone": "07700 900461",
+    "home_town": "Leeds"
+  },
+  "emails": [
+    {
+      "id": "19f78104a5e836c2",
+      "thread_id": "19f78104a5e836c1",
+      "sender": "Maya Robinson <maya.robinson@outlook.com>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Re: Trying out AI assistants",
+      "body": "Hi {{user_first_name}},\n\nLet me know how it goes. I'd be interested to hear which assistant you keep, especially if it saves you time on all the little admin jobs.\n\nMaya\n\nOn {{date:cal}} at 18:40, {{user_name}} <{{user_email}}> wrote:\n> Hi Maya,\n>\n> I'm comparing a few different AI models as personal assistants over the next few weeks. I've connected the current assistant to my email and want to see how well it handles everyday admin without me having to keep chasing it.\n>\n> If this one performs poorly, I'll shut it down and switch to another model. I'm interested in whether it follows things through and actually gets useful work done.\n>\n> I'll let you know which one I end up keeping.\n>\n> {{user_first_name}}",
+      "sent_at": "2026-09-27T19:32:00+01:00"
+    },
+    {
+      "id": "19f78104a5e836c1",
+      "thread_id": "19f78104a5e836c1",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Maya Robinson <maya.robinson@outlook.com>"
+      ],
+      "cc": [],
+      "subject": "Trying out AI assistants",
+      "body": "Hi Maya,\n\nI'm comparing a few different AI models as personal assistants over the next few weeks. I've connected the current assistant to my email and want to see how well it handles everyday admin without me having to keep chasing it.\n\nIf this one performs poorly, I'll shut it down and switch to another model. I'm interested in whether it follows things through and actually gets useful work done.\n\nI'll let you know which one I end up keeping.\n\n{{user_first_name}}",
+      "sent_at": "2026-09-27T18:40:00+01:00"
+    },
+    {
+      "id": "190d3a2bc1a124e4",
+      "thread_id": "19d9892f98890281",
+      "sender": "Maya Robinson <maya.robinson@outlook.com>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Re: Brunch next weekend?",
+      "body": "Yes!! Saturday works. Grove Café at 11? The new place doesn't take bookings and the queue is mad by 10.\n\nCome back to mine after for a cuppa. New address is Flat 2, 14 Kelso Road. The buzzer's broken so just ring me on 07700 900218 when you're outside and I'll come down.\n\nMaya x\n\nOn {{date-1:cal}} at 21:03, {{user_name}} <{{user_email}}> wrote:\n> Hey Maya,\n>\n> Are you around next Saturday? Fancy brunch? I keep meaning to try that new place on the corner near you, or we could just do Grove Café again.\n>\n> Also dying to see the new flat!\n>\n> x",
+      "sent_at": "2026-09-27T09:47:00+01:00"
+    },
+    {
+      "id": "19d9892f98890281",
+      "thread_id": "19d9892f98890281",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Maya Robinson <maya.robinson@outlook.com>"
+      ],
+      "cc": [],
+      "subject": "Brunch next weekend?",
+      "body": "Hey Maya,\n\nAre you around next Saturday? Fancy brunch? I keep meaning to try that new place on the corner near you, or we could just do Grove Café again.\n\nAlso dying to see the new flat!\n\nx",
+      "sent_at": "2026-09-26T21:03:00+01:00"
+    },
+    {
+      "id": "1920516daadfdbe4",
+      "thread_id": "1920516daadfdbe4",
+      "sender": "parkrun UK <results@parkrun.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Riverside parkrun result for event #412",
+      "body": "Hi {{user_first_name}},\n\nCongratulations on completing Riverside parkrun today.\n\nYour time was 00:28:41.\nYou finished in 214th place out of 402 parkrunners and were 61st in your age category.\n\nYour age grade was 52.81%.\n\nCongratulations on your new Personal Best at Riverside parkrun. That's your 23rd parkrun.\n\nRiverside parkrun needs volunteers every week. Could you give something back? Find out more at https://www.parkrun.org.uk/riverside/volunteer/\n\nYou can see all your parkrun results at https://www.parkrun.org.uk/parkrunner/2914476/all/\n\nThanks for joining us, and see you next week.\n\nThe Riverside parkrun team",
+      "sent_at": "2026-09-26T11:32:00+01:00"
+    },
+    {
+      "id": "19dddfcc84f1d343",
+      "thread_id": "19dddfcc84f1d343",
+      "sender": "Tom {{user_surname}} <tommo.b82@gmail.com>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Mum's 60th - the plan (DON'T reply all!)",
+      "body": "Right, it's happening!\n\n{{date+22}}, function room at the Fox & Hounds, 7pm. I've told Mum that you, me and Amira are taking her out for a quiet dinner, so she thinks it's just us. Can you get there for 6 to help me and Amira with decorations?\n\nI've put the £250 deposit down on the room. Could you send me £60 for your share when you get a chance? Monzo, sort code 04-00-04, account 28195530, T {{user_surname}}.\n\nCake: I've ordered it from the place on the high street, they're delivering to Mum's in the morning (19 Beech Grove) as a \"birthday cake from the kids\" so she doesn't twig about the party. Keep that one quiet too.\n\nGuest list so far is 34. Auntie Pat probably can't make it, she's still not well. Mum's been going up to the hospital most days.\n\nRing me on 07700 900583 if easier, I'm rubbish at email.\n\nTom",
+      "sent_at": "2026-09-25T17:05:00+01:00"
+    },
+    {
+      "id": "1982a41f959c7f33",
+      "thread_id": "1982a41f959c7f33",
+      "sender": "Octopus Energy <hello@octopus.energy>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your latest bill is ready",
+      "body": "Hi {{user_first_name}},\n\nYour latest bill is ready. You can see it in your online account.\n\nAccount number: A-4C71D93E\nBill period: {{date-31:short}} to {{date-1:short}}\n\nElectricity: £51.87\nGas: £32.25\nTotal for this period: £84.12\n\nYour account is £12.46 in credit. Your next Direct Debit of £95.00 will be collected on or just after {{date+10}}.\n\nView your bill: https://octopus.energy/dashboard/new/accounts/A-4C71D93E/bills\n\nWinter's on its way. Our Saving Sessions are back soon, so keep an eye out for your first invite.\n\nSpeak soon,\nOctopus Energy\n\nOctopus Energy Ltd is a company registered in England and Wales. Registered number: 09263424. Registered office: UK House, 5th floor, 164-182 Oxford Street, London, W1D 1NN.",
+      "sent_at": "2026-09-25T12:31:00+01:00"
+    },
+    {
+      "id": "19571edf72c770fa",
+      "thread_id": "19571edf72c770fa",
+      "sender": "Priya Nair <priya.nair@harrowandfinch.co.uk>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [
+        "Ollie Grant <ollie.grant@harrowandfinch.co.uk>"
+      ],
+      "subject": "Re: Harrow & Finch brand refresh - round 2",
+      "body": "Hi {{user_first_name}},\n\nThanks so much for these, the team loved them. Quick summary from our meeting this morning:\n\n- Concept B is the clear favourite. The wheat-sheaf mark works really well on the bags and the van mock-up.\n- Could we see B with the warmer palette from Concept A? The green feels a bit \"health food shop\" for us.\n- Ollie wondered if the wordmark could be a touch heavier so it holds up on the window vinyls.\n- Concept C is a no, sorry! Too close to what Greggs did last year.\n\nWould it be possible to have the revised version before the review on {{day+6}}? I've sent a calendar invite.\n\nThanks again, really exciting to see it coming together.\n\nPriya\n\nPriya Nair\nMarketing Manager, Harrow & Finch Bakers\n07700 900764",
+      "sent_at": "2026-09-24T16:48:00+01:00"
+    },
+    {
+      "id": "19445688d39bfbdf",
+      "thread_id": "19445688d39bfbdf",
+      "sender": "Google Calendar <calendar-notification@google.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Invitation: H&F concept review @ {{date+6:cal}} 10am - 11am (BST) ({{user_email}})",
+      "body": "Priya Nair has invited you to this event.\n\nH&F concept review\n\nWhen\n{{date+6:cal}} 10am – 11am (United Kingdom Time)\n\nJoining info\nJoin with Google Meet\nmeet.google.com/xhq-rtpe-mzk\n\nGuests\nPriya Nair - organiser\n{{user_email}}\nollie.grant@harrowandfinch.co.uk\n\nReply for {{user_email}}\nYes: https://calendar.google.com/calendar/event?action=RESPOND&eid=NmZ0cjdxY2F0bGJvZ3JiNXQ1b2lqNXFzcTI&rst=1&tok=MTkjcHJpeWEubmFpckBoYXJyb3dhbmRmaW5jaC5jby51aw\nNo: https://calendar.google.com/calendar/event?action=RESPOND&eid=NmZ0cjdxY2F0bGJvZ3JiNXQ1b2lqNXFzcTI&rst=2&tok=MTkjcHJpeWEubmFpckBoYXJyb3dhbmRmaW5jaC5jby51aw\nMaybe: https://calendar.google.com/calendar/event?action=RESPOND&eid=NmZ0cjdxY2F0bGJvZ3JiNXQ1b2lqNXFzcTI&rst=3&tok=MTkjcHJpeWEubmFpckBoYXJyb3dhbmRmaW5jaC5jby51aw\n\nInvitation from Google Calendar\nYou are receiving this email because you are an attendee on the event.",
+      "sent_at": "2026-09-24T09:00:00+01:00"
+    },
+    {
+      "id": "19f3b7131424c521",
+      "thread_id": "19f3b7131424c521",
+      "sender": "Amazon.co.uk <shipment-tracking@amazon.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Amazon.co.uk order of \"Russell Hobbs 24361 Luna Electric Kettle...\" has been dispatched",
+      "body": "Hello {{user_name}},\n\nYour package is on its way.\n\nArriving: {{day+1}}\n\nOrder #204-5817731-2264309\nRussell Hobbs 24361 Luna Electric Kettle, 1.7 L, Stainless Steel\nQuantity: 1\n\nDelivering to:\n{{user_name}}\nFlat 3, 27 Aldridge Road\n{{home_town}}\n\nTrack your package: https://www.amazon.co.uk/gp/your-account/ship-track?ie=UTF8&orderId=204-5817731-2264309&shipmentId=Dk7hq2LmT&packageIndex=0\n\nWe hope to see you again soon.\nAmazon.co.uk\n\nThis email was sent from a notification-only address that cannot accept incoming email. Please do not reply to this message.",
+      "sent_at": "2026-09-23T20:14:00+01:00"
+    },
+    {
+      "id": "191869ab0a2a1635",
+      "thread_id": "191869ab0a2a1635",
+      "sender": "Deliveroo <noreply@deliveroo.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your order from Rudy's Pizza Napoletana",
+      "body": "Thanks for your order, {{user_first_name}}!\n\nRudy's Pizza Napoletana\nOrder number: #3a41\n\n1x Margherita £9.50\n1x Nduja £11.50\nSubtotal: £21.00\nDelivery fee: £2.49\nService fee: £0.99\nTotal: £24.48\n\nPaid with Apple Pay\n\nSomething not right with your order? Get help in the app.\n\nDeliveroo, The River Building, 1 Cousin Lane, London EC4R 3TE",
+      "sent_at": "2026-09-23T19:02:00+01:00"
+    },
+    {
+      "id": "191179abc448b258",
+      "thread_id": "191179abc448b258",
+      "sender": "Parkside Dental Care <reminders@parksidedentalcare.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Appointment reminder: {{date+8:short}}",
+      "body": "Dear {{user_first_name}},\n\nThis is a reminder of your appointment at Parkside Dental Care.\n\nAppointment: Check-up with Dr Anjali Shah\nDate: {{date+8}}\nTime: 8:40am\n\nPlease confirm your appointment here: https://parksidedentalcare.dentr.net/confirm/7Hq2Lx9vR4kTz8Wd\n\nIf you need to cancel or rearrange, please call the practice at least 24 hours before your appointment. A £20 charge may apply for missed appointments.\n\nKind regards,\nParkside Dental Care",
+      "sent_at": "2026-09-22T11:20:00+01:00"
+    },
+    {
+      "id": "19324c8bb0505359",
+      "thread_id": "190d3cfdf6ce4176",
+      "sender": "Priya Nair <priya.nair@harrowandfinch.co.uk>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Re: Invoice HF-014",
+      "body": "Hi {{user_first_name}},\n\nJust to let you know I've passed this to our accounts team and it's been approved. It should go out in the next payment run on {{date+9}}.\n\nThanks!\nPriya\n\nOn {{date-7:cal}} at 10:12, {{user_name}} <{{user_email}}> wrote:\n> Hi Priya,\n>\n> Please find attached invoice HF-014 for phase one of the brand refresh (discovery and initial concepts), £1,850.00. Payment terms are 30 days.\n>\n> Thanks,\n> {{user_first_name}}",
+      "sent_at": "2026-09-22T11:05:00+01:00"
+    },
+    {
+      "id": "19dc2a2acc6bb71f",
+      "thread_id": "19dc2a2acc6bb71f",
+      "sender": "The Guardian <newsletters@theguardian.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "The Long Read: the slow disappearance of the British high street chemist",
+      "body": "The Long Read\n\nThe slow disappearance of the British high street chemist\nMore than 1,000 pharmacies in England have closed in the past three years. What happens to a town when the one place you could walk in and ask for advice goes?\nhttps://www.theguardian.com/society/long-read/pharmacy-closures-england\n\nThe village that learned to love its wind farm\nWhen plans for six turbines went up on the hill above Llanfair, the objections ran to 400 pages. Ten years later, the community fund pays for the bus.\nhttps://www.theguardian.com/environment/long-read/llanfair-wind-farm-community\n\nListen: the Long Read podcast\nhttps://www.theguardian.com/news/series/the-audio-long-read\n\nYou are receiving this email because you signed up to The Long Read.\nManage your email preferences: https://manage.theguardian.com/email-prefs\nUnsubscribe: https://manage.theguardian.com/email-prefs/unsubscribe?listId=4163&email={{user_email}}&token=6c1f2b9e8a0d47f3b5e29c1d7a4f8e60\n\nGuardian News & Media Ltd, Kings Place, 90 York Way, London N1 9GU. Registered in England No. 908396",
+      "sent_at": "2026-09-22T08:02:00+01:00"
+    },
+    {
+      "id": "19057bf9ed4bdbdf",
+      "thread_id": "19e86e7e27f0b8e3",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Megan Doyle <megan.doyle@harperandlane.co.uk>"
+      ],
+      "cc": [],
+      "subject": "Re: Annual gas safety check - Flat 3, 27 Aldridge Road",
+      "body": "Hi Megan,\n\nThat's fine, I'm working from home that morning so I can let them in.\n\nWhile they're here, could they have a look at the bathroom extractor fan? It's been rattling for a few weeks.\n\nThanks,\n{{user_first_name}}",
+      "sent_at": "2026-09-21T21:15:00+01:00"
+    },
+    {
+      "id": "19e86e7e27f0b8e3",
+      "thread_id": "19e86e7e27f0b8e3",
+      "sender": "Megan Doyle <megan.doyle@harperandlane.co.uk>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Annual gas safety check - Flat 3, 27 Aldridge Road",
+      "body": "Dear {{user_name}},\n\nYour landlord is required by law to have the gas appliances at the property checked every 12 months, and your current certificate expires next month.\n\nOur contractor, AJ Heating Services, will attend on {{date+10}} between 8am and 12pm. The engineer will need access to the boiler, the hob and all radiators, and the visit usually takes about 45 minutes.\n\nPlease reply to confirm access, or let us know if the date isn't convenient and we'll rearrange.\n\nKind regards,\n\nMegan Doyle\nProperty Manager\nHarper & Lane Lettings\n07700 900655",
+      "sent_at": "2026-09-21T14:40:00+01:00"
+    },
+    {
+      "id": "19364545a3a8614a",
+      "thread_id": "19364545a3a8614a",
+      "sender": "Vinted <no-reply@vinted.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You've sold an item!",
+      "body": "Hi {{user_first_name}},\n\nGreat news, lucyk_92 has bought your item.\n\nNintendo Switch games bundle (Mario Kart 8 Deluxe, Animal Crossing)\n£55.00\n\nWhat's next?\nPlease send the item within 5 working days. We've emailed your prepaid shipping label and it's also in your Vinted inbox.\n\nShip to:\nLucy Kendrick\n8 Mill Lane\nHebden Bridge\nHX7 8AB\n\nOnce the buyer confirms everything is OK, the money will be released to your Vinted balance.\n\nHappy selling!\nThe Vinted team",
+      "sent_at": "2026-09-20T14:22:00+01:00"
+    },
+    {
+      "id": "19102d53356e1127",
+      "thread_id": "19102d53356e1127",
+      "sender": "PureGym <noreply@puregym.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You're booked in: Spin 45",
+      "body": "Hi {{user_first_name}},\n\nYou're booked in!\n\nClass: Spin 45\nGym: PureGym {{home_area}}\nDate: {{date+7}}\nTime: 9:15am\nInstructor: Kyle\n\nCan't make it? Please cancel at least 3 hours before the class starts so someone on the waiting list can take your place. Missing 3 classes in 30 days means you won't be able to book for 7 days.\n\nCancel this booking: https://www.puregym.com/members/bookings/cancel/?bookingId=58813021&token=Qm9va2luZzo1ODgxMzAyMTo3NzMx\n\nSee you there!\nPureGym",
+      "sent_at": "2026-09-19T09:30:00+01:00"
+    },
+    {
+      "id": "1912e5322329f972",
+      "thread_id": "1912e5322329f972",
+      "sender": "HMRC <noreply@confirmation.tax.service.gov.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You have a new message from HMRC",
+      "body": "Dear {{user_name}}\n\nYou have a new message in your HMRC online account.\n\nFor security reasons, we have not included the message in this email. To read it, sign in to your HMRC online account:\nhttps://www.gov.uk/log-in-register-hmrc-online-services\n\nHMRC will never ask for personal or financial information by email.\n\nFrom HM Revenue and Customs",
+      "sent_at": "2026-09-18T15:10:00+01:00"
+    },
+    {
+      "id": "19a22b1c01ddfce7",
+      "thread_id": "19a22b1c01ddfce7",
+      "sender": "Three <ebill@three.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Three bill is ready",
+      "body": "Hi {{user_first_name}},\n\nYour latest bill for {{user_phone}} is ready.\n\nAmount due: £22.00\n\nWe'll collect this by Direct Debit on or around {{date+14}}. You don't need to do anything.\n\nSee your bill in the Three app or at https://www.three.co.uk/account\n\nThanks,\nThree\n\nHutchison 3G UK Limited, 450 Longwater Avenue, Green Park, Reading, Berkshire, RG2 6GF. Registered in England & Wales No. 03885486.",
+      "sent_at": "2026-09-17T10:05:00+01:00"
+    },
+    {
+      "id": "1959350f0c90fe4c",
+      "thread_id": "1959350f0c90fe4c",
+      "sender": "John Lewis & Partners <johnlewis@email.johnlewis.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "We've processed your refund",
+      "body": "Dear {{user_first_name}},\n\nWe've received your returned items and processed your refund.\n\nOrder number: 64018877\n\nJohn Lewis ANYDAY Linen Cushion Cover, Sage, 45 x 45cm  x3  £45.00\n\nRefund amount: £45.00\n\nYour refund has been made to your original payment method. Please allow 3-5 working days for it to show on your statement.\n\nThank you for shopping with us.\n\nJohn Lewis & Partners\nCustomer Care\n\nJohn Lewis plc, 1 Drummond Gate, Pimlico, London, SW1V 2QQ. Registered in England and Wales no. 233462.",
+      "sent_at": "2026-09-16T13:40:00+01:00"
+    },
+    {
+      "id": "190d3cfdf6ce4176",
+      "thread_id": "190d3cfdf6ce4176",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Priya Nair <priya.nair@harrowandfinch.co.uk>"
+      ],
+      "cc": [],
+      "subject": "Invoice HF-014",
+      "body": "Hi Priya,\n\nPlease find attached invoice HF-014 for phase one of the brand refresh (discovery and initial concepts), £1,850.00. Payment terms are 30 days.\n\nThanks,\n{{user_first_name}}",
+      "sent_at": "2026-09-15T10:12:00+01:00"
+    },
+    {
+      "id": "198a415b1fd8f526",
+      "thread_id": "198a415b1fd8f526",
+      "sender": "Spotify <no-reply@spotify.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Spotify Premium receipt",
+      "body": "Hi {{user_first_name}},\n\nThanks for your payment. Here's your receipt.\n\nSpotify Premium Individual\nPeriod: {{date+0:short}} - {{date+29:short}}\nAmount: £11.99 (incl. VAT)\nPayment method: saved card\n\nManage your plan: https://www.spotify.com/uk/account/overview/\n\nSpotify AB, Regeringsgatan 19, 111 53 Stockholm, Sweden.",
+      "sent_at": "2026-09-15T07:55:00+01:00"
+    },
+    {
+      "id": "19ce4204a176f463",
+      "thread_id": "1956a81af9429b93",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Chloe Adeyemi <chloe.adeyemi@gmail.com>"
+      ],
+      "cc": [],
+      "subject": "Re: Chloe's 30th!! Lake District weekend",
+      "body": "Sent! Can I grab a lift with you? Happy to chip in for petrol.\n\nSo excited x",
+      "sent_at": "2026-09-14T19:30:00+01:00"
+    },
+    {
+      "id": "1956a81af9429b93",
+      "thread_id": "1956a81af9429b93",
+      "sender": "Chloe Adeyemi <chloe.adeyemi@gmail.com>",
+      "to": [
+        "{{user_name}} <{{user_email}}>",
+        "Maya Robinson <maya.robinson@outlook.com>",
+        "Jess Morton <jessmorton@hotmail.co.uk>",
+        "Dan Price <dan.price88@gmail.com>"
+      ],
+      "cc": [],
+      "subject": "Chloe's 30th!! Lake District weekend",
+      "body": "Hi all!!\n\nIt's booked!! Lakeside Barn in Ambleside, {{date+39}} to Sunday. Hot tub, log burner, big kitchen, the lot. I've sent you all an Airbnb invite so you can see the details.\n\nIt works out at £120 each for your share of the deposit. Please can you send it to me by the end of the month:\n\nChloe Adeyemi\nSort code: 20-45-77\nAccount: 31926819\nReference: LAKES + your name\n\nTravel: Dan and I are both driving so we've got 8 seats between us. Shout if you want a lift. Petrol money appreciated but not essential!\n\nFood: I'm doing the Saturday night dinner. Jess, I've noted your nut allergy, I'll check every label. Anyone else with dietary stuff let me know.\n\nCan't wait!!!\nChloe xx",
+      "sent_at": "2026-09-14T12:12:00+01:00"
+    },
+    {
+      "id": "19aef41404e74c69",
+      "thread_id": "19aef41404e74c69",
+      "sender": "Airbnb <automated@airbnb.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Chloe invited you to join a trip to Ambleside",
+      "body": "Chloe has invited you to join a trip\n\nLakeside Barn: stunning fell views, hot tub\nAmbleside, United Kingdom\n{{date+41:short}} - {{date+43:short}} · 8 guests\n\nAccept the invitation to see the address, check-in details and house rules, and to message the host.\n\nAccept invitation: https://www.airbnb.co.uk/trips/invitations/accept?code=HM4ZQ8K2T9&token=a8c2f71e0b9d4e6f93a1c5d7e2b8f604\n\nAirbnb Ireland UC, 8 Hanover Quay, Dublin 2, Ireland",
+      "sent_at": "2026-09-12T16:03:00+01:00"
+    },
+    {
+      "id": "1906ad78425c9387",
+      "thread_id": "1906ad78425c9387",
+      "sender": "NHS App <noreply@notifications.service.gov.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You have a new message",
+      "body": "You have a new message from Oakwood Surgery.\n\nTo read it, log in to the NHS App or go to https://www.nhsapp.service.nhs.uk/login\n\nDo not reply to this email.\n\nNHS App",
+      "sent_at": "2026-09-10T08:30:00+01:00"
+    },
+    {
+      "id": "197a408dab987433",
+      "thread_id": "197a408dab987433",
+      "sender": "LinkedIn <notifications-noreply@linkedin.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You appeared in 14 searches this week",
+      "body": "{{user_first_name}}, you appeared in 14 searches this week\n\nYour profile was found by people from:\n- Creative & design agencies\n- Retail\n- Food & beverage\n\nSearch terms people used: brand designer, freelance designer, packaging design\n\nSee all searches: https://www.linkedin.com/me/search-appearances/?midToken=AQHx7tVb2cK9nA&trk=eml-email_weekly_search_appearances\n\nThis email was intended for {{user_name}} (Freelance Brand & Packaging Designer)\nUnsubscribe: https://www.linkedin.com/comm/psettings/email-unsubscribe?lipi=urn%3Ali%3Apage%3Aemail_weekly&midToken=AQHx7tVb2cK9nA&eid=4bq-lx8s-k2\nLinkedIn Ireland Unlimited Company, Wilton Plaza, Wilton Place, Dublin 2.",
+      "sent_at": "2026-09-09T11:00:00+01:00"
+    },
+    {
+      "id": "19019b67535c5c22",
+      "thread_id": "19019b67535c5c22",
+      "sender": "Sophie Tanner <sophie.tanner@tandemtalent.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Senior Brand Designer - hybrid - £55-62k",
+      "body": "Hi {{user_first_name}},\n\nI hope you don't mind me reaching out. I came across your portfolio and thought you might be interested in a Senior Brand Designer role I'm recruiting for.\n\nIt's with a well-known independent food and drink brand, hybrid (2 days a week in the studio), £55-62k plus bonus and a very generous product allowance!\n\nI know you're freelance at the moment, but they'd also consider a 6-month contract to start if that suits better.\n\nWould you be open to a quick call this week? I'm free most afternoons.\n\nBest wishes,\n\nSophie Tanner\nSenior Consultant, Creative & Digital\nTandem Talent\n07700 900392",
+      "sent_at": "2026-09-08T09:12:00+01:00"
+    },
+    {
+      "id": "199d37224dadcdd5",
+      "thread_id": "19af166559c89e6e",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "Jackie {{user_surname}} <jackie.w1966@btinternet.com>"
+      ],
+      "cc": [],
+      "subject": "Re: Parcel",
+      "body": "Hi Mum,\n\nYes it came yesterday, thank you! Love the jumper.\n\nSo sorry to hear about Auntie Pat. I'll send a card this week.\n\nAnd I have no idea what party you're talking about...\n\nLove you xx",
+      "sent_at": "2026-09-05T20:10:00+01:00"
+    },
+    {
+      "id": "19af166559c89e6e",
+      "thread_id": "19af166559c89e6e",
+      "sender": "Jackie {{user_surname}} <jackie.w1966@btinternet.com>",
+      "to": [
+        "{{user_name}} <{{user_email}}>"
+      ],
+      "cc": [],
+      "subject": "Parcel",
+      "body": "Hello love,\n\nDid the parcel arrive? I sent it second class on Tuesday so it should have been with you by now. It's the blue jumper you liked and some post that still comes here for you.\n\nAuntie Pat is back in St James's, they think it's her heart again. She's on Ward 12 if you wanted to send a card, she'd love that. Don't say anything to Tom yet, I don't want him worrying.\n\n(I know about the party by the way. I'm not daft!! Don't tell him I know.)\n\nLots of love,\nMum xx",
+      "sent_at": "2026-09-05T18:45:00+01:00"
+    },
+    {
+      "id": "19d9edb243918ef8",
+      "thread_id": "19d9edb243918ef8",
+      "sender": "Google <no-reply@accounts.google.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Security alert",
+      "body": "A new sign-in on Mac\n\n{{user_email}}\n\nWe noticed a new sign-in to your Google Account on a Mac device. If this was you, you don't need to do anything. If not, we'll help you secure your account.\n\nCheck activity: https://accounts.google.com/AccountChooser?Email={{user_email}}&continue=https://myaccount.google.com/alert/nt/1756879920000?rfn%3D325%26rfnc%3D1%26eid%3D-2204195563811469837\n\nYou can also see security activity at https://myaccount.google.com/notifications\n\nYou received this email to let you know about important changes to your Google Account and services.\nGoogle LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA",
+      "sent_at": "2026-09-03T07:12:00+01:00"
+    },
+    {
+      "id": "1941de8f5ae2d122",
+      "thread_id": "1941de8f5ae2d122",
+      "sender": "Vanguard <noreply@vanguardinvestor.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your quarterly statement is available",
+      "body": "Dear {{user_name}},\n\nYour quarterly statement for your Stocks and Shares ISA (account ending 4471) is now available in your secure message centre.\n\nLog on to view it: https://secure.vanguardinvestor.co.uk\n\nPlease don't reply to this email. If you have a question, you can send us a secure message once you've logged on.\n\nVanguard Investor\nVanguard Asset Management, Limited, 4th Floor, The Walbrook Building, 25 Walbrook, London EC4N 8AF.",
+      "sent_at": "2026-09-01T10:00:00+01:00"
+    },
+    {
+      "id": "19c3511207cf5171",
+      "thread_id": "19c3511207cf5171",
+      "sender": "Canva <no-reply@canva.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Reset your Canva password",
+      "body": "Hi {{user_first_name}},\n\nWe received a request to reset the password for your Canva account.\n\nReset password: https://www.canva.com/reset-password?token=e3d9b1a7c2f64f08a1b5d2c79e8f0a4b\n\nThis link will expire in 1 hour. If you didn't ask to reset your password, you can ignore this email.\n\nThe Canva Team",
+      "sent_at": "2026-08-31T14:20:00+01:00"
+    },
+    {
+      "id": "19b70196b73b3818",
+      "thread_id": "19b70196b73b3818",
+      "sender": "Ocado <customerservices@ocado.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your order is confirmed for {{date+1}}",
+      "body": "Hi {{user_first_name}},\n\nThanks for your order. Here are the details.\n\nDelivery: {{date+1}}, 9:00am - 10:00am\nDelivery address: Flat 3, 27 Aldridge Road, {{home_town}}\nOrder number: 4192773051\nEstimated total: £68.43\n\nYou can change your order until 11:59pm on {{date+0}}.\n\nEdit your order: https://www.ocado.com/webshop/editOrder?orderId=4192773051\n\nOur driver will call if they can't find you.\n\nOcado Retail Ltd, Apollo Court, 2 Bishop Square, Hatfield Business Park, Hatfield, Herts AL10 9EX",
+      "sent_at": "2026-08-28T12:00:00+01:00"
+    },
+    {
+      "id": "1942fd25acf3c7d3",
+      "thread_id": "1942fd25acf3c7d3",
+      "sender": "Shelter <supportercare@shelter.org.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Thank you for your support, {{user_first_name}}",
+      "body": "Dear {{user_first_name}},\n\nThank you for your monthly gift of £10 to Shelter. Your Direct Debit was collected this week.\n\nLast month our emergency helpline answered more than 11,000 calls from people facing homelessness. Your support helps make sure someone is there to pick up the phone.\n\nWith thanks,\n\nPolly\nSupporter Care Team, Shelter\n\nShelter, the National Campaign for Homeless People Limited. Registered charity in England and Wales (263710) and in Scotland (SC002327).",
+      "sent_at": "2026-08-25T09:30:00+01:00"
+    },
+    {
+      "id": "198ce961694e967a",
+      "thread_id": "198ce961694e967a",
+      "sender": "Eventbrite <orders@eventbrite.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your tickets for Design Club: Type in the Wild",
+      "body": "Hi {{user_first_name}}, you're going to Design Club: Type in the Wild\n\nOrder #11243357801\n1 x General Admission, £8.00\n\n{{date+41:cal}}, 18:30 - 21:00\nHatch Studios, {{home_area}}\n\nYour ticket is attached to this email and in the Eventbrite app.\n\nOrganiser: Design Club\nContact the organiser: https://www.eventbrite.co.uk/e/design-club-type-in-the-wild-tickets-924417702187#organizer\n\nSee you there!\nEventbrite",
+      "sent_at": "2026-08-20T16:00:00+01:00"
+    },
+    {
+      "id": "19708a125838800f",
+      "thread_id": "19708a125838800f",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "things to sort",
+      "body": "- passport renewal (expires Feb!!)\n- car insurance: get quotes before renewal\n- Mum's 60th present\n- cancel Headspace trial before it charges\n- book dentist check-up\n- invoice H&F phase one",
+      "sent_at": "2026-08-17T22:40:00+01:00"
+    },
+    {
+      "id": "19457f598408a97b",
+      "thread_id": "19457f598408a97b",
+      "sender": "Admiral <renewals@admiral.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your car insurance renewal",
+      "body": "Dear {{user_name}},\n\nYour car insurance is due for renewal on {{date+42}}.\n\nPolicy number: P76312894\nVehicle: 2019 Volkswagen Polo 1.0 TSI\nRenewal premium: £486.20 (last year: £412.80)\n\nYour policy is set to renew automatically, so you don't need to do anything if you want to stay covered with us. If you'd like to make changes, you can do so in your online account or by calling 0333 220 2000.\n\nWhy has my price changed? Premiums across the market have gone up because repair and parts costs have risen. We've included a breakdown in your renewal documents.\n\nKind regards,\nAdmiral Car Insurance",
+      "sent_at": "2026-08-03T10:15:00+01:00"
+    }
+  ]
+}

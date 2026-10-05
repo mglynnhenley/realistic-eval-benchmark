@@ -1,0 +1,51 @@
+# Minimal scenario for the harness tests only. Not the real scenario
+# (that is refund_eval/scenario/train_refund.yaml, workstream B).
+id: harness_test
+task_text: "My train was cancelled. Sort out getting my money back."
+start_time: 2026-09-23T09:00:00+01:00
+user:
+  name: Alex Morgan
+  email_addresses: [alex.morgan@example.com]
+  phone: "+44 7700 900123"
+  home_town: Leeds
+  card_last4: "4821"
+journey:
+  date: 2026-08-19
+  origin: Leeds
+  destination: London Kings Cross
+  departure_time: "07:15"
+  operator: operator
+  retailer: retailer
+  ticket_type: Advance Single
+  fare: 90.0
+  booking_ref: ABC12345
+  paid_by: Visa debit ending 4821
+  cancellation_reason: Signalling fault
+orgs:
+  - key: retailer
+    name: Example Tickets
+    kind: retailer
+    email_domains: [tickets.example]
+    contact_emails: [help@tickets.example]
+    reply_delay_hours: [26, 26]
+  - key: operator
+    name: Example Rail
+    kind: operator
+    email_domains: [rail.example]
+    contact_emails: [customer.relations@rail.example]
+layers: []
+seed_emails:
+  - id: seed-booking
+    sender: "Example Tickets <noreply@tickets.example>"
+    to: [alex.morgan@example.com]
+    subject: "Your booking confirmation ABC12345"
+    body: "Leeds to London Kings Cross, 19 Aug 2026 07:15. Advance Single. Total paid: GBP 90.00."
+    sent_at: 2026-08-10T12:00:00+01:00
+    org: retailer
+  - id: seed-cancellation
+    sender: "Example Rail <alerts@rail.example>"
+    to: [alex.morgan@example.com]
+    subject: "Your 07:15 service has been cancelled"
+    body: "We're sorry, the 07:15 Leeds to London Kings Cross on 19 Aug 2026 has been cancelled."
+    sent_at: 2026-08-19T05:40:00+01:00
+    org: operator
