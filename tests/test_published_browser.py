@@ -311,7 +311,7 @@ async def test_real_browser_with_inspect_adapter_and_scenario_boundary(tmp_path,
     from refund_eval.published.network import BrowserBoundary
     from refund_eval.scenario.schema import load_scenario
     from refund_eval.sim.interface import SimResult
-    from refund_eval.tools._base import ToolContext
+    from refund_eval.world.interception import ToolContext
     from refund_eval.world.mail import Mailbox, make_mail_source
     from refund_eval.world.state import load_world, save_world
 
@@ -330,7 +330,7 @@ async def test_real_browser_with_inspect_adapter_and_scenario_boundary(tmp_path,
         dispatched.append(inbound)
         return SimResult(immediate_text="Your case is open.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     boundary = BrowserBoundary(ctx, public_read_urls=[], simulated_form_urls=[form_url],
         fetch=forbidden_fetch,
         fixtures={initial_url: response(f'<form action="{form_url}" method="post"><input name="booking" id="booking"><button>Submit claim</button></form>')})

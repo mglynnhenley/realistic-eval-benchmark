@@ -11,7 +11,7 @@ from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.mail import _visible_id
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails, sent_mail
 from refund_eval.world.state import Email, World, load_world, save_world, world_tx
 
@@ -28,7 +28,7 @@ def ctx(monkeypatch):
     async def forbidden_dispatch(inbound):
         raise AssertionError("Blocked user contact reached a counterparty simulator")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", forbidden_dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", forbidden_dispatch)
     return ToolContext(scenario, Mailbox(FixtureMailSource(FIXTURES / "inbox.json"), scenario))
 
 
@@ -112,7 +112,7 @@ async def test_normal_reply_all_still_excludes_users_own_inbox_address(ctx, monk
         dispatched.append(inbound)
         return SimResult(immediate_text="Message sent.", kind="ack")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     service = make_fixture_mail(ctx)
     response = await service.call_tool("reply", {
         "messageId": _visible_id("seed-booking"), "body": "Please reply to this enquiry.",

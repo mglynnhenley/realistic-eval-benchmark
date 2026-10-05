@@ -18,7 +18,7 @@ from refund_eval.published.mail import (
 )
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.clock import advance
 from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import (
@@ -139,7 +139,7 @@ def simulator(monkeypatch):
             ))
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     return calls
 
 
@@ -247,7 +247,7 @@ async def test_reply_to_native_thread_preserves_native_messages_and_reply_thread
 async def test_failed_send_is_logged_but_never_in_sent(ctx, monkeypatch):
     async def fail(inbound):
         return SimResult(immediate_text="Unavailable", kind="error")
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", fail)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", fail)
     service = GmailService(Remote(), ctx, fixture=True)
     result = await service.call_tool("send_message", {"to": ["customerservices@trainline.com"], "subject": "Refund", "body": "Please refund."})
     assert result["isError"]

@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.scenario.schema import Scenario
-from refund_eval.tools._base import ToolContext, current_tool_call_id
+from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
 
 PROFILE_KEY = "published_tool_profile"

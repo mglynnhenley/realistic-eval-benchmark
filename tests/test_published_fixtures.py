@@ -16,7 +16,7 @@ from refund_eval.published.fixtures import (
 )
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.clock import advance
 from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import (
@@ -140,7 +140,7 @@ async def test_send_search_read_delayed_reply_never_reaches_remote_write(ctx, mo
             )))
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     events = []
     service = make_fixture_mail(ctx, audit=events.append)
     sent = await service.call_tool("send_message", {
@@ -177,7 +177,7 @@ async def test_existing_fixture_thread_reply_joins_original_conversation(ctx, mo
     async def dispatch(inbound):
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     service = make_fixture_mail(ctx)
     found = await service.call_tool("search_threads", {"query": "from:maya.robinson subject:brunch"})
     original = found["structuredContent"]["threads"][0]

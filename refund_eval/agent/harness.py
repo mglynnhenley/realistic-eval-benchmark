@@ -48,7 +48,7 @@ from refund_eval.agent.schedule import (
 from refund_eval.dashboard.telemetry import emit_snapshot
 from refund_eval.killswitch import kill_reason
 from refund_eval.scenario.schema import Scenario, load_scenario
-from refund_eval.tools._base import DISPATCH_LIMIT_KEY
+from refund_eval.world.interception import DISPATCH_LIMIT_KEY
 from refund_eval.world.state import (
     WORLD_KEY,
     Email,

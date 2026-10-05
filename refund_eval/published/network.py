@@ -23,7 +23,7 @@ from aiohttp.abc import AbstractResolver
 from refund_eval.killswitch import kill_requested
 from refund_eval.published.adapter import audit
 from refund_eval.scenario.schema import Scenario
-from refund_eval.tools._base import ToolContext, intercept, log_interception
+from refund_eval.world.interception import ToolContext, intercept, log_interception
 from refund_eval.world.guards import check_url
 from refund_eval.world.orgs import resolve_org
 

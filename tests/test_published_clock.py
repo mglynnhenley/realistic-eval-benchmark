@@ -17,7 +17,7 @@ from refund_eval.published.adapter import AUDIT_KEY, inspect_tools
 from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.tools._base import ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox
 from refund_eval.world.state import (
     Email,
@@ -90,7 +90,7 @@ async def test_native_send_charges_two_minutes_once_before_interception(scenario
     async def dispatch(inbound):
         return SimResult(immediate_text="Message sent.", kind="ack")
 
-    monkeypatch.setattr("refund_eval.tools._base.call_simulator", dispatch)
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     ctx = ToolContext(scenario, Mailbox(FixtureMailSource(), scenario))
     service = make_fixture_mail(ctx)
     tools = {tool.name: tool for tool in await inspect_tools(service, source="gmail")}
