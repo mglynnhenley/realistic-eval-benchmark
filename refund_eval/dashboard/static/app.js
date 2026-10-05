@@ -144,7 +144,7 @@
   const $ = (id) => document.getElementById(id);
   const ACTIVE = new Set(["starting", "running", "grading", "stopping"]);
   const CONTACT_TOOLS = new Set(["send_email", "reply_email", "forward_email", "submit_web_form", "phone_call", "live_chat", "make_payment"]);
-  const state = {config: null, runs: [], selected: null, run: null, snapshot: null,
+  const state = {config: null, defaultsApplied: false, dataModeEdited: false, runs: [], selected: null, run: null, snapshot: null,
     tab: "transcript", listKey: "", detailKey: "", promptKey: "", starting: false, stopping: false,
     listOnline: false, detailOnline: true, listError: "", detailError: "", runRubrics: null,
     activityKey: "", progressKey: "", folds: new Map(), feedScroll: 0};
@@ -302,30 +302,33 @@
     updateControls();
   }
 
+  function selectedDataMode() {
+    return $("run-form").elements.mode.value === "demo" ? "fixture" : $("data-mode").value;
+  }
+
   function publishedDataStatus() {
     const execution = $("execution").value;
     if (execution !== "local") {
-      if ($("run-form").elements.mode.value === "model" && $("tool-profile").value === "published" && $("data-mode").value === "live") {
+      if (selectedDataMode() === "live") {
         return {configured: false, reason: "Live Gmail is available only for runs on this computer. Choose simulated Gmail or change the run location."};
       }
       return state.config?.execution_readiness?.[execution];
     }
     const published = (state.config?.tool_profiles || []).find((profile) => profile.name === "published");
-    return published?.data_modes?.find((mode) => mode.name === $("data-mode").value);
+    return published?.data_modes?.find((mode) => mode.name === selectedDataMode());
   }
 
   function publishedSetupMissing() {
-    const isPublished = $("run-form").elements.mode.value === "model" && $("tool-profile").value === "published";
-    return ($("execution").value !== "local" || isPublished) && !publishedDataStatus()?.configured;
+    return !publishedDataStatus()?.configured;
   }
 
   function showSetupRequirement() {
     const profile = publishedDataStatus();
     const requirement = $("execution").value !== "local"
       ? `${title($("execution").value)} runs the browser inside each trial sandbox.`
-      : $("data-mode").value === "live"
+      : selectedDataMode() === "live"
       ? "Live data needs verified Gmail access and native send/reply tools."
-      : $("data-mode").value === "hybrid"
+      : selectedDataMode() === "hybrid"
         ? "Local hybrid runs need the Docker browser image. Startup verifies keyless Exa; Gmail setup is not required."
         : "Simulated data needs the local browser runtime.";
     $("form-error").textContent = profile
@@ -1185,6 +1188,10 @@
     try {
       const previousDefault = state.config?.default_model;
       state.config = await request("/api/config");
+      if (!state.defaultsApplied && state.config.model_defaults) {
+        if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
+        state.defaultsApplied = true;
+      }
       const scenario = state.config.scenario || {};
       if (scenario.task_text && !state.selected) {
         $("scenario-quote").textContent = `“${scenario.task_text.trim()}”`;
@@ -1447,7 +1454,7 @@
 
   function worldSelectionProblem() {
     return $("run-form").elements.mode.value === "model" && $("world-mode").value === "friction"
-      && $("tool-profile").value === "published" && $("data-mode").value === "live"
+      && selectedDataMode() === "live"
       ? "Realistic friction requires simulated Gmail. Choose Simulated Gmail + live Exa web, simulated inbox and websites, or use the Standard world." : "";
   }
 
@@ -1473,7 +1480,7 @@
   function applyRunPreset() {
     const preset = (state.config?.run_presets || []).find((item) => item.name === $("run-preset").value);
     if (preset) {
-      const fields = {"tool-profile": "tool_profile", "data-mode": "data_mode", "world-mode": "world_mode",
+      const fields = {"data-mode": "data_mode", "world-mode": "world_mode",
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
         "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks"};
       for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
@@ -1612,7 +1619,6 @@
     $("demo-explanation").hidden = isModel;
     $("model").required = isModel;
     $("model-settings").querySelectorAll("input").forEach((input) => { input.disabled = !isModel; });
-    $("tool-profile").disabled = !isModel;
     $("submit-run").textContent = isModel ? "Start paid model trial ↗" : "Start offline demo ↗";
     $("form-error").hidden = true;
     updateProfileStatus();
@@ -1621,33 +1627,29 @@
   function updateProfileStatus() {
     updateBatchSettings();
     const batch = $("execution").value !== "local";
-    const name = $("tool-profile").value;
-    const isPublished = name === "published";
     const isModel = $("run-form").elements.mode.value === "model";
-    const fixture = $("data-mode").value === "fixture";
-    const hybrid = $("data-mode").value === "hybrid";
-    const simulated = !isPublished || fixture || hybrid;
+    const fixture = selectedDataMode() === "fixture";
+    const hybrid = selectedDataMode() === "hybrid";
+    const simulated = fixture || hybrid;
     $("run-preset").disabled = !isModel || !state.config?.run_presets;
-    $("tool-profile").disabled = !isModel;
     $("world-mode-field").hidden = !isModel || !simulated;
     $("world-mode").disabled = !isModel || !simulated;
     $("data-mode").querySelector('[value="live"]').disabled = batch || $("world-mode").value === "friction";
     $("world-mode-help").textContent = $("world-mode").value === "friction"
       ? "A more demanding simulated world, available with simulated Gmail and either live or fixture web data. To use live Gmail, first choose Standard."
       : "Use the standard simulated world, or add realistic friction for a stress test.";
-    $("data-mode-field").hidden = !isPublished;
-    $("data-mode").disabled = !isModel || !isPublished;
-    $("tool-profile").querySelector('[value="published"]').textContent = `Published tools · ${hybrid ? "simulated Gmail + live Exa web" : fixture ? "simulated data" : "live data"}`;
+    $("data-mode").disabled = !isModel;
     const profile = publishedDataStatus();
     const description = fixture
       ? "Simulated inbox and websites. Email uses a local test contract; Gmail authentication is not used."
       : hybrid
         ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; other website writes are blocked and recorded. Keyless Exa access has rate limits. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
         : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.";
-    $("tool-profile-status").textContent = name === "legacy"
-      ? "Legacy custom tools with a fixture inbox. This profile does not use the published Gmail, Exa and Playwright stack."
-      : !profile ? "Checking published tool configuration…"
+    $("tool-profile-status").textContent = !profile ? "Checking browser and tool configuration…"
         : `${description} ${profile.configured ? "Ready — startup checks pending." : "Setup needed."} ${profile.reason}`;
+    $("demo-runtime-status").textContent = batch
+      ? `The scripted demo runs published Gmail and Playwright tools inside each trial sandbox. ${profile?.reason || "Checking run setup…"}`
+      : `The scripted demo uses real Chromium and needs the local Docker browser image. ${profile?.reason || "Checking browser setup…"}`;
     updatePresetHelp();
     updateControls();
   }
@@ -1678,15 +1680,14 @@
       return;
     }
     const mode = $("run-form").elements.mode.value;
-    const payload = {mode, execution: $("execution").value};
+    const payload = {mode, execution: $("execution").value,
+      tool_profile: "published", data_mode: selectedDataMode()};
     if (payload.execution !== "local") {
       payload.trials = Number($("batch-trials").value);
       payload.concurrency = Number($("batch-concurrency").value);
       payload.time_limit = Number($("batch-time-limit").value);
     }
     if (mode === "model") {
-      payload.tool_profile = $("tool-profile").value;
-      payload.data_mode = payload.tool_profile === "published" ? $("data-mode").value : "fixture";
       payload.world_mode = $("world-mode").value;
       payload.model = $("model").value.trim();
       if (payload.execution !== "local") {
@@ -1823,12 +1824,8 @@
     }
   });
   $("run-form").querySelectorAll('[name="mode"]').forEach((input) => input.addEventListener("change", updateMode));
-  $("tool-profile").addEventListener("change", () => {
-    $("form-error").hidden = true;
-    markPresetCustom();
-    updateProfileStatus();
-  });
   $("data-mode").addEventListener("change", () => {
+    state.dataModeEdited = true;
     $("form-error").hidden = true;
     markPresetCustom();
     updateProfileStatus();
