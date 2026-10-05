@@ -14,7 +14,6 @@ import binascii
 import json
 import os
 import re
-import shutil
 import stat
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,12 +21,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from refund_eval.published.mcp import MCPRPCError, MCPStdioClient
+from refund_eval.published.browser_runtimes import (
+    DEFAULT_IMAGE, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, PLAYWRIGHT_MCP_VERSION,
+    RUNTIME_DIR, BrowserBoundaryError, DockerBrowserRuntime, docker_command,
+)
 
-PLAYWRIGHT_MCP_VERSION = "0.0.83"
-DEFAULT_IMAGE = f"refund-eval-playwright:{PLAYWRIGHT_MCP_VERSION}"
-RUNTIME_DIR = Path(__file__).with_name("browser_runtime")
-MAX_REQUEST_BYTES = 3_000_000
-MAX_RESPONSE_BYTES = 8_000_000
 REQUEST_FILE = re.compile(r"^[a-f0-9-]{36}\.json$")
 
 # Select upstream tools, never rewrite their descriptors or parameter schemas.
@@ -40,27 +38,6 @@ BROWSER_TOOLS = frozenset({
 })
 
 RequestHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
-
-
-class BrowserBoundaryError(RuntimeError):
-    """The browser boundary failed; continuing the trial is not supported."""
-
-
-def docker_command(
-    spool_dir: Path, container_name: str, *, image: str = DEFAULT_IMAGE,
-    docker_binary: str = "docker", docker_host: str | None = None,
-) -> list[str]:
-    """No host networking, credentials, Docker socket, shared profile or host cwd."""
-    return [docker_binary, *(["--host", docker_host] if docker_host else []),
-        "run", "--rm", "-i", "--name", container_name,
-        "--network", "none", "--dns", "127.0.0.1", "--read-only",
-        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--pids-limit", "256", "--memory", "1g", "--cpus", "2",
-        "--shm-size", "256m", "--user", f"{os.getuid()}:{os.getgid()}",
-        "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
-        "--mount", f"type=bind,source={spool_dir},target=/exchange",
-        image,
-    ]
 
 
 class PublishedBrowserService:
@@ -88,7 +65,6 @@ class PublishedBrowserService:
         self.timeout = timeout
         self.request_timeout = request_timeout
         self._audit_callback = audit
-        self.container_name = f"refund-browser-{uuid.uuid4().hex}"
         # Evidence is outside the mount: the browser cannot overwrite its audit.
         self.audit_path = self.spool_dir.parent / f"{self.spool_dir.name}.network.jsonl"
         self.security_manifest: dict[str, Any] = {"verified": False, "mode": "docker-network-none"}
@@ -102,8 +78,9 @@ class PublishedBrowserService:
         self._closed = False
         self._sequence = 0
         self._active_request_ids: list[str] = []
-        self._docker_binary = shutil.which("docker") or "docker"
-        self._docker_host: str | None = None
+        self._runtime = DockerBrowserRuntime(self.spool_dir, image=image, timeout=timeout,
+                                             audit_path=self.audit_path)
+        self.container_name = self._runtime.container_name
 
     async def _ensure_started(self) -> None:
         async with self._start_lock:
@@ -111,8 +88,6 @@ class PublishedBrowserService:
                 raise BrowserBoundaryError("Browser service is closed")
             if self._client is not None:
                 return
-            if shutil.which(self._docker_binary) is None:
-                raise BrowserBoundaryError("Docker is required for the published browser")
             # A caller must choose a fresh directory, so two trials cannot share
             # outstanding traffic, browser responses, or audit records.
             self.spool_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -122,32 +97,10 @@ class PublishedBrowserService:
             (self.spool_dir / "responses").mkdir(mode=0o700)
             self._audit({"event": "browser_start", "image": self.image, "network": "none"})
             self._server_task = asyncio.create_task(self._serve_requests())
-            # MCP children have an empty HOME. Resolve only the active daemon
-            # endpoint now, then pass it explicitly, without docker auth/config.
-            process = await asyncio.create_subprocess_exec(
-                self._docker_binary, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10)
-            except BaseException:
-                process.kill()
-                await process.wait()
-                await self.aclose()
-                raise
-            if process.returncode != 0:
-                await self.aclose()
-                raise BrowserBoundaryError("Cannot resolve the active Docker daemon")
-            self._docker_host = os.environ.get("DOCKER_HOST") or stdout.decode().strip()
-            self._client = MCPStdioClient(
-                docker_command(self.spool_dir, self.container_name, image=self.image,
-                               docker_binary=self._docker_binary, docker_host=self._docker_host),
-                timeout=self.timeout,
-                max_response_bytes=MAX_RESPONSE_BYTES * 2,
-            )
-            try:
-                await self._client.initialize()
-                await self._verify_isolation()
+                self._client = await self._runtime.start()
+                self.security_manifest = await self._runtime.verify_isolation()
+                self._audit({"event": "browser_isolation_verified", "manifest": self.security_manifest})
             except BaseException:
                 await self.aclose()
                 raise
@@ -210,50 +163,6 @@ class PublishedBrowserService:
                 self._audit({"event": "browser_tool_end", **call, "completed": completed,
                              "request_ids": list(self._active_request_ids),
                              "boundary_verified": self.security_manifest["verified"]})
-
-    async def _docker_output(self, *arguments: str) -> bytes:
-        process = await asyncio.create_subprocess_exec(
-            self._docker_binary, *(["--host", self._docker_host] if self._docker_host else []),
-            *arguments, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
-        except BaseException:
-            process.kill()
-            await process.wait()
-            raise
-        if process.returncode:
-            raise BrowserBoundaryError(f"Docker boundary verification failed: {stderr.decode()[:500]}")
-        return stdout
-
-    async def _verify_isolation(self) -> None:
-        inspected = json.loads(await self._docker_output("inspect", self.container_name))[0]
-        host = inspected["HostConfig"]
-        mounts = inspected.get("Mounts", [])
-        valid_mount = (len(mounts) == 1 and mounts[0].get("Type") == "bind"
-                       and mounts[0].get("Source") == str(self.spool_dir)
-                       and mounts[0].get("Destination") == "/exchange")
-        if (host.get("NetworkMode") != "none" or not host.get("ReadonlyRootfs")
-                or host.get("Privileged") or "ALL" not in host.get("CapDrop", [])
-                or host.get("Dns") != ["127.0.0.1"] or not valid_mount):
-            raise BrowserBoundaryError("Browser container isolation does not match its required policy")
-        runtime = json.loads(await self._docker_output("exec", self.container_name, "node", "-e",
-            "console.log(JSON.stringify({interfaces:require('node:os').networkInterfaces(),"
-            "version:require('/opt/browser/node_modules/@playwright/mcp/package.json').version}))"))
-        interfaces = runtime["interfaces"]
-        if runtime.get("version") != PLAYWRIGHT_MCP_VERSION:
-            raise BrowserBoundaryError("Browser image contains an unexpected Playwright MCP version")
-        if any(not item.get("internal") for values in interfaces.values() for item in values):
-            raise BrowserBoundaryError("Browser container has a non-loopback network interface")
-        self.security_manifest = {
-            "verified": True, "mode": "docker-network-none", "network_mode": host["NetworkMode"],
-            "readonly_rootfs": host["ReadonlyRootfs"], "privileged": host["Privileged"],
-            "cap_drop": host["CapDrop"], "dns": host["Dns"],
-            "image_id": inspected["Image"], "container_id": inspected["Id"],
-            "network_interfaces": sorted(interfaces), "audit_path": str(self.audit_path),
-            "package": "@playwright/mcp", "package_version": PLAYWRIGHT_MCP_VERSION,
-        }
-        self._audit({"event": "browser_isolation_verified", "manifest": self.security_manifest})
 
     def _raise_if_failed(self) -> None:
         if self._fatal is not None:
@@ -362,22 +271,7 @@ class PublishedBrowserService:
             if self._client is not None:
                 await self._client.aclose()
         finally:
-            await self._remove_container()
-
-    async def _remove_container(self) -> None:
-        # Reaping docker's client does not guarantee the container stopped.
-        # Remove by our unpredictable per-trial name; never stop other workloads.
-        if shutil.which("docker"):
-            process = await asyncio.create_subprocess_exec(
-                self._docker_binary, *(["--host", self._docker_host] if self._docker_host else []),
-                "rm", "--force", self.container_name,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                await asyncio.wait_for(process.wait(), timeout=10)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+            await self._runtime.aclose()
 
     async def __aenter__(self) -> Self:
         await self._ensure_started()
