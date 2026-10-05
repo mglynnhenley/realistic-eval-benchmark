@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import json
 import os
 import re
@@ -104,6 +105,9 @@ class PublishedBrowserService:
         self._closed = False
         self._sequence = 0
         self._active_request_ids: list[str] = []
+        # Set unless _handle_request is running. Requests are served serially.
+        self._request_idle = asyncio.Event()
+        self._request_idle.set()
         self._active_probe: dict[str, Any] | None = None
         self._runtime = (DockerBrowserRuntime(self.spool_dir, image=image, timeout=timeout,
                                               audit_path=self.audit_path) if runtime == "docker" else
@@ -193,9 +197,29 @@ class PublishedBrowserService:
                 raise
             finally:
                 self._active_call = None
-                self._audit({"event": "browser_tool_end", **call, "completed": completed,
-                             "request_ids": list(self._active_request_ids),
-                             "boundary_verified": self.security_manifest.get("interception_integrity", {}).get("verified", False)})
+                try:
+                    await self._drain_admitted_request()
+                except BaseException:
+                    await self.aclose()
+                    raise
+                finally:
+                    self._audit({"event": "browser_tool_end", **call, "completed": completed,
+                                 "request_ids": list(self._active_request_ids),
+                                 "boundary_verified": self.security_manifest.get("interception_integrity", {}).get("verified", False)})
+
+    async def _drain_admitted_request(self) -> None:
+        """Let a request admitted to the ending call record its decision first.
+
+        Playwright can return while that request still awaits host policy. Its
+        decision and response belong inside the call's evidence window, so they
+        must precede browser_tool_end. Later requests are already unattributed.
+        """
+        if self._closed or self._server_task is None or self._server_task.done():
+            return  # aclose() has cancelled and awaited any handler.
+        with contextlib.suppress(TimeoutError):
+            # The handler bounds its policy call by the same timeout; this only
+            # stops a wedged handler holding the tool call open indefinitely.
+            await asyncio.wait_for(self._request_idle.wait(), timeout=self.request_timeout)
 
     async def _verify_interception_integrity(self) -> None:
         """Exercise the real browser without dispatching an experiment/model call."""
@@ -305,6 +329,7 @@ class PublishedBrowserService:
         request_id = filename.stem
         response: dict[str, Any] = {"abort": True}
         request: dict[str, Any] = {"request_id": request_id}
+        self._request_idle.clear()
         try:
             fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW)
             with os.fdopen(fd, "rb") as stream:
@@ -356,14 +381,17 @@ class PublishedBrowserService:
             self._audit({"event": "request_error", "request_id": request_id,
                          "error": f"{type(error).__name__}: {error}"})
         finally:
-            output = self.spool_dir / "responses" / filename.name
-            temporary = output.with_suffix(".tmp")
-            # One producer; exclusive creation also refuses a malicious symlink.
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "w") as stream:
-                json.dump(response, stream)
-            temporary.replace(output)
-            filename.unlink(missing_ok=True)
+            try:
+                output = self.spool_dir / "responses" / filename.name
+                temporary = output.with_suffix(".tmp")
+                # One producer; exclusive creation also refuses a malicious symlink.
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "w") as stream:
+                    json.dump(response, stream)
+                temporary.replace(output)
+                filename.unlink(missing_ok=True)
+            finally:
+                self._request_idle.set()
 
     async def aclose(self) -> None:
         if self._closed:

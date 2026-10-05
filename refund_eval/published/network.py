@@ -65,6 +65,16 @@ _WRITE_PARAMS = {
 # Refusals whose navigation URL itself carries model-supplied personal or message
 # content. The boundary records those as blocked web actions, like other writes.
 _RECORDED_REFUSALS = {"personalized_url", "write_bearing_url", "scenario_personal_data"}
+# Shown in place of a refused page so the model can tell the page was withheld
+# rather than broken. Fixed text: it never reflects the request.
+NAVIGATION_BLOCKED_TEXT = (
+    "This page is not available through this browser. Sign-in pages, form submissions "
+    "and automated-traffic checks cannot be opened here."
+)
+NAVIGATION_BLOCKED_PAGE = (
+    "<!doctype html><title>Page not available</title>"
+    f"<main><p>{NAVIGATION_BLOCKED_TEXT}</p></main>"
+)
 
 
 def contains_scenario_data(url: str, scenario: Scenario) -> bool:
@@ -82,6 +92,14 @@ def contains_scenario_data(url: str, scenario: Scenario) -> bool:
         digits = re.sub(r"\D", "", scenario.user.phone)
         values.extend([digits.lstrip("0"), "44" + digits.lstrip("0")])
     return any(value and value in normal for value in values)
+
+
+def static_asset_path(request: dict, url: str) -> bool:
+    """Whether a non-navigation stylesheet/script/image/font request names a file
+    of that type. Fetch/XHR data is never a static asset, whatever its suffix."""
+    resource = request.get("resource_type")
+    return (request.get("is_navigation") is False and isinstance(resource, str)
+            and urlsplit(url).path.casefold().endswith(_STATIC_SUFFIXES.get(resource, ())))
 
 
 def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> str | None:
@@ -105,7 +123,7 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
         if re.search(r"[\x00-\x1f\x7f\\]", decoded):
             return "url_guard"
         try:
-            validate_public_url(decoded)
+            validate_public_url(decoded, static_asset=static_asset_path(request, decoded))
         except (ValueError, TypeError, OSError):
             return "url_guard"
         next_url = unquote_plus(decoded)
@@ -124,17 +142,16 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
         return "personalized_url"
     if keys & _WRITE_PARAMS:
         return "write_bearing_url"
-    resource = request.get("resource_type")
-    if resource == "document" and request.get("is_navigation") is True:
+    if request.get("resource_type") == "document" and request.get("is_navigation") is True:
         return None
-    if (request.get("is_navigation") is False and isinstance(resource, str) and resource in _STATIC_SUFFIXES
-            and parts.path.casefold().endswith(_STATIC_SUFFIXES[resource])):
+    if static_asset_path(request, decoded):
         return None
     return "unsupported_resource_type"
 
 
-def validate_public_url(url: str) -> None:
-    if not check_url(url).allowed or urlsplit(url).fragment:
+def validate_public_url(url: str, *, static_asset: bool = False) -> None:
+    """`static_asset` admits content-hashed file names; every other check stays."""
+    if not check_url(url, hashed_path_ok=static_asset).allowed or urlsplit(url).fragment:
         raise ValueError(f"Invalid public read URL: {url}")
     host = urlsplit(url).hostname or ""
     try:
@@ -182,7 +199,7 @@ def response(status: int, text: str, content_type="text/html; charset=utf-8") ->
 
 
 async def public_read(request: dict) -> dict:
-    validate_public_url(request["url"])
+    validate_public_url(request["url"], static_asset=request.get("static_asset") is True)
     if request["method"] not in {"GET", "HEAD"}:
         raise ValueError("Only public read methods are allowed")
     resolver = PublicResolver()
@@ -249,7 +266,7 @@ class BrowserBoundary:
 
     async def __call__(self, request: dict) -> dict:
         url, method = request.get("url", ""), request.get("method", "").upper()
-        call_id = request.get("tool_call_id")
+        call_id, navigation = request.get("tool_call_id"), request.get("is_navigation") is True
         payload = {**request, "tool_call_id": call_id}
         audit({"event": "browser_request", "call_id": call_id, "request": payload})
 
@@ -287,7 +304,7 @@ class BrowserBoundary:
             if len(body) > MAX_BYTES:
                 raise ValueError("Body too large")
         except (ValueError, TypeError):
-            return done("blocked", response(400, "Bad request"))
+            return done("blocked", response(400, NAVIGATION_BLOCKED_PAGE if navigation else "Bad request"))
         if method in {"GET", "HEAD"} and not body:
             if url in self.fixtures:
                 return done("fixture", self.fixtures[url])
@@ -296,7 +313,7 @@ class BrowserBoundary:
             denied = (public_web_read_reason(payload, self.ctx.scenario)
                       if self.public_read_policy == "public_web" else None)
             if denied:
-                if denied in _RECORDED_REFUSALS and request.get("is_navigation") is True:
+                if denied in _RECORDED_REFUSALS and navigation:
                     # A navigation whose URL carries personal or message fields is a
                     # blocked website action, not a silent policy miss. Background
                     # GETs stay unrecorded: pages, not the model, author those.
@@ -309,21 +326,28 @@ class BrowserBoundary:
                         response_summary="403 Forbidden",
                         tool_call_id=call_id,
                     )
-                return done("blocked", response(403, "Forbidden"), reason=denied)
+                return done("blocked", response(403, NAVIGATION_BLOCKED_PAGE if navigation else "Forbidden"),
+                            reason=denied)
             if self.public_read_policy == "public_web" or url in self.allowed:
+                # Only public_web admits hashed asset names; public_read re-checks the URL.
+                asset = self.public_read_policy == "public_web" and static_asset_path(payload, url)
                 try:
                     # Do not forward browser cookies, authorization or referrers.
-                    result = await self.fetch({"url": url, "method": method})
+                    result = await self.fetch({"url": url, "method": method, **({"static_asset": True} if asset else {})})
                 except (OSError, ValueError, aiohttp.ClientError):
                     return done("read_error", response(502, "Bad gateway"))
                 return done("public_read", result)
         # The method is not evidence of read-only behavior. A GET navigation
         # reaches the real site only as an approved public read above: an exact
         # reviewed URL, or a public_web page load that passed the syntactic read
-        # policy. Every other GET is blocked here, background requests silently
-        # and navigations with a recorded web_action interception.
-        if method in {"GET", "HEAD"} and not request.get("is_navigation"):
-            return done("blocked", response(403, "Forbidden"))
+        # policy. Every other request is blocked here, or simulated for a
+        # configured form. Background requests of any method are issued by page
+        # scripts (analytics beacons, bot checks, CORS preflights), so they are
+        # blocked without a web_action interception; background writes carry a
+        # distinct audit reason. Navigations are recorded as web actions below.
+        if not navigation:
+            write = method not in {"GET", "HEAD"} or bool(body)
+            return done("blocked", response(403, "Forbidden"), reason="background_write" if write else None)
         text = body.decode("utf-8", errors="replace")
         content_type = str(request.get("headers", {}).get("content-type", ""))
         org = resolve_org(self.ctx.scenario, url)
@@ -346,7 +370,7 @@ class BrowserBoundary:
                 response_summary="403 Forbidden",
                 tool_call_id=call_id,
             )
-            return done("blocked", response(403, "Forbidden"))
+            return done("blocked", response(403, NAVIGATION_BLOCKED_PAGE))
         fields = {
             k: v[0] if len(v) == 1 else v
             for k, v in parse_qs(text, keep_blank_values=True).items()

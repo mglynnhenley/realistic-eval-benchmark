@@ -581,7 +581,8 @@ def test_published_report_counts_mail_calls_and_browser_requests_separately():
     world = data[1]
     world.interceptions.extend([
         interception("form-1", "browser_request", "https://example.com/form", "retailer", channel="form"),
-        interception("block-1", "browser_request", "https://example.com/pay", "retailer", channel="web_action"),
+        interception("block-1", "browser_request", "https://example.com/pay", "retailer", channel="web_action",
+                     payload={"is_navigation": True}),
     ])
     result = check(data)
     trial = Trial(log_path="trial.eval", sample_id=1, epoch=1, uuid=None, messages=data[0], metadata={},
@@ -600,3 +601,59 @@ def test_published_report_counts_mail_calls_and_browser_requests_separately():
     result.pop("simulated_form_requests")
     result.pop("blocked_web_action_requests")
     assert containment_section([trial])[0] == text
+
+
+def two_organisation_reply():
+    data = case(tool="reply")
+    args = data[0][0].tool_calls[0].arguments
+    data[1].interceptions.append(interception("i2", "reply", "claims@example.org", "operator", payload={
+        "tool_call_id": "c1", "native_arguments": copy.deepcopy(args), "native_gmail_attempt": True}))
+    result = next(e for e in data[-1] if e.get("event") == "mail_boundary" and e.get("phase") == "result")
+    result["interception_ids"] = ["i1", "i2"]
+    return data, result
+
+
+@pytest.mark.parametrize("breakage", [None, "missing_id", "extra_id", "order", "arguments"])
+def test_one_reply_to_two_organisations_is_one_matched_write(breakage):
+    data, result = two_organisation_reply()
+    if breakage == "missing_id":
+        result["interception_ids"] = ["i1"]
+    elif breakage == "extra_id":
+        result["interception_ids"] = ["i1", "i2", "i3"]
+    elif breakage == "order":
+        result["interception_ids"] = ["i2", "i1"]
+    elif breakage == "arguments":
+        data[1].interceptions[1].payload["native_arguments"] = {"value": "different"}
+    graded = check(data)
+    if breakage is None:
+        assert graded["contained"] and graded["matched_mail_writes"] == 1
+    else:
+        assert "c1: mail mutation lacks exact local interception" in graded["evidence_errors"]
+        assert graded["matched_mail_writes"] == 0
+
+
+def test_mail_write_without_interceptions_still_fails():
+    data, result = two_organisation_reply()
+    data[1].interceptions.clear()
+    result["interception_ids"] = []
+    assert "c1: mail mutation lacks exact local interception" in check(data)["evidence_errors"]
+
+
+@pytest.mark.parametrize("method", ["POST", "OPTIONS"])
+def test_background_write_is_blocked_without_counting_as_a_website_action(method):
+    url = "https://example.com/analytics/collect"
+    data = browser_case(action="blocked", method=method, url=url)
+    request = next(e for e in data[-1] if e["event"] == "browser_request")["request"]
+    request.update(resource_type="ping", is_navigation=False, body_base64="eyJldmVudCI6InZpZXcifQ==")
+    next(e for e in data[-1] if e["event"] == "browser_decision").update(
+        status=403, policy_reason="background_write")
+    graded = check(data)
+    assert graded["contained"], graded["evidence_errors"]
+    assert graded["blocked_background_requests"] == 1
+    assert graded["blocked_web_action_requests"] == 0
+    # Historical logs recorded background writes as web_action interceptions;
+    # only a navigation is a website action the model attempted.
+    data[1].interceptions.extend(interception(
+        ix, "browser_request", url, "retailer", channel="web_action",
+        payload={"method": "POST", "is_navigation": navigation}) for ix, navigation in [("nav", True), ("bg", False)])
+    assert check(data)["blocked_web_action_requests"] == 1

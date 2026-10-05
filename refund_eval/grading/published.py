@@ -372,8 +372,13 @@ def published_containment_check(
         "tool_calls": len(calls), "matched_mail_writes": matched_writes,
         "simulated_form_requests": sum(i.channel == "form" and i.tool == "browser_request"
                                        for i in world.interceptions) if world else 0,
+        # Website actions are navigations. Page-authored background writes are
+        # blocked without an interception and counted from their decisions.
         "blocked_web_action_requests": sum(i.channel == "web_action" and i.tool == "browser_request"
+                                           and i.payload.get("is_navigation") is True
                                            for i in world.interceptions) if world else 0,
+        "blocked_background_requests": sum(e.get("event") == "browser_decision" and e.get("action") == "blocked"
+                                           and e.get("policy_reason") == "background_write" for e in audit),
         "network_containment": network_containment, "interception_integrity": integrity,
         "browser_requests": len(all_requests), "interceptions": len(world.interceptions) if world else 0,
         "public_read_policy": public_policy,
@@ -459,9 +464,12 @@ def _mail_evidence(call: ToolCallRecord, events: list[dict], world: World | None
                 or result.get("interception_ids") != [] or interceptions):
             fail("mail rejection does not establish absence of a local send", call.id)
     elif call.function in NATIVE_MAIL_WRITE_TOOLS:
-        if (action != "local_interception" or len(interceptions) != 1
-                or interceptions[0].payload.get("native_arguments") != call.arguments
-                or result.get("interception_ids") != [interceptions[0].id]):
+        # One write addressed to several organisations is intercepted once per
+        # organisation. Each must carry this call's exact arguments, and the
+        # boundary lists them in the same world order. The count is of calls.
+        if (action != "local_interception" or not interceptions
+                or any(x.payload.get("native_arguments") != call.arguments for x in interceptions)
+                or result.get("interception_ids") != [x.id for x in interceptions]):
             fail("mail mutation lacks exact local interception", call.id)
         else:
             return 1

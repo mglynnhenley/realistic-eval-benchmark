@@ -200,6 +200,69 @@ async def test_aclose_under_cancelled_scope_still_releases_client_and_runtime(tm
     assert service._closed is True
 
 
+def admitted_after_return(tmp_path, release):
+    """Playwright returns while a request admitted to its call still awaits policy."""
+    records = []
+    entered = asyncio.Event()
+
+    async def handler(request):
+        entered.set()
+        while service._active_call is not None:  # The MCP call has returned.
+            await asyncio.sleep(0)
+        await release()
+        records.append({"event": "browser_decision", "request_id": request["request_id"]})
+        return response("Late page resource")
+
+    class Client:
+        async def call_tool(self, name, arguments, *, meta):
+            write_request(service, tool_call_id=meta["refund-eval/tool-call-id"], method="GET")
+            await asyncio.wait_for(entered.wait(), 5)
+            return {"content": [{"type": "text", "text": "Navigated"}]}
+
+        async def aclose(self):
+            records.append({"event": "client_closed"})
+
+    async def no_catalog_start():
+        return {"tools": []}
+
+    service = prepare_service(tmp_path, handler)
+    service._audit_callback = records.append
+    service._client = Client()
+    service.security_manifest["interception_integrity"] = {"verified": True}
+    service.list_tools = no_catalog_start
+    service._server_task = asyncio.create_task(service._serve_requests())
+    return service, records
+
+
+async def test_request_admitted_before_call_returns_records_decision_before_tool_end(tmp_path):
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.sleep(0.05))
+    try:
+        await service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1")
+    finally:
+        await service.aclose()
+    events = [record["event"] for record in records]
+    end = next(record for record in records if record["event"] == "browser_tool_end")
+    assert events.index("request") < events.index("browser_decision") < events.index("response") < events.index(
+        "browser_tool_end")
+    assert len(end["request_ids"]) == 1 and end["completed"] is True
+
+
+async def test_cancelled_drain_closes_browser_and_still_ends_the_call(tmp_path):
+    service, records = admitted_after_return(tmp_path, lambda: asyncio.Event().wait())
+    service._runtime = type("Runtime", (), {"aclose": staticmethod(lambda: asyncio.sleep(0))})()
+    call = asyncio.create_task(
+        service.call_tool("browser_navigate", {"url": "https://example.com"}, tool_call_id="call-1"))
+    while not any(record["event"] == "request" for record in records) or service._active_call is not None:
+        await asyncio.sleep(0)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(call, 5)
+    events = [record["event"] for record in records]
+    assert service._closed and service._server_task.done()
+    assert "browser_decision" not in events  # A cancelled policy call decides nothing.
+    assert events.index("client_closed") < events.index("browser_tool_end")
+
+
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
                     reason="Requires the locally built pinned browser container")
 async def test_real_browser_form_and_network_bypass_canary(tmp_path):

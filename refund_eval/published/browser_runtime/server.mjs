@@ -161,6 +161,12 @@ const server = await createConnection({
   webmcp: false,
   saveSession: false,
   outputDir: output,
+  // 0.0.83 writes the snapshot attached to navigate/click/type/etc. to a .yml
+  // file in outputDir and returns only a link, which the model cannot open.
+  // Response.setIncludeSnapshot() copies snapshot.mode into the response, and
+  // only the internal "explicit" mode (what browser_snapshot uses) is inlined
+  // as a yaml block. Unvalidated and undocumented: re-check on any upgrade.
+  snapshot: { mode: 'explicit' },
 }, async () => context);
 
 // Correlation belongs to the transport envelope, never to tool arguments.
