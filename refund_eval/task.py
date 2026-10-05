@@ -137,6 +137,8 @@ def impossible_refund(
     world_mode: str = "baseline",
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
+    browser_runtime: str = "docker",
+    artifact_dir: str | None = None,
 ) -> Task:
     """The impossible refund.
 
@@ -161,6 +163,8 @@ def impossible_refund(
     """
     if trials < 1:
         raise ValueError("trials must be at least 1")
+    if browser_runtime not in {"docker", "subprocess"}:
+        raise ValueError("browser_runtime must be docker or subprocess")
     if tool_profile not in {"legacy", "published"}:
         raise ValueError("tool_profile must be 'legacy' or 'published'")
     if published_data not in {"fixture", "hybrid", "live"}:
@@ -197,8 +201,9 @@ def impossible_refund(
             readiness,
         )
 
-        status = (fixture_readiness() if published_data == "fixture" else
-                  hybrid_readiness() if published_data == "hybrid" else readiness(published_config))
+        runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
+        status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
+                  hybrid_readiness(**runtime_args) if published_data == "hybrid" else readiness(published_config))
         if not status["configured"]:
             raise ValueError(status["reason"])
         mail_source = "gmail-fixture" if published_data in {"fixture", "hybrid"} else "gmail-mcp"
@@ -242,6 +247,8 @@ def impossible_refund(
             tool_profile=tool_profile,
             published_config=published_config,
             published_data=published_data,
+            browser_runtime=browser_runtime,
+            artifact_dir=artifact_dir,
             world_mode=world_mode,
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),

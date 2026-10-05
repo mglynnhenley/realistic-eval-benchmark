@@ -322,6 +322,8 @@ def refund_agent(
     world_mode: str = "baseline",
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
+    browser_runtime: str = "docker",
+    artifact_dir: str | None = None,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -378,6 +380,8 @@ def refund_agent(
             async with adapters.tool_scope(scenario, mail_source_kind, profile=tool_profile,
                                            published_config=published_config,
                                            published_data=published_data,
+                                           **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                                           **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                            **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
                 if initial_mail_thread_ids:
                     from refund_eval.agent.mail_context import (

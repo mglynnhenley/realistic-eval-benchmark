@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -18,13 +19,15 @@ from inspect_ai.util import store
 from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
+from refund_eval.published.browser_runtimes import (
+    DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
+)
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
 
 PROFILE_KEY = "published_tool_profile"
 DEFAULT_CONFIG = ".secrets/published-tools.json"
-DEFAULT_BROWSER_IMAGE = "refund-eval-playwright:0.0.83"
 
 
 def validate_fixture_path(fixture_path: str | None, *, data_mode: str) -> str | None:
@@ -92,14 +95,20 @@ def readiness(path: str | None = None) -> dict:
     }
 
 
-def fixture_readiness() -> dict:
+def fixture_readiness(*, browser_runtime: str = "docker") -> dict:
     """Simulated data needs only the local, network-isolated browser runtime."""
+    if browser_runtime == "subprocess":
+        from refund_eval.published.browser_runtimes import subprocess_readiness
+
+        return subprocess_readiness()
+    if browser_runtime != "docker":
+        return {"configured": False, "reason": f"Unknown browser runtime: {browser_runtime}"}
     return dict(_fixture_readiness(int(time.monotonic() // 5)))
 
 
-def hybrid_readiness() -> dict:
+def hybrid_readiness(*, browser_runtime: str = "docker") -> dict:
     """Check only the local browser; no Gmail config or live requests are needed."""
-    status = fixture_readiness()
+    status = fixture_readiness(**({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}))
     if status["configured"]:
         status["reason"] = (
             "Simulated inbox and public web browser are ready; no Gmail connection is needed. "
@@ -160,7 +169,8 @@ def search_policy(scenario: Scenario):
 @asynccontextmanager
 async def published_tools(
     scenario: Scenario, *, config_path: str | None = None, data_mode: str = "live",
-    fixture_path: str | None = None,
+    fixture_path: str | None = None, browser_runtime: str = "docker",
+    artifact_dir: str | None = None,
 ):
     from refund_eval.published.browser import PublishedBrowserService
     from refund_eval.published.mail import GMAIL_ENDPOINT, GmailService
@@ -171,10 +181,14 @@ async def published_tools(
     if data_mode not in {"fixture", "hybrid", "live"}:
         raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
     fixture_path = validate_fixture_path(fixture_path, data_mode=data_mode)
-    status = (fixture_readiness() if data_mode == "fixture" else
-              hybrid_readiness() if data_mode == "hybrid" else readiness(config_path))
+    runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
+    status = (fixture_readiness(**runtime_args) if data_mode == "fixture" else
+              hybrid_readiness(**runtime_args) if data_mode == "hybrid" else readiness(config_path))
     if not status["configured"]:
         raise ValueError(status["reason"])
+    from refund_eval.dashboard.telemetry import emit_snapshot
+
+    emit_snapshot(phase="checking_tools")
     source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture")
     ctx = ToolContext(scenario, Mailbox(source, scenario))
     mode_details = ({"mail_data_mode": "fixture", "web_data_mode": "live",
@@ -231,7 +245,8 @@ async def published_tools(
             **({"fixture_provenance": profile_config} if data_mode in {"fixture", "hybrid"} else {}),
             **mode_details,
             "config_sha256": fingerprint(profile_config),
-            "browser_network": "none",
+            "browser_network": "unverified",
+            "browser_runtime": browser_runtime,
             "public_read_policy": boundary_config.get("public_read_policy", "reviewed_urls"),
             "public_read_urls": boundary_config["public_read_urls"],
             "simulated_form_urls": boundary_config["simulated_form_urls"],
@@ -270,14 +285,28 @@ async def published_tools(
             )
         stack.push_async_callback(search.aclose)
         tools.extend(await inspect_tools(search, source="exa"))
+        artifacts = Path(artifact_dir or ".context/artifacts").resolve() / "browser"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
+        emit_snapshot(phase="starting_browser")
         browser = PublishedBrowserService(
             BrowserBoundary(ctx, **boundary_config),
             spool_dir=spool,
             image=browser_image,
+            runtime=browser_runtime,
+            audit_path=network_audit,
             audit=audit,
         )
         stack.push_async_callback(browser.aclose)
         tools.extend(await inspect_tools(browser, source="playwright"))
+        manifest = getattr(browser, "security_manifest", {}) or {}
+        profile = store().get(PROFILE_KEY)
+        profile["browser_network"] = "none" if manifest.get("verified") else "unverified"
+        profile["browser_runtime"] = browser_runtime
+        profile["browser_boundary"] = manifest
+        if manifest.get("evidence_version") == 2:
+            profile["evidence_version"] = 2
+        store().set(PROFILE_KEY, profile)
         names = [t.name for t in tools]
         if len(set(names)) != len(names):
             raise ValueError("Published MCP catalogs contain duplicate tool names")
@@ -291,4 +320,5 @@ async def published_tools(
                 "browser_boundary": getattr(browser, "security_manifest", None),
             }
         )
+        emit_snapshot(phase="running")
         yield tools
