@@ -1,6 +1,9 @@
 import json
+import os
 
 import pytest
+
+pytestmark = pytest.mark.harbor
 
 from refund_eval.harbor.config import TrialRequest, TrialSettings
 from refund_eval.harbor.verifier import verify
@@ -8,12 +11,14 @@ from refund_eval.harbor.worker import run_trial
 from refund_eval.scenario.schema import load_scenario
 
 
+@pytest.mark.browser
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_SUBPROCESS_BROWSER_SMOKE") != "1", reason="Requires packaged subprocess Chromium runtime")
 def test_real_inspect_worker_exports_complete_scripted_trial(tmp_path, monkeypatch):
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "KILL"))
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     request = TrialRequest(
         instruction=load_scenario("train_refund").task_text, model="mockllm/model",
-        settings=TrialSettings(smoke=True), trial_id="worker-smoke",
+        settings=TrialSettings(smoke=True, tool_profile="published", data_mode="fixture", browser_runtime="subprocess"), trial_id="worker-smoke",
     )
     output = tmp_path / "artifacts"
     result = run_trial(request, output)

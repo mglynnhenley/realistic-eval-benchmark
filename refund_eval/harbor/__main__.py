@@ -12,11 +12,21 @@ from refund_eval.harbor.config import TrialSettings
 from refund_eval.scenario.schema import load_scenario
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCKERFILE = """FROM python:3.12-slim-bookworm
+DOCKERFILE = """FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS browser-node
+FROM python:3.12-slim-bookworm
+COPY --from=browser-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=browser-node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers NODE_ENV=production
 COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy UV_PYTHON=3.12 TIKTOKEN_CACHE_DIR=/opt/tiktoken
 WORKDIR /app
 COPY source/ /app/
+RUN mkdir -p /opt/browser && cp refund_eval/published/browser_runtime/package*.json refund_eval/published/browser_runtime/server.mjs /opt/browser/
+WORKDIR /opt/browser
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+RUN ./node_modules/.bin/playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/* /root/.npm
+WORKDIR /app
 RUN uv sync --frozen --no-dev
 RUN uv run --no-sync python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
 ENV PATH="/app/.venv/bin:$PATH"
@@ -75,9 +85,9 @@ def prepare(
         'version = "1.0"\n\n[agent]\n'
         f'timeout_sec = {settings.time_limit + 600}\n\n'
         '[verifier]\ntimeout_sec = 60\n\n'
-        '[environment]\nbuild_timeout_sec = 1200\ncpus = 1\nmemory_mb = 2048\n'
+        '[environment]\nbuild_timeout_sec = 1800\ncpus = 2\nmemory_mb = 4096\n'
         'workdir = "/app"\n'
-        f'network_mode = "{"no-network" if settings.smoke else "public"}"\n',
+        f'network_mode = "{"no-network" if settings.smoke and settings.data_mode == "fixture" else "public"}"\n',
     )
     tests = task_dir / "tests"
     tests.mkdir()
@@ -116,6 +126,9 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=4, help="Trials per selected model")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--tool-profile", choices=["published", "legacy"], default="published")
+    parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default=None)
+    parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")
     parser.add_argument("--simulator-model")
     parser.add_argument("--grader-model")
@@ -129,6 +142,7 @@ def main() -> None:
     args = parser.parse_args()
     if not args.smoke and not args.model:
         parser.error("Choose --smoke or provide --model for a paid trial")
+    args.data_mode = args.data_mode or ("fixture" if args.smoke else "hybrid")
     settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields if name != "rubric_set"},
                              rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None)
     config = prepare(

@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.harbor
+
 pytest.importorskip("harbor.models.job.config")
 
 from harbor.models.agent.context import AgentContext
@@ -32,7 +34,11 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     source = task.paths.environment_dir / "source"
     assert (source / "refund_eval/agent/harness.py").is_file()
     dockerfile = (task.paths.environment_dir / "Dockerfile").read_text()
-    assert "npm" not in dockerfile and "FROM python:" in dockerfile
+    assert "npm ci" in dockerfile and "FROM python:" in dockerfile
+    assert "install --with-deps chromium" in dockerfile
+    assert "node:24.16.0" in dockerfile
+    assert task.config.environment.cpus == 2
+    assert task.config.environment.memory_mb == 4096
     assert (source / "tests/fixtures/inbox.json").is_file()
     assert not any(p.name in {".env", ".secrets", "node_modules", ".venv", ".context"}
                    for p in source.rglob("*"))

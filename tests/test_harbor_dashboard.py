@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.harbor
+
 pytest.importorskip("harbor.models.job.config")
 
 from harbor.trial.hooks import TrialEvent

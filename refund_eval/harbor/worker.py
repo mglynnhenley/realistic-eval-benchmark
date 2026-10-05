@@ -34,10 +34,13 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     if settings.smoke:
         from refund_eval.demo import run_demo
 
+        if settings.tool_profile != "published":
+            raise ValueError("Scripted smoke now uses published fixture tools; use tool_profile=published and browser_runtime=subprocess.")
         demo = run_demo(
             output, max_turns=settings.max_turns,
             sim_weeks=settings.sim_weeks, cost_limit=settings.cost_limit,
             time_limit=settings.time_limit,
+            browser_runtime=settings.browser_runtime, data_mode=settings.data_mode,
             **rubric_args,
         )
         checks = demo["checks"]
@@ -50,6 +53,8 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
                 "max_turns": settings.max_turns, "sim_weeks": settings.sim_weeks,
                 "cost_limit": settings.cost_limit, "time_limit": settings.time_limit,
                 "world_mode": settings.world_mode,
+                "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
+                "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),
                 **rubric_args,
             },
             model=request.model,
@@ -84,7 +89,10 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     }
     write_json(output / "usage.json", usage)
     result = {
-        "schema_version": 2, "trial_id": request.trial_id,
+        "schema_version": 3, "trial_id": request.trial_id,
+        "tool_profile": settings.tool_profile, "data_mode": settings.data_mode,
+        "browser_runtime": settings.browser_runtime,
+        "browser_boundary": sample.store.get("published_tool_profile", {}).get("browser_boundary"),
         "smoke": settings.smoke, "checks": checks, "status": log.status,
         "inspect_log": Path(log.location).name,
         "stop_reason": world["stop_reason"], "turns": world["turn"],
