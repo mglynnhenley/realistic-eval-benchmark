@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Credentials: Gmail OAuth client and tokens
+.env
+.env.*
+!.env.example
+.secrets/
+credentials*.json
+token*.json
+
+# Eval logs and scans contain the user's real email. Never commit them.
+logs/
+scans/
+reports/
+calibration/
+
+.context/
+node_modules/
