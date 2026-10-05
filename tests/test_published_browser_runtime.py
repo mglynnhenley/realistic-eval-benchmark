@@ -13,7 +13,10 @@ from urllib.parse import urlsplit
 import pytest
 
 from refund_eval.published.browser import BrowserBoundaryError, PublishedBrowserService
-from refund_eval.published.browser_runtimes import SubprocessBrowserRuntime, subprocess_environment
+from refund_eval.published.browser_runtimes import (
+    SubprocessBrowserRuntime,
+    subprocess_environment,
+)
 
 pytestmark = pytest.mark.browser
 
