@@ -1,0 +1,9 @@
+markdown-it 15.0.2 (MIT), https://github.com/markdown-it/markdown-it
+Source: https://registry.npmjs.org/markdown-it/-/markdown-it-15.0.2.tgz
+File: package/dist/browser/markdown-it.umd.min.js, copied without changes.
+Bundle SHA-256: 635972b985228e8af9f0143647c68616b7a3bb09f6946e7e4a52e43dcf5e7be5
+Package SHA-512: q4IGxMv56jCqT4OCRCADBoDP3LO4MhmTXjFbphHPXs4g3j9Xg5RDnxqN8IF/3vIWEU+VCnUq+7JUg/cfy2E6Qw==
+License: markdown-it.LICENSE in this directory.
+
+This browser build is served locally, with no CDN or runtime npm dependency.
+The dashboard wrapper disables raw HTML and external image loading.
