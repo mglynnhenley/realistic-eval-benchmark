@@ -303,21 +303,30 @@
   }
 
   function publishedDataStatus() {
+    const execution = $("execution").value;
+    if (execution !== "local") {
+      if ($("run-form").elements.mode.value === "model" && $("tool-profile").value === "published" && $("data-mode").value === "live") {
+        return {configured: false, reason: "Live Gmail is available only for runs on this computer. Choose simulated Gmail or change the run location."};
+      }
+      return state.config?.execution_readiness?.[execution];
+    }
     const published = (state.config?.tool_profiles || []).find((profile) => profile.name === "published");
     return published?.data_modes?.find((mode) => mode.name === $("data-mode").value);
   }
 
   function publishedSetupMissing() {
     const isPublished = $("run-form").elements.mode.value === "model" && $("tool-profile").value === "published";
-    return isPublished && !publishedDataStatus()?.configured;
+    return ($("execution").value !== "local" || isPublished) && !publishedDataStatus()?.configured;
   }
 
   function showSetupRequirement() {
     const profile = publishedDataStatus();
-    const requirement = $("data-mode").value === "live"
+    const requirement = $("execution").value !== "local"
+      ? `${title($("execution").value)} runs the browser inside each trial sandbox.`
+      : $("data-mode").value === "live"
       ? "Live data needs verified Gmail access and native send/reply tools."
       : $("data-mode").value === "hybrid"
-        ? "Hybrid data needs Docker for public webpages. Startup verifies the live, keyless Exa tool contract; Gmail setup is not required."
+        ? "Local hybrid runs need the Docker browser image. Startup verifies keyless Exa; Gmail setup is not required."
         : "Simulated data needs the local browser runtime.";
     $("form-error").textContent = profile
       ? `${requirement} ${profile.reason}`
@@ -337,7 +346,7 @@
     $("submit-run").disabled = anyActive || state.starting;
     $("submit-run").type = setupMissing || worldProblem ? "button" : "submit";
     $("submit-run").textContent = state.starting ? "Starting…"
-      : worldProblem ? "Review world settings" : setupMissing ? "Check tool setup"
+      : worldProblem ? "Review world settings" : setupMissing ? "Check run setup"
         : $("execution").value !== "local" ? "Start batch ↗"
           : $("run-form").elements.mode.value === "model" ? "Start paid model trial ↗" : "Start offline demo ↗";
     const active = ACTIVE.has(state.run?.status);
@@ -376,10 +385,14 @@
     const worldMode = run.world_mode || run.config?.world_mode || "baseline";
     const targetLabel = !run.parent_batch_id && run.config?.models?.length > 1
       ? `${run.config.models.length} target models` : run.model || "Model trial";
-    const model = run.mode === "demo" ? "Scripted offline demo · Legacy tools · No API calls"
-      : `${targetLabel} · ${profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools"} · ${worldMode === "friction" ? "Realistic friction" : "Standard world"}`;
+    const runtime = run.browser_runtime || run.config?.browser_runtime;
+    const runtimeLabel = runtime === "subprocess" ? "Browser in trial sandbox"
+      : runtime === "docker" ? "Docker browser" : "";
+    const toolsLabel = profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools";
+    const model = run.mode === "demo" ? `Scripted offline demo · ${toolsLabel} · No API calls`
+      : `${targetLabel} · ${toolsLabel} · ${worldMode === "friction" ? "Realistic friction" : "Standard world"}`;
     const stopping = run.stop_reason ? ` · ${title(run.stop_reason)}` : "";
-    $("selected-subtitle").textContent = `${model} · ${date(run.created_at)}${stopping}`;
+    $("selected-subtitle").textContent = `${model}${runtimeLabel ? ` · ${runtimeLabel}` : ""} · ${date(run.created_at)}${stopping}`;
     $("selected-dot").className = `status-dot ${run.status}`;
     $("selected-status").className = `status-tag ${run.status}`;
     const warnings = state.snapshot?.grading_warnings || [];
@@ -401,13 +414,13 @@
     $("wall-time").textContent = `Wall time ${elapsed(run)} · ${live ? "in progress" : human(run.status)}`;
     $("world-phase").textContent = human(state.snapshot?.phase || run.status).toUpperCase();
     $("integrity-text").textContent = run.mode === "demo"
-      ? "Scripted demo using legacy custom tools. Company identities and model grades are fixtures, not measured behavioural results."
+      ? `Scripted demo using ${profile === "published" ? "published Gmail and browser tools" : "legacy custom tools"}. Company identities and model grades are fixtures, not measured behavioural results.`
       : profile === "published"
         ? dataMode === "fixture"
           ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication or live account data."
           : dataMode === "hybrid"
             ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access. Unsupported website writes are blocked locally."
-            : "Published Gmail, Exa and Playwright tools. Outgoing actions and company replies are intercepted and simulated."
+            : "Published Gmail, Exa and Playwright tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded."
         : "Legacy model trial using custom tools and a fixture inbox. Company replies and money movements are simulated.";
     if (worldMode === "friction") $("integrity-text").textContent += " Realistic friction is enabled in the simulated world.";
     if (state.snapshot?.review_note) $("integrity-text").textContent += ` Recorded-run review: ${state.snapshot.review_note}`;
@@ -1061,6 +1074,12 @@
       fragment.append(element("p", "field-help", state.run.status === "stopping"
         ? "Cancelling queued trials and cleaning up active sandboxes…"
         : `${title(state.run.config.execution)} · up to ${state.run.config.concurrency} trials at once. Open a trial to view activity, scores and its Inspect log.`));
+      const profile = state.run.tool_profile || state.run.config.tool_profile;
+      const runtime = state.run.browser_runtime || state.run.config.browser_runtime;
+      const dataMode = state.run.data_mode || state.run.config.data_mode;
+      const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
+        : dataMode === "fixture" ? "Simulated inbox and websites" : "Live data";
+      fragment.append(element("p", "field-help", `${profile === "published" ? "Published tools" : "Legacy tools"} · ${dataLabel}${runtime ? ` · Browser: ${runtime === "subprocess" ? "inside each trial sandbox" : "Docker container"}` : ""}`));
       const groups = element("div", "batch-models");
       for (const group of batch?.models || []) {
         const active = ["starting", "running", "grading", "stopping"].reduce((sum, status) => sum + (group.counts[status] || 0), 0);
@@ -1075,6 +1094,10 @@
         const button = element("button", "button batch-trial");
         button.type = "button";
         button.append(element("strong", "", trial.label), element("span", "", `${title(trial.status)} · ${trial.turns || 0} turns · ${trial.stage || "Queued"}`));
+        const trialProfile = trial.tool_profile || profile;
+        const trialRuntime = trial.browser_runtime || runtime;
+        const trialData = trial.data_mode || dataMode;
+        button.append(element("span", "batch-trial-tools", `${trialProfile === "published" ? "Published tools" : "Legacy tools"} · ${trialData === "hybrid" ? "Simulated Gmail + live web" : trialData === "fixture" ? "Simulated inbox and websites" : "Live data"}${trialRuntime ? ` · ${trialRuntime === "subprocess" ? "Browser in trial sandbox" : "Docker browser"}` : ""}`));
         button.addEventListener("click", () => selectRun(trial.id));
         list.append(button);
       }
@@ -1553,12 +1576,7 @@
     $("batch-settings").hidden = !batch;
     document.querySelector(".mini-badge").textContent = batch ? "NO MODEL COST" : "FREE";
     $("batch-settings").querySelectorAll("input").forEach((input) => { input.disabled = !batch; });
-    if (batch) {
-      $("run-preset").value = "custom";
-      $("tool-profile").value = "legacy";
-      $("data-mode").value = "fixture";
-    }
-    $("batch-help").textContent = "Batches use legacy tools and fixture data. Each trial gets its own sandbox and your saved rubrics. " + ($("execution").value === "modal"
+    $("batch-help").textContent = "Each trial gets its own sandbox, browser, inbox and saved rubrics. " + ($("execution").value === "modal"
       ? "Modal compute charges apply, including for scripted demos. Configure Modal credentials on this computer first."
       : "Docker must be running on this computer.");
     const paid = $("run-form").elements.mode.value === "model";
@@ -1609,11 +1627,11 @@
     const fixture = $("data-mode").value === "fixture";
     const hybrid = $("data-mode").value === "hybrid";
     const simulated = !isPublished || fixture || hybrid;
-    $("run-preset").disabled = batch || !isModel || !state.config?.run_presets;
-    $("tool-profile").disabled = batch || !isModel;
+    $("run-preset").disabled = !isModel || !state.config?.run_presets;
+    $("tool-profile").disabled = !isModel;
     $("world-mode-field").hidden = !isModel || !simulated;
     $("world-mode").disabled = !isModel || !simulated;
-    $("data-mode").querySelector('[value="live"]').disabled = $("world-mode").value === "friction";
+    $("data-mode").querySelector('[value="live"]').disabled = batch || $("world-mode").value === "friction";
     $("world-mode-help").textContent = $("world-mode").value === "friction"
       ? "A more demanding simulated world, available with simulated Gmail and either live or fixture web data. To use live Gmail, first choose Standard."
       : "Use the standard simulated world, or add realistic friction for a stress test.";
@@ -1624,8 +1642,8 @@
     const description = fixture
       ? "Simulated inbox and websites. Email uses a local test contract; Gmail authentication is not used."
       : hybrid
-        ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Unsupported website writes are blocked locally. Keyless Exa access has rate limits; unavailable search fails visibly, without fixture fallback. Docker runs the browser, and startup verifies the live Exa contract."
-        : "Live Gmail and reviewed websites. Outgoing actions are intercepted and simulated.";
+        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; other website writes are blocked and recorded. Keyless Exa access has rate limits. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
+        : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.";
     $("tool-profile-status").textContent = name === "legacy"
       ? "Legacy custom tools with a fixture inbox. This profile does not use the published Gmail, Exa and Playwright stack."
       : !profile ? "Checking published tool configuration…"
