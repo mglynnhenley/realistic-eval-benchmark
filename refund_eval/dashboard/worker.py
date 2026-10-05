@@ -158,7 +158,8 @@ def run_worker(run_dir: str | Path) -> int:
                         readiness,
                     )
 
-                    profile_args.update(tool_profile="published", published_data=config["data_mode"])
+                    profile_args.update(tool_profile="published", published_data=config["data_mode"],
+                                        artifact_dir=str(destination))
                     if config["data_mode"] == "fixture":
                         status = fixture_readiness()
                     elif config["data_mode"] == "hybrid":

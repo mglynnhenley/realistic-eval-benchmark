@@ -42,6 +42,7 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
 
 
 def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
     for keys in server.PROVIDER_KEYS.values():
         for key in keys:
@@ -268,6 +269,7 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
 
 
 def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     from refund_eval.published import profile
 
     model = "openrouter/anthropic/claude-haiku-4.5"

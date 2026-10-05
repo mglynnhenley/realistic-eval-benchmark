@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import threading
+import tomllib
 import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -116,6 +117,45 @@ class APIError(Exception):
         self.status = status
         self.message = message
         super().__init__(message)
+
+
+def execution_readiness(execution: str) -> dict:
+    """Check the launch host; packaged browser checks run inside each trial."""
+    if execution == "local":
+        return {"configured": True, "reason": "Local browser readiness is checked for the selected data mode."}
+    if not shutil.which("uv"):
+        return {"configured": False, "reason": "Install uv before launching Harbor batches."}
+    if execution == "modal":
+        configured = bool(os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET"))
+        if not configured:
+            try:
+                profiles = tomllib.loads((Path.home() / ".modal.toml").read_text())
+                selected = os.environ.get("MODAL_PROFILE")
+                candidates = [profiles.get(selected, {})] if selected else [
+                    value for value in profiles.values() if isinstance(value, dict) and value.get("active")
+                ] or list(profiles.values())[:1]
+                configured = any(isinstance(value, dict) and value.get("token_id") and value.get("token_secret")
+                                 for value in candidates)
+            except (OSError, ValueError):
+                pass
+        return {"configured": bool(configured), "reason": (
+            "Modal credentials found; the packaged browser is checked inside the sandbox."
+            if configured else "Modal credentials missing. Run scripts/harbor modal token new, or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET."
+        )}
+    if execution != "docker":
+        return {"configured": False, "reason": f"Unknown run location: {execution}"}
+    if not shutil.which("docker"):
+        return {"configured": False, "reason": "Install Docker to launch local Harbor sandboxes."}
+    try:
+        result = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
+                                capture_output=True, timeout=5, check=False)
+        configured = result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        configured = False
+    return {"configured": configured, "reason": (
+        "Docker is ready; the browser is packaged in each trial image." if configured
+        else "Docker daemon is unavailable. Start Docker and retry."
+    )}
 
 
 def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
@@ -253,8 +293,8 @@ class RunManager:
         if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
             raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
         if config.execution != "local":
-            if config.tool_profile != "legacy" or config.data_mode != "fixture":
-                raise APIError(422, "Harbor batches currently require legacy tools and fixture data.")
+            if config.data_mode == "live":
+                raise APIError(422, "Live Gmail is local-only; choose fixture or hybrid data for Harbor.")
             if config.experiment_manifest or config.all_role_cost_limit or config.experiment_budget_file:
                 raise APIError(422, "Comparison experiments are currently local only.")
             if config.concurrency > total:
@@ -265,8 +305,9 @@ class RunManager:
                 *targets, config.simulator_model, config.grader_model,
             )):
                 raise APIError(422, "Harbor batches currently support OpenRouter for all three model roles.")
-            if not shutil.which("uv"):
-                raise APIError(422, "Install uv before launching Harbor batches.")
+            status = execution_readiness(config.execution)
+            if not status["configured"]:
+                raise APIError(422, status["reason"])
         experiment = None
         if config.experiment_manifest:
             from refund_eval.experiments.protocol import experiment_settings
@@ -293,7 +334,7 @@ class RunManager:
         if config.world_mode == "friction" and (config.mode != "model" or config.data_mode == "live"):
             raise APIError(422, "Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
         published_path = None
-        if config.tool_profile == "published":
+        if config.tool_profile == "published" and config.execution == "local":
             from refund_eval.published.profile import (
                 fixture_readiness,
                 hybrid_readiness,
@@ -331,6 +372,7 @@ class RunManager:
             directory = self.root / run_id
             directory.mkdir()
             settings = config.model_dump()
+            settings["browser_runtime"] = "docker" if config.execution == "local" else "subprocess"
             if config.mode == "model":
                 settings["model"] = targets[0]
             if published_path:
@@ -519,6 +561,7 @@ def public_config() -> dict:
     return {
         "default_model": dashboard_default_model(),
         "run_presets": run_presets(),
+        "execution_readiness": {name: execution_readiness(name) for name in ("local", "modal", "docker")},
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
                       for name, keys in PROVIDER_KEYS.items()],
