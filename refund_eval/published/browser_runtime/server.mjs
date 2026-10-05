@@ -1,5 +1,5 @@
-// The browser and the real upstream MCP server have no network interface.
-// Routes are fulfilled by the host's reviewed policy through a per-trial spool.
+// Browser requests are fulfilled by the worker policy through a per-trial spool.
+// Runtime isolation is verified separately and recorded in the trial manifest.
 import { createConnection } from '@playwright/mcp';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { chromium } from 'playwright';
@@ -49,6 +49,8 @@ const browser = await chromium.launch({
   args: [
     '--no-sandbox',
     '--disable-quic',
+    '--proxy-server=http://127.0.0.1:9',
+    '--proxy-bypass-list=<-loopback>',
     '--disable-background-networking',
     '--disable-component-update',
     '--disable-domain-reliability',
@@ -117,7 +119,7 @@ async function pausedRequest(session, event) {
 
 // Playwright's context.route sees only the first request in a redirect chain.
 // CDP Fetch pauses every hop. Requests from unsupported target types still have
-// no network route; missing interception therefore produces a browser failure.
+// no usable proxy; missing interception therefore produces a browser failure.
 const attached = new WeakMap();
 function attachPage(page) {
   if (!attached.has(page)) {
