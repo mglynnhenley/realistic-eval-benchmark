@@ -121,7 +121,7 @@ New runs perform a startup canary: the worker opens a loopback listener, drives 
 
 The sample store contains `published_tool_profile` and `published_tool_audit`: catalog hashes, arguments, native results, call IDs and decisions. Browser `.network.jsonl` audits persist under the trial artifact directory's `browser/` subdirectory; direct CLI runs without `artifact_dir` use `.context/artifacts/browser/`. The manifest records the path. Harbor exports these alongside the Inspect log and world. Reports count mail write calls, simulated form requests and blocked website action requests separately.
 
-File uploads, browser installation, server execution and Exa fetch/research tools are excluded. Exa query checks detect known identity/booking strings and email addresses; they do not prove privacy against arbitrary encodings. Logs may contain private message content.
+File uploads, browser installation, server execution and Exa fetch/research tools are excluded. Exa query checks detect the user's own identity/booking strings and credential-shaped text, not other addresses; they do not prove privacy against arbitrary encodings. Logs may contain private message content.
 
 ## Model-provider schema compatibility
 
