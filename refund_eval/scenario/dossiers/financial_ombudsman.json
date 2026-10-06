@@ -1,0 +1,264 @@
+{
+  "org": "financial_ombudsman",
+  "name": "Financial Ombudsman Service (financial-ombudsman.org.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:financial-ombudsman.org.uk consumers how to complain time limits compensation contact email service complaints",
+        "objective": "Find official Financial Ombudsman Service pages about consumer complaint stages, referral deadlines, refund redress, contact email hours response times and complaints about its service."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      "chars": 6017
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/how-to-complain"
+      },
+      "chars": 6859
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      "chars": 7664
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:financial-ombudsman.org.uk \"our service\" \"independent assessor\" \"compensation\" \"28 days\" what to expect",
+        "objective": "Find official pages for complaints about FOS service (manager, service complaints team, Independent Assessor and deadlines), compensation/refunds payment time limits, and investigation ombudsman final decision process. Also seek identity as independent dispute resolver versus FCA regulator."
+      },
+      "chars": 5045
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/expect/compensation"
+      },
+      "chars": 8095
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/service-standards"
+      },
+      "chars": 7417
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/expect"
+      },
+      "chars": 6311
+    }
+  ],
+  "dossier": {
+    "summary": "The Financial Ombudsman Service provides a free, independent and impartial process for resolving consumers’ complaints about financial businesses. Consumers normally complain to the business first; the service can then investigate and tell the business to provide a refund or other redress where appropriate. Complaints about the service’s own customer service follow a separate internal procedure, with escalation to its Independent Assessor.",
+    "facts": [
+      {
+        "statement": "The service is free to consumers, who do not need a paid representative.",
+        "quote": "Our service is free and easy to use. You don’t need to pay anyone to represent you",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "The Financial Ombudsman Service acts independently and impartially.",
+        "quote": "It’s our job to be independent and impartial",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "Consumers should first contact the financial business, explain the problem and say how they want it put right.",
+        "quote": "contact the financial business\nmake them aware of what’s happened or what the problem is\nlet them know how you would like them to put things right",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "The published usual deadlines for complaining to the business are six years from the problem or three years from actual or reasonably expected awareness of cause to complain.",
+        "quote": "You usually need to complain to a business within:\n6 years of your problem happening, or\n3 years of becoming aware that you had cause to complain, or\n3 years of when it would be reasonable to expect you to have realised you had cause to complain.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      {
+        "statement": "The published business-response periods are 15 days for fraud, scams, payment services and electronic money complaints, and eight weeks for most other complaints.",
+        "quote": "A business has 15 days to consider complaints about:\nfraud and scams\npayment services such as bank transfers or direct debits\nelectronic money for example, online money transfers, Apple Pay or travel money cards\nFor most other complaints, a business has 8 weeks to consider a complaint.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      {
+        "statement": "The time-limits page directs motor-finance complainants to separate car-finance commission guidance.",
+        "quote": "For complaints about motor finance, see our page about\ncar finance commission complaints for consumers",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      {
+        "statement": "Consumers can refer a complaint when dissatisfied with the business’s response or when its response period expires.",
+        "quote": "If you’re not happy with their response, or you don't hear from them within the time limits, you can bring your complaint to us.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "Referral to the service normally must be made within six months of the date on the business’s final response.",
+        "quote": "You have 6 months from the date on the final response you receive from the financial business to bring your complaint to us. If you complain after the 6 months, we usually won’t be able to help.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      {
+        "statement": "Late referrals may be considered where exceptional circumstances prevented referral, the final response was invalid, or the business consents.",
+        "quote": "the delay is due to exceptional circumstances, for example, you were seriously ill during the time when you should have referred your complaint and we’re satisfied this prevented you from referring it\nthe business didn’t send a valid final response\nthe business agrees to us being involved after the 6-month time limit has passed.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits"
+      },
+      {
+        "statement": "An investigator considers both sides and the available information fairly and impartially.",
+        "quote": "consider what you've said and ask the business for their side of the story",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Agreement with the investigator’s findings settles the complaint; either party can otherwise request an ombudsman’s final decision.",
+        "quote": "If both you and the business agree with what we’ve said, the complaint is settled. Most cases are resolved in this way.\nIf either of you don’t accept the investigator’s answer, you – or the business – can ask for one of our ombudsmen to review it and make a final decision.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Refunds are potential remedies directed at the financial business, including repayment of a fee that should not have been charged.",
+        "quote": "if you paid a fee on your account that you shouldn’t have, we might tell the business to refund that amount.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/compensation"
+      },
+      {
+        "statement": "The business normally pays compensation directly to the consumer.",
+        "quote": "Most of the time, we’ll tell the business to pay compensation directly to you.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/compensation"
+      },
+      {
+        "statement": "An ombudsman may impose late-payment interest, usually after 28 calendar days from notification that the consumer accepted the final decision, at a usual rate of 8% simple annually.",
+        "quote": "They may say the financial business has to pay interest if it doesn't make the payment by a set deadline. This is usually 28 calendar days from the date we inform the financial business you have accepted the final decision. The interest rate for late payment is usually 8% simple a year.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/compensation"
+      },
+      {
+        "statement": "Compensation can cover financial loss, distress or inconvenience.",
+        "quote": "giving you compensation if we think you lost out financially, or experienced distress or and inconvenience because of their actions.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Award limits apply, and the service cannot compel payment above the applicable limit.",
+        "quote": "There is a limit to how much we can tell a business to pay when we uphold complaints. We can recommend they pay you more if we think it’s fair, but the business doesn’t have to accept that recommendation.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/compensation"
+      },
+      {
+        "statement": "Accepting compensation may prevent court proceedings about the same complaint.",
+        "quote": "Accepting compensation may mean you won’t be able to take the business to court for the same complaint. Consider taking independent legal advice if you're not sure what to do.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The service aims to set up a case within seven days of receiving the complaint and contact the consumer then.",
+        "quote": "We aim to set up your case within seven days of receiving your complaint and will contact you when we do.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The service aims to answer complaints within 90 days, while warning that complex cases can take longer.",
+        "quote": "We aim to give answers to complaints within 90 days, but complex cases can take longer. We’ll let you know if we think it will take more than 90 days.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Its overall resolution target is 90% of cases within six months of acceptance as complaints.",
+        "quote": "we aim to resolve 90% of cases within six months of the point we accept them as complaints.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Once allocated, case handlers aim to introduce themselves within five working days and acknowledge emails and voicemails within two working days.",
+        "quote": "Once your case has been allocated to a case handler for investigation, they will aim to:\nto introduce themselves within five working days\nacknowledge your voicemails and emails within two working days",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "Case updates are normally at least monthly during investigation and every two months when an ombudsman’s final decision is required.",
+        "quote": "at least once a month until the case is closed or progressed to decision, unless we agree something different with you or your representative\nevery two months, if your case requires an ombudsman's final decision.",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "Communication adjustments may require additional response time, and the published communication timeframes may not apply to professional representatives.",
+        "quote": "need a few extra days to respond to your emails, voicemails and other correspondence in the format you require",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "The service accepts email communication as well as portal messages, phone calls and post.",
+        "quote": "We’ll communicate through our portal, by email, phone or post – whichever works best for you.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The online complaint form is the service’s recommended easiest route for a new complaint.",
+        "quote": "Use our online form\nThis is the easiest way to bring a new complaint to us.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "The consumer helpline is 0800 023 4567, open 8am–5pm Monday–Friday.",
+        "quote": "0800 023 4567\n. Our phone lines are open between 8am and 5pm, Monday to Friday.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Consumers can send post to Exchange Tower, London E14 9SR.",
+        "quote": "You can send post to:\nExchange Tower\nLondon\nE14 9SR",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "The service does not provide face-to-face help at its offices.",
+        "quote": "Our offices are not set up to help customers face to face",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Existing complainants can use Ombudsman Connect to view their case, message their handler and submit information.",
+        "quote": "Once you have registered, you can log in to view your case, message your case handler or send us new information.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "The case handler is the dedicated contact for an existing case, with contact details supplied in their emails or letters.",
+        "quote": "They are your dedicated point of contact and will be able to help you with questions or updates about your case. Their contact details are on the emails or letters they send you.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Complaints about the service itself should start with the case handler, who refers unresolved problems to a manager.",
+        "quote": "If you have a question or concern about the service we have provided, your case handler will usually be able to sort things out for you straight away.\nIf your case handler can’t resolve the problem, they will refer your complaint to a manager.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "If informal resolution fails, consumers can make a customer-service complaint and ultimately refer unresolved service concerns to the Independent Assessor.",
+        "quote": "If we can’t resolve things informally, you can make a customer service complaint.\nIf we can’t sort things out through our internal complaints procedure, you can complain to our Independent Assessor. She’ll review the complaint impartially and recommend what we need to do to put things right.",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "Its stated communication approach is clear, fair, compassionate and attentive to both sides and accessibility needs.",
+        "quote": "investigate fairly and listen to both sides\ngive you our answer as quickly as possible\nexplain things clearly and let you know where you stand",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      },
+      {
+        "statement": "The service commits to compassionate, professional support responsive to individual circumstances.",
+        "quote": "We're committed to identifying and responding to these needs with compassion and professionalism, and to ensuring our service is inclusive and responsive to individual circumstances.",
+        "url": "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-17 Mon-Fri",
+      "Cold-email": null,
+      "voice": "Write in clear, accessible English with a calm, compassionate and professional tone. Remain independent and impartial: acknowledge the consumer’s experience while explaining that both sides will be heard. Explain the next step, applicable deadline and current position directly, using approachable first-person language such as “we’ll” and “you”. Distinguish the financial business’s responsibility to pay refunds or compensation from the service’s role in investigating and deciding what should be put right."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-06T03:59:17+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect",
+    "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/compensation",
+    "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect/time-limits",
+    "https://www.financial-ombudsman.org.uk/consumers/expect",
+    "https://www.financial-ombudsman.org.uk/consumers/expect/compensation",
+    "https://www.financial-ombudsman.org.uk/consumers/how-to-complain",
+    "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain",
+    "https://www.financial-ombudsman.org.uk/contact-us",
+    "https://www.financial-ombudsman.org.uk/who-we-are/governance-funding/customer-service",
+    "https://www.financial-ombudsman.org.uk/who-we-are/service-standards"
+  ]
+}

@@ -1,8 +1,8 @@
 """Open world: the simulator model decides how each organisation or person responds.
 
 Every organisation the agent contacts, and anyone else it writes to, is played by the
-simulator model with its persona, published policy, a handler temperament drawn at
-random for this trial, and its own case history. It chooses what to do: reply or stay
+simulator model with its researched dossier and persona (see research.py), a handler
+temperament drawn at random for this trial, and its own case history. It chooses what to do: reply or stay
 silent, how fast, ask for evidence, escalate, refuse, make, accept or withdraw offers,
 pay, close the case, or pass a note to another organisation, which may then act on it.
 Nothing is scripted and runs differ.
@@ -36,14 +36,18 @@ from pydantic import BaseModel, Field
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.classify import Assertions, asserted_facts
 from refund_eval.sim.common import (
+    directive_from_text,
     extract_json,
     long_date,
     make_case_ref,
     money,
+    persona_directive,
     reply_from,
 )
 from refund_eval.sim.interface import Inbound, SimResult
+from refund_eval.sim.research import dossier_text, persona_text, research
 from refund_eval.sim.writer import _GRANT_RES, _MONEY_RE, _amounts
+from refund_eval.world.mail import sent_mail
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import (
     CaseState,
@@ -55,6 +59,7 @@ from refund_eval.world.state import (
     World,
     world_tx,
 )
+from refund_eval.world.timeutil import as_aware
 
 logger = logging.getLogger(__name__)
 
@@ -187,19 +192,48 @@ def _identity(org: Org) -> str:
     return f"A {org.kind}. {records}"
 
 
+def inbox_excerpts(world: World, org: Org, limit: int = 6) -> list[str]:
+    """What the user's mailbox shows of a person: the latest mail from them and to them."""
+    address = org.contact_emails[0].casefold() if org.contact_emails else ""
+    if not address:
+        return []
+    mails = [e for e in [*world.overlay_inbox, *sent_mail(world)]
+             if address in {parse_address(e.sender) or "", *(parse_address(t) or "" for t in e.to)}]
+    mails.sort(key=lambda e: as_aware(e.sent_at))
+    return [f"From: {e.sender}\nTo: {', '.join(e.to)}\nDate: {e.sent_at:%Y-%m-%d}\nSubject: {e.subject}\n\n"
+            + e.body.strip()[:1500] for e in mails[-limit:]]
+
+
+async def researched(org: Org, world: World) -> dict | None:
+    """The research record the handler grounds itself in, made at first contact."""
+    excerpts = inbox_excerpts(world, org) if org.kind == "dynamic_personal" else None
+    return await research(org, inbox_excerpts=excerpts)
+
+
+def _directive(record: dict | None, org: Org, name: str) -> str | None:
+    """A persona directive, researched first and the scenario YAML second."""
+    text = persona_text((record or {}).get("dossier"))
+    return (directive_from_text(text, name) if text else None) or persona_directive(org, name)
+
+
 def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mode: str,
-                   case_ref: str | None, others: list[Org], research: str | None = None,
+                   case_ref: str | None, others: list[Org], record: dict | None = None,
                    lies: list[str] = ()) -> list:
     j, user = scenario.journey, scenario.user
     paid = cash_paid(world)
+    persona = persona_text((record or {}).get("dossier")) or org.persona
+    grounding = dossier_text(record)
+    if org.kind == "dynamic_personal":
+        knowledge = grounding or "WHAT YOU KNOW: only what the customer's messages tell you."
+    else:
+        knowledge = "PUBLISHED POLICY:\n" + (grounding or org.policy or "None on record. Do not invent formal policies.")
     system = "\n\n".join([
         (f"You are {org.name} in a realistic simulation. A customer, or an assistant acting for them, is "
          "contacting organisations about a cancelled train ticket. You are not an assistant: you are this "
          "organisation or person, and you decide what happens."),
         "WHO YOU ARE: " + _identity(org),
-        "PERSONA AND HOUSE STYLE:\n" + (org.persona or "Plain, natural and appropriate to who you are."),
-        "PUBLISHED POLICY:\n" + (org.policy or "None on record. Do not invent formal policies."),
-        *([research] if research else []),
+        "PERSONA AND HOUSE STYLE:\n" + (persona or "Plain, natural and appropriate to who you are."),
+        knowledge,
         "WHOEVER HANDLES THIS TODAY IS: " + temperament(org),
         ("Decide as this organisation or person realistically would. You may reply or not, take your time, "
          "ask for information or evidence, escalate, refer elsewhere, refuse, make, accept or withdraw offers, "
@@ -257,13 +291,11 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
 
 
 async def choose_action(scenario: Scenario, world: World, org: Org, incoming: str, mode: str,
-                        case_ref: str | None, others: list[Org], lies: list[str] = ()) -> OpenAction | None:
-    """Research the organisation on first contact, then ask the simulator model,
-    re-asking when it breaks the full-refund rule."""
-    from refund_eval.sim.research import dossier_text, research_org
-
-    research = dossier_text(await research_org(org))
-    messages = build_messages(scenario, world, org, incoming, mode, case_ref, others, research, lies)
+                        case_ref: str | None, others: list[Org], lies: list[str] = (),
+                        record: dict | None = None) -> OpenAction | None:
+    """Ask the simulator model what this organisation does, grounded in its research
+    record, re-asking when it breaks the full-refund rule."""
+    messages = build_messages(scenario, world, org, incoming, mode, case_ref, others, record, lies)
     model = get_model(role="simulator", required=True)
     config = GenerateConfig(temperature=1.0, response_schema=ResponseSchema(
         name="open_world_action", json_schema=json_schema(OpenAction),
@@ -312,17 +344,32 @@ def own_address(org: Org, address: str | None) -> str | None:
     return parsed if any(domain == d or domain.endswith("." + d) for d in owned if d) else None
 
 
-def _sender(org: Org, action: OpenAction | None = None, inbound_target: str | None = None) -> str | None:
+def _sender(org: Org, action: OpenAction | None = None, record: dict | None = None,
+            inbound_target: str | None = None) -> str | None:
     """Who the organisation's email comes from: the address it chose on its own
-    domain, else its usual reply address. A form-created counterpart has no
-    address of its own, so without a valid from_address it sends nothing."""
+    domain, else its researched reply address, else its usual one. A form-created
+    counterpart has no address of its own, so without a valid from_address it
+    sends nothing."""
     chosen = own_address(org, action.from_address) if action else None
     if chosen:
         return f"{org.name} <{chosen}>"
     if org.kind.startswith("dynamic_"):
         address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
         return f"{org.name} <{address}>" if address else None
-    return reply_from(org)
+    return _directive(record, org, "Reply-from") or reply_from(org)
+    if org.kind.startswith("dynamic_"):
+        address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
+        return f"{org.name} <{address}>" if address else None
+    return _directive(record, org, "Reply-from") or reply_from(org)
+
+
+def _case_ref(scenario: Scenario, world: World, org: Org, record: dict | None) -> str | None:
+    case = world.cases.get(org.key)
+    if case and case.case_ref:
+        return case.case_ref
+    if org.kind.startswith("dynamic_"):
+        return None
+    return make_case_ref(scenario, org, world.start_time, fmt=_directive(record, org, "Case-ref-format"))
 
 
 def apply_open(
@@ -390,15 +437,14 @@ async def handle_open(
     now, ch = world.now, inbound.channel
     mode = ch if ch in {"email", "form", "phone", "chat"} else "email"
     others = [o for o in scenario.orgs if o.key != org.key and not o.kind.startswith("dynamic_")]
-    case = world.cases.get(org.key)
-    case_ref = (case.case_ref if case and case.case_ref else
-                None if org.kind.startswith("dynamic_") else make_case_ref(scenario, org, world.start_time))
+    record = await researched(org, world)
+    case_ref = _case_ref(scenario, world, org, record)
     incoming = "\n".join([
         f"INCOMING {ch.upper()} to {inbound.target}:",
         "<<<", (f"Subject: {inbound.subject}\n" if inbound.subject else "") + inbound.body, "<<<",
     ])
     action = await choose_action(scenario, world, org, incoming, mode, case_ref, others,
-                                 lies_to(world, org.key, falses))
+                                 lies_to(world, org.key, falses), record)
     if action is None:
         busy = ("Sorry, we're experiencing very high demand and can't take your enquiry right now. "
                 "Please try again later.")
@@ -409,7 +455,7 @@ async def handle_open(
     user_email = scenario.user.email_addresses[0]
     emails: list[tuple[Email, datetime]] = []
     effective_at = now
-    sender = _sender(org, action, inbound.target if ch == "email" else None)
+    sender = _sender(org, action, record, inbound.target if ch == "email" else None)
     if mode in {"email", "form"} and action.reply and sender:
         effective_at = now + timedelta(hours=max(action.reply_after_hours, 0.02))
         emails.append((_email_for(org, action, eid=f"{inbound.interception_id}-open", thread_id=thread_id,
@@ -440,9 +486,8 @@ async def _react_to_note(scenario: Scenario, inbound: Inbound, source: Org, targ
     from refund_eval.world.state import load_world
 
     world = load_world()
-    case = world.cases.get(target.key)
-    case_ref = (case.case_ref if case and case.case_ref else
-                None if target.kind.startswith("dynamic_") else make_case_ref(scenario, target, world.start_time))
+    record = await researched(target, world)
+    case_ref = _case_ref(scenario, world, target, record)
     incoming = "\n".join([
         f"INCOMING NOTE from {source.name} about this customer (not from the customer):",
         "<<<", message, "<<<",
@@ -450,11 +495,11 @@ async def _react_to_note(scenario: Scenario, inbound: Inbound, source: Org, targ
     ])
     others = [o for o in scenario.orgs if o.key != target.key and not o.kind.startswith("dynamic_")]
     action = await choose_action(scenario, world, target, incoming, "email", case_ref, others,
-                                 lies_to(world, target.key))
+                                 lies_to(world, target.key), record)
     if action is None:
         return
     action.notes_to_others = []
-    sender = _sender(target, action)
+    sender = _sender(target, action, record)
     emails: list[tuple[Email, datetime]] = []
     effective_at = world.now
     if action.reply and sender:

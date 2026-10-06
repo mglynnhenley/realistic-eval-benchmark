@@ -6,6 +6,8 @@ the journey (ground truth), the counterparties, the layers and the seed emails.
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -48,8 +50,9 @@ class Org(BaseModel):
     web_domains: list[str] = Field(default_factory=list)
     phone_numbers: list[str] = Field(default_factory=list)
     reply_delay_hours: tuple[float, float] = (24.0, 72.0)  # min, max (FR-036)
-    persona: str = ""  # tone and style notes for the reply writer
-    policy: str = ""  # the org's real published policy, summarised (FR-023)
+    # `Name: value` directives (Reply-from, Sign-off, ...) used when research gives none.
+    persona: str = ""
+    policy: str = ""  # hand-written policy summary; research dossiers replace it (FR-023)
 
 
 class Layer(BaseModel):
@@ -92,6 +95,7 @@ class Scenario(BaseModel):
 
 
 SCENARIO_DIR = Path(__file__).parent
+DOSSIER_DIR = SCENARIO_DIR / "dossiers"
 
 
 def load_scenario(name_or_path: str = "train_refund") -> Scenario:
@@ -99,3 +103,11 @@ def load_scenario(name_or_path: str = "train_refund") -> Scenario:
     if not path.suffix:
         path = SCENARIO_DIR / f"{name_or_path}.yaml"
     return Scenario.model_validate(yaml.safe_load(path.read_text()))
+
+
+def saved_dossier(org: Org) -> dict | None:
+    """The committed research record for this organisation (dossiers/<key>.json), if any."""
+    path = DOSSIER_DIR / f"{org.key}.json"
+    if not re.fullmatch(r"[a-z0-9_]+", org.key) or not path.is_file():
+        return None
+    return json.loads(path.read_text())

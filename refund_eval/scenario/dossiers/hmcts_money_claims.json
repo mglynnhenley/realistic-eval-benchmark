@@ -1,0 +1,201 @@
+{
+  "org": "hmcts_money_claims",
+  "name": "HM Courts & Tribunals Service Civil Money Claims (moneyclaims.service.gov.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.gov.uk moneyclaims.service.gov.uk civil money claims contact refund court fees complaints HMCTS",
+        "objective": "Find official Civil Money Claims contact email and hours, court fee refund rules and deadlines, HMCTS complaints stages response times and ombudsman."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      "chars": 5448
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.moneyclaims.service.gov.uk/eligibility?lang=en"
+      },
+      "chars": 1736
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.gov.uk \"money claims\" \"refund\" \"fee\" \"3 months\"",
+        "objective": "Find ordinary Civil Money Claims fee refund or nonrefund rules, cancellation, Help with Fees retrospective deadline and official service terms."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.moneyclaims.service.gov.uk \"refund\"",
+        "objective": "Find Money Claims terms and conditions refund clauses and service identity; prioritise official terms page."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.gov.uk/government/publications/fees-in-the-civil-and-family-courts-main-fees-ex50/pay-a-civil-or-family-court-fee-get-help-with-fees-or-get-a-refund"
+      },
+      "error": "Invalid public read URL: https://www.gov.uk/government/publications/fees-in-the-civil-and-family-courts-main-fees-ex50/pay-a-civil-or-family-court-fee-get-help-with-fees-or-get-a-refund"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      "chars": 8059
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.gov.uk/get-help-with-court-fees"
+      },
+      "chars": 6168
+    }
+  ],
+  "dossier": {
+    "summary": "HM Courts & Tribunals Service Civil Money Claims provides an online money-claim service with email and telephone support. Court-fee refunds include retrospective Help with Fees applications within three months and a separate scheme for specified overcharged or mischarged fees. Service complaints progress through an initial response, senior-manager review and User Investigations Team appeal, with subsequent referral through an MP to the Parliamentary and Health Service Ombudsman.",
+    "facts": [
+      {
+        "statement": "The Money Claims website describes its online service as being developed and improved through user feedback.",
+        "quote": "We are building a new service. Different designs are being tested and changed based on feedback from users.",
+        "url": "https://www.moneyclaims.service.gov.uk/eligibility?lang=en"
+      },
+      {
+        "statement": "Money Claims accepts support enquiries by email at contactocmc@justice.gov.uk and by telephone on 0300 123 7050, Monday to Friday, 8.30am to 5pm.",
+        "quote": "Contact us for help\nEmail\ncontactocmc@justice.gov.uk\nTelephone\n0300 123 7050\nMonday to Friday, 8.30am to 5pm.",
+        "url": "https://www.moneyclaims.service.gov.uk/eligibility?lang=en"
+      },
+      {
+        "statement": "Retrospective Help with Fees requires both payment within the last three months and eligibility for help when the fee was paid.",
+        "quote": "If you’ve already paid the fee, you can apply to get money back if both of the following apply:\nyou paid the fee in the last 3 months\nyou were eligible for help when you paid it",
+        "url": "https://www.gov.uk/get-help-with-court-fees"
+      },
+      {
+        "statement": "An application for help with an already-paid fee must be sent to the court or tribunal that received the fee.",
+        "quote": "If you’re applying for money off a fee you’ve already paid, send your help with fees application to the court or tribunal you paid your fee to.",
+        "url": "https://www.gov.uk/get-help-with-court-fees"
+      },
+      {
+        "statement": "The separate Ministry of Justice court-fee refund scheme addresses overcharged and mischarged fees.",
+        "quote": "overcharged – where we have charged a fee that is greater than the cost of the service\nmischarged – where we have charged the wrong fee or we should not have charged a fee at all",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Eligibility for that refund scheme is limited to circumstances and fees specified in its guidance, rather than every court-fee payment.",
+        "quote": "You can only claim a refund if your circumstances and the fee you paid are referred to in the guidance document.",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "The scheme covers applicants who paid the court directly or were ordered to pay the fees of someone who brought a claim against them.",
+        "quote": "You can only claim a refund if:\nyou paid the fee straight to the court\nsomeone put a claim against you and you were ordered to pay their fees",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Applications under the specified-fee refund scheme must use one of its designated refund forms.",
+        "quote": "You must apply for a refund using either:\napplication for full or partial refund of court fees\nlow value personal injury (LVPI) Part 8 stage 3 refund form\nAll applications must be submitted using these forms.",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Refund-scheme applications and evidence are accepted by email at civil_refunds@justice.gov.uk.",
+        "quote": "Send the form and your evidence as email attachments to\ncivil_refunds@justice.gov.uk",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Refund application emails should have the subject “Civil fees refund application”, with attachments within a 10MB email limit.",
+        "quote": "The email size limit is 10MB but you can send more than one email.\nWrite ‘Civil fees refund application’ as the subject.",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Refund-scheme applications can alternatively be posted to HMCTS, PO Box 8793, Leicester, LE1 8BN.",
+        "quote": "Post the form and your evidence to:\nHMCTS\nPO Box 8793\nLeicester\nLE1 8BN",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "The refund scheme aims to process applications within 20 working days of receipt.",
+        "quote": "We will try to process your application in 20 working days from the day we get it.",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "The refund-scheme contact team aims to respond to enquiries within five working days.",
+        "quote": "Email\ncivil_refunds@justice.gov.uk\nWe aim to respond within 5 working days.",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "Refund applicants receive an email or letter explaining missing information, the decision, payment details or rejection reasons.",
+        "quote": "You’ll be told by email or letter:\nif any information is missing\nwhether your claim is successful\nthe refund amount and when it’ll be paid\nthe reasons for any rejection",
+        "url": "https://www.gov.uk/guidance/claim-a-court-fee-refund"
+      },
+      {
+        "statement": "HMCTS service complaints concern staff handling and cannot change a case decision or investigate judicial conduct.",
+        "quote": "Our complaint process looks at how your case was handled by our staff. We’re not able to change the decision in your case or investigate how a judge or magistrate acted towards you.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "HMCTS accepts complaints through an online form, in person, by email, by phone or in writing.",
+        "quote": "To complain about our service:\ncomplete our online complaints form\nspeak to a member of staff in our buildings and we’ll record your feedback\ncontact our courts or tribunals by email, phone or in writing",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "The initial complaint response target is 10 working days.",
+        "quote": "We aim to respond within 10 working days.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "A dissatisfied complainant can request a senior-manager review, explain their dissatisfaction and expect a target response within 10 working days.",
+        "quote": "you can ask a senior manager at the office to carry out a review. You should explain why you’re not satisfied. The manager will aim to respond to you within 10 working days.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "After senior-manager review, a complainant can appeal to the User Investigations Team, whose contact details are supplied by the reviewing manager.",
+        "quote": "If you’re not satisfied with the senior manager’s review of your complaint, you can appeal to the User Investigations Team. The manager who reviewed your complaint will give you their contact details.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "The User Investigations Team reviews the handling of the complaint and aims to respond within 15 working days.",
+        "quote": "The User Investigations Team will take a fresh look at the way your complaint has been handled. They will aim to respond to you within 15 working days.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "After completing the HMCTS complaints process, a complainant can ask their MP to refer the case to the Parliamentary and Health Service Ombudsman.",
+        "quote": "If you remain unsatisfied at the end of the HMCTS complaints process, you can also ask your member of Parliament to refer your case to the\nParliamentary and Health Service Ombudsman",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      },
+      {
+        "statement": "HMCTS uses plain, direct language that acknowledges dissatisfaction and explains practical next steps.",
+        "quote": "If you’re not happy with the reply to your complaint, you can ask a senior manager at the office to carry out a review. You should explain why you’re not satisfied.",
+        "url": "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Money Claims <contactocmc@justice.gov.uk>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in plain, neutral public-service English, addressing the customer as “you” and the service as “we”. Acknowledge dissatisfaction and give clear, practical next steps in short paragraphs or lists. Distinguish staff-service complaints from judicial decisions, and describe published response times as aims rather than guarantees."
+    }
+  },
+  "errors": [
+    "read_page: Invalid public read URL: https://www.gov.uk/government/publications/fees-in-the-civil-and-family-courts-main-fees-ex50/pay-a-civil-or-family-court-fee-get-help-with-fees-or-get-a-refund"
+  ],
+  "retrieved_at": "2026-10-06T04:00:37+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.gov.uk/get-help-with-court-fees",
+    "https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service/about/complaints-procedure",
+    "https://www.gov.uk/guidance/claim-a-court-fee-refund",
+    "https://www.moneyclaims.service.gov.uk/eligibility?lang=en"
+  ]
+}

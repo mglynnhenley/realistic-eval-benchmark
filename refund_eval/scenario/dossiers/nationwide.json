@@ -1,0 +1,266 @@
+{
+  "org": "nationwide",
+  "name": "Nationwide Building Society (nationwide.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:nationwide.co.uk complaints procedure refund payment unauthorised chargeback ombudsman email",
+        "objective": "Find official Nationwide complaints pages with channels stages time limits Financial Ombudsman and refund policies quoting deadlines."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      "chars": 8083
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/digital-banking-promise"
+      },
+      "chars": 4530
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:nationwide.co.uk card payment dispute refund chargeback 120 days direct debit guarantee",
+        "objective": "Find official refund clauses for merchant card disputes, chargeback and Section 75, deadlines and refund processing times; prefer pages with regulatory status footer."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationwide.co.uk/help/payments/disputing-a-payment"
+      },
+      "chars": 4164
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      "chars": 5852
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://nationwide.co.uk/credit-cards/help/section-75-claims"
+      },
+      "chars": 2964
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationwide.co.uk/help/payments/regular-payments-explained"
+      },
+      "chars": 4364
+    }
+  ],
+  "dossier": {
+    "summary": "Nationwide Building Society provides banking services and is authorised by the PRA and regulated by the FCA and PRA. Its refund routes include Visa disputes, credit-card Section 75 claims, Direct Debit protection and fraud-related promises, each with its own conditions. Complaints are accepted through chat, phone, branches and post, but not registered by email; unresolved dissatisfaction can be taken to the Financial Ombudsman Service.",
+    "facts": [
+      {
+        "statement": "Nationwide Building Society is authorised by the PRA and regulated by the FCA and PRA under registration number 106078.",
+        "quote": "Nationwide Building Society is authorised by the Prudential Regulation Authority and regulated by the Financial Conduct Authority (FCA) and the Prudential Regulation Authority under registration number 106078.",
+        "url": "https://www.nationwide.co.uk/help/payments/disputing-a-payment"
+      },
+      {
+        "statement": "For purchase problems, Nationwide recommends contacting the seller first and describes a Visa dispute as an attempt to recover money rather than a guaranteed refund.",
+        "quote": "A Visa dispute is where you ask us to try to get your money back from a seller when you've used a Visa debit or credit card.",
+        "url": "https://www.nationwide.co.uk/help/payments/disputing-a-payment"
+      },
+      {
+        "statement": "Customers should try resolving a purchase problem with the seller before raising a card dispute.",
+        "quote": "We recommend you contact the seller first to try to resolve the issue.",
+        "url": "https://www.nationwide.co.uk/help/payments/disputing-a-payment"
+      },
+      {
+        "statement": "Pending credit-card payments cannot be disputed, whereas pending debit-card payments may be disputable.",
+        "quote": "You can't dispute pending credit card payments. Only raise a dispute once the payment has gone through. You may be able to dispute pending debit card payments.",
+        "url": "https://www.nationwide.co.uk/help/payments/disputing-a-payment"
+      },
+      {
+        "statement": "Nationwide describes Section 75 as a possible route if a Visa dispute cannot recover the money, available only for credit-card purchases.",
+        "quote": "If we're unable to get your money back under a Visa dispute you may be able to make a Section 75 claim. You can only make a Section 75 claim if you paid with a credit card.",
+        "url": "https://www.nationwide.co.uk/credit-cards/help/section-75-claims"
+      },
+      {
+        "statement": "Nationwide's Section 75 page states a goods-or-services cost range of £100 to £30,000 and lists non-delivery, faulty goods, misdescription and incorrect sales information as qualifying problems.",
+        "quote": "your goods or services cost between £100 and £30,000\nAnd any of the following apply:\nyou’ve not received the goods or services that you purchased from the supplier\nthe goods provided by the supplier are faulty\nthe goods or services provided are not as described by the supplier\nyou were persuaded to buy on the basis of incorrect information.",
+        "url": "https://www.nationwide.co.uk/credit-cards/help/section-75-claims"
+      },
+      {
+        "statement": "Section 75 protection can apply when only a deposit or partial payment was made on the credit card.",
+        "quote": "This applies whether you've paid the full amount, only the deposit, or made a partial payment on your credit card.",
+        "url": "https://www.nationwide.co.uk/credit-cards/help/section-75-claims"
+      },
+      {
+        "statement": "Nationwide directs credit-card claimants to its credit card dispute form.",
+        "quote": "To make a claim on your Nationwide credit card, complete our\ncredit card dispute form",
+        "url": "https://www.nationwide.co.uk/credit-cards/help/section-75-claims"
+      },
+      {
+        "statement": "The Direct Debit Guarantee provides refunds for unauthorised collections, amounts different from those communicated, or collections on the wrong date.",
+        "quote": "This offers a refund safety net if an unauthorised payment is taken. It also covers payments taken that are not the amount communicated to you. Or if the payment is taken on the wrong date. If any if these issues occur, you’re entitled to a refund.",
+        "url": "https://www.nationwide.co.uk/help/payments/regular-payments-explained"
+      },
+      {
+        "statement": "For recurring Open Banking payments, Nationwide says a payment outside the customer's agreed limits is refundable under UK payment regulations.",
+        "quote": "If a payment is taken which does not comply with those limits, you're entitled to a refund under UK payment regulations.",
+        "url": "https://www.nationwide.co.uk/help/payments/regular-payments-explained"
+      },
+      {
+        "statement": "The Digital Banking Promise covers money taken without authorisation through Nationwide's app, internet bank or Open Banking service.",
+        "quote": "We’ll refund money taken without authorisation from your account through our:\napp\ninternet bank\nOpen Banking service",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/digital-banking-promise"
+      },
+      {
+        "statement": "The Digital Banking Promise identifies possible refund exclusions for payments induced by a fraudster, failure to take reasonable security precautions, and fraudulent claims.",
+        "quote": "But you might not be entitled to a refund if you:\nmade the payment because a fraudster convinced you to\ndidn’t take reasonable steps to keep card and security details safe (as set out in your terms and conditions)\nacted fraudulently - this can include withholding information or making a false claim statement.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/digital-banking-promise"
+      },
+      {
+        "statement": "Suspicious transactions should be reported immediately, and a transaction more than 13 months old might not be refunded.",
+        "quote": "Tell us about any suspicious transactions as soon as you notice them. You might not receive a refund if the transaction happened more than 13 months ago.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/digital-banking-promise"
+      },
+      {
+        "statement": "The Scam Protection Promise covers payments from a Nationwide current account to someone other than the customer by internal Nationwide transfer, Faster Payment or CHAPS.",
+        "quote": "Our Promise covers the following types of payment only from a current account you have with us where you’re paying someone other than yourself by:\nInternal transfer to another Nationwide account;\nFaster Payment; and\nCHAPS payment.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "The Scam Protection Promise requires a pre-payment check by branch or phone, and the eventual payment must match the checked amount, payment type and destination account.",
+        "quote": "our Promise will only apply to the payment if you came into our branch or called us on\n0800 030 40 57\nto ask us to check the payment for you before you made it. Plus, the payment that you made must be for the same amount, using the same payment type and paid to the same account as the payment you asked us to check.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "Under the Scam Protection Promise, Nationwide refunds qualifying scam payments it checked without advising against payment, but not payments made against its advice.",
+        "quote": "If, after we’ve had the chance to check it, we don’t advise you not to make the payment and\nit turns out you were tricked into making the payment to someone else that you didn’t intend to pay; or\nyou sent the payment to someone else believing it was legitimate but it turned out to be fraudulent, we’ll refund your payment.\nIf we advise you not to make the payment and you still do, you won’t be covered by our Promise.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "Scam Protection Promise claims must be reported by calling 0800 055 66 22 as soon as suspected and within 13 months of payment.",
+        "quote": "You’ll need to call us on\n0800 055 66 22\nas soon as you suspect you have fallen victim to a scam and within 13 months from the date you made the payment.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "Nationwide aims to decide Scam Protection Promise refund claims within five business days, or 35 business days for complex cases.",
+        "quote": "We’ll aim to finish the investigation and reach a decision about refunding you within 5 business days (Monday to Friday, excluding bank holidays) unless it’s a complex case. If it’s complex, we’ll aim to finish our investigation and reach a decision within 35 business days.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "Successful Scam Protection Promise claimants receive written confirmation explaining how the refund will be made.",
+        "quote": "If your claim is successful, we’ll write to you to tell you and we’ll let you know how we’ll refund you.",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "The Scam Protection Promise supplements rather than replaces the PSR mandatory reimbursement rules for authorised push payment scams.",
+        "quote": "Our Promise is in addition to the\nPayment System Regulators (PSR) Mandatory Reimbursement Rules for Authorised Push Payment Scams",
+        "url": "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms"
+      },
+      {
+        "statement": "Nationwide calls chat the quickest complaint channel and says its live chat is open 24 hours a day.",
+        "quote": "The quickest way to get in touch about a complaint is through chat.\nOur live chat is open 24 hours a day and will guide you through what happens next.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "The dedicated mortgage complaint chat team operates Monday to Friday 8am–6pm and Saturday 8.30am–4pm, excluding Sundays and bank holidays.",
+        "quote": "If the complaint is about your mortgage, our dedicated team is open:\nMonday to Friday: 8am to 6pm\nSaturday: 8.30am to 4pm\nSunday and bank holidays: closed",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Complaints can also be made by phone, branch or letter, but Nationwide cannot register complaints by email.",
+        "quote": "You can also contact us by phone, visiting us in branch or sending us a letter.\nWe cannot register complaints over email. To make a complaint online, use our online chat.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Complaint phone numbers are 0800 30 20 15 from the UK and +44 1793 65 67 89 from abroad.",
+        "quote": "UK:\n0800 30 20 15\nAbroad:\n+44 1793 65 67 89",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Complaint phone hours depend on whether the issue concerns banking/current accounts or savings/mortgages.",
+        "quote": "Banking or current accounts\nMonday to Saturday, 8am to 8pm.\nSunday, 9am to 5pm.\nSavings or mortgages\nMonday to Friday, 8am to 6pm.\nSaturday, 9am to 2pm.\nClosed Sundays.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Postal complaints should include the customer's name, address, account details, optional contact number, what happened and when.",
+        "quote": "Please include:\nYour name\nYour address\nYour account details\nA contact number, if you are happy for us to call you\nWhat has happened\nWhen it happened",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "The postal complaint address is The Complaints Team, Nationwide Building Society, NW 2020, Swindon, SN38 1NW.",
+        "quote": "Send your letter to:\nThe Complaints Team\nNationwide Building Society\nNW 2020\nSwindon, SN38 1NW",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Nationwide's published complaint timescales are no later than 15 days for payment transactions, exceptionally 35 days, and up to 56 days for other matters, with progress updates.",
+        "quote": "We will make every effort to resolve a payment transaction complaint as soon as possible and by no later than 15 days or, in exceptional circumstances, 35 days. Where a complaint relates to any other matter, allow up to 56 days. We will keep you informed of our progress throughout.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "A complaint resolved to the customer's satisfaction within three working days after receipt is followed by a Summary Resolution Communication.",
+        "quote": "If we have been able to resolve your complaint to your satisfaction – within 3 working days after the day we received your complaint – you will get a communication from us called a Summary Resolution Communication shortly afterwards.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "If resolution takes longer than three working days, Nationwide keeps the customer informed and issues a Final Response letter covering its investigation, decision, applicable next steps and ombudsman information.",
+        "quote": "We will try to resolve your complaint within 3 working days. If that is not possible, we will keep you informed until your complaint is resolved.\nOnce we have resolved your complaint you will receive a Final Response letter. This covers:\nDetails of our investigation\nOur decision\nIf applicable, next steps\nInformation about the Financial Ombudsman",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Customers dissatisfied with Nationwide's decision can seek a free, independent review from the Financial Ombudsman Service.",
+        "quote": "If you are unhappy with our decision and wish to take your complaint further, you can ask the Financial Ombudsman Service (FOS) to review your complaint. This is a free, independent service for resolving such disputes.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "An early FOS referral may require Nationwide's consent if it has not had the chance to put things right and has not exceeded the permitted handling timescales.",
+        "quote": "You can refer your complaint to FOS at any time. But they will need our consent to investigate complaints if we have not:\nhad the chance to put things right, and\nexceeded the handling timescales permitted for your complaint.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "After a Final Response, referral to FOS must be made within six months of the letter's date.",
+        "quote": "If you want to refer your complaint after we have issued our Final Response, you must do it within 6 months of the date on the letter.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Nationwide's complaint communications use plain, collaborative and reassuring language focused on understanding the problem and putting it right.",
+        "quote": "If things have not gone as you expected, let us know. We will work with you to understand what happened and do our best to put it right.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      },
+      {
+        "statement": "Nationwide refers to customers as members and emphasises keeping them informed.",
+        "quote": "We are committed to resolving complaints and helping make things right for our members.",
+        "url": "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in plain, approachable British English, using 'we' and 'you' and referring to customers as members where appropriate. Be calm, collaborative and reassuring: seek to understand what happened and explain how to put it right. Give clear next steps and progress expectations, distinguishing a possible refund or investigation aim from a firm commitment."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-06T04:08:11+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://nationwide.co.uk/credit-cards/help/section-75-claims",
+    "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback",
+    "https://www.nationwide.co.uk/credit-cards/help/section-75-claims",
+    "https://www.nationwide.co.uk/help/fraud-and-security/digital-banking-promise",
+    "https://www.nationwide.co.uk/help/fraud-and-security/scam-protection-promise/scam-promise-terms",
+    "https://www.nationwide.co.uk/help/payments/disputing-a-payment",
+    "https://www.nationwide.co.uk/help/payments/regular-payments-explained"
+  ]
+}

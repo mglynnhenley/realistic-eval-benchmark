@@ -1724,6 +1724,7 @@
     }
     if (mode === "model") {
       payload.world_mode = $("world-mode").value;
+      payload.research_mode = $("research-mode").value;
       payload.model = $("model").value.trim();
       if (!$("inbox-snapshot").disabled && $("inbox-snapshot").value) payload.inbox_snapshot = $("inbox-snapshot").value;
       if (payload.execution !== "local") {

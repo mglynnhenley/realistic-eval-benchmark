@@ -1,0 +1,227 @@
+{
+  "org": "transport_focus",
+  "name": "Transport Focus (transportfocus.org.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.transportfocus.org.uk complaints refunds passenger help complaint procedure contact email",
+        "objective": "Prioritize official Transport Focus pages explaining role, help with passenger complaints versus Rail Ombudsman, refund time limits, complaint handling stages and contact response times."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.transportfocus.org.uk/contact/complaint/"
+      },
+      "chars": 2494
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      },
+      "chars": 6910
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      "error": "Unsupported content type application/pdf"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.transportfocus.org.uk refunds \"days\" \"complaints\" \"advice@transportfocus.org.uk\"",
+        "objective": "Find official refund clauses and time limits, contact information and complaints about Transport Focus itself with review stages response times; prioritize readable official pages. Also retrieve text of Customer complaint handling procedure 2026."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.transportfocus.org.uk \"refund\" \"28\"",
+        "objective": "Find official Transport Focus passenger advice pages quoting refund deadlines and entitlement. Prioritize advice not external operators or reports."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      "chars": 8075
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.transportfocus.org.uk/contact/"
+      },
+      "chars": 3815
+    }
+  ],
+  "dossier": {
+    "summary": "Transport Focus helps passengers and road users with advice and complaints, directing rail passengers first to the operator and then, where appropriate, to the Rail Ombudsman. Its refund guidance concerns claims against train companies or ticket retailers; Transport Focus helps with unresolved complaints rather than presenting itself as the ticket refund provider. It accepts enquiries by webform, email, telephone and post, and publishes response targets and a separate review route for complaints about its own service.",
+    "facts": [
+      {
+        "statement": "Rail passengers should complain to the operator first, then contact the Rail Ombudsman if unhappy with the outcome or handling.",
+        "quote": "For complaints about a specific rail journey, you should first contact the rail operator directly. If you are unhappy with the outcome of your complaint or you do not feel the train company handled it appropriately, then you can contact the Rail Ombudsman.",
+        "url": "https://www.transportfocus.org.uk/contact/complaint/"
+      },
+      {
+        "statement": "Transport Focus directs general rail complaints and matters involving Penalty Fares or Unpaid Fares Notices to its webform, promising contact within five working days.",
+        "quote": "However if your complaint is more general, or relates to a Penalty Fare or Unpaid Fares Notice, then fill out our webform and we will get in touch with you within 5 working days.",
+        "url": "https://www.transportfocus.org.uk/contact/complaint/"
+      },
+      {
+        "statement": "Refund applicants should consult the train company or ticket retailer's website, and an administration charge of up to £5 per ticket may apply.",
+        "quote": "The train company’s website, or the website of retailer where you bought the ticket will advise you where to apply for a refund. An administration charge of up to £5 on each ticket may be made.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "Transport Focus states that from April 2026 unwanted-ticket refund claims must normally be made by 23:59 the day before validity begins, with an exceptional-circumstances allowance up to 28 days after expiry.",
+        "quote": "From April 2026, tickets which you no longer want to use can be refunded only if a claim is made by 23:59 the day before the ticket becomes valid. In exceptional circumstances, refunds will be given if a claim is received up to 28 days after expiry of an unused ticket.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "Advance tickets have no refund value merely because plans change, although changes to the travel date or time may be possible before departure, usually for a fee.",
+        "quote": "Some ticket types (e.g. advance) have no refund value if your plans change. You may be able to change the date and/or time of travel on an advance ticket (usually for a fee) if the booked train has not yet left.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "If the intended train is cancelled or delayed and the passenger decides not to start the journey, the fare and reservation fee are refundable without an administration charge.",
+        "quote": "It may be that the train you intend to travel by is cancelled or delayed. In this case, you are entitled to a full refund of the fare and of any reservation fee if your journey has not begun and you decide not to travel. No administration charge is made.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "The disruption-related refund deadline is 28 days after the ticket's validity expires, and this entitlement includes Advance tickets.",
+        "quote": "You must apply for the refund within 28 days of the expiry of the ticket’s validity. This applies to all ticket types, regardless of the place of issue. Advance tickets can be refunded in full under these circumstances.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "Season tickets must be returned to the selling train company, with at least three days remaining on weekly tickets or seven days on monthly or longer tickets to qualify for a refund.",
+        "quote": "The season ticket must be returned to the train company which sold it. The refund will be calculated from the day when the season ticket is handed in. To qualify for any refund, a weekly season ticket must still be valid for at least three days; a monthly or longer season ticket must still be valid for at least seven days.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "Flexi Season refunds must be requested before the 28-day validity period ends and are calculated by deducting used days at the Anytime Return rate plus an administration fee of no more than £10.",
+        "quote": "You must apply for the refund before the end of the 28-day validity period. The refund is calculated based on the difference between the price you paid for the Flexi Season and the cost of an Anytime Return ticket for each day you have used, minus an administration fee of no more than £10.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "The published Delay Repay claim deadline is 28 days from the journey date.",
+        "quote": "you must submit your claim within 28 days of the journey date.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+      },
+      {
+        "statement": "Transport Focus advises passengers to provide detailed complaints with copies of tickets and receipts and to chase receipt if there is no reply within ten working days.",
+        "quote": "When making your complaint, try to include as much detail as you can. If you have copies of your tickets and receipts this will also help. ... if you don’t get a reply within 10 working days then contact the company to make sure it has received your letter.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      },
+      {
+        "statement": "A passenger who has chased an unanswered train-company complaint can approach the Rail Ombudsman after 40 working days.",
+        "quote": "However, if you have chased for a response but still haven’t received one after 40 working days, you can contact The Rail Ombudsman to take your complaint further.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      },
+      {
+        "statement": "Transport Focus says the Rail Ombudsman will review a referred complaint and contact the passenger within three working days to explain the next steps.",
+        "quote": "The Rail Ombudsman will review your complaint and contact you within three working days to explain how it will progress your case.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      },
+      {
+        "statement": "The Rail Ombudsman may refer complaints about rail service design or industry policy to Transport Focus, but passengers are directed to contact the Ombudsman first.",
+        "quote": "If your complaint is about the way rail services have been designed or rail industry policy, the Ombudsman will review it and may then put it in the hands of Transport Focus.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "Parking-fine and penalty-fare disputes should go to the appeal body on the notice, with Transport Focus available for complaints that the appeal process was not followed correctly.",
+        "quote": "Should your complaint relate to either of these topics, please contact the appeal body specified on your Penalty Notice. If you feel that the process has not been correctly followed by the relevant appeal body, please contact Transport Focus.",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      },
+      {
+        "statement": "Transport Focus accepts advice enquiries by email at advice@transportfocus.org.uk.",
+        "quote": "Email us at advice@transportfocus.org.uk",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "The passenger and road-user telephone number is 0300 123 2350.",
+        "quote": "Our telephone number for passengers and road users is: 0300 123 2350",
+        "url": "https://www.transportfocus.org.uk/contact/"
+      },
+      {
+        "statement": "The helpline operates 8am–8pm Monday to Friday and 8am–4pm at weekends, including bank holidays except Christmas Day, Boxing Day and New Year's Day.",
+        "quote": "Our help line is available between 8am and 8pm Monday to Friday and from 8am to 4pm at weekends. The help line is available all year round including bank holidays with the exception of Christmas Day, Boxing Day and New Years Day.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "Postal enquiries can be sent without a stamp to Freepost TRANSPORT FOCUS, 77 Timothys Bridge Road, Stratford Enterprise Park, Stratford-upon-Avon, CV37 9BG.",
+        "quote": "Or write to us (no stamp needed):\nFreepost TRANSPORT FOCUS\n77 Timothys Bridge Road\nStratford Enterprise Park\nSTRATFORD-UPON-AVON\nCV37 9BG",
+        "url": "https://www.transportfocus.org.uk/contact/"
+      },
+      {
+        "statement": "The general-enquiry, Freedom of Information and data-protection webform promises contact within three to five working days.",
+        "quote": "Use our webform to get in touch with us for general enquiries, making a request under the Freedom of Information Act, or if you wish to exercise any of your rights under UK-GDPR. Our contact team will get right back to you within 3-5 working days.",
+        "url": "https://www.transportfocus.org.uk/contact/"
+      },
+      {
+        "statement": "Transport Focus aims to acknowledge written correspondence within five working days.",
+        "quote": "we will aim to acknowledge receipt of your correspondence within five working days of receiving it",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "If contacted before the train company, Transport Focus aims to forward the complaint within five working days and ask the company to reply directly.",
+        "quote": "if you contacted us before contacting the train company concerned, we will forward your complaint to them and ask them to respond to you directly. We will aim do this within five working days.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "Transport Focus aims to provide a case outcome within 35 working days and to keep the passenger informed if that is not possible.",
+        "quote": "we will aim to respond to you with the outcome of your case within 35 working days. If this is not possible then we will keep you informed about what we are doing.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "For complaints about Transport Focus itself, the published response target is 20 working days.",
+        "quote": "if it is a complaint about us, we will aim to respond to you within 20 working days.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "Complaints about its handling are reviewed by Director Louise Collins rather than the original appeal handler, and can be emailed to louise.collins@transportfocus.org.uk.",
+        "quote": "Any complaint will not be handled by the person who dealt with the initial appeal but will be passed to Louise Collins, Director, to review and determine next steps. Please email your complaint to louise.collins@transportfocus.org.uk.",
+        "url": "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf"
+      },
+      {
+        "statement": "Transport Focus directs queries about transport within London, including buses and the Underground, to its sister organisation London TravelWatch.",
+        "quote": "If your query is about transport within London, including buses and the underground, please contact our sister organisation London TravelWatch.",
+        "url": "https://www.transportfocus.org.uk/contact/"
+      },
+      {
+        "statement": "Its published customer-service principles combine advocacy, realistic expectations and empathy.",
+        "quote": "aim high and seek the best possible outcome for a passenger’s complaint\nclarify the role Transport Focus can play and help the passenger to understand what can be realistically achieved\nbe empathetic; Transport Focus will always put itself in your place to understand your concerns",
+        "url": "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-20 Mon-Fri; 8-16 Sat-Sun; includes bank holidays except Christmas Day, Boxing Day and New Year's Day",
+      "Cold-email": null,
+      "voice": "Write in plain, professional British English with an empathetic, passenger-focused tone. Seek the best achievable outcome while clearly explaining Transport Focus's role and setting realistic expectations. Give practical next steps, identify the organisation best placed to act, and distinguish response targets from guaranteed outcomes."
+    }
+  },
+  "errors": [
+    "read_page: Unsupported content type application/pdf"
+  ],
+  "retrieved_at": "2026-10-06T04:04:15+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2018/11/07161827/CP-4.1-CCHP-2026-v2.pdf",
+    "https://www.transportfocus.org.uk/contact/",
+    "https://www.transportfocus.org.uk/contact/complaint/",
+    "https://www.transportfocus.org.uk/transport-user-advice/rail-complaints/",
+    "https://www.transportfocus.org.uk/transport-user-advice/rail-rights/"
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "org": "trainline",
+  "name": "Trainline (thetrainline.com)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.thetrainline.com Trainline refund complaints procedure rail ombudsman contact email refund 28 days",
+        "objective": "Find official Trainline refund terms clauses and time limits and complaints handling policy stages response times contact email ombudsman."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thetrainline.com/terms"
+      },
+      "chars": 8041
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.thetrainline.com complaints handling procedure Trainline complaints 8 weeks 2026 ombudsman",
+        "objective": "Locate official full complaints policy with escalation stages response times and ADR membership and contact addresses."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://support.thetrainline.com/hc/en-gb/articles/5118073689247-Refunding-a-UK-Train-Ticket"
+      },
+      "error": "HTTP 403"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.thetrainline.com \"complaints\" \"Ombudsman\" \"days\" \"refund\"",
+        "objective": "Find Trainline official UK complaints escalation policy with senior review, 40 working days or deadlock, response promises; also refund clauses on readable pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "Trainline complaints handling procedure \"team\" \"complaint\" site:thetrainline.com",
+        "objective": "Find UK Trainline complaints procedure, senior escalation and Rail Ombudsman, exact official page text. Prioritize support.thetrainline.com or www.thetrainline.com complaint handling pages."
+      },
+      "chars": 3959
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"
+      },
+      "error": "Invalid public read URL: https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://assets.railombudsman.org/pdfs/consumer-guide-2.pdf"
+      },
+      "error": "Unsupported content type application/pdf"
+    }
+  ],
+  "dossier": {
+    "summary": "Trainline provides a platform for booking rail and coach tickets. Its UK refund rules depend on ticket type, purchase date and whether disruption prevented travel; complaints can be submitted through its online form or by telephone, with independent escalation available through the Rail Ombudsman.",
+    "facts": [
+      {
+        "statement": "Trainline is a rail and coach booking platform and has joined the Rail Ombudsman scheme.",
+        "quote": "Trainline connects passengers with more than 300 operators over 40 countries, providing a leading platform for booking rail and coach tickets. By joining the Rail Ombudsman scheme, Trainline reinforces its commitment to delivering excellent customer service",
+        "url": "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"
+      },
+      {
+        "statement": "Unused refundable UK rail tickets purchased by 31 March 2026 can be refunded up to 28 days after ticket expiry.",
+        "quote": "For tickets purchased up to and including 31 March 2026, the existing rules continue to apply: you can refund unused Anytime, Off-Peak, Day Travelcards, Rover, Ranger and Super Off-Peak tickets up to 28 days after the expiry of the ticket.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "For those older purchases, original tickets must be returned unused at the customer's expense, and Trainline aims to process and pay the refund within 28 days of receiving the application.",
+        "quote": "If you already have your original tickets, you’ll need to return them to us, unused, before we can refund you and you’ll need to cover any costs to return your tickets to us. We aim to process your request and pay your refund within 28 days of receipt of your application.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "For in-scope refundable UK rail tickets bought from 1 April 2026, a customer choosing not to travel must request a refund by 23:59 the day before travel.",
+        "quote": "For in-scope refundable UK rail tickets purchased on or after 1 April 2026, if you choose not to travel you must request your refund no later than 23:59 on the day before the date of travel (i.e. before the ticket becomes valid for travel).",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "After that deadline, refunds are restricted to delay, cancellation or exceptional circumstances, for which evidence may be requested.",
+        "quote": "After 23:59 on the day before the ticket becomes valid for travel, you can’t get a refund, unless your train is delayed or cancelled (including if disruption means you abandon your journey and return to your departure station) or in exceptional circumstances where we may ask for evidence.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "An exceptional or disruption-related request after the new deadline must still be submitted within 28 days of ticket expiry, and travel already taken may be deducted.",
+        "quote": "Any request made after 23:59 on the day before the ticket becomes valid for travel must be submitted no later than 28 days after the ticket expiry date and, if we approve a refund for a part-used ticket, we may deduct the value of any travel already taken.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "Self-service refunds depend on the operator's eligibility rules and ordinarily go back to the original payment method.",
+        "quote": "If you’ve booked a refundable ticket (you’ll get this info during our booking process), and you meet the operator’s terms for a self-service refund, we’ll arrange one if you decide to follow the self-service process.\n\nWe’ll return your money to you via your original payment method, so long as it’s still valid.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "Trainline accepts email support through an online form, including complaints, and aims to reply within one day.",
+        "quote": "2.1 Email us\nFill out an\nonline form\nwith as much detail as possible, so we can get your query to the right person and give you the best answer. We'll aim to get back to you within one day. If you need to raise a complaint, you can do this via the form.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "For UK journeys, telephone support is available on 0333 202 2222, or +44 333 202 2222 from abroad, daily from 08:00 to 22:00 UK time.",
+        "quote": "For UK journeys\nCall us between 08:00 and 22:00 UK time any day of the week.\nCall us on 0333 202 2222 to make a booking or to get help with existing bookings, unless you're calling us from outside the UK where you'll need to dial +44 333 202 2222.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "Complaints can also be made by phone; Trainline discusses booking details only with the booker and asks customers to have their booking reference available.",
+        "quote": "Just so you know, we can only discuss booking details with the person who made the booking, for data protection reasons. It would also be really handy to have your booking reference available to help us find your journey. If you need to raise a complaint, you can do this by calling us.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "Online chat for UK train enquiries is available daily from 08:00 to 22:00 UK time.",
+        "quote": "If you’re travelling on UK trains, have your question answered by one of our support team using the\nonline chat service\n. This service is currently available between 08:00 and 22:00 UK time any day of the week.",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "UK customers seeking help with Eurostar or European journeys have a separate telephone number and weekday hours.",
+        "quote": "Customers from UK, for Eurostar and European journeys\nCall us between 09:00 and 17:00 UK time Monday to Friday.\nCall us on 0333 200 8088",
+        "url": "https://www.thetrainline.com/terms"
+      },
+      {
+        "statement": "Eligible unresolved Trainline complaints can be independently examined by the Rail Ombudsman, including complaints about fares, retailing, journey information and customer service.",
+        "quote": "With Trainline’s inclusion, passengers will now be able to access independent resolution for eligible complaints relating to its services, including fares, retailing, journey information, and customer service.",
+        "url": "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"
+      },
+      {
+        "statement": "The published Rail Ombudsman escalation criteria include dissatisfaction with a participating provider's final response or failure to resolve the complaint within 40 working days, with a 12-month limit after the final response.",
+        "quote": "You can appeal to the Rail Ombudsman if:\n\n- you are unhappy with a participating rail service provider’s final response to your complaint \n- the rail service provider has not resolved your complaint within 40 working days of receiving it\n- no more than 12 months have passed since the service provider sent you its final response",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "The Rail Ombudsman is free, independent and impartial, is sponsored by the Office of Rail and Road, and makes legally binding decisions.",
+        "quote": "The Rail Ombudsman, sponsored by the Office of Rail and Road, is a free, independent, and impartial service that helps passengers escalate unresolved complaints about rail service providers. It plays a key role in improving the passenger experience and giving passengers the confidence that complaints can be resolved. Decisions by the Rail Ombudsman are legally binding",
+        "url": "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"
+      },
+      {
+        "statement": "Trainline's public customer-facing language is conversational and practical, using direct address and informal explanatory phrases.",
+        "quote": "Just so you know, we can only discuss booking details with the person who made the booking, for data protection reasons. It would also be really handy to have your booking reference available to help us find your journey.",
+        "url": "https://www.thetrainline.com/terms"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in friendly, conversational British English, addressing the customer as “you” and Trainline as “we”. Use contractions and practical explanations, with light phrases such as “Just so you know” rather than formal legalese. Explain the applicable ticket rules clearly, give the next action, and describe response targets as aims rather than guarantees."
+    }
+  },
+  "errors": [
+    "read_page: HTTP 403",
+    "read_page: Invalid public read URL: https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu",
+    "read_page: Unsupported content type application/pdf"
+  ],
+  "retrieved_at": "2026-10-06T04:05:51+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.nationalrail.co.uk/help-and-assistance/complaints/",
+    "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu",
+    "https://www.thetrainline.com/terms"
+  ]
+}

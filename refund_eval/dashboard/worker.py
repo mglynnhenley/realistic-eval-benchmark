@@ -174,6 +174,8 @@ def run_worker(run_dir: str | Path) -> int:
                     profile_args["fixture_path"] = str(inbox)
                 if config["world_mode"] != "baseline":
                     profile_args["world_mode"] = config["world_mode"]
+                if config["research_mode"] != "auto":
+                    profile_args["research_mode"] = config["research_mode"]
                 if config["tool_profile"] == "published":
                     from refund_eval.published.profile import (
                         DEFAULT_CONFIG,
