@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialSettings
 from refund_eval.scenario.schema import load_scenario
 
@@ -115,6 +117,9 @@ def prepare(
     agent_env = {}
     if not settings.smoke and not secrets:
         agent_env = {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}
+        # Opt-in Exa account for hybrid search; otherwise trials stay keyless.
+        if settings.data_mode == "hybrid" and os.environ.get(HYBRID_EXA_KEY_ENV):
+            agent_env[HYBRID_EXA_KEY_ENV] = "${" + HYBRID_EXA_KEY_ENV + "}"
     job = JobConfig.model_validate({
         "job_name": "refund-inspect-smoke" if settings.smoke else "refund-inspect",
         "jobs_dir": str(destination / "jobs"), "n_attempts": trials,

@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
 DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5"
+# Hybrid search is keyless unless this is set, so an existing EXA_API_KEY never
+# silently switches comparisons to billed, differently rate-limited search.
+HYBRID_EXA_KEY_ENV = "REFUND_EVAL_EXA_API_KEY"
 
 
 def dashboard_default_model() -> str:

@@ -55,6 +55,7 @@ def offline_profile(monkeypatch):
     monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", "/nonexistent/published-tools.json")
     monkeypatch.setenv("EXA_API_KEY", "unused-test-key")
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
 
     def boundary(ctx, **kwargs):
         captured["boundaries"].append(kwargs)
@@ -133,6 +134,15 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
     assert services["playwright"].closed
 
 
+async def test_hybrid_search_uses_only_the_opt_in_exa_key(offline_profile, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_EXA_API_KEY", "opt-in-test-key")
+    async with profile.published_tools(load_scenario("train_refund"), data_mode="hybrid"):
+        assert offline_profile["services"]["exa"]._client._client.headers["x-api-key"] == "opt-in-test-key"
+        metadata = store().get(profile.PROFILE_KEY)
+        assert metadata["search_auth"] == "api_key"
+        assert "opt-in-test-key" not in json.dumps(metadata)
+
+
 async def test_hybrid_records_default_inbox_provenance(offline_profile, monkeypatch):
     monkeypatch.delenv("REFUND_EVAL_FIXTURE_INBOX", raising=False)
     async with profile.published_tools(load_scenario("train_refund"), data_mode="hybrid"):
@@ -161,6 +171,7 @@ async def test_hybrid_search_setup_failure_closes_mail_without_fixture_fallback(
 
 
 def test_hybrid_readiness_is_local_and_independent_of_gmail(monkeypatch):
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
     profile._fixture_readiness.cache_clear()
     calls = []
 

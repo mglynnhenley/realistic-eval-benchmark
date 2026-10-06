@@ -18,7 +18,7 @@ from pathlib import Path
 from inspect_ai.util import store
 from pydantic import BaseModel, ConfigDict, Field
 
-from refund_eval.config import RunConfig
+from refund_eval.config import HYBRID_EXA_KEY_ENV, RunConfig
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
@@ -113,7 +113,9 @@ def hybrid_readiness(*, browser_runtime: str = "docker") -> dict:
     if status["configured"]:
         status["reason"] = (
             "Simulated inbox and public web browser are ready; no Gmail connection is needed. "
-            "Live Exa search uses keyless access with provider rate limits; contracts are checked at startup."
+            + ("Live Exa search uses the REFUND_EVAL_EXA_API_KEY account" if os.environ.get(HYBRID_EXA_KEY_ENV)
+               else "Live Exa search uses keyless access with provider rate limits; set REFUND_EVAL_EXA_API_KEY to use an account")
+            + "; contracts are checked at startup."
         )
     return status
 
@@ -193,7 +195,8 @@ async def published_tools(
     source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture")
     ctx = ToolContext(scenario, Mailbox(source, scenario))
     mode_details = ({"mail_data_mode": "fixture", "web_data_mode": "live",
-                     "web_time_basis": "wall_clock", "search_auth": "keyless"}
+                     "web_time_basis": "wall_clock",
+                     "search_auth": "api_key" if os.environ.get(HYBRID_EXA_KEY_ENV) else "keyless"}
                     if data_mode == "hybrid" else {})
     if data_mode in {"fixture", "hybrid"}:
         from refund_eval.published.fixtures import (
@@ -282,7 +285,7 @@ async def published_tools(
             search = ExaSearchService(
                 policy=search_policy(scenario),
                 audit=search_audit,
-                api_key=None if data_mode == "hybrid" else os.environ.get(config.exa_key_env),
+                api_key=os.environ.get(HYBRID_EXA_KEY_ENV if data_mode == "hybrid" else config.exa_key_env),
             )
         stack.push_async_callback(search.aclose)
         tools.extend(await inspect_tools(search, source="exa"))

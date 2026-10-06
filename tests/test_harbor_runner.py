@@ -82,6 +82,17 @@ def test_paid_config_uses_named_secrets_without_values(tmp_path):
     assert job["agents"][0].get("env", {}) == {}
 
 
+def test_opt_in_exa_key_is_forwarded_by_reference_only_for_hybrid(tmp_path, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_EXA_API_KEY", "secret-exa-value")
+    hybrid = json.loads(prepare(tmp_path / "hybrid", settings=published_settings(data_mode="hybrid"),
+                                model="openrouter/example/model").read_text())
+    assert hybrid["agents"][0]["env"]["REFUND_EVAL_EXA_API_KEY"] == "${REFUND_EVAL_EXA_API_KEY}"
+    assert "secret-exa-value" not in json.dumps(hybrid)
+    fixture = json.loads(prepare(tmp_path / "fixture", settings=published_settings(data_mode="fixture"),
+                                 model="openrouter/example/model").read_text())
+    assert "REFUND_EVAL_EXA_API_KEY" not in fixture["agents"][0]["env"]
+
+
 class FakeEnvironment:
     def __init__(self, *, wait=False, return_code=0):
         self.wait = wait

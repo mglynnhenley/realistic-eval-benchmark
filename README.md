@@ -40,7 +40,7 @@ uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus
   -M strict_tools=false -T trials=1 -T published_data=hybrid
 ```
 
-Native optional tool fields require `strict_tools=false` for the OpenRouter route. The dashboard and Harbor worker set this automatically. Hybrid needs no Gmail access, Exa key or published-tools configuration file. Exa is keyless and rate-limited; service errors remain visible tool errors. Paid provider-family schema checks are separate from the scripted smoke tests.
+Native optional tool fields require `strict_tools=false` for the OpenRouter route. The dashboard and Harbor worker set this automatically. Hybrid needs no Gmail access, Exa key or published-tools configuration file. Exa is keyless and rate-limited unless `REFUND_EVAL_EXA_API_KEY` is set; service errors remain visible tool errors. Paid provider-family schema checks are separate from the scripted smoke tests.
 
 Use `fixture` for a simulated inbox and websites, or `hybrid` for simulated Gmail plus live web. `live` is an advanced local-only option requiring a compatible authenticated Gmail catalog; native Gmail sending compatibility remains unverified. Explicit legacy requests return a migration error. Saved legacy results remain readable, and older frozen jobs keep their original source snapshot and runner.
 
