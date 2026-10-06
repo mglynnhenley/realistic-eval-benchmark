@@ -16,7 +16,12 @@ from inspect_ai.tool import ToolInfo
 
 from refund_eval.published.adapter import fingerprint, inspect_parameters
 from refund_eval.published.fixtures import fixture_mail_catalog
-from refund_eval.published.provider import check_published_model, published_model_args
+from refund_eval.published.provider import (
+    cache_conversation_prefix,
+    check_published_model,
+    mark_last_message,
+    published_model_args,
+)
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 
 
@@ -112,3 +117,48 @@ async def test_real_browser_catalog_encodes_for_all_openrouter_families(tmp_path
         finally:
             await provider.aclose()
     assert fingerprint(catalog) == digest
+
+
+EPHEMERAL = {"type": "ephemeral"}
+
+
+def test_last_tool_result_gets_a_cache_breakpoint():
+    request = {"messages": [
+        {"role": "system", "content": [{"type": "text", "text": "Rules", "cache_control": EPHEMERAL}]},
+        {"role": "user", "content": "Get my refund"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "Inbox results"},
+    ]}
+    mark_last_message(request)
+    assert request["messages"][-1]["content"] == [{"type": "text", "text": "Inbox results", "cache_control": EPHEMERAL}]
+    assert request["messages"][1]["content"] == "Get my refund"  # Earlier turns are untouched.
+
+
+@pytest.mark.parametrize("messages", [
+    [],
+    [{"role": "system", "content": "Rules"}],
+    [{"role": "user", "content": ""}],
+    # Inspect already placed a conversation breakpoint; Anthropic allows four in total.
+    [{"role": "user", "content": [{"type": "text", "text": "a", "cache_control": EPHEMERAL}, {"type": "text", "text": "b"}]},
+     {"role": "tool", "tool_call_id": "c1", "content": "Result"}],
+])
+def test_no_extra_breakpoint_when_one_exists_or_nothing_can_be_marked(messages):
+    request = {"messages": copy.deepcopy(messages)}
+    mark_last_message(request)
+    assert request["messages"] == messages
+
+
+def test_conversation_caching_wraps_inspect_once(monkeypatch):
+    from inspect_ai.model._providers import openrouter
+
+    # The hook depends on this private Inspect function; fail loudly if an upgrade removes it.
+    assert callable(getattr(openrouter, "_add_anthropic_cache_markers", None))
+    calls = []
+    monkeypatch.setattr(openrouter, "_add_anthropic_cache_markers", lambda request: calls.append("inspect"))
+    cache_conversation_prefix()
+    wrapped = openrouter._add_anthropic_cache_markers
+    cache_conversation_prefix()
+    assert openrouter._add_anthropic_cache_markers is wrapped
+    request = {"messages": [{"role": "tool", "tool_call_id": "c1", "content": "Result"}]}
+    wrapped(request)
+    assert calls == ["inspect"] and request["messages"][0]["content"][0]["cache_control"] == EPHEMERAL
