@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
+
 DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5"
 
 
@@ -65,4 +67,6 @@ class RunConfig(BaseModel):
     experiment_replicate: int = Field(default=0, ge=0, le=3, strict=True)
     all_role_cost_limit: float | None = Field(default=None, gt=0, le=40)
     experiment_budget_file: str | None = Field(default=None, min_length=1)
+    # A saved Gmail snapshot (.secrets/inboxes/<name>.json) to use instead of the bundled inbox.
+    inbox_snapshot: str | None = Field(default=None, pattern=SNAPSHOT_NAME_PATTERN)
 
