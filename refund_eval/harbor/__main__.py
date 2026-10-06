@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from refund_eval.harbor.config import TrialSettings
+from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialSettings
 from refund_eval.scenario.schema import load_scenario
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +37,7 @@ def prepare(
     destination: Path, *, settings: TrialSettings, model: str | None = None,
     models: list[str] | None = None,
     environment: str = "modal", trials: int = 4, concurrency: int = 2,
-    secrets: list[str] | None = None,
+    secrets: list[str] | None = None, inbox: Path | None = None,
 ) -> Path:
     from harbor.models.job.config import JobConfig
     from harbor.models.task.task import Task
@@ -53,6 +53,13 @@ def prepare(
         raise ValueError("environment must be modal or docker")
     if secrets and (environment != "modal" or settings.smoke):
         raise ValueError("Named secrets are only used for real Modal trials")
+    if (inbox is None) != (settings.inbox_sha256 is None):
+        raise ValueError("A Gmail snapshot needs both its file and inbox_sha256")
+    if inbox is not None:
+        from refund_eval.world.snapshot_store import file_sha256
+
+        if file_sha256(inbox) != settings.inbox_sha256:
+            raise ValueError("The Gmail snapshot changed since this batch was configured")
     from refund_eval.harbor.config import TrialRequest
 
     instruction = load_scenario("train_refund").task_text
@@ -79,6 +86,9 @@ def prepare(
         target = source / filename
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, target)
+    if inbox is not None:
+        # Only the mail data travels; no Gmail token or connection is uploaded.
+        shutil.copyfile(inbox, source / SNAPSHOT_IN_IMAGE)
     (task_dir / "environment/Dockerfile").write_text(DOCKERFILE)
     (task_dir / "instruction.md").write_text(instruction + "\n", encoding="utf-8")
     (task_dir / "task.toml").write_text(
@@ -141,15 +151,21 @@ def main() -> None:
     parser.add_argument("--world-mode", choices=["baseline", "friction"], default="baseline")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")
     parser.add_argument("--rubrics", type=Path, help="Frozen dashboard rubric snapshot JSON")
+    parser.add_argument("--inbox", type=Path, help="Gmail snapshot JSON from refund_eval.world.snapshot")
     args = parser.parse_args()
     if not args.smoke and not args.model:
         parser.error("Choose --smoke or provide --model for a paid trial")
     args.data_mode = args.data_mode or ("fixture" if args.smoke else "hybrid")
-    settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields if name != "rubric_set"},
-                             rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None)
+    from refund_eval.world.snapshot_store import file_sha256
+
+    settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields
+                                if name not in {"rubric_set", "inbox_sha256"}},
+                             rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None,
+                             inbox_sha256=file_sha256(args.inbox) if args.inbox else None)
     config = prepare(
         args.output, settings=settings, models=args.model or ["mockllm/model"],
         environment=args.environment, trials=args.trials, concurrency=args.concurrency, secrets=args.secret,
+        inbox=args.inbox,
     )
     print(json.dumps({"config": str(config), "trials_per_model": args.trials,
                       "total_trials": args.trials * len(args.model or ["mockllm/model"]), "concurrency": args.concurrency}))

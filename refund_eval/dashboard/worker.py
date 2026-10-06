@@ -162,6 +162,16 @@ def run_worker(run_dir: str | Path) -> int:
                     profile_args.update(scenario=experiment["scenario_path"], fixture_path=experiment["inbox_path"])
                     if experiment.get("startup_context", {}).get("mode") == "matched_thread_prefetch":
                         profile_args["initial_mail_thread_ids"] = experiment["startup_context"]["thread_ids"]
+                if config.get("inbox_snapshot"):
+                    from refund_eval.world.snapshot_store import (
+                        file_sha256,
+                        snapshot_path,
+                    )
+
+                    inbox = snapshot_path(config["inbox_snapshot"])
+                    if not inbox.is_file() or file_sha256(inbox) != config.get("inbox_sha256"):
+                        raise ValueError("The Gmail snapshot changed or was removed after this run was configured.")
+                    profile_args["fixture_path"] = str(inbox)
                 if config["world_mode"] != "baseline":
                     profile_args["world_mode"] = config["world_mode"]
                 if config["tool_profile"] == "published":

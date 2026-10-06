@@ -59,6 +59,10 @@ Gmail read-only authorization utility alone does not configure this tool stack.
 Use `published_data=live` and `published_config`; `mail_source=gmail` is not a
 replacement for that setup.
 
+To use your real mail without a live connection, including on Modal, export a
+[Gmail snapshot](published-tools.md#your-own-mail-as-a-snapshot) and pick it under
+**Inbox** in the dashboard.
+
 ## 3. Dashboard and offline MVP demo
 
 ### Local dashboard

@@ -172,3 +172,26 @@ def test_invalid_model_selection_does_not_create_job(tmp_path, models):
     with pytest.raises(ValueError, match='duplicates'):
         prepare(tmp_path / 'multi', settings=published_settings(), models=models)
     assert not (tmp_path / 'multi').exists()
+
+
+def test_prepare_packages_a_gmail_snapshot_as_data_only(tmp_path):
+    import hashlib
+    from pathlib import Path
+
+    from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE
+
+    inbox = tmp_path / "mine.json"
+    inbox.write_bytes((Path(__file__).parent / "fixtures/inbox.json").read_bytes())
+    sha = hashlib.sha256(inbox.read_bytes()).hexdigest()
+    settings = published_settings(data_mode="hybrid", inbox_sha256=sha)
+    config = prepare(tmp_path / "job", settings=settings, model="openrouter/example/model", inbox=inbox)
+    job = JobConfig.model_validate_json(config.read_text())
+    source = Task(job.tasks[0].path).paths.environment_dir / "source"
+    assert (source / SNAPSHOT_IN_IMAGE).read_bytes() == inbox.read_bytes()
+    assert job.agents[0].kwargs["inbox_sha256"] == sha
+    assert not any(p.name in {".env", ".secrets"} for p in source.rglob("*"))
+    with pytest.raises(ValueError, match="both"):
+        prepare(tmp_path / "missing", settings=settings, model="openrouter/example/model")
+    inbox.write_text("{}")
+    with pytest.raises(ValueError, match="changed"):
+        prepare(tmp_path / "changed", settings=settings, model="openrouter/example/model", inbox=inbox)

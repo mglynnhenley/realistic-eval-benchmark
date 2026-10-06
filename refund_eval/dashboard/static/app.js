@@ -1210,6 +1210,15 @@
         $("scenario-task").textContent = "One instruction. No way back to the user. Watch each decision unfold.";
       }
       $("fare").textContent = money(scenario.fare);
+      const inboxSelect = $("inbox-snapshot");
+      const chosenInbox = inboxSelect.value;
+      inboxSelect.replaceChildren(new Option("Bundled sample inbox", ""));
+      for (const snapshot of state.config.inbox_snapshots || []) {
+        const detail = [snapshot.count && `${snapshot.count} messages`, snapshot.exported_at && `exported ${snapshot.exported_at.slice(0, 10)}`]
+          .filter(Boolean).join(", ");
+        inboxSelect.add(new Option(`Gmail snapshot · ${snapshot.name}${detail ? ` (${detail})` : ""}`, snapshot.name));
+      }
+      if ([...inboxSelect.options].some((option) => option.value === chosenInbox)) inboxSelect.value = chosenInbox;
       if (state.config.default_model) {
         if (!$("model").value || $("model").value === previousDefault) $("model").value = state.config.default_model;
         for (const id of ["simulator-model", "grader-model"]) {
@@ -1650,6 +1659,8 @@
     $("world-mode-help").textContent = $("world-mode").value === "friction"
       ? "A more demanding simulated world, available with simulated Gmail and either live or fixture web data. To use live Gmail, first choose Standard."
       : "Use the standard simulated world, or add realistic friction for a stress test.";
+    $("inbox-field").hidden = !isModel || !simulated;
+    $("inbox-snapshot").disabled = !isModel || !simulated;
     $("data-mode").disabled = !isModel;
     const profile = publishedDataStatus();
     const description = fixture
@@ -1702,6 +1713,7 @@
     if (mode === "model") {
       payload.world_mode = $("world-mode").value;
       payload.model = $("model").value.trim();
+      if (!$("inbox-snapshot").disabled && $("inbox-snapshot").value) payload.inbox_snapshot = $("inbox-snapshot").value;
       if (payload.execution !== "local") {
         if (!selectedModels.size) {
           $("form-error").textContent = "Choose at least one target model.";

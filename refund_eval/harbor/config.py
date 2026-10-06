@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from refund_eval.config import RunConfig
 
+# Where a Gmail snapshot sits in the trial image, relative to the source root (/app).
+SNAPSHOT_IN_IMAGE = "inbox_snapshot.json"
+
 
 def batch_models(config: dict) -> list[str]:
     if config["mode"] == "demo":
@@ -34,6 +37,8 @@ class TrialSettings(BaseModel):
     simulator_model: str | None = None
     grader_model: str | None = None
     rubric_set: dict | None = None
+    # A Gmail snapshot shipped in the image as data; the hash pins its contents.
+    inbox_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_smoke(self):
@@ -45,6 +50,8 @@ class TrialSettings(BaseModel):
             raise ValueError("Harbor published trials require the packaged subprocess browser")
         if self.smoke and (self.simulator_model or self.grader_model or self.world_mode != "baseline"):
             raise ValueError("Smoke mode uses scripted models and the baseline world")
+        if self.smoke and self.inbox_sha256:
+            raise ValueError("Smoke mode uses the bundled inbox")
         if self.smoke and self.max_turns < 12:
             raise ValueError("Smoke mode needs at least 12 turns to exercise the complete demo")
         return self

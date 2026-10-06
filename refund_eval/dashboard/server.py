@@ -33,6 +33,7 @@ from refund_eval.grading.behaviours import (
 )
 from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.scenario.schema import load_scenario
+from refund_eval.world.snapshot_store import list_snapshots
 
 STATIC_DIR = Path(__file__).parent / "static"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -287,6 +288,21 @@ class RunManager:
                 raise APIError(422, f"Experiment preflight failed: {error}") from error
         if config.mode == "demo" and config.data_mode != "fixture":
             raise APIError(422, "The dashboard scripted demo requires fixture data. Use the hybrid smoke CLI for scripted live-web checks.")
+        inbox_sha256 = None
+        if config.inbox_snapshot:
+            if config.mode != "model" or config.data_mode not in {"fixture", "hybrid"}:
+                raise APIError(422, "A Gmail snapshot needs a model trial with simulated Gmail (fixture or hybrid data).")
+            if config.experiment_manifest:
+                raise APIError(422, "Comparison experiments use their own inbox.")
+            from refund_eval.published.profile import validate_fixture_path
+            from refund_eval.world.snapshot_store import file_sha256, snapshot_path
+
+            try:
+                path = snapshot_path(config.inbox_snapshot)
+                validate_fixture_path(str(path), data_mode=config.data_mode)
+            except ValueError as error:
+                raise APIError(422, f"Gmail snapshot unavailable: {error}") from error
+            inbox_sha256 = file_sha256(path)
         if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
             raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
         if config.world_mode == "friction" and (config.mode != "model" or config.data_mode == "live"):
@@ -335,6 +351,8 @@ class RunManager:
                 settings["model"] = targets[0]
             if published_path:
                 settings["published_config"] = published_path
+            if inbox_sha256:
+                settings["inbox_sha256"] = inbox_sha256
             record = {
                 "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
                 else {"fixture": "Published tools · simulated data",
@@ -352,6 +370,8 @@ class RunManager:
                 record["label"] += " · realistic friction"
             if config.execution != "local":
                 record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
+            if config.inbox_snapshot:
+                record["label"] += f" · Gmail snapshot {config.inbox_snapshot}"
             if experiment:
                 phase = f"Repeat {config.experiment_replicate}" if config.experiment_replicate else "Pilot"
                 record["label"] = f"{experiment['arm']} · {phase} · {experiment['label']}"
@@ -528,6 +548,7 @@ def public_config() -> dict:
                      "fare": scenario.journey.fare, "currency": scenario.journey.currency,
                      "organisations": [{"key": org.key, "name": org.name, "kind": org.kind}
                                        for org in scenario.orgs]},
+        "inbox_snapshots": list_snapshots(),
         "modes": ["demo", "model"],
         "tool_profiles": [
             {"name": "published", "label": "Published tools", **hybrid_status,

@@ -12,7 +12,7 @@ forms are simulated. Other website writes (non-GET requests, and page loads
 whose URL carries message text or the user's details) are blocked and recorded;
 other GET page loads reach the real site as reads. Hybrid has
 no simulated form endpoints. Baseline and friction worlds and OpenRouter models
-are supported. Live Gmail and comparison experiments remain local-only.
+are supported. Live Gmail and comparison experiments remain local-only. To run on your own mail, use a [Gmail snapshot](published-tools.md#your-own-mail-as-a-snapshot): it is packaged as data, without a Gmail connection.
 
 Inspect and the browser run inside **one sandbox per trial**. The browser is a
 subprocess in the packaged image, not another container. Each trial has separate
@@ -144,6 +144,10 @@ scripts/harbor python -m refund_eval.harbor \
 # Export OPENROUTER_API_KEY in your shell before launching:
 scripts/harbor harbor run -c .context/harbor-pilot/job.json
 ```
+
+Add `--inbox .secrets/inboxes/<name>.json` to use a [Gmail snapshot](published-tools.md#your-own-mail-as-a-snapshot)
+instead of the bundled inbox. The file is copied into the frozen job and image; its hash is
+pinned in the agent settings and checked again inside each trial.
 
 Alternatively supply `--secret NAME` when preparing a Modal job to use an existing
 Modal secret containing `OPENROUTER_API_KEY`. Only the secret name is saved.

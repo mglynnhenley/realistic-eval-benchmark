@@ -73,7 +73,8 @@ class FixtureMailSource:
     The file holds a default persona (`user`), an `anchor` time the mail was written
     around, and `emails`. Text can use {{user_name}}, {{user_first_name}},
     {{user_surname}}, {{user_email}}, {{user_phone}}, {{home_town}}, {{home_area}}
-    (the part of home_town before any comma), and dates relative
+    (the part of home_town before any comma), {{user_handle}} (the address local
+    part), {{user_slug}} ('jane-smith'), and dates relative
     to the email's own date: {{date+3}} ('Thursday 1 October'), {{date+3:full}},
     {{date+3:short}} ('1 Oct 2026'), {{date+3:cal}} ('Thu 1 Oct 2026'),
     {{date+3:num}} ('01/10/2026'), {{day+3}} ('Thursday').
@@ -106,6 +107,9 @@ class FixtureMailSource:
         }
         # 'Walthamstow, London' -> 'Walthamstow' for gym branches, venues and the like
         self._vars["home_area"] = self._vars["home_town"].split(",")[0].strip()
+        # Usernames and profile URL slugs, for inboxes exported from real mail.
+        self._vars["user_handle"] = email_addr.split("@")[0]
+        self._vars["user_slug"] = "-".join(re.findall(r"[a-z0-9]+", name.lower()))
         shift = timedelta(0)
         if start_time is not None and data.get("anchor"):
             anchor = as_aware(datetime.fromisoformat(data["anchor"]))

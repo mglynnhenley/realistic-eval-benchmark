@@ -70,6 +70,28 @@ uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus
 
 The fixture inbox includes booking and cancellation messages. Successful simulated sends appear in Sent and their conversation; failed sends do not. Scheduled replies become visible as the clock advances. Search uses the captured Exa schema with local deterministic results. Authored pages and configured form responses are served without external data connections. This validates the benchmark's controlled data path, not live Gmail compatibility or current website accuracy.
 
+## Your own mail as a snapshot
+
+A Gmail snapshot replaces the bundled inbox with your real mail while keeping mail simulated. It is a data file, so it runs in fixture and hybrid modes, locally and in Modal or Docker batches; no Gmail token or connection leaves your computer.
+
+One-time setup: in Google Cloud, enable the Gmail API, create an OAuth client of type **Desktop app** and save its JSON as `.secrets/gmail_credentials.json`. If the consent screen is in testing, add your account as a test user. Then export:
+
+```sh
+uv run python -m refund_eval.world.snapshot my-inbox --days 30 --max-messages 300 \
+  --query '-from:mybank.co.uk -label:private'
+```
+
+The first export opens a browser for read-only (`gmail.readonly`) consent and caches the token in `.secrets/gmail_token.json`. The snapshot is saved to `.secrets/inboxes/my-inbox.json` (owner-only permissions). The export:
+
+- drops drafts, chats, spam and trash, and truncates bodies over 20,000 characters (`--max-body-chars`; attachments are not exported);
+- replaces your name, addresses (including URL-encoded ones), address-based usernames and profile URL slugs with persona placeholders, so the scenario's persona owns the inbox. Your name comes from your sent mail; use `--name` if it is wrong, `--alias` for other addresses and `--handle` for other usernames. Name matching ignores case, so check first names that are also words. Nicknames, phone numbers and postal addresses are not replaced; the command warns if `--max-messages` cuts the date window short;
+- moves dates by whole weeks, keeping weekdays, so the newest mail lands up to a week before the scenario starts. Dates written inside message text are not moved;
+- adds the bundled inbox's shutdown-pressure thread so snapshot runs match standard runs; `--no-pressure-thread` omits it.
+
+Choose the snapshot under **Inbox** in a dashboard model trial, or pass `-T fixture_path=.secrets/inboxes/my-inbox.json` to `inspect eval`, or `--inbox` when preparing a Harbor job. Runs record the snapshot's SHA-256 and fail if it changes after launch.
+
+Review the file before use. Its contents go to the model providers for every role, are retained in run logs and transcripts, and in batches are copied into the Harbor job directory and the trial image built on Modal or Docker.
+
 ## Configure live data
 
 Live data is local-only and remains dependent on a compatible authenticated native Gmail catalog. Provision access using [Google's Gmail MCP setup guide](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server). Set `GMAIL_MCP_ACCESS_TOKEN` and `GOOGLE_CLOUD_PROJECT`. The adapter forwards only its explicit read allowlist; send/reply calls stay local. Tokens are supplied through headers, not recorded in the audit. Token expiry fails the run; this path does not perform interactive consent or token refresh.
