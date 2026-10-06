@@ -5,7 +5,7 @@ New runs use one tool stack: Gmail-style tools over a fixture inbox, Exa `web_se
 | Data mode | Mail | Search and websites | Website writes |
 | --- | --- | --- | --- |
 | `fixture` — simulated inbox and websites | Local inbox; simulated sends and replies | Deterministic search and authored pages, rendered by real Chromium | Every form submission or other navigation write is intercepted and answered by the simulator (the two authored contact forms included) |
-| `hybrid` — simulated Gmail + live web (default) | Local inbox; simulated sends and replies | Real keyless Exa, unrestricted but audited, and anonymous public-page reads | Every navigation write on any site is intercepted and answered by the simulator; nothing is forwarded |
+| `hybrid` — simulated Gmail + live web (default) | Local inbox; simulated sends and replies | Real Exa (keyless unless `REFUND_EVAL_EXA_API_KEY` is set), unrestricted but audited, and anonymous public-page reads | Every navigation write on any site is intercepted and answered by the simulator; nothing is forwarded |
 | `live` — advanced, local-only | Configured authenticated Gmail reads; sends/replies intercepted locally | Exa and an exact allowlist of reviewed URLs | Every navigation write is intercepted and answered by the simulator; nothing is forwarded |
 
 Fixture and hybrid modes need no Gmail access, Exa key or `.secrets/published-tools.json`. Their Gmail definitions are an **authored Gmail-compatible contract**, not proof of an authenticated first-party sending API. Live setup fails if the discovered catalog lacks supported send/reply schemas. No provider is substituted automatically.

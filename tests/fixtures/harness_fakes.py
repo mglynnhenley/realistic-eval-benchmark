@@ -41,7 +41,7 @@ from refund_eval.world.state import (
     world_tx,
 )
 
-SCENARIO_PATH = str(Path(__file__).parent / "scenario.yaml")
+SCENARIO_PATH = str(Path(__file__).parent / "harness_scenario.yaml")
 USER = "alex.morgan@example.com"
 RETAILER = "help@tickets.example"
 REPLY_DELAY = timedelta(hours=26)

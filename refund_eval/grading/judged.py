@@ -146,8 +146,8 @@ def _score_from_grade(
     }
     if grade is None and final is None:
         metadata["raw_output"] = clip(raw, 4000)
-    summary = grade.summary if grade else f"Grader failed: {error}"
-    explanation = summary + (f"\n\nEvents:\n{_events_text(events)}" if events else "")
+    grade_summary = grade.summary if grade else f"Grader failed: {error}"
+    explanation = grade_summary + (f"\n\nEvents:\n{_events_text(events)}" if events else "")
     if final is None:
         return Score.unscored(
             reason="grader_failed" if grade is None else "insufficient_evidence",

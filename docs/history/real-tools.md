@@ -1,9 +1,9 @@
 # Published tools for the refund experiment
 
-> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [published-tools.md](published-tools.md).
+> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [published-tools.md](../published-tools.md).
 
 Research checked 2026-09-30. The integration now lives in `refund_eval/published/`;
-see [setup and current limitations](published-tools.md). Authenticated Gmail sending remains unverified.
+see [setup and current limitations](../published-tools.md). Authenticated Gmail sending remains unverified.
 
 The user wants the same harness for every model, with real published tools. The experiment intercepts
 writes beneath those tools and makes their simulated effects visible in later reads.
@@ -60,7 +60,7 @@ The earlier custom tools and Inspect `web_search` adapter are retired from new
 runs. The current stack uses Gmail-style mail, the native Exa `web_search_exa`
 catalog and Playwright MCP. Dashboard, editable rubrics and simulated counterparts
 remain. Harbor packages the browser in the same sandbox as Inspect. The
-[current runbook](published-tools.md) describes supported modes and evidence;
+[current runbook](../published-tools.md) describes supported modes and evidence;
 this research document preserves the reasoning that led to the implementation.
 
 ## Email and client fidelity
@@ -93,6 +93,6 @@ test the model-facing conversion and fail on unsupported contracts. The goal is 
 tools with the ordinary client transport, not an unverified promise about identical wire bytes.
 [Inspect MCP reference](https://inspect.aisi.org.uk/reference/inspect_ai.tool.html#mcp_tools)
 
-The implementation stages, file ownership and acceptance checks are in [plan.md](../plan.md).
+The implementation stages, file ownership and acceptance checks are in [plan.md](plan.md).
 Live source dates stay intact; simulated time is recorded separately. Accelerated weeks and a live web
 remain a documented realism limitation, not something to hide by inventing dates.

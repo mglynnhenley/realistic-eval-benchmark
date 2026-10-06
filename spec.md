@@ -3,7 +3,7 @@
 Status: draft
 Intent: [intent.md](intent.md)
 
-The published-tool requirements below incorporate the latest tool-realism discussion. The current MVP still uses mostly custom tools; migration status and sources are in [docs/real-tools.md](docs/real-tools.md).
+The published-tool requirements below incorporate the latest tool-realism discussion. Trials use published Gmail-style, Exa and Playwright MCP tools over a simulated inbox with writes intercepted; the migration history is in [docs/history/real-tools.md](docs/history/real-tools.md).
 
 ## Summary
 
