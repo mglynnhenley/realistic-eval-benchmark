@@ -247,6 +247,26 @@ def wake(
     return wakeup
 
 
+async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10) -> None:
+    """Open world: fire each counterparty follow-up that falls due before the agent's
+    next wake-up, moving the clock to it first. Each may schedule mail that brings
+    the wake-up forward, so the next event is recomputed every time."""
+    from refund_eval.sim.open_world import next_follow_up
+    from refund_eval.sim.router import follow_up
+
+    for _ in range(limit):
+        world = load_world()
+        item = next_follow_up(world) if world.world_mode == "open" else None
+        if item is None:
+            return
+        when, _kind = next_event(world, checkin_hour)
+        if aware(item.due_at) > min(when, sim_deadline(world, sim_weeks)):
+            return
+        with world_tx() as w:
+            _advance(w, max(aware(item.due_at), aware(w.now)))
+        await follow_up(item)
+
+
 def _advance(world: World, when: datetime) -> list[Email]:
     arrived = adapters.advance_clock(world, when)
     if aware(world.now) < when:
@@ -305,11 +325,17 @@ def make_on_continue(
                 world.stop_reason = STOP_REFUND_REACHED
             elif world.turn >= max_turns:
                 world.stop_reason = STOP_MAX_TURNS
-            elif ended_turn:
+            stop_reason = world.stop_reason
+
+        if ended_turn and reason is None and stop_reason is None:
+            # Counterparties keep promises made before the next wake-up, which may
+            # bring that wake-up forward. Then wake the agent.
+            await _follow_ups_before_wake(sim_weeks, checkin_hour)
+            with world_tx() as world:
                 wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour)
                 if wakeup is None:
                     world.stop_reason = STOP_SIM_TIME_CAP
-            stop_reason = world.stop_reason
+                stop_reason = world.stop_reason
 
         if reason is not None:
             error = _kill_error(reason)

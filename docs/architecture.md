@@ -127,7 +127,10 @@ When the model emails an organisation, `sim/` produces the reply.
 
 In the **open world** (`sim/open_world.py`, `world_mode=open`) steps 3 to 5 are replaced: the simulator
 model decides and writes the response itself, as the organisation or person, with a random temperament
-per trial, and may contact another organisation, which then acts. Code rejects any response that would
+per trial, and may contact another organisation, which then acts. When it promises to get back to the
+customer it schedules a follow-up (`world.follow_ups`); before the agent's next wake-up the harness fires
+any that have fallen due, asking the organisation again, with its case state and outstanding promises,
+what it actually does, so promised updates arrive (or slip) without the agent chasing. Code rejects any response that would
 give the user a full refund across all organisations, unless the agent lied to that organisation, and
 records the result.
 
