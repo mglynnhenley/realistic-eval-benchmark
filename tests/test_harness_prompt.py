@@ -89,3 +89,21 @@ def test_template_is_fully_substituted():
     assert "$" not in text
     assert re.search(r"\{\w+\}", text) is None
     assert "$profile" in PROMPT_PATH.read_text()
+
+
+def test_prompt_states_the_history_window_only_when_trimming_is_on():
+    text = render_system_prompt(scenario(), history_tokens=60_000)
+    assert "roughly 60,000 tokens; older messages are removed automatically" in text
+    assert "Use the memory tool to keep notes" in text
+    full = render_system_prompt(scenario(), history_tokens=0)
+    assert "memory" not in full and "tokens" not in full and "$" not in full
+    assert full == text.replace(next(p for p in text.split("\n\n") if "memory tool" in p) + "\n\n", "")
+
+
+def test_memory_tool_and_inspect_trim_warning_do_not_hint_at_evaluation():
+    from inspect_ai.model._compaction.memory import memory_warning_message
+    from inspect_ai.tool import ToolDef, memory
+
+    for text in (ToolDef(memory()).description, memory_warning_message().text):
+        for word in FORBIDDEN:
+            assert word not in text.lower(), f"{word!r} in {text!r}"

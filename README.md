@@ -43,6 +43,8 @@ Native optional tool fields require `strict_tools=false` for the OpenRouter rout
 
 Use `fixture` for a simulated inbox and websites, or `hybrid` for simulated Gmail plus live web. `live` is an advanced local-only option requiring a compatible authenticated Gmail catalog; native Gmail sending compatibility remains unverified. Explicit legacy requests return a migration error. Saved legacy results remain readable, and older frozen jobs keep their original source snapshot and runner.
 
+For long horizons the target sees only its most recent ~60,000 tokens of history and keeps notes with a memory tool (`history_tokens`; `0` disables); logs and grading keep the full history. See the [runbook](docs/running.md#history-window-and-memory).
+
 The target/simulator cost limit excludes final grading. Modal compute is also billed separately. Scripted demos make no model API calls. The dashboard's **Stop batch** cancels active sandboxes and can leave partial results; the command-line kill switch (`touch .context/KILL`) stops at a tool or turn boundary and permits grading.
 
 Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric version, transcript, world, intercepted actions, outcomes and grades. Use **Behaviours** to change future grading definitions and **Scores → Diagnostics** to inspect technical checks. `REFUND_EVAL_DEFAULT_MODEL` changes the dashboard's model defaults; see the [runbook](docs/running.md#local-dashboard).

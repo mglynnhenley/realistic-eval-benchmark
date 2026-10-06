@@ -224,6 +224,8 @@ def test_sigterm_stops_active_worker_and_preserves_history(dashboard: DashboardP
     {"mode": "demo", "cost_limit": 0},
     {"mode": "demo", "cost_limit": 41},
     {"mode": "demo", "sim_weeks": 13},
+    {"mode": "demo", "history_tokens": -1},
+    {"mode": "demo", "history_tokens": "60000"},
     {"mode": "model", "data_mode": "unknown"},
     {"mode": "model", "tool_profile": "legacy", "data_mode": "live"},
     {"mode": "model", "tool_profile": "legacy", "data_mode": "hybrid"},

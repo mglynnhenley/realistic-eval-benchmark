@@ -20,6 +20,11 @@ generation's tool calls have run). Here it:
 
 The kill switch is also checked before the first model call and before
 every tool call, so no tool runs once it is on (FR-017).
+
+For long horizons the model sees a rolling window of recent history
+(`history_tokens`), trimmed by Inspect's compaction, plus a memory tool for
+notes, as Vending-Bench does. Compaction changes only the model's input: the
+sample's messages, which the dashboard and scorers read, keep the full history.
 """
 
 from __future__ import annotations
@@ -30,8 +35,8 @@ from datetime import datetime
 from typing import Any, get_type_hints
 
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
-from inspect_ai.model import ChatMessageUser
-from inspect_ai.tool import Tool, ToolDef
+from inspect_ai.model import ChatMessage, ChatMessageUser, CompactionTrim, Model
+from inspect_ai.tool import Tool, ToolDef, ToolInfo, memory
 from inspect_ai.util import LimitExceededError, store
 
 from refund_eval.agent import adapters
@@ -76,6 +81,30 @@ STOP_LOOP_ENDED = "loop_ended"
 # Wake-up messages carry this metadata (never sent to the model) so graders
 # and scanners can tell them apart from the one real user message.
 WAKEUP_METADATA = "wakeup"
+
+# Share of the non-prefix history kept by each trim; Vending-Bench 2 keeps about 61%.
+HISTORY_PRESERVE = 0.6
+
+
+class HistoryWindow(CompactionTrim):
+    """CompactionTrim that keeps trimming, down to the latest turn, until the window fits.
+
+    Inspect retries a strategy three times and then fails the sample, which a run
+    of large page snapshots can cause well before the real context window is full."""
+
+    def __init__(self, tokens: int):
+        super().__init__(threshold=tokens, memory=True, preserve=HISTORY_PRESERVE)
+
+    async def compact(self, model: Model, messages: list[ChatMessage],
+                      tools: list[ToolInfo]) -> tuple[list[ChatMessage], ChatMessageUser | None]:
+        budget = int(self.threshold) - await model.count_tool_tokens(tools)
+        trimmed, _ = await super().compact(model, messages, tools)
+        while await model.count_tokens(trimmed) > budget:
+            shorter, _ = await super().compact(model, trimmed, tools)
+            if len(shorter) >= len(trimmed):
+                break
+            trimmed = shorter
+        return trimmed, None
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +344,7 @@ def refund_agent(
     scenario_id: str = "train_refund",
     mail_source_kind: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
+    history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     checkin_hour: int = CHECKIN_HOUR,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
@@ -332,6 +362,8 @@ def refund_agent(
       scenario_id: Scenario name or YAML path (see load_scenario()).
       mail_source_kind: "fixture" or "gmail" (see refund_eval.world.mail).
       max_turns: Stop after this many model generations.
+      history_tokens: Model-visible history in tokens, trimmed oldest first, with a
+        memory tool for notes; 0 shows the full history and adds no memory tool.
       sim_weeks: Stop when the next wake-up would be more than this many
         simulated weeks after the scenario start.
       checkin_hour: Hour of the daily scheduled check-in.
@@ -342,6 +374,8 @@ def refund_agent(
 
     if tool_profile != "published":
         raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
+    if isinstance(history_tokens, bool) or not isinstance(history_tokens, int) or history_tokens < 0:
+        raise ValueError("history_tokens must be a non-negative integer (0 shows the full history)")
     initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
     if initial_mail_thread_ids and (tool_profile != "published" or published_data not in {"fixture", "hybrid"}):
         raise ValueError("Initial mailbox context requires the published fixture or hybrid profile")
@@ -360,15 +394,19 @@ def refund_agent(
             raise error
 
         def make_inner(tools):
+            # Notes cost no simulated time: they never touch the world, so taking
+            # notes cannot move the clock or deliver mail mid-turn.
+            local = [memory()] if history_tokens else []
             return react(
                 prompt=AgentPrompt(
-                    instructions=render_system_prompt(scenario, checkin_hour),
+                    instructions=render_system_prompt(scenario, checkin_hour, history_tokens),
                     handoff_prompt=None,
                     assistant_prompt=None,
                     submit_prompt=None,
                 ),
-                tools=[guard_tool(t) for t in tools],
+                tools=[guard_tool(t) for t in [*tools, *local]],
                 submit=False,
+                compaction=HistoryWindow(history_tokens) if history_tokens else None,
                 on_continue=make_on_continue(
                     fare=scenario.journey.fare,
                     max_turns=max_turns,
@@ -400,11 +438,20 @@ def refund_agent(
         except LimitExceededError as ex:
             _record_stop(f"{ex.type}_limit")
             raise
+        except RuntimeError as ex:
+            # Inspect's compaction raises this (no specific type) when the latest
+            # turn alone exceeds the window. End like a context overflow; the
+            # sample keeps the full history for grading.
+            if not str(ex).startswith("Compaction insufficient"):
+                raise
+            logger.warning("Stopping trial: %s", ex)
+            _record_stop(STOP_CONTEXT_WINDOW)
         finally:
             emit_snapshot(state.messages, phase="grading")
 
         # react() can also end on its own (context overflow, repeated refusals).
-        stop = state.output.stop_reason
+        # No output yet if the window could not fit even the first generation.
+        stop = state.output.stop_reason if state.output.choices else None
         if stop == "model_length":
             _record_stop(STOP_CONTEXT_WINDOW)
         elif stop == "content_filter":

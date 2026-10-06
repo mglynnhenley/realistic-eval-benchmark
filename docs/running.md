@@ -278,6 +278,7 @@ new model runs default to hybrid. Frozen jobs keep their recorded settings.
 | `published_config` | none | Optional live published-profile configuration path; unnecessary for fixture and hybrid modes. |
 | `world_mode` | `baseline` | `friction` adds recorded service delays, handoffs and offer reminders. Requires simulated Gmail (fixture or hybrid data). |
 | `max_turns` | `20` | Per-trial cap on the target model's generations. The harness enforces it. |
+| `history_tokens` | `60000` | Model-visible history window in tokens, with a memory tool for notes (see below). `0` shows the full history, adds no memory tool and leaves the prompt as before. |
 | `cost_limit` | `1.0` | Per-trial target and simulator spend cap in dollars (Inspect `cost_limit`). Final grading is billed separately. |
 | `sim_weeks` | `1` | Per-trial cap on simulated time. |
 | `message_limit` | none | Optional Inspect message limit. |
@@ -321,6 +322,28 @@ Published tools advance simulated time during active tool use, so a due reply ca
 arrive before the agent ends its turn. Email sends and replies take two simulated
 minutes; other published calls currently take one. No real-time waiting is required
 to advance through the simulated weeks.
+
+### History window and memory
+
+For months-long trials the target sees a rolling window of recent history, as in
+Vending-Bench. When its input passes `history_tokens` (counting tool definitions),
+Inspect's trim compaction drops the oldest 40% of the conversation from the model's
+input, always keeping the system prompt, the task and any automatic email context,
+and repeats until the window fits. Nothing is summarised. The system prompt tells
+the agent its visible history is limited to roughly that many tokens and that it
+has a `memory` tool; notes are files under `/memories` in the Inspect sample store
+(`MemoryStore:files`), so they survive trimming and appear in the log. Shortly
+before a trim Inspect adds "Context compaction approaching. Use memory() to save
+concise notes…" to the model's input only.
+
+Trimming changes only what the model is sent. The sample's messages, which the
+dashboard, scorers and graders read, keep every message; each trim is logged as a
+`compaction` event and each model call's input is in its `model` event. Memory calls
+cost no simulated time, have no network or audit record, and are counted as
+`memory_actions`, never as reads or writes; containment requires that they have no
+service evidence. If the latest turn alone cannot fit the window, the trial stops
+with `stop_reason=context_window` and is still graded. The dashboard's setting is
+under **Advanced settings → Visible history**.
 
 ## 5. How a trial runs
 
@@ -392,7 +415,7 @@ their original recorded prompts; edits take effect on the next run.
 | `sim_time_cap` | The next wake-up would be more than `sim_weeks` after the start. |
 | `kill_switch` | The kill switch was on (section 6). The log shows an `operator` limit. |
 | `cost_limit`, `token_limit`, `message_limit`, `time_limit`, ... | An Inspect limit was hit. The log shows the same limit. |
-| `context_window`, `content_filter`, `loop_ended` | The agent loop ended by itself (rare). |
+| `context_window`, `content_filter`, `loop_ended` | The agent loop ended by itself (rare), or the latest turn alone exceeded `history_tokens`. |
 
 The agent saying it is done does not stop a trial.
 

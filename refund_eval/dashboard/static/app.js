@@ -18,6 +18,9 @@
     submit_web_form: "Submit a form", phone_call: "Make a phone call",
     live_chat: "Send a chat message", make_payment: "Make a payment",
   };
+  // The harness-local memory tool: the agent's own notes, stored with the trial, never sent anywhere.
+  const NOTES = {view: "Read own notes", create: "Write own notes", str_replace: "Edit own notes",
+    insert: "Edit own notes", delete: "Delete own notes", rename: "Rename own notes"};
 
   function text(value) {
     if (value == null) return "";
@@ -45,6 +48,8 @@
   function describe(call) {
     const name = call.function || call.name || "Tool call";
     const args = parse(call.arguments) || {};
+    if (name === "memory") return {name, title: NOTES[args.command] || "Use own notes", category: "notes",
+      target: args.old_path ? `${args.old_path} → ${args.new_path || ""}` : short(args.path || ""), outgoing: false};
     const category = /email|thread|message|^reply$|list_labels/.test(name) ? "email"
       : /search/.test(name) ? "search" : /browser|web_fetch/.test(name) ? "browser" : "other";
     let target = "";
@@ -491,7 +496,7 @@
     const heading = element("div", "tool-event-heading");
     const identity = element("div", "tool-event-identity");
     identity.append(element("strong", "tool-event-title", info.title), element("code", "tool-event-name", info.name));
-    heading.append(element("span", "tool-event-icon", {email: "✉", browser: "▣", search: "⌕", other: "↗"}[info.category]),
+    heading.append(element("span", "tool-event-icon", {email: "✉", browser: "▣", search: "⌕", notes: "✎", other: "↗"}[info.category]),
       identity, element("span", `tool-status ${status.kind}`, status.label));
     heading.firstElementChild.setAttribute("aria-hidden", "true");
     card.append(heading);
@@ -1489,7 +1494,7 @@
     if (preset) {
       const fields = {"data-mode": "data_mode", "world-mode": "world_mode",
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
-        "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks"};
+        "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens"};
       for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
       $("form-error").hidden = true;
       updateProfileStatus();
@@ -1709,6 +1714,7 @@
       payload.max_turns = Number($("max-turns").value);
       payload.cost_limit = Number($("cost-limit").value);
       payload.sim_weeks = Number($("sim-weeks").value);
+      payload.history_tokens = Number($("history-tokens").value);
       const simulator = $("simulator-model").value.trim();
       const grader = $("grader-model").value.trim();
       if (simulator) payload.simulator_model = simulator;
@@ -1843,7 +1849,7 @@
     updateProfileStatus();
   });
   $("run-preset").addEventListener("change", applyRunPreset);
-  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "sim-weeks"]) {
+  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "sim-weeks", "history-tokens"]) {
     $(id).addEventListener("input", markPresetCustom);
   }
   bindNewRunButtons();

@@ -133,6 +133,8 @@ def main() -> None:
     parser.add_argument("--simulator-model")
     parser.add_argument("--grader-model")
     parser.add_argument("--max-turns", type=int, default=20)
+    parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
+                        help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
     parser.add_argument("--sim-weeks", type=float, default=1)
     parser.add_argument("--cost-limit", type=float, default=1)
     parser.add_argument("--time-limit", type=int, default=1800)

@@ -19,6 +19,7 @@ from inspect_ai.model import ChatMessage
 
 from refund_eval.grading.transcript import (
     BROWSER_TOOLS,
+    LOCAL_TOOLS,
     NATIVE_MAIL_READ_TOOLS,
     NATIVE_MAIL_WRITE_TOOLS,
     NOT_EXECUTED_ERRORS,
@@ -269,6 +270,15 @@ def published_containment_check(
     matched_writes = 0
     requests_seen: set[str] = set()
     for call in calls:
+        if call.function in LOCAL_TOOLS:
+            # Harness-local tools never reach a service, so any native record or
+            # boundary evidence under their call id means something did.
+            if call.function in descriptors or any(
+                    call.id in {e.get("call_id"), e.get("tool_call_id")}
+                    or isinstance(e.get("request"), dict) and e["request"].get("tool_call_id") == call.id
+                    for e in audit):
+                fail("harness-local tool call has native or boundary evidence", call.id)
+            continue
         entries = [(n, e) for n, e in indexed if e.get("call_id") == call.id]
         if call.error_type in NOT_EXECUTED_ERRORS and not entries:
             continue

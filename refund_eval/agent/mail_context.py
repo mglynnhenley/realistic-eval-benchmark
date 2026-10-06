@@ -96,6 +96,9 @@ async def load_initial_mail(state, tools, thread_ids: list[str], *, expected_mes
         state.messages.append(request)
         messages, _ = await execute_tools(state.messages, reads, max_output=128_000)
         for message in messages:
+            # Like the request above, the result is input: history trimming keeps
+            # both, so the model never sees a tool call without its result.
+            message.source = "input"
             message.metadata = {**(message.metadata or {}), CONTEXT_METADATA: True}
         state.messages.extend(messages)
         pending_limit = store().get(DISPATCH_LIMIT_KEY)

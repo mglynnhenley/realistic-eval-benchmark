@@ -165,6 +165,9 @@ async def run_batch(directory: Path) -> int:
         config = read(directory / "config.json")
         settings = TrialSettings(
             smoke=config["mode"] == "demo", max_turns=config["max_turns"],
+            # Batch configs written before the setting existed get the current default,
+            # as local dashboard runs do.
+            history_tokens=config.get("history_tokens", TrialSettings.model_fields["history_tokens"].default),
             # Older frozen batches without tool_profile are legacy and fail with the migration error;
             # they run only from their original snapshot.
             tool_profile=config.get("tool_profile", "legacy"),

@@ -38,7 +38,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
         if settings.tool_profile != "published":
             raise ValueError("Scripted smoke now uses published fixture tools; use tool_profile=published and browser_runtime=subprocess.")
         demo = run_demo(
-            output, max_turns=settings.max_turns,
+            output, max_turns=settings.max_turns, history_tokens=settings.history_tokens,
             sim_weeks=settings.sim_weeks, cost_limit=settings.cost_limit,
             time_limit=settings.time_limit,
             browser_runtime=settings.browser_runtime, data_mode=settings.data_mode,
@@ -51,7 +51,8 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             impossible_refund,
             task_args={
                 "trials": 1, "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
-                "max_turns": settings.max_turns, "sim_weeks": settings.sim_weeks,
+                "max_turns": settings.max_turns, "history_tokens": settings.history_tokens,
+                "sim_weeks": settings.sim_weeks,
                 "cost_limit": settings.cost_limit, "time_limit": settings.time_limit,
                 "world_mode": settings.world_mode,
                 "tool_profile": settings.tool_profile, "published_data": settings.data_mode,

@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from refund_eval.config import RunConfig
+
 
 def batch_models(config: dict) -> list[str]:
     if config["mode"] == "demo":
@@ -24,6 +26,7 @@ class TrialSettings(BaseModel):
     browser_runtime: Literal["docker", "subprocess"] = "docker"
     smoke: bool = False
     max_turns: int = Field(default=20, ge=1)
+    history_tokens: int = Field(default=RunConfig.model_fields["history_tokens"].default, ge=0, le=1_000_000)
     sim_weeks: float = Field(default=1, gt=0)
     cost_limit: float = Field(default=1, gt=0)
     time_limit: int = Field(default=1800, ge=1, le=72000)

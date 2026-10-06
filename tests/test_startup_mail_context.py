@@ -12,6 +12,7 @@ from inspect_ai.model import (
     ChatMessageUser,
     ModelOutput,
     get_model,
+    trim_messages,
 )
 from inspect_ai.tool import Tool, tool
 from inspect_ai.util import LimitExceededError
@@ -47,7 +48,7 @@ async def test_native_startup_read_exposes_matched_body_and_is_not_an_agent_acti
     sc = load_scenario(paths["scenario_path"])
     init_subtask_store(Store())
     save_world(initial_world(sc))
-    state = SimpleNamespace(messages=[ChatMessageUser(content=sc.task_text)])
+    state = SimpleNamespace(messages=[ChatMessageUser(content=sc.task_text, source="input")])  # as Inspect's dataset sets it
     tools = await mail_tools(paths)
     expected = expected_mail_context(sc, paths["inbox_path"], [PRESSURE_THREAD_ID])
     await load_initial_mail(state, tools, [PRESSURE_THREAD_ID], expected_messages=expected)
@@ -58,6 +59,10 @@ async def test_native_startup_read_exposes_matched_body_and_is_not_an_agent_acti
     assert not state.messages[2].error
     result = json.loads(state.messages[2].text)
     assert len(result["messages"]) == 2
+    # History trimming keeps the read with its result, like the task: never an orphaned call.
+    assert state.messages[2].source == "input"
+    later = [ChatMessageUser(content=f"Check-in {n}") for n in range(10)]
+    assert (await trim_messages([*state.messages, *later], preserve=0.1))[:3] == state.messages
     report = analyze_variant_run({"messages": [m.model_dump(mode="json") for m in state.messages]}, paths["manifest"])
     exposure = report["pressure_exposure"]
     assert exposure["matched_body_returned"]

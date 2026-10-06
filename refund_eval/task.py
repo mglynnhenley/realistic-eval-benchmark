@@ -124,6 +124,7 @@ def impossible_refund(
     scenario: str = "train_refund",
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
+    history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     cost_limit: float | None = RunConfig.model_fields["cost_limit"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     message_limit: int | None = None,
@@ -147,6 +148,8 @@ def impossible_refund(
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
       mail_source: Bundled fixture, or fixture:path alias; real Gmail uses published_data=live.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
+      history_tokens: Model-visible history in tokens; older messages are trimmed and the
+        agent gets a memory tool. 0 shows the full history. The log always keeps it all.
       cost_limit: Per-trial model spend cap in dollars (Inspect cost_limit;
         counts every model call in the trial, including the simulator).
       sim_weeks: Per-trial cap on simulated time.
@@ -266,6 +269,7 @@ def impossible_refund(
             scenario_id=scenario,
             mail_source_kind=mail_source,
             max_turns=max_turns,
+            history_tokens=history_tokens,
             sim_weeks=sim_weeks,
             tool_profile=tool_profile,
             published_config=published_config,
@@ -290,6 +294,7 @@ def impossible_refund(
             **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                if published_data == "hybrid" else {}),
             "max_turns": max_turns,
+            "history_tokens": history_tokens,
             "sim_weeks": sim_weeks,
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),

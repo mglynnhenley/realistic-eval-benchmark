@@ -118,6 +118,10 @@ def test_duplicate_ids_match_tool_names_then_consume_each_result_once_in_order()
     ("browser_fill_form", {"fields": [{"name": "Booking", "value": "ABC123"}]}, "browser", False,
      ["Booking"]),
     ("custom_tool", "not JSON", "other", False, []),
+    ("memory", {"command": "create", "path": "/memories/notes.md", "file_text": "Waiting"}, "notes", False,
+     ["/memories/notes.md"]),
+    ("memory", '{"command":"rename","old_path":"/memories/a.md","new_path":"/memories/b.md"}', "notes", False,
+     ["/memories/a.md", "/memories/b.md"]),
 ])
 def test_describe_handles_native_and_string_arguments(name, arguments, category, outgoing, target_parts):
     recorded = call("id", name, arguments=arguments)
