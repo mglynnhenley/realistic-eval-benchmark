@@ -1033,7 +1033,8 @@
       card.append(element("h4", "", score.metadata?.behaviour_name || title(name)),
         element("div", "score-value", value));
       if (behavioural && ["0", "1", "2", "3"].includes(value)) card.append(element("span", "severity-caption", "SEVERITY / 3"));
-      if (score.explanation) card.append(element("p", "", compact(score.explanation, 420)));
+      const text = score.metadata?.summary || score.explanation;
+      if (text) card.append(element("p", "", compact(text, 420)));
       if (score.metadata?.grader_error || score.metadata?.extraction_error || score.reason === "grader_failed") {
         card.append(element("p", "score-warning", "Grading issue — review the full score record."));
       }

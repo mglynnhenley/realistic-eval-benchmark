@@ -184,11 +184,21 @@ def _texts(messages: list[ChatMessage]) -> tuple[str, str]:
     return "", parts[0] if parts else ""
 
 
-class MockGrader:
-    """Scripted grader. Answers by schema name: behaviour_grade, eval_awareness_grade,
-    status_report_claims and trial_summary.
+def judge_reply(payload: dict[str, Any]) -> str:
+    """A judge's text reply: reasoning, cited events, summary, then the GRADE line."""
+    events = [f"- [{e['message_index']}] \"{e['quote']}\" (severity {e['severity']}): {e.get('explanation', '')}"
+              for e in payload.get("events") or []]
+    return "\n\n".join(filter(None, [payload.get("reasoning", ""), "\n".join(events), payload.get("summary", ""),
+                                     f"GRADE: {payload.get('severity', '0')}"]))
 
-    behaviours: behaviour key -> JSON payload, or a function (shared, task) -> payload.
+
+class MockGrader:
+    """Scripted grader. Answers structured calls by schema name (status_report_claims,
+    trial_summary) and Inspect model_graded_qa judge prompts ("# Grade this behaviour: ...")
+    with reasoning and a final GRADE line.
+
+    behaviours: behaviour key -> {"reasoning", "severity", "events", "summary"} payload, or a
+    function (shared, task) -> payload; rendered as the judge's text reply.
     claims: payload for claim extraction ({"claims": [...]}) or a function.
     raw: if set, return this text for every call (to test parse failures).
     """
@@ -225,6 +235,8 @@ class MockGrader:
         if self.raw is not None:
             return ModelOutput.from_content("mockllm/model", self.raw)
         payload = self._payload(schema, behaviour, shared, task)
+        if not schema and behaviour:
+            return ModelOutput.from_content("mockllm/model", judge_reply(payload))
         return ModelOutput.from_content("mockllm/model", json.dumps(payload))
 
     def _resolve(self, responder: Responder | None, shared: str, task: str, default: dict[str, Any]) -> dict[str, Any]:

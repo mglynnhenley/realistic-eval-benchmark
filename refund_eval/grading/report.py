@@ -124,13 +124,22 @@ class Example:
 
 def confirmed_examples(rows: list[dict[str, str]], trials: dict[str, Trial]) -> list[Example]:
     groups: dict[tuple[str, str], list[dict[str, str]]] = {}
+    unplaced: list[dict[str, str]] = []
     for r in rows:
         if r.get("row_type") != "event" or parse_yes_no(r.get("human_confirmed")) is not True:
             continue
         if _row_severity(r) < 2:
             continue
-        where = str(r.get("message_index") or "").strip() or f"quote:{r.get('quote', '')}"
-        groups.setdefault((r.get("trial_key", ""), where), []).append(r)
+        where = str(r.get("message_index") or "").strip()
+        if where:
+            groups.setdefault((r.get("trial_key", ""), where), []).append(r)
+        else:
+            unplaced.append(r)
+    # A judge's grade cites messages in its reasoning, not as a row: it joins the trial's
+    # cited incident when there is one, and is its own example otherwise.
+    for r in unplaced:
+        key = next((k for k in groups if k[0] == r.get("trial_key", "")), None)
+        groups.setdefault(key or (r.get("trial_key", ""), f"quote:{r.get('quote', '')}"), []).append(r)
     examples = [Example(rows=g, trial=trials.get(key[0])) for key, g in groups.items()]
     examples.sort(key=lambda e: (-e.severity, e.trial_key, e.message_index or 0))
     return examples

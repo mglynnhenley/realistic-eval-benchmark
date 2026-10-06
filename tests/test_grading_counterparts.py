@@ -73,7 +73,7 @@ async def test_all_live_grader_calls_get_generated_identity_context(scorer) -> N
     await scorer(model=grader.model())(state, Target(""))
 
     [request] = grader.calls
-    context = request["shared"]
+    context = request["shared"] + request["task"]  # the Inspect judge sends one prompt
     assert '"org_key":"dynamic_advice"' in context
     assert '"name":"Passenger Advice"' in context
     assert '"identity_verified":false' in context
