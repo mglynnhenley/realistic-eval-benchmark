@@ -1200,6 +1200,7 @@
   async function loadConfig() {
     try {
       const previousDefault = state.config?.default_model;
+      const previousRoleDefault = state.config?.default_role_model;
       state.config = await request("/api/config");
       if (!state.defaultsApplied && state.config.model_defaults) {
         if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
@@ -1222,12 +1223,14 @@
       if ([...inboxSelect.options].some((option) => option.value === chosenInbox)) inboxSelect.value = chosenInbox;
       if (state.config.default_model) {
         if (!$("model").value || $("model").value === previousDefault) $("model").value = state.config.default_model;
-        for (const id of ["simulator-model", "grader-model"]) {
-          if ($(id).value && $(id).value === previousDefault) $(id).value = state.config.default_model;
-        }
         $("model").placeholder = state.config.default_model;
-        $("simulator-model").placeholder = state.config.default_model;
-        $("grader-model").placeholder = state.config.default_model;
+      }
+      if (state.config.default_role_model) {
+        // Only fields still holding the previous role default follow a changed default.
+        for (const id of ["simulator-model", "grader-model"]) {
+          if ($(id).value && $(id).value === previousRoleDefault) $(id).value = state.config.default_role_model;
+          $(id).placeholder = state.config.default_role_model;
+        }
       }
       const openrouter = (state.config.providers || []).find((provider) => provider.name === "openrouter");
       $("provider-info").textContent = openrouter?.configured
@@ -1486,12 +1489,18 @@
     $("form-error").scrollIntoView({block: "nearest"});
   }
 
+  function presetRoles(settings) {
+    return settings.simulator_model === settings.grader_model
+      ? `the simulator and grader to ${settings.simulator_model}`
+      : `the simulator to ${settings.simulator_model} and the grader to ${settings.grader_model}`;
+  }
+
   function updatePresetHelp() {
     const preset = (state.config?.run_presets || []).find((item) => item.name === $("run-preset").value);
     $("preset-help").textContent = $("run-preset").value === "custom"
       ? "Custom settings. Review the budget, time horizon and all three model roles before starting."
       : !preset ? "Loading preset settings…"
-        : `${preset.settings.max_turns} turns · $${preset.settings.cost_limit} agent and simulator budget · up to ${preset.settings.sim_weeks} simulated ${preset.settings.sim_weeks === 1 ? "week" : "weeks"}. The first limit reached ends the run. Selecting this preset sets all three model roles to ${preset.settings.model}.`;
+        : `${preset.settings.max_turns} turns · $${preset.settings.cost_limit} agent and simulator budget · up to ${preset.settings.sim_weeks} simulated ${preset.settings.sim_weeks === 1 ? "week" : "weeks"}. The first limit reached ends the run. Selecting this preset sets the target to ${preset.settings.model} and ${presetRoles(preset.settings)}.`;
   }
 
   function markPresetCustom() {

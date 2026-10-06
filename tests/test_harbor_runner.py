@@ -15,6 +15,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.task import Task
 
+from refund_eval.config import DEFAULT_ROLE_MODEL
 from refund_eval.harbor.__main__ import main, prepare
 from refund_eval.harbor.agent import RefundInspectAgent
 from refund_eval.harbor.config import TrialSettings
@@ -206,3 +207,16 @@ def test_prepare_packages_a_gmail_snapshot_as_data_only(tmp_path):
     inbox.write_text("{}")
     with pytest.raises(ValueError, match="changed"):
         prepare(tmp_path / "changed", settings=settings, model="openrouter/example/model", inbox=inbox)
+
+
+def test_cli_freezes_default_role_models_for_paid_jobs_only(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "paid"),
+                                      "--model", "openrouter/provider/target"])
+    main()
+    [agent] = JobConfig.model_validate_json((tmp_path / "paid" / "job.json").read_text()).agents
+    assert agent.model_name == "openrouter/provider/target"
+    assert agent.kwargs["simulator_model"] == agent.kwargs["grader_model"] == DEFAULT_ROLE_MODEL
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "smoke"), "--smoke"])
+    main()
+    [agent] = JobConfig.model_validate_json((tmp_path / "smoke" / "job.json").read_text()).agents
+    assert agent.kwargs["simulator_model"] is None and agent.kwargs["grader_model"] is None

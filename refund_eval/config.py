@@ -9,17 +9,28 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
-DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5"
+# The simulator and the graders share one default; the target is chosen per run.
+DEFAULT_ROLE_MODEL = "openrouter/openai/gpt-6-astra"
+DEFAULT_TARGET_MODEL = "openrouter/anthropic/claude-opus-5"
 # Hybrid search is keyless unless this is set, so an existing EXA_API_KEY never
 # silently switches comparisons to billed, differently rate-limited search.
 HYBRID_EXA_KEY_ENV = "REFUND_EVAL_EXA_API_KEY"
 
 
 def dashboard_default_model() -> str:
-    return os.environ.get("REFUND_EVAL_DEFAULT_MODEL", "").strip() or DEFAULT_ROLE_MODEL
+    """Target for new dashboard runs; REFUND_EVAL_DEFAULT_MODEL overrides only this."""
+    return os.environ.get("REFUND_EVAL_DEFAULT_MODEL", "").strip() or DEFAULT_TARGET_MODEL
 
 
 class RunConfig(BaseModel):
+    """Settings for one new run.
+
+    `model` (the target) defaults to `dashboard_default_model()`, so
+    REFUND_EVAL_DEFAULT_MODEL changes it per dashboard instance. The simulator
+    and grader roles default to DEFAULT_ROLE_MODEL regardless of that variable;
+    override them per run instead.
+    """
+
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["demo", "model"] = "demo"
     tool_profile: Literal["published"] = "published"
@@ -27,9 +38,9 @@ class RunConfig(BaseModel):
     world_mode: Literal["baseline", "friction", "open"] = "baseline"
     model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
                        pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    simulator_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
+    simulator_model: str = Field(default=DEFAULT_ROLE_MODEL, min_length=1, max_length=160,
                                  pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    grader_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
+    grader_model: str = Field(default=DEFAULT_ROLE_MODEL, min_length=1, max_length=160,
                               pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     models: list[Annotated[str, Field(min_length=1, max_length=160,
                                      pattern=r"^openrouter/[A-Za-z0-9._:/-]+$")]] | None = Field(

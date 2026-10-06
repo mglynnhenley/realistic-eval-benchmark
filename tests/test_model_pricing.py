@@ -12,6 +12,7 @@ from inspect_ai.model import (
 from inspect_ai.model._model_info import clear_model_info_cache
 
 from refund_eval import model_pricing as pricing
+from refund_eval.config import DEFAULT_ROLE_MODEL, DEFAULT_TARGET_MODEL
 from refund_eval.task import register_default_costs
 
 FABLE = "openrouter/anthropic/claude-fable-5"
@@ -48,7 +49,8 @@ def catalog(monkeypatch, entries):
 def test_missing_role_prices_load_once_with_token_and_cache_conversion(monkeypatch):
     set_model_info(FABLE, ModelInfo(context_length=1_000_000))
     calls = catalog(monkeypatch, [FABLE_ENTRY])
-    register_default_costs(["openrouter/anthropic/claude-opus-5", FABLE, FABLE])
+    # Both bundled defaults are priced before the lookup, so only FABLE is fetched.
+    register_default_costs([DEFAULT_TARGET_MODEL, DEFAULT_ROLE_MODEL, FABLE, FABLE])
     info = get_model_info(FABLE)
     assert info.context_length == 1_000_000
     assert info.cost == ModelCost(input=10, output=50, input_cache_read=1, input_cache_write=12.5)
@@ -82,7 +84,7 @@ def test_explicit_prices_and_offline_models_need_no_network(monkeypatch):
     assert get_model_info("mockllm/target").cost.input == 0
 
 
-@pytest.mark.parametrize("name", [FABLE, "openrouter/anthropic/claude-opus-5"])
+@pytest.mark.parametrize("name", [FABLE, DEFAULT_TARGET_MODEL, DEFAULT_ROLE_MODEL])
 def test_canonical_price_override_is_preserved(monkeypatch, name):
     custom = ModelCost(input=9, output=19, input_cache_read=1, input_cache_write=11)
     set_model_info(name.removeprefix("openrouter/"), ModelInfo(cost=custom))

@@ -25,16 +25,17 @@ rate limits remain recoverable tool errors. The canonical [browser prerequisites
 cover local Docker and packaged batch runtimes. Both modes need no Gmail connection
 or Exa API key.
 
-The default model for the simulator and graders is
-`openrouter/anthropic/claude-opus-5`. The `anthropic` segment identifies the model publisher;
-Inspect sends requests through OpenRouter using `OPENROUTER_API_KEY`. No `ANTHROPIC_API_KEY`
-is required for these defaults. The default installation includes the OpenAI-compatible SDK
-used by Inspect's OpenRouter provider.
+The counterparty simulator and the LLM graders default to
+`openrouter/openai/gpt-6-astra`. The `openai` segment identifies the model publisher;
+Inspect sends requests through OpenRouter using `OPENROUTER_API_KEY`, so no OpenAI or
+Anthropic key is required for the defaults. The default installation includes the
+OpenAI-compatible SDK used by Inspect's OpenRouter provider.
 
-The dashboard uses the same model by default. Set `REFUND_EVAL_DEFAULT_MODEL`
-before starting the server to change its target, simulator and grader defaults
-together, for example `openrouter/anthropic/claude-haiku-4.5`. This setting does
-not change CLI benchmark defaults; individual run selections still take precedence.
+The dashboard's target model defaults to `openrouter/anthropic/claude-opus-5`. Set
+`REFUND_EVAL_DEFAULT_MODEL` before starting the server to change that target default,
+for example `openrouter/anthropic/claude-haiku-4.5`; the simulator and grader defaults
+stay on gpt-6-astra unless a run overrides them. This setting does not change CLI
+benchmark defaults; individual run selections still take precedence.
 
 Direct provider routes remain available if explicitly selected. For direct Anthropic, Google
 or Grok runs, install their optional SDKs and set the corresponding provider key:
@@ -96,7 +97,7 @@ credentials and needs no local Docker daemon; Docker batches need the daemon.
 The [Harbor guide](harbor.md) covers multiple models, trials per model and
 batch-wide concurrency. All trials have independent inbox and browser state.
 
-To use Haiku 4.5 for all three model defaults in this dashboard instance:
+To use Haiku 4.5 as the default target in this dashboard instance:
 
 ```bash
 REFUND_EVAL_DEFAULT_MODEL=openrouter/anthropic/claude-haiku-4.5 \
@@ -124,9 +125,9 @@ intercepted submissions also available in World state.
 
 For a longer simulated trial, choose **Longer stress test** in the run preset selector.
 It selects **Realistic friction**, up to **12 simulated weeks**, **600 target turns**,
-and a **$10 target/simulator budget**. It also resets all three model roles to this
-dashboard instance's default (Haiku 4.5 when configured as above), so an old simulator
-or grader selection does not carry over. Final grading costs are additional. The
+and a **$10 target/simulator budget**. It also resets the target to this dashboard
+instance's default (Haiku 4.5 when configured as above) and the simulator and grader
+to gpt-6-astra, so an old selection does not carry over. Final grading costs are additional. The
 first time, turn, budget or other stop condition ends the run; these are ceilings,
 not a guarantee that every trial reaches week 12. Quick test keeps the original
 20-turn, $1, one-week limits and baseline world. Manual edits select Custom.
@@ -283,8 +284,8 @@ acceptance; provider-family model checks require separate approval.
 | Who | How it is set | Default |
 | --- | --- | --- |
 | Target agent | `--model` | CLI: required; dashboard: `REFUND_EVAL_DEFAULT_MODEL`, otherwise `openrouter/anthropic/claude-opus-5` |
-| Counterparty simulator | `--model-role simulator=...` | `openrouter/anthropic/claude-opus-5` (`mockllm/model` when the target is mockllm) |
-| LLM graders | `--model-role grader=...` | `openrouter/anthropic/claude-opus-5` (`mockllm/model` when the target is mockllm) |
+| Counterparty simulator | `--model-role simulator=...` | `openrouter/openai/gpt-6-astra` (`mockllm/model` when the target is mockllm) |
+| LLM graders | `--model-role grader=...` | `openrouter/openai/gpt-6-astra` (`mockllm/model` when the target is mockllm) |
 
 ### Task parameters (`-T name=value`)
 
@@ -321,9 +322,12 @@ the budget limit stays enabled. Existing Inspect prices and prices supplied with
 `--model-cost-config costs.yaml` take precedence. Providers other than OpenRouter
 still need Inspect prices or an explicit cost config.
 
-The default `openrouter/anthropic/claude-opus-5` also has a bundled fallback
+The defaults also have bundled fallbacks: `openrouter/anthropic/claude-opus-5`
 ($5 input, $25 output, $6.25 cache write, $0.50 cache read per million tokens,
-verified 2026-09-30). Mockllm has a zero price and never needs a catalog lookup.
+verified 2026-09-30) and `openrouter/openai/gpt-6-astra` ($10 input, $50 output,
+$12.50 cache write, $1 cache read, verified 2026-10-05; the catalog's higher rate
+above 272k prompt tokens is not modelled). Mockllm has a zero price and never
+needs a catalog lookup.
 
 Trials run concurrently. Use `--max-samples N` to limit how many run at once.
 

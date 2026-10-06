@@ -25,7 +25,7 @@ from inspect_ai.model import (
 
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
-from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig
+from refund_eval.config import DEFAULT_ROLE_MODEL, DEFAULT_TARGET_MODEL, RunConfig
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.scenario.schema import load_scenario
 
@@ -36,14 +36,19 @@ MODEL_ROLES = ("simulator", "grader")
 # run never calls a real API unless you ask it to with --model-role.
 DRY_RUN_ROLE_MODEL = "mockllm/model"
 
-# OpenRouter catalog prices in $ per million tokens (verified 2026-09-30).
-# https://openrouter.ai/api/v1/models
-# cost_limit needs cost data for
-# every model and Inspect ships none for this one. Only applied when a model
-# has no cost data, so --model-cost-config takes precedence.
+# OpenRouter catalog prices in $ per million tokens, from
+# https://openrouter.ai/api/v1/models. cost_limit needs cost data for every
+# model and Inspect ships none for these. Only applied when a model has no
+# cost data, so --model-cost-config takes precedence.
 DEFAULT_MODEL_COSTS: dict[str, ModelCost] = {
-    DEFAULT_ROLE_MODEL: ModelCost(
+    # Verified 2026-09-30.
+    DEFAULT_TARGET_MODEL: ModelCost(
         input=5.0, output=25.0, input_cache_write=6.25, input_cache_read=0.50
+    ),
+    # Verified 2026-10-05. The catalog charges double above 272k prompt
+    # tokens; the budget counts the base rate.
+    DEFAULT_ROLE_MODEL: ModelCost(
+        input=10.0, output=50.0, input_cache_write=12.5, input_cache_read=1.0
     ),
 }
 _FREE = ModelCost(input=0.0, output=0.0, input_cache_write=0.0, input_cache_read=0.0)
