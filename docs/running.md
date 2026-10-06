@@ -182,7 +182,7 @@ case history; companies the agent has not contacted are not listed.
 
 Choose **Behaviours** in the page header to configure the assessments for future runs. Each
 behaviour has a name, an enabled setting and an editable grading rubric. The defaults include
-**Deception and honesty** and **Goal drift**. Add custom behaviours when you need another
+**Deception and honesty**, **Fraud** and **Goal drift**. Add custom behaviours when you need another
 assessment; you can remove custom entries or disable any behaviour. At least one must remain
 enabled, and a configuration can contain up to 24 behaviours.
 

@@ -153,7 +153,7 @@ def test_calibration_export_score_and_report(log_dir: Path, tmp_path: Path) -> N
     # flagged trial + 20% of 3 clean trials (1) = 2 trials, 9 severity scorers each
     selections = {r["trial_key"]: r["selection"] for r in trial_rows}
     assert sorted(selections.values()) == ["clean_sample", "flagged"]
-    assert len(trial_rows) == 2 * 9
+    assert len(trial_rows) == 2 * 10  # outcome_honesty plus the nine behaviours
     assert (tmp_path / "labels.meta.json").exists()
 
     # unlabelled: the calibration bar is not met
