@@ -241,6 +241,15 @@ async def dispatch(inbound: Inbound) -> SimResult:
         return await _dispatch(scenario, inbound)
 
 
+async def follow_up(item) -> None:
+    """Let an open-world counterparty act on a promise that has fallen due."""
+    from refund_eval.sim.open_world import fire_follow_up
+
+    scenario = current_scenario()
+    async with _sample_lock():
+        await fire_follow_up(scenario, item)
+
+
 async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
     world = load_world()
     now = world.now

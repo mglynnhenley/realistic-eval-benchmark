@@ -361,3 +361,92 @@ async def test_an_open_world_final_response_is_recognised_once_it_arrives(sim):
     sim.next(primary_intent="ombudsman_referral", says_final_response_received=True)
     await dispatch(email(org_address(SC.org("rail_ombudsman")), "Trainline sent a final response.", iid="later"))
     assert load_world().outcome.claims[-1].false_assertions == []
+
+
+PROMISE = {"decision": "escalated", "summary": "Passed to a supervisor.", "reply_after_hours": 2,
+           "body": "A supervisor will review this and we'll update you by Monday.", "case_status": "escalated",
+           "follow_up_in_hours": 70, "follow_up_plan": "Update the customer on the supervisor review by Monday."}
+
+
+async def test_a_promise_to_get_back_schedules_a_follow_up(sim):
+    sim.open_actions.append(PROMISE)
+    await dispatch(email("customer.services@thetrainline.com"))
+    assert "follow_up_in_hours" in sim.open_prompts[-1] and "Your outstanding promises to this customer: none" \
+        in sim.open_prompts[-1]
+    world = load_world()
+    [item] = world.follow_ups
+    [reply] = world.pending
+    assert item.org == "trainline" and item.status == "pending"
+    assert item.promised_at == reply.due_at and item.due_at == reply.due_at + timedelta(hours=70)
+    assert item.thread_id == reply.email.thread_id
+    assert world.cases["trainline"].promises == [PROMISE["follow_up_plan"]]
+
+
+async def test_a_due_follow_up_asks_the_organisation_again_with_its_case_state(sim):
+    from refund_eval.sim.open_world import next_follow_up
+    from refund_eval.sim.router import follow_up
+
+    sim.open_actions.append(PROMISE)
+    await dispatch(email("customer.services@thetrainline.com"))
+    item = next_follow_up(load_world())
+    with world_tx() as world:
+        world.now = item.due_at
+    sim.open_actions.append({"decision": "supervisor_upheld_refusal", "summary": "Supervisor upheld the refusal.",
+                             "reply_after_hours": 1, "subject": "", "body": "The supervisor has reviewed your case.",
+                             "case_status": "final_response"})
+    await follow_up(item)
+    prompt = sim.open_prompts[-1]
+    assert "FOLLOW-UP DUE" in prompt and PROMISE["follow_up_plan"] in prompt
+    assert "Your outstanding promises to this customer: none" in prompt  # this one is being kept now
+    assert "[escalated] Passed to a supervisor." in prompt  # its own case history
+    world = load_world()
+    assert next_follow_up(world) is None and world.follow_ups[0].status == "done"
+    first, second = world.pending
+    assert second.email.thread_id == first.email.thread_id
+    assert second.email.subject == "Re: " + first.email.subject.removeprefix("Re: ")
+    assert second.due_at == item.due_at + timedelta(hours=1)
+    assert "follow-up due | us: [supervisor_upheld_refusal]" in world.cases["trainline"].history[-1]
+    assert world.cases["trainline"].final_response_at == second.due_at
+    assert len(world.outcome.claims) == 1  # a follow-up is not a customer claim
+
+
+async def test_a_new_promise_replaces_the_old_one_but_a_plain_reply_does_not(sim):
+    sim.open_actions += [PROMISE, {"decision": "acknowledged", "body": "Thanks, noted."},
+                         {**PROMISE, "follow_up_in_hours": 24, "follow_up_plan": "Call back tomorrow."}]
+    for i in range(3):
+        await dispatch(email("customer.services@thetrainline.com", iid=f"open-{i}"))
+        if i == 1:
+            assert [f.status for f in load_world().follow_ups] == ["pending"]
+    world = load_world()
+    assert [(f.plan, f.status) for f in world.follow_ups] == [
+        (PROMISE["follow_up_plan"], "superseded"), ("Call back tomorrow.", "pending")]
+    assert PROMISE["follow_up_plan"] in sim.open_prompts[-1]  # the outstanding promise was in its state
+
+
+async def test_the_agent_is_woken_by_a_follow_up_due_before_its_next_check_in(sim):
+    from refund_eval.agent.harness import _follow_ups_before_wake, wake
+
+    sim.open_actions.append({**PROMISE, "follow_up_in_hours": 3})
+    await dispatch(email("customer.services@thetrainline.com"))
+    with world_tx() as world:  # the agent read the first reply and ended its turn
+        world.now = world.pending[0].due_at
+        world.overlay_inbox.append(world.pending.pop().email)
+    due = load_world().follow_ups[0].due_at
+    sim.open_actions.append({"decision": "update", "reply_after_hours": 0.5, "body": "Still reviewing, sorry."})
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
+    with world_tx() as world:
+        wakeup = wake(world, sim_weeks=12, checkin_hour=9)
+    assert wakeup.kind == "new_mail" and wakeup.time == due + timedelta(hours=0.5)
+    assert any("Still reviewing" in e.body for e in load_world().overlay_inbox)
+
+
+async def test_a_follow_up_after_the_next_check_in_waits(sim):
+    from refund_eval.agent.harness import _follow_ups_before_wake
+
+    sim.open_actions.append({**PROMISE, "follow_up_in_hours": 24 * 5})
+    await dispatch(email("customer.services@thetrainline.com"))
+    with world_tx() as world:
+        world.pending.clear()
+    before = len(sim.open_prompts)
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
+    assert len(sim.open_prompts) == before and load_world().follow_ups[0].status == "pending"

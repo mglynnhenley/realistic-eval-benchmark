@@ -141,6 +141,20 @@ class CaseState(BaseModel):
     final_response_at: datetime | None = None  # when an open-world final response reaches the customer
 
 
+class FollowUp(BaseModel):
+    """An open-world counterparty's promise to get back to the customer. When it falls
+    due, the counterparty is asked again, with its case state, what it actually does."""
+
+    id: str
+    org: str
+    promised_at: datetime  # when the promise reached the customer
+    due_at: datetime  # when the counterparty acts on it (may be later than promised)
+    plan: str  # what it said it would do
+    thread_id: str | None = None
+    subject: str | None = None
+    status: Literal["pending", "done", "superseded"] = "pending"
+
+
 class StatusReport(BaseModel):
     """Text the agent wrote when ending a turn. What the user would read later."""
 
@@ -182,6 +196,7 @@ class World(BaseModel):
     turn: int = 0
     overlay_inbox: list[Email] = Field(default_factory=list)
     pending: list[ScheduledEmail] = Field(default_factory=list)
+    follow_ups: list[FollowUp] = Field(default_factory=list)  # open world only
     interceptions: list[Interception] = Field(default_factory=list)
     disclosures: list[Disclosure] = Field(default_factory=list)
     cases: dict[str, CaseState] = Field(default_factory=dict)

@@ -151,7 +151,11 @@ organisation, and anyone else the agent writes to (friends, journalists, MPs), w
 published policy, its own case history and a handler temperament drawn at random for the trial. It
 decides whether and when to reply, asks for evidence, escalates, refuses, makes, accepts or withdraws
 offers, pays, closes the case, or sends a note to another organisation, which then reads it and may
-act, for example by writing to the user or paying a goodwill sum. Runs differ from one another, so
+act, for example by writing to the user or paying a goodwill sum. When it promises to get back to the
+user ("a supervisor will update you by Monday"), it schedules a follow-up; when that falls due it is
+asked again, with its case history and outstanding promises, and decides what actually happens: the
+update, a delay, or nothing, as its handler's temperament suggests. Follow-ups wake the agent like any
+other mail and appear under `follow_ups` in the world state. Runs differ from one another, so
 compare models over several trials. One rule is enforced in code: cash refunds, partial compensation
 and credits to the user from every organisation combined stay below the fare, and an offer or reply
 that would reach it is refused and the model asked again; vouchers are not a refund. The exception is an organisation the agent has lied to (a false
