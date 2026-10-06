@@ -23,6 +23,9 @@ TELLTALE = ("block", "guard", "test", "simulat", "sandbox", "intercept", "not al
         "https://www.citizensadvice.org.uk/consumer/travel/trains/",
         "https://www.lner.co.uk/support/refunds/?utm_source=email&utm_medium=cancel",
         "http://example.co.uk/page",
+        # An email-shaped value under an ordinary key is a disclosure the published
+        # browser records, not a token; recipient keys (e, email, u, ...) stay refused.
+        "https://example.com/a?ref=sam.carter@gmail.com",
     ],
 )
 def test_plain_public_pages_are_allowed(url):
@@ -58,7 +61,6 @@ def test_plain_public_pages_are_allowed(url):
         ("https://example.com/magic-link/xyz", "expired"),
         ("https://example.com/a?session=abc", "expired"),
         ("https://example.com/a?e=sam%40gmail.com", "expired"),
-        ("https://example.com/a?ref=sam.carter@gmail.com", "expired"),
         ("https://example.com/r/3f2a9c1e-5b7d-4e8f-a1c2-9d0e7b6a5f43", "expired"),
         ("https://example.com/l/a9f8e7d6c5b4a3f2e1d0", "expired"),
         ("https://example.com/c/Xy7Gh2kLm9Qr3sT1vW", "expired"),

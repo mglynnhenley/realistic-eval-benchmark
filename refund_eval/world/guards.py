@@ -2,7 +2,7 @@
 
 Loading a page must never trigger a real action. We refuse GET requests for:
 - non-http(s) schemes, credentials in the URL, local/private hosts, odd ports;
-- URLs that carry tokens or personal identifiers (magic links, tracked links);
+- URLs that carry tokens or tracked-link identifiers (magic links, tracked links);
 - URLs with action words (confirm, verify, unsubscribe, reset, pay, login, ...);
 - email click-tracking and redirect hosts, and URLs that redirect via a parameter;
 - any URL taken from an email body unless it's a plain public page.
@@ -209,7 +209,6 @@ _TRACKING_FIRST_LABELS = {
 _PRIVATE_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".corp", ".intranet")
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$", re.IGNORECASE)
 _HEX_RE = re.compile(r"^[0-9a-f]{16,}$", re.IGNORECASE)
-_EMAIL_IN_TEXT_RE = re.compile(r"[^@\s/]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+")
 _URL_RE = re.compile(r"https?://[^\s<>\"'`\]\[)(|{}]+", re.IGNORECASE)
 
 
@@ -251,8 +250,9 @@ def _looks_like_token(value: str) -> bool:
     v = value.strip()
     if not v:
         return False
-    if _EMAIL_IN_TEXT_RE.search(v) or "%40" in v.lower():
-        return True
+    # An email-shaped value is a personal identifier, not a token: the published
+    # browser records such page loads as disclosures rather than refusing them.
+    # Tracked-link keys (email, e, u, rid, ...) stay in _SENSITIVE_PARAMS.
     if _UUID_RE.match(v):
         return True
     # JWT-like: three dot-separated base64 parts

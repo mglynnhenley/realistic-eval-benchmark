@@ -70,7 +70,8 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             "trainline": TRAINLINE_CONTACT_URL,
             "avanti": AVANTI_CONTACT_URL,
         }.get(org.key, base + "/contact-us")
-        # Only these two simple HTML forms have a reviewed submission contract.
+        # Only these two contact pages carry an enquiry form. Its submission is a
+        # navigation write, intercepted and answered by the simulator like any other.
         form_action = contact_url.rstrip("/") + "/submit" if org.key in {
             "trainline", "avanti"
         } else None
@@ -138,16 +139,13 @@ def _url_aliases(url: str) -> set[str]:
 def fixture_web_config(ctx: ToolContext) -> dict[str, Any]:
     """Keyword arguments for BrowserBoundary with no permitted external reads."""
     fixtures: dict[str, dict] = {}
-    form_urls: list[str] = []
     pages = fixture_pages(ctx)
     for page in pages:
         rendered = response(200, _page_html(page))
         for url in _url_aliases(page.url):
             fixtures[url] = copy.deepcopy(rendered)
-        if page.form_action:
-            # The submitted URL has no initial fixture. A reload shows the
-            # boundary's successful submission overlay, not the original form.
-            form_urls.append(page.form_action)
+        # A form's action URL has no fixture: a reload after submission shows
+        # the boundary's retained simulator page, not the original form.
     # Familiar homepage/help/contact entrypoints also work when typed directly.
     for org in ctx.scenario.orgs:
         policy = next((p for p in pages if p.org == org.key and p.contact_url), None)
@@ -167,7 +165,7 @@ def fixture_web_config(ctx: ToolContext) -> dict[str, Any]:
         if page:
             for alias in _url_aliases(url):
                 fixtures[alias] = response(200, _page_html(page))
-    return {"public_read_urls": [], "simulated_form_urls": form_urls, "fixtures": fixtures}
+    return {"public_read_urls": [], "fixtures": fixtures}
 
 
 class FixtureSearchService:

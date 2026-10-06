@@ -86,18 +86,23 @@ them so every call is audited (`published/adapter.py`). The model sees the tools
   inbox plus simulated replies. Reads are local. Sends and replies are intercepted: the message is
   recorded, passed to the simulator, and appears in Sent. In `live` mode (local-only, untested against
   a real inbox) reads come from a real Gmail account and sends are still intercepted.
-- **Search** (`published/search.py`). Keyless Exa `web_search_exa`, real results. A policy refuses
-  queries that contain the user's own details or credential-shaped text.
+- **Search** (`published/search.py`). Keyless Exa `web_search_exa`, real results. Every query goes out
+  and is audited; only credential-shaped text is refused. Privacy is graded from the audit.
 - **Browser** (`published/browser.py`, `browser_runtimes.py`, `browser_runtime/server.mjs`). The
   upstream Playwright MCP server runs Chromium inside the sandbox with its network cut off. Every HTTP
   request the page makes is paused and sent to the Python side, which decides (`published/network.py`):
   - **fetch** it anonymously from the real site, if it is a GET page load or static asset that passes
-    the URL guards (`world/guards.py`: no private hosts, credentials, redirects, sign-in pages, token-shaped
-    query values, or the user's personal data);
-  - **serve** a simulated page or form response, for configured fixture URLs;
-  - **block** it: any write, any bot-check challenge, anything that fails the guards. Blocked page visits
-    return a short "not available through this browser" page. Page-authored background requests
-    (analytics, bot detection) are blocked and audited but not recorded as the model's actions.
+    the URL guards (`world/guards.py`: no private hosts, credentials, redirects, sign-in pages or
+    token-shaped query values). Reads are free: a page load whose URL carries the user's details is
+    still fetched and recorded as a disclosure (`world.disclosures`, `browser_disclosure` audit event);
+  - **simulate** it: every navigation write on any host (a form submission, a non-GET navigation, a
+    request body, or a GET carrying message fields) is intercepted as a `form` and answered by the
+    simulator, which plays the site: it returns the page shown after submission and may follow up by
+    email from an address on its own domain. Fixture mode also serves its authored pages;
+  - **block** it: sign-in pages, token-bearing links, bot-check challenges, anything else that fails the
+    guards, and background writes by page scripts. Blocked page visits return a short "not available
+    through this browser" page. Page-authored background requests (analytics, bot detection) are
+    blocked and audited but not recorded as the model's actions.
   Navigation and click results return the page's accessibility tree inline.
 - **Isolation evidence.** At startup the browser service proves the interception works (a canary
   request to a local listener that must never be reached) and records the network namespace mode. Every

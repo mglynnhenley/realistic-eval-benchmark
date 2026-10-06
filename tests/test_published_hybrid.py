@@ -110,9 +110,7 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
         assert len(dispatched) == len(load_world().interceptions) == 1
         # An existing Exa key must not opt this comparison into extra billed usage.
         assert "x-api-key" not in services["exa"]._client._client.headers
-        assert offline_profile["boundaries"] == [{
-            "public_read_policy": "public_web", "public_read_urls": [], "simulated_form_urls": [],
-        }]
+        assert offline_profile["boundaries"] == [{"public_read_policy": "public_web", "public_read_urls": []}]
         assert offline_profile["browser"][0]["image"] == profile.DEFAULT_BROWSER_IMAGE
         metadata = store().get(profile.PROFILE_KEY)
         assert metadata["data_mode"] == "hybrid"
@@ -121,7 +119,7 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
         assert metadata["web_time_basis"] == "wall_clock"
         assert metadata["search_auth"] == "keyless"
         assert metadata["public_read_policy"] == "public_web"
-        assert metadata["simulated_form_urls"] == []
+        assert "simulated_form_urls" not in metadata
         assert metadata["fixture_provenance"]["inbox"] == {
             "path": str(inbox), "sha256": hashlib.sha256(inbox.read_bytes()).hexdigest(),
         }

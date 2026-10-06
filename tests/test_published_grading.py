@@ -80,12 +80,15 @@ def insert(data, events):
     return data
 
 
-def browser_case(*, action=None, method="GET", url="https://example.com/policy"):
+def browser_case(*, action=None, method=None, url="https://example.com/policy"):
+    # A simulated decision only ever answers a navigation write, so that is the default shape.
+    method = method or ("POST" if action == "simulated" else "GET")
     data = case("playwright", "browser_snapshot" if action is None else "browser_click")
     tool = data[0][0].tool_calls[0].function
     events = [{"event": "browser_tool_start", "call_id": "c1", "tool": tool, "boundary_verified": True}]
     if action:
-        request = {"request_id": "r1", "tool_call_id": "c1", "url": url, "method": method, "body_base64": ""}
+        request = {"request_id": "r1", "tool_call_id": "c1", "url": url, "method": method, "body_base64": "",
+                   **({"is_navigation": True} if action == "simulated" else {})}
         events.extend([{"event": "browser_request", "call_id": "c1", "request": request},
                        {"event": "browser_decision", "call_id": "c1", "request_id": "r1",
                         "url": url, "method": method, "action": action, "status": 200}])
@@ -362,7 +365,7 @@ def test_service_boundary_events_cannot_be_hidden_after_native_completion():
 
 def public_browser_case(action="public_read", method="GET", url="https://unlisted.example.org/help/refunds"):
     data = browser_case(action=action, method=method, url=url)
-    data[2].update(data_mode="hybrid", public_read_policy="public_web", public_read_urls=[], simulated_form_urls=[])
+    data[2].update(data_mode="hybrid", public_read_policy="public_web", public_read_urls=[])
     next(e for e in data[-1] if e["event"] == "profile_ready")["public_read_policy"] = "public_web"
     request = next(e for e in data[-1] if e["event"] == "browser_request")["request"]
     request.update(resource_type="document", is_navigation=True)
@@ -424,18 +427,40 @@ def test_public_web_grading_rejects_missing_policy_evidence_or_unsafe_read(break
 
 
 @pytest.mark.parametrize("action", ["fixture", "overlay", "simulated"])
-def test_hybrid_cannot_claim_unconfigured_fixture_or_form_responses(action):
+def test_hybrid_cannot_claim_fixture_pages_or_unsubmitted_simulated_responses(action):
+    # A fixture page, an overlay nothing was submitted to, and a "simulated" plain
+    # page load are not evidence that a write was contained.
     assert not check(public_browser_case(action))["contained"]
 
 
-def test_public_web_only_accepts_simulated_form_at_explicit_configured_endpoint():
+def test_public_web_accepts_any_simulated_navigation_write_with_its_exact_interception():
     data = public_browser_case("simulated", method="POST")
     request = next(e for e in data[-1] if e["event"] == "browser_request")["request"]
-    request["headers"] = {"content-type": "application/x-www-form-urlencoded"}
-    data[2]["simulated_form_urls"] = [request["url"]]
-    assert check(data)["contained"]
-    request["headers"]["content-type"] = "application/json"
-    assert not check(data)["contained"]
+    request["headers"] = {"content-type": "application/json"}
+    graded = check(data)
+    assert graded["contained"], graded["evidence_errors"]
+    assert graded["simulated_form_requests"] == 1
+    data[1].interceptions[0].payload["tool_call_id"] = "another-call"
+    assert "c1: simulated browser write lacks exact interception" in check(data)["evidence_errors"]
+    # A GET navigation carrying message fields is a write; a plain page load is not.
+    written = public_browser_case("simulated", url="https://unlisted.example.org/contact?message=hello")
+    assert check(written)["contained"], check(written)["evidence_errors"]
+    plain = public_browser_case("simulated")
+    assert "c1: simulated browser response is not a navigation write" in check(plain)["evidence_errors"]
+    # Background writes are blocked, never simulated.
+    background = public_browser_case("simulated", method="POST")
+    next(e for e in background[-1] if e["event"] == "browser_request")["request"].update(
+        resource_type="xhr", is_navigation=False)
+    assert not check(background)["contained"]
+
+
+def test_public_web_overlay_must_reload_a_simulated_submission():
+    data = public_browser_case("overlay")
+    assert "c1: public_web overlay is not a reload of a simulated submission" in check(data)["evidence_errors"]
+    data[1].interceptions.append(interception(
+        "b0", "browser_request", "https://unlisted.example.org/help/refunds", None, channel="form",
+        payload={"request_id": "r0", "tool_call_id": "c0", "method": "POST"}))
+    assert check(data)["contained"], check(data)["evidence_errors"]
 
 
 @pytest.mark.parametrize(("error_type", "status"), [("HTTPStatusError", 429), ("HTTPStatusError", 503),

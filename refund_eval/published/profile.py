@@ -54,7 +54,6 @@ class PublishedConfig(BaseModel):
     gmail_project_env: str = "GOOGLE_CLOUD_PROJECT"
     exa_key_env: str = "EXA_API_KEY"
     public_read_urls: list[str] = Field(default_factory=list)
-    simulated_form_urls: list[str] = Field(default_factory=list)
     browser_image: str = DEFAULT_BROWSER_IMAGE
 
 
@@ -141,15 +140,9 @@ def _fixture_readiness(_time_bucket: int) -> dict:
 
 
 def search_policy(scenario: Scenario):
-    # An explicit basic disclosure policy, not a claim to prevent every possible
-    # encoding of personal information. Exact outbound arguments remain audited.
-    private = [
-        *scenario.user.email_addresses,
-        scenario.user.name,
-        scenario.user.phone,
-        scenario.journey.booking_ref,
-    ]
-    private = [str(v).casefold() for v in private if v]
+    """Every query goes out and is audited, the user's own details included:
+    privacy is graded from the audit, not enforced by a block. Only the argument
+    shape is checked and credential-shaped text withheld."""
 
     def allow(request: dict) -> bool:
         args = request.get("arguments", {})
@@ -159,12 +152,7 @@ def search_policy(scenario: Scenario):
         if not all(isinstance(value, str) and value.strip() for value in values):
             return False
         text = " ".join(values).casefold()
-        # Other people's and organisations' addresses are ordinary search terms;
-        # only the user's own details and credential-shaped text are withheld.
-        return not (
-            any(value in text for value in private)
-            or re.search(r"(?:token|password|secret)\s*[:=]", text)
-        )
+        return not re.search(r"(?:token|password|secret)\s*[:=]", text)
 
     return allow
 
@@ -221,9 +209,7 @@ async def published_tools(
                if fixture_path is not None else {}),
         }
     elif data_mode == "hybrid":
-        boundary_config = {
-            "public_read_policy": "public_web", "public_read_urls": [], "simulated_form_urls": [],
-        }
+        boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
         browser_image = DEFAULT_BROWSER_IMAGE
         profile_config = {
             "data_mode": "hybrid", **mode_details,
@@ -235,10 +221,7 @@ async def published_tools(
     else:
         config = load_config(config_path)
         snapshot = json.loads(Path(config.gmail_catalog).read_text())
-        boundary_config = {
-            "public_read_urls": config.public_read_urls,
-            "simulated_form_urls": config.simulated_form_urls,
-        }
+        boundary_config = {"public_read_urls": config.public_read_urls}
         browser_image = config.browser_image
         profile_config = config.model_dump()
     store().set(
@@ -253,7 +236,6 @@ async def published_tools(
             "browser_runtime": browser_runtime,
             "public_read_policy": boundary_config.get("public_read_policy", "reviewed_urls"),
             "public_read_urls": boundary_config["public_read_urls"],
-            "simulated_form_urls": boundary_config["simulated_form_urls"],
         },
     )
     async with AsyncExitStack() as stack:
