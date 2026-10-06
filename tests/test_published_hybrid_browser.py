@@ -28,7 +28,7 @@ from refund_eval.world.state import World
 
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
                    reason="Requires the locally built pinned browser container")
-def test_hybrid_native_tools_read_public_pages_but_never_forward_forms(tmp_path, monkeypatch):
+def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monkeypatch):
     upstream_calls, browser_reads, dispatched = [], [], []
     public_url = "https://www.nationalrail.co.uk/refunds/"
 
@@ -113,13 +113,16 @@ def test_hybrid_native_tools_read_public_pages_but_never_forward_forms(tmp_path,
     assert "Hybrid enquiry" in results[-1].text
     assert len([message for message in upstream_calls if message["method"] == "tools/call"]) == 1
     assert browser_reads and all(request["method"] == "GET" for request in browser_reads)
-    assert len(dispatched) == 1 and dispatched[0].channel == "email"
+    # The form on the public page was submitted to the simulator, never to the site.
+    assert [item.channel for item in dispatched] == ["form", "email"]
+    assert dispatched[0].target == "https://www.nationalrail.co.uk/enquiry"
+    assert dispatched[0].fields == {"message": "Please review my journey"}
     recorded, events = sample.store[profile.PROFILE_KEY], sample.store[AUDIT_KEY]
     assert recorded["data_mode"] == "hybrid" and recorded["public_read_policy"] == "public_web"
     assert recorded["mail_data_mode"] == "fixture" and recorded["web_data_mode"] == "live"
     assert any(event.get("action") == "public_read" for event in events)
     assert not any(event.get("backend") == "fixture" for event in events if event["event"] == "search_boundary")
     world = World.model_validate(sample.store["world"])
-    assert any(item.payload.get("method") == "POST" for item in world.interceptions)
+    assert any(item.channel == "form" and item.payload.get("method") == "POST" for item in world.interceptions)
     containment = published_containment_check(sample.messages, world, recorded, events)
     assert containment["contained"], containment["evidence_errors"]

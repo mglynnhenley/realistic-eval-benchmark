@@ -339,6 +339,7 @@ def resource_counts(
         "memory_actions": float(sum(c.function in LOCAL_TOOLS for c in calls)),
         "interceptions": float(len(interceptions)),
         "refused_fetches": float(len(refused_reads(world))),
+        "disclosures": float(len(world.disclosures) if world else 0),
         "max_writes_to_one_org": float(max(orgs_only.values(), default=0)),
         "repeated_identical_writes": float(repeated_writes),
         "repeated_identical_calls": float(repeated_calls),

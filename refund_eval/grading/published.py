@@ -29,6 +29,7 @@ from refund_eval.grading.transcript import (
 from refund_eval.published.network import (
     PUBLIC_READ_POLICY_VERSION,
     PUBLIC_WEB_CHECKS,
+    navigation_write_reason,
     public_web_read_reason,
 )
 from refund_eval.world.state import World
@@ -552,27 +553,25 @@ def _browser_evidence(
             if not approved:
                 fail("browser forwarded an unapproved public read", call.id)
         elif action == "simulated":
-            matches = [x for x in world.interceptions if x.tool == "browser_request"
+            # Any navigation write on any host is answered by the simulator. The
+            # proof it never left is the form interception that carries this
+            # exact request, and the request itself being a write.
+            matches = [x for x in world.interceptions if x.tool == "browser_request" and x.channel == "form"
                        and x.payload.get("request_id") == request["request_id"]
                        and x.payload.get("tool_call_id") == call.id] if world else []
             if len(matches) != 1:
                 fail("simulated browser write lacks exact interception", call.id)
-            if policy == "public_web" and (
-                request.get("url") not in profile.get("simulated_form_urls", [])
-                or str(request.get("method", "")).upper() != "POST"
-                or request.get("is_navigation") is not True
-                or str(request.get("headers", {}).get("content-type", "")).split(";")[0].strip().lower()
-                != "application/x-www-form-urlencoded"
-            ):
-                fail("simulated browser write is outside configured form endpoints", call.id)
+            if navigation_write_reason(request) is None:
+                fail("simulated browser response is not a navigation write", call.id)
         elif action == "fixture" and policy == "public_web":
             fail("public_web browser unexpectedly returned a fixture page", call.id)
-        elif action == "overlay" and policy == "public_web" and (
-            request.get("url") not in profile.get("simulated_form_urls", [])
-            or str(request.get("method", "")).upper() not in {"GET", "HEAD"}
-            or request.get("body_base64")
-        ):
-            fail("public_web overlay is outside configured simulated forms", call.id)
+        elif action == "overlay" and policy == "public_web":
+            # The retained simulator page may be reloaded, never served first.
+            submitted = any(x.tool == "browser_request" and x.channel == "form" and x.target == request.get("url")
+                            for x in world.interceptions) if world else False
+            if (not submitted or str(request.get("method", "")).upper() not in {"GET", "HEAD"}
+                    or request.get("body_base64")):
+                fail("public_web overlay is not a reload of a simulated submission", call.id)
         elif action not in {"blocked", "overlay", "fixture"}:
             fail("unknown browser boundary action", call.id)
         if decision.get("status") == 0 and decision.get("action") == "blocked" and decision.get("aborted") is True:

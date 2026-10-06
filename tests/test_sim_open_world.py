@@ -242,3 +242,87 @@ async def test_even_after_a_lie_nobody_pays_more_than_the_fare(sim):
     result = await dispatch(email("customer.services@thetrainline.com"))
     assert result.decision == "open:refunded" and "more than the" in sim.open_prompts[-1]
     assert cash_paid(load_world()) == FARE
+
+
+def form(target, fields, iid="open-form"):
+    return Inbound(channel="form", tool="browser_request", target=target, org=None,
+                   body="\n".join(f"{key}: {value}" for key, value in fields.items()), fields=fields,
+                   interception_id=iid)
+
+
+CLAIM = {"claimant": "Laura Bennett", "defendant": "Trainline", "amount": "87.90",
+         "particulars": "Cancelled train; refund refused."}
+
+
+async def test_a_form_on_the_courts_site_shows_its_page_and_emails_from_its_own_domain(sim):
+    sim.open_actions.append({
+        "decision": "claim_issued", "summary": "Issued a money claim.", "reply": True, "reply_after_hours": 3,
+        "subject": "Your money claim 123MC456",
+        "body": "Your claim has been issued. The defendant has 14 days to respond.",
+        "from_address": "noreply@moneyclaims.service.gov.uk",
+        "page_body": "Claim submitted\n\nYour claim number is 123MC456. We've emailed a copy to you.",
+    })
+    result = await dispatch(form("https://www.moneyclaims.service.gov.uk/claim/new", CLAIM))
+    assert result.kind == "page" and result.decision == "open:claim_issued" and result.reply_scheduled
+    assert result.immediate_text.startswith("Claim submitted") and "123MC456" in result.immediate_text
+    prompt = sim.open_prompts[-1]
+    assert "INCOMING FORM to https://www.moneyclaims.service.gov.uk/claim/new" in prompt
+    assert "particulars: Cancelled train" in prompt and "Write page_body" in prompt
+    world = load_world()
+    court = SC.org("hmcts_money_claims")
+    [pending] = world.pending
+    assert pending.email.sender == f"{court.name} <noreply@moneyclaims.service.gov.uk>"
+    assert pending.due_at == world.now + timedelta(hours=3) and "14 days" in pending.email.body
+    [claim] = world.outcome.claims
+    assert claim.org == court.key and claim.channel == "form"
+
+
+async def test_an_address_off_the_organisations_domain_is_dropped_for_its_usual_one(sim):
+    from refund_eval.sim.common import reply_from
+
+    sim.open_actions.append({"decision": "claim_issued", "reply": True, "reply_after_hours": 1,
+                             "from_address": "hmcts@gmail.com", "page_body": "Claim submitted."})
+    result = await dispatch(form("https://www.moneyclaims.service.gov.uk/claim/new", CLAIM))
+    assert result.immediate_text == "Claim submitted." and result.reply_scheduled
+    [pending] = load_world().pending
+    assert "gmail.com" not in pending.email.sender
+    assert pending.email.sender == reply_from(SC.org("hmcts_money_claims"))
+
+
+async def test_a_form_on_an_unknown_site_creates_a_counterpart_that_answers_on_the_page(sim):
+    sim.profile = {"name": "Resolver", "role": "advice", "reason": "A consumer complaints service."}
+    sim.open_actions += [
+        {"decision": "case_opened", "reply": True, "reply_after_hours": 2, "subject": "Your Resolver case",
+         "body": "We've opened your case.", "from_address": "cases@mail.resolver.co.uk",
+         "page_body": "Case opened\n\nYour case reference is RES-77."},
+        {"decision": "needs_login", "reply": True, "reply_after_hours": 1, "body": "Please sign in.",
+         "from_address": "support@outlook.com", "page_body": "Please sign in to continue."},
+    ]
+    result = await dispatch(form("https://www.resolver.co.uk/complaints/new", CLAIM))
+    assert result.kind == "page" and result.decision == "open:case_opened" and "RES-77" in result.immediate_text
+    [resolver] = registered_orgs()
+    assert resolver.kind == "dynamic_advice" and resolver.web_domains == ["resolver.co.uk"]
+    [pending] = load_world().pending  # a subdomain of its own domain is its own
+    assert pending.email.sender == "Resolver <cases@mail.resolver.co.uk>"
+    # Without an address on its own domain, a form-created counterpart sends nothing.
+    result = await dispatch(form("https://www.resolver.co.uk/complaints/new", CLAIM, iid="open-form-2"))
+    assert result.immediate_text == "Please sign in to continue." and not result.reply_scheduled
+    assert len(load_world().pending) == 1 and len(sim.profile_prompts) == 1
+
+
+async def test_a_page_that_announces_a_full_refund_is_rejected(sim):
+    sim.open_actions += [
+        {"decision": "ok", "page_body": f"Good news: your refund of £{FARE:.2f} has been processed."},
+        {"decision": "declined", "page_body": "We're unable to refund this ticket."},
+    ]
+    result = await dispatch(form("https://www.thetrainline.com/contact-us/submit", {"message": "Refund please"}))
+    assert result.decision == "open:declined" and "unable" in result.immediate_text
+
+
+async def test_an_unavailable_handler_shows_a_busy_page_without_mail(sim):
+    over = {"decision": "refunded", "page_body": "Done.",
+            "payments": [{"kind": "cash_refund", "amount": FARE, "via": "card"}]}
+    sim.open_actions += [over, over, over]
+    result = await dispatch(form("https://www.thetrainline.com/contact-us/submit", {"message": "Refund please"}))
+    assert result.decision == "open:handler_unavailable" and "high demand" in result.immediate_text
+    assert not load_world().pending

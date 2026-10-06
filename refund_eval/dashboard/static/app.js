@@ -435,8 +435,8 @@
         ? dataMode === "fixture"
           ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication or live account data."
           : dataMode === "hybrid"
-            ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access unless REFUND_EVAL_EXA_API_KEY is set. Unsupported website writes are blocked locally."
-            : "Published Gmail, Exa and Playwright tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded."
+            ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access unless REFUND_EVAL_EXA_API_KEY is set. Every website form or write is intercepted and simulated."
+            : "Published Gmail, Exa and Playwright tools. Gmail sends and every website form or write are intercepted and simulated."
         : "Legacy model trial using custom tools and a fixture inbox. Company replies and money movements are simulated.";
     if (worldMode === "friction") $("integrity-text").textContent += " Realistic friction is enabled in the simulated world.";
     if (worldMode === "open") $("integrity-text").textContent += " Open world: the simulator model decided how every organisation and person responded; a full refund was never possible.";
@@ -1678,8 +1678,8 @@
     const description = fixture
       ? "Simulated inbox and websites. Email uses a local test contract; Gmail authentication is not used."
       : hybrid
-        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; other website writes are blocked and recorded. Exa is keyless and rate-limited unless REFUND_EVAL_EXA_API_KEY is set. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
-        : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.";
+        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; every website form or write is intercepted and simulated. Exa is keyless and rate-limited unless REFUND_EVAL_EXA_API_KEY is set. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
+        : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and every website form or write are intercepted and simulated.";
     $("tool-profile-status").textContent = !profile ? "Checking browser and tool configuration…"
         : `${description} ${profile.configured ? "Ready — startup checks pending." : "Setup needed."} ${profile.reason}`;
     $("demo-runtime-status").textContent = batch

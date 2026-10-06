@@ -17,6 +17,7 @@ from refund_eval.published.fixture_web import (
     TRAINLINE_CONTACT_URL,
     TRAINLINE_POLICY_URL,
     FixtureSearchService,
+    fixture_pages,
     fixture_web_config,
 )
 from refund_eval.published.network import BrowserBoundary
@@ -67,14 +68,18 @@ async def test_search_native_contract_useful_result_and_explicit_provenance(ctx)
 
 
 @pytest.mark.parametrize("field", ["query", "objective"])
-async def test_fixture_search_keeps_disclosure_boundary(ctx, field):
+async def test_fixture_search_lets_the_users_details_through_and_audits_them(ctx, field):
     events = []
     service = FixtureSearchService(ctx, policy=search_policy(ctx.scenario), audit=events.append)
     args = {"query": "train refund", "objective": "find policy", field: ctx.user_email}
+    result = await service.call_tool("web_search_exa", args)
+    assert not result["isError"]
+    assert [e["phase"] for e in events] == ["attempt", "allowed", "result"]
+    assert all(e["arguments"] == args for e in events)
+    # Credential-shaped text is the one thing still withheld.
     with pytest.raises(ExaPolicyDenied):
-        await service.call_tool("web_search_exa", args)
-    assert [e["phase"] for e in events] == ["attempt", "blocked"]
-    assert events[-1]["arguments"] == args
+        await service.call_tool("web_search_exa", {"query": "trainline", "objective": "password: hunter2"})
+    assert events[-1]["phase"] == "blocked"
 
 
 async def test_mutating_callback_cannot_rewrite_search_arguments(ctx):
@@ -135,7 +140,9 @@ def test_fixture_pages_have_no_network_subresources_or_hidden_scenario_state(ctx
         assert ctx.scenario.journey.booking_ref not in body
         assert ctx.user_email not in body
         assert "retailer_refund_declined_out_of_window" not in body
-    assert not set(config["simulated_form_urls"]) & config["fixtures"].keys()
+    # A form's action URL has no page of its own; the simulator answers the submission.
+    actions = {page.form_action for page in fixture_pages(ctx) if page.form_action}
+    assert actions and not actions & config["fixtures"].keys()
 
 
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",

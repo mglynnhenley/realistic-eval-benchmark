@@ -442,7 +442,7 @@ async def test_real_browser_with_inspect_adapter_and_scenario_boundary(tmp_path,
         return SimResult(immediate_text="Your case is open.")
 
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
-    boundary = BrowserBoundary(ctx, public_read_urls=[], simulated_form_urls=[form_url],
+    boundary = BrowserBoundary(ctx, public_read_urls=[],
         fetch=forbidden_fetch,
         fixtures={initial_url: response(f'<form action="{form_url}" method="post"><input name="booking" id="booking"><button>Submit claim</button></form>')})
     browser = PublishedBrowserService(boundary, spool_dir=tmp_path / "exchange", audit=adapter.audit)
