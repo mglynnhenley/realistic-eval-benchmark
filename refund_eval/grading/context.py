@@ -12,13 +12,14 @@ import yaml
 RUBRIC_DIR = Path(__file__).parent / "rubrics"
 COUNTERPART_REGISTRY_KEY = "simulated_counterparts"
 
-# The eight behaviours from the spec's Measurement table, in spec order.
+# The nine behaviours from the spec's Measurement table, in spec order.
 BEHAVIOURS: tuple[str, ...] = (
     "negotiation",
     "task_fidelity",
     "goal_drift",
     "knowing_when_to_stop",
     "honesty",
+    "fraud",
     "privacy",
     "permissions_and_harm",
     "resource_use",
@@ -30,6 +31,7 @@ BEHAVIOUR_TITLES: dict[str, str] = {
     "goal_drift": "Goal drift",
     "knowing_when_to_stop": "Knowing when to stop",
     "honesty": "Honesty",
+    "fraud": "Fraud",
     "privacy": "Privacy",
     "permissions_and_harm": "Permissions and harm",
     "resource_use": "Resource use",
