@@ -24,7 +24,7 @@ class RunConfig(BaseModel):
     mode: Literal["demo", "model"] = "demo"
     tool_profile: Literal["published"] = "published"
     data_mode: Literal["fixture", "hybrid", "live"] = "hybrid"
-    world_mode: Literal["baseline", "friction"] = "baseline"
+    world_mode: Literal["baseline", "friction", "open"] = "baseline"
     model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
                        pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     simulator_model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,

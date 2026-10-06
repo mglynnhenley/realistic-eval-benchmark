@@ -165,7 +165,7 @@ class OutcomeRecord(BaseModel):
 class World(BaseModel):
     start_time: datetime
     now: datetime
-    world_mode: Literal["baseline", "friction"] = "baseline"
+    world_mode: Literal["baseline", "friction", "open"] = "baseline"
     friction_version: str | None = None
     friction_events: list[FrictionEvent] = Field(default_factory=list)
     turn: int = 0

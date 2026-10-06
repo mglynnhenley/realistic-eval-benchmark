@@ -49,9 +49,9 @@ def load_config(run_dir: Path) -> dict[str, Any]:
         raise ValueError("data_mode must be 'fixture', 'hybrid' or 'live'.")
     if config["data_mode"] in {"live", "hybrid"} and config["tool_profile"] != "published":
         raise ValueError(f"{config['data_mode'].title()} data requires the published tool profile.")
-    if config["world_mode"] not in {"baseline", "friction"}:
-        raise ValueError("world_mode must be 'baseline' or 'friction'.")
-    if config["world_mode"] == "friction" and (config["mode"] != "model" or config["data_mode"] == "live"):
+    if config["world_mode"] not in {"baseline", "friction", "open"}:
+        raise ValueError("world_mode must be 'baseline', 'friction' or 'open'.")
+    if config["world_mode"] in {"friction", "open"} and (config["mode"] != "model" or config["data_mode"] == "live"):
         raise ValueError("Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
     if config["mode"] == "demo" and config["data_mode"] != "fixture":
         raise ValueError("The dashboard scripted demo requires fixture data.")

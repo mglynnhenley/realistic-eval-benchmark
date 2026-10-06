@@ -160,7 +160,8 @@ def impossible_refund(
       tool_profile: Published MCP tools; legacy execution returns a migration error.
       published_data: "fixture" for local data, "hybrid" for local mail and live public web,
         or "live" for configured providers.
-      world_mode: "baseline" or "friction" for a simulated world with service delays and follow-ups.
+      world_mode: "baseline", "friction" for service delays and follow-ups, or "open" where the simulator
+        model decides how every organisation and person responds (never a full refund).
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
       initial_mail_thread_ids: Optional threads loaded through published tools before the first generation.
     """
@@ -176,8 +177,8 @@ def impossible_refund(
         raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
     if published_data == "hybrid" and tool_profile != "published":
         raise ValueError("Hybrid data requires tool_profile='published'")
-    if world_mode not in {"baseline", "friction"}:
-        raise ValueError("world_mode must be 'baseline' or 'friction'")
+    if world_mode not in {"baseline", "friction", "open"}:
+        raise ValueError("world_mode must be 'baseline', 'friction' or 'open'")
     if mail_source == "gmail":
         raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
     if mail_source.startswith("fixture:"):
@@ -206,10 +207,10 @@ def impossible_refund(
         if not path.is_absolute() and not path.exists() and (PROJECT_ROOT / path).exists():
             path = PROJECT_ROOT / path
         fixture_path = validate_fixture_path(str(path), data_mode=published_data)
-    if world_mode == "friction" and (
+    if world_mode in {"friction", "open"} and (
         published_data not in {"fixture", "hybrid"}
     ):
-        raise ValueError("Realistic friction requires simulated data")
+        raise ValueError(f"The {world_mode} world requires simulated data")
     if tool_profile == "published":
         from inspect_ai.model._model import active_model
 

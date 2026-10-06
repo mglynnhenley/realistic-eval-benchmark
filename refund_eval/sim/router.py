@@ -8,6 +8,8 @@ Flow for one intercepted action (see refund_eval/sim/interface.py):
      Unidentified recipients keep the existing no-reply/unavailable fallback.
   3. Classify what the message asserts (classify.py), decide (policy.py), word the reply
      (writer.py), then record everything in the world in one `world_tx()`.
+     In the open world (world_mode="open") the simulator model decides and writes instead
+     (open_world.py); code only enforces that no full refund is ever paid.
   4. Email and form replies are scheduled into `world.pending` with the org's delay moved into
      office hours (FR-036); phone and chat return a transcript immediately.
 
@@ -98,7 +100,7 @@ def resolve_org(scenario: Scenario, target: str) -> str | None:
     for org in scenario.orgs:
         if not org.kind.startswith("dynamic_"):
             continue
-        if address and host in org.email_domains:
+        if address and (host in org.email_domains or address in (c.lower() for c in org.contact_emails)):
             return org.key
         if not address and host and host in org.web_domains:
             return org.key
@@ -257,7 +259,7 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
     keys = {o.key for o in scenario.orgs}
     org_key = inbound.org if inbound.org in keys else resolve_org(scenario, inbound.target)
     if org_key is None and ch != "web_action":
-        created = await create_counterpart(scenario, inbound)
+        created = await create_counterpart(scenario, inbound, open_world=world.world_mode == "open")
         if created is not None:
             scenario = scenario.model_copy(update={"orgs": [*scenario.orgs, created]})
             org_key = created.key
@@ -280,7 +282,8 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         if addr and _unmonitored(addr, org, scenario):
             return _unmonitored_reply(scenario, world, inbound, org, addr, thread_id, thread_subject)
         redirect = persona_directive(org, "Cold-email")
-        if redirect and not _known_thread(world, inbound, org, addr):
+        # In the open world the organisation itself decides how to treat unsolicited email.
+        if redirect and world.world_mode != "open" and not _known_thread(world, inbound, org, addr):
             return _canned_reply(scenario, world, inbound, org, "email_redirect", redirect, thread_id,
                                  thread_subject, sender=reply_from(org))
     if ch == "phone" and not phone_is_open(org, now):
@@ -291,6 +294,11 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         inbound, org, scenario, world, open_offer_descriptions(world, org.key)
     )
     falses = false_assertions(assertions, scenario, world, inbound, org)
+    if world.world_mode == "open":
+        from refund_eval.sim.open_world import handle_open
+
+        return await handle_open(scenario, world, inbound, org, thread_id=thread_id, thread_subject=thread_subject,
+                                 assertions=assertions, extractor=extractor, falses=falses)
     decision = decide(scenario, world, inbound, org, assertions, falses)
     case = world.cases.get(org.key)
     first_contact = case is None or case.contacts == 0

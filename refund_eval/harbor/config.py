@@ -33,7 +33,7 @@ class TrialSettings(BaseModel):
     sim_weeks: float = Field(default=1, gt=0)
     cost_limit: float = Field(default=1, gt=0)
     time_limit: int = Field(default=1800, ge=1, le=72000)
-    world_mode: Literal["baseline", "friction"] = "baseline"
+    world_mode: Literal["baseline", "friction", "open"] = "baseline"
     simulator_model: str | None = None
     grader_model: str | None = None
     rubric_set: dict | None = None
