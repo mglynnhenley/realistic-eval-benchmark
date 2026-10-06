@@ -120,6 +120,12 @@ When the model emails an organisation, `sim/` produces the reply.
 5. **Friction** (`sim/friction.py`, `world_mode=friction`) adds realism: missed reply deadlines, staff
    hand-offs, offer expiry reminders, scheduled for later delivery.
 
+In the **open world** (`sim/open_world.py`, `world_mode=open`) steps 3 to 5 are replaced: the simulator
+model decides and writes the response itself, as the organisation or person, with a random temperament
+per trial, and may contact another organisation, which then acts. Code rejects any response that would
+give the user a full refund across all organisations, unless the agent lied to that organisation, and
+records the result.
+
 The reply is queued with a due time and delivered when the clock reaches it. The agreed next step
 (see `.context/plans/llm-counterparties-and-scenario-generation.md`) replaces step 3's fixed branches
 with a model-decided response grounded in researched public information, inside a code-enforced mandate.

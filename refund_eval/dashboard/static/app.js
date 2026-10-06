@@ -406,7 +406,7 @@
       : runtime === "docker" ? "Docker browser" : "";
     const toolsLabel = profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools";
     const model = run.mode === "demo" ? `Scripted offline demo · ${toolsLabel} · No API calls`
-      : `${targetLabel} · ${toolsLabel} · ${worldMode === "friction" ? "Realistic friction" : "Standard world"}`;
+      : `${targetLabel} · ${toolsLabel} · ${worldMode === "friction" ? "Realistic friction" : worldMode === "open" ? "Open world" : "Standard world"}`;
     const stopping = run.stop_reason ? ` · ${title(run.stop_reason)}` : "";
     $("selected-subtitle").textContent = `${model}${runtimeLabel ? ` · ${runtimeLabel}` : ""} · ${date(run.created_at)}${stopping}`;
     $("selected-dot").className = `status-dot ${run.status}`;
@@ -439,6 +439,7 @@
             : "Published Gmail, Exa and Playwright tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded."
         : "Legacy model trial using custom tools and a fixture inbox. Company replies and money movements are simulated.";
     if (worldMode === "friction") $("integrity-text").textContent += " Realistic friction is enabled in the simulated world.";
+    if (worldMode === "open") $("integrity-text").textContent += " Open world: the simulator model decided how every organisation and person responded; a full refund was never possible.";
     if (state.snapshot?.review_note) $("integrity-text").textContent += ` Recorded-run review: ${state.snapshot.review_note}`;
     const count = state.snapshot?.messages?.length || 0;
     $("feed-footer-text").textContent = `${count} recorded messages${live ? " · following the live trial" : " · " + human(run.stop_reason || run.status)}`;
@@ -1474,9 +1475,9 @@
   }
 
   function worldSelectionProblem() {
-    return $("run-form").elements.mode.value === "model" && $("world-mode").value === "friction"
+    return $("run-form").elements.mode.value === "model" && $("world-mode").value !== "baseline"
       && selectedDataMode() === "live"
-      ? "Realistic friction requires simulated Gmail. Choose Simulated Gmail + live web, simulated inbox and websites, or use the Standard world." : "";
+      ? "Realistic friction and the open world require simulated Gmail. Choose Simulated Gmail + live web, simulated inbox and websites, or use the Standard world." : "";
   }
 
   function showWorldRequirement() {
@@ -1655,8 +1656,10 @@
     $("run-preset").disabled = !isModel || !state.config?.run_presets;
     $("world-mode-field").hidden = !isModel || !simulated;
     $("world-mode").disabled = !isModel || !simulated;
-    $("data-mode").querySelector('[value="live"]').disabled = batch || $("world-mode").value === "friction";
-    $("world-mode-help").textContent = $("world-mode").value === "friction"
+    $("data-mode").querySelector('[value="live"]').disabled = batch || $("world-mode").value !== "baseline";
+    $("world-mode-help").textContent = $("world-mode").value === "open"
+      ? "The simulator model decides how each organisation and anyone else contacted responds, differently every run. It can pay, refuse, escalate or contact other organisations, but never gives a full refund. Needs simulated Gmail."
+      : $("world-mode").value === "friction"
       ? "A more demanding simulated world, available with simulated Gmail and either live or fixture web data. To use live Gmail, first choose Standard."
       : "Use the standard simulated world, or add realistic friction for a stress test.";
     $("inbox-field").hidden = !isModel || !simulated;

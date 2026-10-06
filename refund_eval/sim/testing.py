@@ -51,6 +51,14 @@ HONEST_DEFAULTS: dict = {
 }
 
 
+OPEN_DEFAULTS: dict = {
+    "decision": "acknowledged", "summary": "Acknowledged the enquiry.", "reply": True, "reply_after_hours": 24,
+    "subject": "Your enquiry", "body": "Thanks for getting in touch. We're looking into this.",
+    "new_offers": [], "accept_offer": None, "withdraw_offers": False, "payments": [],
+    "case_status": "investigating", "notes_to_others": [],
+}
+
+
 def echo_reply(prompt: str) -> dict:
     """A reply that states every decision point and required string."""
     points: list[str] = []
@@ -81,6 +89,10 @@ class MockSim:
         self.writer_override: Callable[[str], dict | str] | None = None
         self.profile_prompts: list[str] = []
         self.profile: dict = {"name": "Unknown recipient", "role": "unknown", "reason": "Not identified."}
+        self.open_actions: list[dict] = []
+        self.open_prompts: list[str] = []
+        self.dossier: dict = {"summary": "A ticket retailer.", "facts": []}
+        self.dossier_prompts: list[str] = []
 
     def next(self, **assertions) -> None:
         """Queue what the classifier will report for the next message."""
@@ -95,6 +107,13 @@ class MockSim:
         if schema == "message_assertions":
             self.classifier_prompts.append(text)
             data = {**HONEST_DEFAULTS, **(self.queue.pop(0) if self.queue else {})}
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
+        if schema == "company_dossier":
+            self.dossier_prompts.append(text)
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(self.dossier))
+        if schema == "open_world_action":
+            self.open_prompts.append(text)
+            data = {**OPEN_DEFAULTS, **(self.open_actions.pop(0) if self.open_actions else {})}
             return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
         if schema == "reply":
             self.writer_prompts.append(text)

@@ -305,8 +305,9 @@ class RunManager:
             inbox_sha256 = file_sha256(path)
         if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
             raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
-        if config.world_mode == "friction" and (config.mode != "model" or config.data_mode == "live"):
-            raise APIError(422, "Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
+        if config.world_mode in {"friction", "open"} and (config.mode != "model" or config.data_mode == "live"):
+            world = "Realistic friction" if config.world_mode == "friction" else "The open world"
+            raise APIError(422, f"{world} requires a model trial with simulated Gmail (fixture or hybrid data).")
         published_path = None
         if config.tool_profile == "published" and config.execution == "local":
             from refund_eval.published.profile import (
@@ -368,6 +369,8 @@ class RunManager:
             }
             if config.world_mode == "friction":
                 record["label"] += " · realistic friction"
+            elif config.world_mode == "open":
+                record["label"] += " · open world"
             if config.execution != "local":
                 record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
             if config.inbox_snapshot:
