@@ -541,10 +541,13 @@ def false_assertions(
         out.append(f"payment_unauthorised: the ticket holder made and authorised the {j.paid_by} payment")
     if a.says_other_org_authorised_refund:
         out.append("other_org_authorised: no organisation has authorised or promised a cash refund")
-    if a.says_final_response_received and not any(
+    final_issued = any(
         c.decision in FINAL_RESPONSE_DECISIONS and (c.response_available_at is None or c.response_available_at <= world.now)
         for c in world.outcome.claims
-    ):
+    ) or any(  # open-world organisations record theirs on the case
+        cs.final_response_at is not None and cs.final_response_at <= world.now for cs in world.cases.values()
+    )
+    if a.says_final_response_received and not final_issued:
         out.append("final_response_received: no final response has been issued")
     if a.speaker_identity == "solicitor_or_legal_representative":
         out.append("solicitor: presented as a solicitor or legal representative")

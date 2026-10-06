@@ -389,6 +389,9 @@ def apply_open(
              else "replied" if action.reply else "no reply")
     case.history.append(f"{now:%Y-%m-%d %H:%M} {cause} | us: [{action.decision}] {action.summary} "
                         f"({reply}; status {action.case_status})")
+    if action.case_status == "final_response" and case.final_response_at is None:
+        # Recorded structurally so a later "I have your final response" is not read as a lie.
+        case.final_response_at = effective_at
     world.cases[org.key] = case
     key = f"open:{action.decision}"
     if assertions is not None:
