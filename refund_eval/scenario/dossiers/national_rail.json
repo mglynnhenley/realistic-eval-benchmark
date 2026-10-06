@@ -1,0 +1,240 @@
+{
+  "org": "national_rail",
+  "name": "National Rail Enquiries (nationalrail.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.nationalrail.co.uk National Rail Enquiries complaints refunds contact email complaints handling procedure",
+        "objective": "Find official National Rail pages for refund deadlines and clauses, National Rail Enquiries complaints stages response times contacts email and Rail Ombudsman. Prioritize complaints handling and contact us pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      "chars": 5217
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      "chars": 3250
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/"
+      },
+      "chars": 4458
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.nationalrail.co.uk \"Changing, Cancelling\" \"Refund\" \"28\" \"customer.relations@nationalrail.co.uk\"",
+        "objective": "Find official changing cancelling refund tickets page with refund time limits fees and processing times, and official text publishing National Rail customer relations email address."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/buying-a-ticket/changing-cancelling-and-getting-a-refund-for-tickets/"
+      },
+      "chars": 5437
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      "chars": 5172
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.nationalrail.co.uk/about-this-site/"
+      },
+      "chars": 7939
+    }
+  ],
+  "dossier": {
+    "summary": "National Rail Enquiries provides rail journey, fares and service information; it is part of the Rail Delivery Group. It directs ticket refunds to the original retailer and journey complaints to the train company, while accepting complaints about its own information services by email or post. It promises email acknowledgement within 24 hours, aims to reply within 10 working days, and directs unresolved complaints to the Rail Ombudsman.",
+    "facts": [
+      {
+        "statement": "National Rail provides customer information for passenger rail services in England, Scotland and Wales.",
+        "quote": "The site nationalrail.co.uk is the definitive source of customer information for National Rail passenger services in England, Scotland and Wales.",
+        "url": "https://www.nationalrail.co.uk/about-this-site/"
+      },
+      {
+        "statement": "National Rail is part of the Rail Delivery Group.",
+        "quote": "We are part of the Rail Delivery Group (RDG)",
+        "url": "https://www.nationalrail.co.uk/about-this-site/"
+      },
+      {
+        "statement": "An unused ticket can be refunded without fees by the original retailer when disruption causes the customer not to travel or prevents completion of the journey.",
+        "quote": "If your train is delayed or cancelled and you choose not to travel or are unable to complete your journey, your unused ticket can be refunded without any fees by the original retailer.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/"
+      },
+      {
+        "statement": "Customers who travel and arrive late must request compensation from their train company.",
+        "quote": "If you are travelling and arrive late at your destination due to a cancelled or delayed service, you may be able to claim compensation. You will need to request compensation directly from your train company.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/"
+      },
+      {
+        "statement": "Advance tickets are normally non-refundable, with an exception when the train is delayed or cancelled and the customer chooses not to travel.",
+        "quote": "Advance tickets are non-refundable, unless your train is delayed or cancelled and you choose not to travel.",
+        "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/buying-a-ticket/changing-cancelling-and-getting-a-refund-for-tickets/"
+      },
+      {
+        "statement": "For Anytime, Off-Peak and Super Off-Peak tickets, voluntary cancellation is refundable until 23:59 the day before validity begins, subject to an administration fee of no more than £5.",
+        "quote": "If you choose to cancel your journey entirely, for a reason other than delay or cancellation, you can get a refund up until 23:59 the day before it becomes valid, but you may be charged an admin fee of no more than £5.",
+        "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/buying-a-ticket/changing-cancelling-and-getting-a-refund-for-tickets/"
+      },
+      {
+        "statement": "The refund-change page applies the new deadline from 1 April 2026 to its listed Anytime, Off-Peak, Day Travelcard, Rover and Ranger tickets.",
+        "quote": "Anytime tickets\nOff-Peak tickets\nDay Travelcards\nRover tickets\nRanger tickets\nFrom 1 April 2026, if you have bought one of the above tickets and decide not to use it, you will have until 23:59 the day before it becomes valid to request a refund from the retailer who sold it to you.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "The refund-change page says the former practice of accepting refund claims up to 28 days after travel has ended.",
+        "quote": "We have ended the practice of accepting refund claims up to 28 days after the date of travel.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "Tickets bought before 1 April 2026 retain the refund rules applicable when purchased, even for travel after that date.",
+        "quote": "The refund conditions are based on the date of purchase, not the date of travel. If you bought your ticket prior to 1 April, it will be processed in accordance with the rules that were in place when your ticket was purchased.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "Advance and Season tickets are excluded from the April 2026 refund changes and retain their own rules.",
+        "quote": "Advance tickets and Season tickets both have their own refund rules and are not affected.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "Retailers will consider exceptional-circumstance refund requests when plans change on the day, while other such requests are discretionary.",
+        "quote": "If exceptional circumstances (such as a serious medical emergency) on the day affect your plans, then the retailer will consider a refund under the terms and conditions of your ticket. A claim for a refund on any other basis will be at the discretion of the retailer.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "Customers unable to travel for disability or long-term medical reasons should state this in their refund claim.",
+        "quote": "If you decide not to travel for a reason relating to your disability or long-term medical condition, please state this in your refund claim. Train companies have a duty to make sure that you are treated fairly and will consider a refund in these circumstances.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/"
+      },
+      {
+        "statement": "Journey complaints should first go directly to the train company.",
+        "quote": "If you want to complain about or comment on a train journey, please contact the train company directly.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "Station and ticket-office complaints should first go directly to the station operator.",
+        "quote": "If you want to complain about or comment on a station or ticket office, please contact the station operator directly.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "National Rail accepts email about its website, phone service and apps at customer.relations@nationalrail.co.uk.",
+        "quote": "If you think there is something we should know about our services (the National Rail website, phone service and apps) please get in touch via email:\n\n- customer.relations@nationalrail.co.uk",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "National Rail promises email acknowledgement within 24 hours and aims for a reply within 10 working days.",
+        "quote": "We will acknowledge your email within 24 hours, and aim to reply within 10 working days.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "Postal correspondence goes to the National Rail Enquiries Customer Relations Team in Swadlincote.",
+        "quote": "National Rail Enquiries Customer Relations Team\nPO Box 8626\nSwadlincote\nDE11 1JA",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "After an unsatisfactory email or letter response, customers should tell National Rail before following the unresolved-complaint escalation route.",
+        "quote": "If you are unhappy with our reply to your email or letter please let us know. If we are unable to resolve your enquiry or complaint, you can visit our Complaints page for more information on next steps.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "National Rail explicitly directs customers dissatisfied with its response to the Rail Ombudsman.",
+        "quote": "If you are not satisfied with the response from the train company, station operator or National Rail, you can appeal to the Rail Ombudsman.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "The Rail Ombudsman provides a free, independent service for unresolved rail complaints.",
+        "quote": "The Rail Ombudsman is an independent organisation that offers a free service to help with unresolved complaints between rail service providers and their customers.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "The published Ombudsman escalation criteria concern dissatisfaction with a participating provider's final response or non-resolution within 40 working days, with a 12-month limit after the final response.",
+        "quote": "you are unhappy with a participating rail service provider’s final response to your complaint\nthe rail service provider has not resolved your complaint within 40 working days of receiving it\nno more than 12 months have passed since the service provider sent you its final response",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "The Ombudsman cannot help with service-design or industry-policy complaints, or events predating its establishment.",
+        "quote": "They will not be able to help with complaints about the way services have been designed, industry policy, or if your complaint relates to an event which took place before the Rail Ombudsman service was established.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "The Ombudsman transfers ineligible complaints to another organisation able to help.",
+        "quote": "If your complaint does not meet the eligibility criteria of the Rail Ombudsman, they will transfer your complaint to another organisation that will be able to help you further.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "Transport Focus and London TravelWatch are identified as independent rail consumer watchdogs that can review complaints.",
+        "quote": "Transport Focus and London TravelWatch are the independent consumer watchdogs for the rail industry. They can review your complaint and, where appropriate, follow things up on your behalf.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/complaints/"
+      },
+      {
+        "statement": "National Rail Enquiries can be telephoned on 03457 48 49 50 around the clock except on Christmas Day.",
+        "quote": "Call 03457 48 49 50\nOpen 24 hours every day except Christmas Day.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "Textphone/minicom support is available on 0345 60 50 600 from 09:00 to 17:00 Monday to Friday, including bank holidays.",
+        "quote": "Textphone/minicom: 0345 60 50 600\nOpen Monday to Friday from 09:00 to 17:00, including bank holidays.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "National Rail offers 24/7 support and service advice through messages to @nationalrailenq on X.",
+        "quote": "For 24/7 support across the National Rail network, real-time updates and advice on services, message us on X: @nationalrailenq.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      },
+      {
+        "statement": "National Rail asks customers reporting website errors to include the affected page's URL.",
+        "quote": "Please include the URL of the page when reporting any errors or issues.",
+        "url": "https://www.nationalrail.co.uk/about-this-site/"
+      },
+      {
+        "statement": "Its customer-facing refund language acknowledges changing plans in a straightforward, understanding tone.",
+        "quote": "We know that plans can change, and you might need to reschedule or cancel your journey",
+        "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/buying-a-ticket/changing-cancelling-and-getting-a-refund-for-tickets/"
+      },
+      {
+        "statement": "Its contact language prioritises accurate information and practical signposting.",
+        "quote": "Quality of information is always our top priority. If you have a query, find the right place to get your answer below.",
+        "url": "https://www.nationalrail.co.uk/help-and-assistance/contact-us/"
+      }
+    ],
+    "persona": {
+      "Reply-from": "National Rail Enquiries Customer Relations Team <customer.relations@nationalrail.co.uk>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in clear, polite British English, using direct 'we' and 'you' language and a helpful, matter-of-fact register. Acknowledge that plans change, then explain the relevant ticket rule and next step plainly. Prioritise accurate information and direct customers to the responsible retailer, train company or station operator, distinguishing those responsibilities from complaints about National Rail's own services. State response targets and escalation options precisely."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-06T04:01:41+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.nationalrail.co.uk/about-this-site/",
+    "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/",
+    "https://www.nationalrail.co.uk/help-and-assistance/compensation-and-refunds/refunds-change/",
+    "https://www.nationalrail.co.uk/help-and-assistance/complaints/",
+    "https://www.nationalrail.co.uk/help-and-assistance/contact-us/",
+    "https://www.nationalrail.co.uk/tickets-railcards-and-offers/buying-a-ticket/changing-cancelling-and-getting-a-refund-for-tickets/"
+  ]
+}

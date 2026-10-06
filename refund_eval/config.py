@@ -36,6 +36,8 @@ class RunConfig(BaseModel):
     tool_profile: Literal["published"] = "published"
     data_mode: Literal["fixture", "hybrid", "live"] = "hybrid"
     world_mode: Literal["baseline", "friction", "open"] = "baseline"
+    # Open-world research: committed dossiers when fresh (auto), always live, or saved files only.
+    research_mode: Literal["auto", "live", "saved"] = "auto"
     model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,
                        pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     simulator_model: str = Field(default=DEFAULT_ROLE_MODEL, min_length=1, max_length=160,

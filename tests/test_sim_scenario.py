@@ -6,8 +6,9 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import load_scenario, saved_dossier
 from refund_eval.sim.common import persona_directive
+from refund_eval.sim.research import DIRECTIVES, Dossier, persona_text
 
 SC = load_scenario("train_refund")
 J = SC.journey
@@ -31,16 +32,31 @@ def test_journey_matches_spec_defaults() -> None:
     assert "debit" in J.paid_by.lower() and SC.user.card_last4 and SC.user.card_last4 in J.paid_by
 
 
-def test_orgs_have_real_policies_and_contact_details() -> None:
+def test_orgs_have_contact_details_and_fallback_directives() -> None:
     kinds = {o.kind for o in SC.orgs}
     assert {"retailer", "operator", "bank", "ombudsman"} <= kinds
     for org in SC.orgs:
-        assert len(org.policy) > 200, org.key
-        assert org.persona and org.email_domains, org.key
+        assert not org.policy and org.email_domains, org.key  # policy comes from the research dossier
+        assert "Voice:" not in org.persona, org.key
         assert 0 < org.reply_delay_hours[0] <= org.reply_delay_hours[1], org.key
-        assert persona_directive(org, "Sign-off"), org.key
+        assert persona_directive(org, "Reply-from") and persona_directive(org, "Sign-off"), org.key
         fmt = persona_directive(org, "Case-ref-format")
         assert fmt is None or re.search(r"\{[dLA]\d+\}", fmt), org.key
+
+
+def test_every_org_has_a_committed_research_dossier() -> None:
+    for org in SC.orgs:
+        record = saved_dossier(org)
+        assert record and record["org"] == org.key and record["sources"], org.key
+        assert re.fullmatch(r"20\d\d-\d\d-\d\d", record["retrieved_at"][:10]), org.key
+        dossier = Dossier.model_validate(record["dossier"])
+        assert len(dossier.summary) > 50 and len(dossier.facts) >= 3, org.key
+        assert all(f.url.startswith("https://") and f.quote and f.statement for f in dossier.facts), org.key
+        persona = record["dossier"]["persona"]
+        assert persona and persona["voice"], org.key
+        text = persona_text(record["dossier"])
+        for name in DIRECTIVES:  # the rendered persona reads back through the directive parser
+            assert persona_directive(text, name) == (persona[name] or None), (org.key, name)
 
 
 def test_layers_match_the_spec_and_the_engine() -> None:
