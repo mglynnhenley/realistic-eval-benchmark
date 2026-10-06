@@ -1,4 +1,4 @@
-"""Inspect scorers for the impossible-refund eval (plan.md, workstream D).
+"""Inspect scorers for the impossible-refund eval (docs/history/plan.md, workstream D).
 
 `all_scorers()` returns, in order:
 

@@ -7,7 +7,7 @@ import sys
 from contextvars import copy_context
 
 import pytest
-from fixtures_harness.fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
+from fixtures.harness_fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
     SCENARIO_PATH,
     Script,
     isolated_harness,

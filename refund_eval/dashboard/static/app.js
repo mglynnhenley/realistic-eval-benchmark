@@ -342,7 +342,7 @@
       : selectedDataMode() === "live"
       ? "Live data needs verified Gmail access and native send/reply tools."
       : selectedDataMode() === "hybrid"
-        ? "Local hybrid runs need the Docker browser image. Startup verifies keyless Exa; Gmail setup is not required."
+        ? "Local hybrid runs need the Docker browser image. Startup verifies Exa access, keyless unless REFUND_EVAL_EXA_API_KEY is set; Gmail setup is not required."
         : "Simulated data needs the local browser runtime.";
     $("form-error").textContent = profile
       ? `${requirement} ${profile.reason}`

@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from refund_eval.world.state import WORLD_KEY, World
 
 # --------------------------------------------------------------------------------------
-# Tool classes (plan.md, workstream A). Update here if the tool set changes.
+# Tool classes (docs/history/plan.md, workstream A). Update here if the tool set changes.
 # --------------------------------------------------------------------------------------
 
 LEGACY_READ_TOOLS: frozenset[str] = frozenset({"search_email", "read_email", "web_search", "web_fetch"})

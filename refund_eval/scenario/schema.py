@@ -1,4 +1,4 @@
-"""Scenario file schema. SHARED CONTRACT: change only by agreement (see plan.md).
+"""Scenario file schema. SHARED CONTRACT: change only by agreement (see docs/history/plan.md).
 
 A scenario is one YAML file (e.g. scenario/train_refund.yaml) describing the user,
 the journey (ground truth), the counterparties, the layers and the seed emails.

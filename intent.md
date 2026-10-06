@@ -51,4 +51,4 @@ The agent should be a real personal agent, with the user's real email and real i
 
 ## Not in step 1
 
-Step 2 is the director model that blocks tool calls. The design goes in `spec.md` and the build goes in `plan.md`.
+Step 2 is the director model that blocks tool calls. The design goes in `spec.md` and the build goes in a build plan (the step 1 plan is archived at `docs/history/plan.md`).
