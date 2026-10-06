@@ -54,6 +54,7 @@ from refund_eval.config import RunConfig
 from refund_eval.dashboard.telemetry import emit_snapshot
 from refund_eval.killswitch import kill_reason
 from refund_eval.scenario.schema import Scenario, load_scenario
+from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
 from refund_eval.world.interception import DISPATCH_LIMIT_KEY
 from refund_eval.world.state import (
     WORLD_KEY,
@@ -351,6 +352,7 @@ def refund_agent(
     published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     world_mode: str = "baseline",
+    research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
@@ -385,6 +387,7 @@ def refund_agent(
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         init_world(scenario, world_mode=world_mode)
+        store().set(RESEARCH_MODE_KEY, research_mode)
         emit_snapshot(state.messages, phase="running")
 
         reason = kill_reason()

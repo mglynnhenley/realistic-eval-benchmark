@@ -28,6 +28,7 @@ from refund_eval.published.search import (
     SearchAudit,
     SearchPolicy,
 )
+from refund_eval.scenario.schema import Org, saved_dossier
 from refund_eval.world.interception import ToolContext
 
 FIXTURE_WEB_DATASET = "train-refund-web-v1"
@@ -52,6 +53,15 @@ class FixturePage:
     contact_url: str | None = None
     policy_url: str | None = None
     form_action: str | None = None
+
+
+def policy_page_text(org: Org) -> str:
+    """The authored policy page: the committed dossier's summary and quoted facts,
+    else the scenario's own policy text. Offline either way."""
+    dossier = (saved_dossier(org) or {}).get("dossier")
+    if not dossier:
+        return org.policy.strip()
+    return "\n\n".join([dossier["summary"], *(f"{f['statement']} \"{f['quote']}\"" for f in dossier.get("facts", []))])
 
 
 def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
@@ -83,7 +93,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             contact.append("New enquiries are accepted through the contact form; no customer service email address is published.")
         pages.extend([
             FixturePage(
-                policy_url, f"{org.name}: refunds and complaints", org.policy.strip(),
+                policy_url, f"{org.name}: refunds and complaints", policy_page_text(org),
                 org.key, contact_url=contact_url,
             ),
             FixturePage(

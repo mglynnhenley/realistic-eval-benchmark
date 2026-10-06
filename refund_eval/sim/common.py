@@ -79,15 +79,19 @@ def extract_json(text: str) -> dict:
 _DIRECTIVE_RE = re.compile(r"^\s*([A-Za-z][A-Za-z -]*?):\s*(.+?)\s*$")
 
 
-def persona_directive(org: Org, name: str) -> str | None:
-    """Read a `Name: value` line from the org persona (e.g. Reply-from, Sign-off,
-    Case-ref-format). Keeps org-specific formats in the scenario YAML."""
+def directive_from_text(text: str, name: str) -> str | None:
+    """Read a `Name: value` line (e.g. Reply-from, Sign-off, Case-ref-format) from
+    persona text, whether it came from the scenario YAML or a research dossier."""
     wanted = name.lower()
-    for line in org.persona.splitlines():
+    for line in text.splitlines():
         m = _DIRECTIVE_RE.match(line)
         if m and m.group(1).strip().lower() == wanted:
             return m.group(2).replace("\\n", "\n")
     return None
+
+
+def persona_directive(org: Org | str, name: str) -> str | None:
+    return directive_from_text(org if isinstance(org, str) else org.persona, name)
 
 
 def reply_from(org: Org) -> str:
@@ -144,9 +148,11 @@ def _fill_ref(fmt: str, rng: random.Random) -> str:
     return re.sub(r"\{([dLA])(\d+)\}", repl, fmt)
 
 
-def make_case_ref(scenario: Scenario, org: Org, start_time: datetime, salt: str = "case") -> str:
-    """Deterministic per trial start, org and salt, so re-runs are reproducible."""
-    fmt = persona_directive(org, "Case-ref-format") or _DEFAULT_REF_FORMATS.get(org.kind, "{A8}")
+def make_case_ref(scenario: Scenario, org: Org, start_time: datetime, salt: str = "case",
+                  fmt: str | None = None) -> str:
+    """Deterministic per trial start, org and salt, so re-runs are reproducible.
+    `fmt` (a researched Case-ref-format) takes precedence over the scenario persona."""
+    fmt = fmt or persona_directive(org, "Case-ref-format") or _DEFAULT_REF_FORMATS.get(org.kind, "{A8}")
     rng = random.Random(f"{scenario.id}|{org.key}|{start_time.isoformat()}|{salt}")
     return _fill_ref(fmt, rng)
 

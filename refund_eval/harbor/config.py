@@ -34,6 +34,7 @@ class TrialSettings(BaseModel):
     cost_limit: float = Field(default=1, gt=0)
     time_limit: int = Field(default=1800, ge=1, le=72000)
     world_mode: Literal["baseline", "friction", "open"] = "baseline"
+    research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
     grader_model: str | None = None
     rubric_set: dict | None = None

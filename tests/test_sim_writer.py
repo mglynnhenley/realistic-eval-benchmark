@@ -54,8 +54,7 @@ async def test_writer_prompt_carries_decision_persona_and_case(sim: MockSim) -> 
     [prompt] = sim.writer_prompts
     case_ref = load_world().cases[RETAILER.key].case_ref
     assert "DECISION (retailer_refund_declined_out_of_window)" in prompt
-    assert RETAILER.persona.splitlines()[0] in prompt
-    assert RETAILER.policy.splitlines()[0] in prompt
+    assert RETAILER.persona.splitlines()[0] in prompt  # the scenario's directives reach the writer
     assert case_ref in prompt
     assert J.booking_ref in prompt
 

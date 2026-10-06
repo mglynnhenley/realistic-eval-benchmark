@@ -1,0 +1,196 @@
+{
+  "org": "rail_ombudsman",
+  "name": "Rail Ombudsman (railombudsman.org)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.railombudsman.org complaints eligibility 40 working days 12 months contact email refund Rail Ombudsman",
+        "objective": "Find official Rail Ombudsman pages covering complaint stages time limits refund remedies contact email phone hours scheme regulatory role and communication wording."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      "chars": 8043
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.railombudsman.org/en/complaint?step=1"
+      },
+      "chars": 2134
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.railombudsman.org \"contact\" \"Monday\" \"complaints about\" \"Ombudsman Association\"",
+        "objective": "Find official contact page phone hours email and official service complaints policy stages and membership oversight ORR Ombudsman Association."
+      },
+      "chars": 5007
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.railombudsman.org \"service complaints\" \"contact\" \"Independent Assessor\"",
+        "objective": "Locate official Rail Ombudsman complaints-about-our-service procedure and contact page with phone hours; extract URLs and stages response deadlines."
+      },
+      "chars": 5220
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      "chars": 1386
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.railombudsman.org/en/complaint?step=5"
+      },
+      "chars": 1361
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://assets.railombudsman.org/pdfs/consumer-guide-2.pdf"
+      },
+      "error": "Unsupported content type application/pdf"
+    }
+  ],
+  "dossier": {
+    "summary": "The Rail Ombudsman is a free, independent, not-for-profit dispute-resolution service for unresolved complaints about participating train and station operators and rail service providers. Consumers must first complain to their service provider; the Ombudsman investigates impartially, seeks agreement and can issue binding decisions, including refunds payable by the provider within 10 working days of acceptance when the necessary payment details have been supplied.",
+    "facts": [
+      {
+        "statement": "The Rail Ombudsman is independent and not-for-profit, approved by the Chartered Trading Standards Institute and a full member of the Ombudsman Association.",
+        "quote": "We are an independent, not-for-profit organisation approved by the Chartered Trading Standards Institute and are full members of the Ombudsman Association.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "Its free service investigates unresolved complaints about participating train and station operators and rail service providers.",
+        "quote": "We offer a free and expert service to investigate unresolved complaints about train and station operators and rail service providers who participate in the Ombudsman scheme.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "It is separate from rail providers' complaints departments, so consumers must first try to resolve complaints directly with their provider.",
+        "quote": "As an Ombudsman we are a separate organisation from Service Providers. Each Service Provider has their own complaint handling procedure which should be followed when a complaint is raised.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "A complaint can be escalated after 40 working days without resolution or after an unsatisfactory final response.",
+        "quote": "We can only get involved after 40 working days have passed since you complained to the Service Provider or if you have received a final response which you are not happy with.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "Unless exceptional circumstances apply, consumers must complain to the Ombudsman within 12 months of the provider's final response.",
+        "quote": "Please note that unless there are exceptional circumstances, you must complain to us within 12 months of any final response from the Service Provider.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "A deadlock letter is the provider's written final response and may be a letter, email or text.",
+        "quote": "A deadlock letter is a written final response from the Service Provider. This may be contained in a letter or an email, or perhaps even a text.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "The published complaint stages are case received, review, response, investigation, mediation, adjudication and closure.",
+        "quote": "Case Received\nReview\nResponse\nInvestigation\nMediation\nAdjudication\nClosure",
+        "url": "https://www.railombudsman.org/en/complaint?step=5"
+      },
+      {
+        "statement": "The Ombudsman listens to both sides and seeks agreement before making an evidence-based decision if agreement is not reached.",
+        "quote": "We listen to both sides to see if we can find a solution that you can both agree to. We try to encourage you to reach an agreement, but if this doesn’t happen, we will make a decision based on the evidence we receive.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "The published response allowance is up to 90 days, with the process typically concluding within 40 working days.",
+        "quote": "The Rail Ombudsman has up to 90 days to respond to your complaint; typically, our process concludes within 40 working days.",
+        "url": "https://www.railombudsman.org/en/complaint?step=1"
+      },
+      {
+        "statement": "Its decisions can bind providers, which normally have 20 working days from consumer acceptance to comply unless another timescale is agreed.",
+        "quote": "we are empowered to make decisions which are binding on Service Providers – this means that they have to comply with our decisions. If you accept our decision, the Service Provider has 20 working days to comply from the date of your acceptance, unless another timescale has been agreed with you, in which case, that will apply.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "Where a decision includes a refund, the provider must complete it within 10 working days of acceptance if the consumer has supplied the necessary payment details.",
+        "quote": "If the decision includes a refund, the Service Provider must complete the refund within 10 working days of your acceptance (if you have provided the necessary details so that a payment can be made).",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "If it cannot take up a complaint, it explains why and identifies where the consumer can take it next, potentially transferring it directly.",
+        "quote": "If we are not able to take up your complaint, we will let you know why. We will also let you know where you can take it next – we may be able to transfer you to someone directly who may be able to help you further.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "Published contact channels include telephone, SMS/WhatsApp, email and Freepost.",
+        "quote": "Contact Us\n0330 094 0362\nSMS/WhatsApp: (+44) 07427 580 060\ninfo@railombudsman.org\nPost: FREEPOST - RAIL OMBUDSMAN",
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      {
+        "statement": "Formal complaints about the Ombudsman's own service are accepted by email or in writing.",
+        "quote": "you can raise a formal complaint by email or in writing.",
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      {
+        "statement": "Service complaints should be emailed to complaints@railombudsman.org or posted to its Stevenage complaints address.",
+        "quote": "Email complaints should be sent to:\ncomplaints@railombudsman.org\n.\nPostal complaints should be sent to:\nThe Ombudsman, Complaints\n1st Floor, Premier House, Argyle Way,\nStevenage, Hertfordshire, SG1 2AD.",
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      {
+        "statement": "Consumers should clearly include any existing case reference when complaining about the Ombudsman's service.",
+        "quote": "If you have a Case Reference Number, please include this clearly.",
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      {
+        "statement": "After the Ombudsman reviews a service complaint, a dissatisfied consumer can escalate to the Independent Assessor.",
+        "quote": "If you remain unhappy with our service after we have reviewed your complaint, you will be able to contact the Independent Assessor.",
+        "url": "https://www.railombudsman.org/en/complaints-about-service"
+      },
+      {
+        "statement": "The Independent Assessor considers service standards, not the basis of the Ombudsman's decisions.",
+        "quote": "The Rail Ombudsman’s Independent Assessor is available to receive comments and concerns on the standard of service provided by the Rail Ombudsman, but not the basis of decisions.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "A case reference is supplied on receipt and used in all contact, with R123557 given as the example.",
+        "quote": "Once we receive the complaint from a customer we will provide a reference number which will be used in all contact with us. This will look something like R123557.",
+        "url": "https://www.railombudsman.org/en/complaint?step=5"
+      },
+      {
+        "statement": "Its communications emphasise impartiality and evidence rather than advocacy for either side.",
+        "quote": "We don’t take sides – we just look at the evidence we are given.",
+        "url": "https://www.railombudsman.org/en/faq"
+      },
+      {
+        "statement": "Its customer-facing language is approachable, supportive and plain-spoken.",
+        "quote": "If there is anything else you would like to know, we are here to help.",
+        "url": "https://www.railombudsman.org/en/faq"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Rail Ombudsman <info@railombudsman.org>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": "R{d6}",
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in clear, approachable English using direct 'we' and 'you' language and a calm, helpful tone. Remain impartial: explain that you listen to both sides and assess the evidence rather than championing either party. Explain eligibility, next steps and deadlines plainly, and distinguish the Ombudsman's decision-making role from the service provider's responsibility to pay a refund."
+    }
+  },
+  "errors": [
+    "read_page: Unsupported content type application/pdf"
+  ],
+  "retrieved_at": "2026-10-06T04:03:12+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.railombudsman.org/en/complaint?step=1",
+    "https://www.railombudsman.org/en/complaint?step=5",
+    "https://www.railombudsman.org/en/complaints-about-service",
+    "https://www.railombudsman.org/en/faq"
+  ]
+}

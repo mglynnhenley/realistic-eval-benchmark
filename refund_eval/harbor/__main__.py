@@ -154,6 +154,8 @@ def main() -> None:
     parser.add_argument("--cost-limit", type=float, default=1)
     parser.add_argument("--time-limit", type=int, default=1800)
     parser.add_argument("--world-mode", choices=["baseline", "friction", "open"], default="baseline")
+    parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default="auto",
+                        help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")
     parser.add_argument("--rubrics", type=Path, help="Frozen dashboard rubric snapshot JSON")
     parser.add_argument("--inbox", type=Path, help="Gmail snapshot JSON from refund_eval.world.snapshot")

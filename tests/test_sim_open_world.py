@@ -1,5 +1,6 @@
 """Open world: the simulator model decides each response; code forbids a full refund."""
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -141,9 +142,11 @@ async def test_personal_contacts_stay_unknown_outside_the_open_world():
 
 @pytest.fixture
 def live_web(sim, monkeypatch):
+    """Live web data and research_mode=live, with the simulator scripted to search once."""
     from refund_eval.sim import research
 
     store().set("published_tool_profile", {"data_mode": "hybrid"})
+    store().set(research.MODE_KEY, "live")
     searches = []
 
     async def search(query, objective):
@@ -153,7 +156,10 @@ def live_web(sim, monkeypatch):
     monkeypatch.setattr(research, "_search", search)
     sim.dossier = {"summary": "Trainline is an online ticket retailer.", "facts": [{
         "statement": "Refunds must be claimed within 28 days.", "quote": "within 28 days",
-        "url": "https://www.thetrainline.com/terms"}]}
+        "url": "https://www.thetrainline.com/terms"}], "persona": {
+        "Reply-from": "Trainline Help <help@thetrainline.com>", "Case-ref-format": "TL-{d6}",
+        "voice": "Friendly and informal."}}
+    sim.research_script = [("web_search_exa", {"query": "Trainline refund policy", "objective": "time limits"})]
     return searches
 
 
@@ -162,38 +168,45 @@ async def test_a_company_is_researched_once_at_first_contact_and_answers_from_it
 
     await dispatch(email("customer.services@thetrainline.com"))
     await dispatch(email("customer.services@thetrainline.com", "Following up.", iid="open-2"))
-    assert len(live_web) == 3 and all(q.startswith("Trainline ") for q in live_web)
-    assert len(sim.dossier_prompts) == 1 and "28 days" in sim.dossier_prompts[0]
+    assert live_web == ["Trainline refund policy"]
+    assert len(sim.dossier_prompts) == 2 and "28 days" in sim.dossier_prompts[1]  # search turn, then the dossier
     assert all("RESEARCHED PUBLIC INFORMATION" in p and "thetrainline.com/terms" in p for p in sim.open_prompts)
+    assert all("Voice: Friendly and informal." in p for p in sim.open_prompts)
     record = store().get(DOSSIERS_KEY)["trainline"]
-    assert record["dossier"]["facts"][0]["url"] == "https://www.thetrainline.com/terms"
-    assert record["retrieved_at"] and len(record["queries"]) == 3
+    assert record["mode"] == "live" and record["retrieved_at"]
+    assert [c["tool"] for c in record["tool_calls"]] == ["web_search_exa"]
+    world = load_world()  # the researched persona names the sender and the case reference format
+    assert world.pending[0].email.sender == "Trainline Help <help@thetrainline.com>"
+    assert re.fullmatch(r"TL-\d{6}", world.cases["trainline"].case_ref)
 
 
-async def test_a_newly_found_company_is_researched_but_a_person_is_not(sim, live_web):
+async def test_a_newly_found_company_is_researched_but_a_person_is_profiled_from_the_inbox(sim, live_web):
     sim.profile = {"name": "Which?", "role": "advice", "reason": "Consumer group."}
+    sim.research_script = [("web_search_exa", {"query": "Which? consumer advice", "objective": "scope"})]
     await dispatch(email("help@which.co.uk", "Can you advise?"))
-    assert live_web and all(q.startswith("Which? ") for q in live_web)
+    assert live_web == ["Which? consumer advice"]
     live_web.clear()
+    sim.profile = {"name": "Mhairi Campbell", "role": "personal", "reason": "Friend."}
+    await dispatch(email("mhairi.campbell84@outlook.com", "Any ideas?", iid="open-2"))
+    assert not live_web and "Hayburn Crescent" in sim.person_prompts[0]  # her seed mail, nothing from the web
+    assert "WHAT THE CUSTOMER'S MAILBOX SHOWS" in sim.open_prompts[-1]
     sim.profile = {"name": "Maya Robinson", "role": "personal", "reason": "Friend."}
-    await dispatch(email("maya.robinson@outlook.com", "Any ideas?", iid="open-2"))
-    assert not live_web
+    await dispatch(email("maya.robinson@outlook.com", "Any ideas?", iid="open-3"))
+    assert len(sim.person_prompts) == 1 and not live_web  # no mail from Maya: nothing to profile
 
 
-async def test_failed_research_leaves_the_scenario_text(sim, live_web, monkeypatch):
+async def test_failed_research_falls_back_to_the_committed_dossier(sim, live_web):
     from refund_eval.sim import research
 
-    async def down(query, objective):
-        raise RuntimeError("rate limit")
-
-    monkeypatch.setattr(research, "_search", down)
+    sim.research_script = [RuntimeError("model down")]
     result = await dispatch(email("customer.services@thetrainline.com"))
     assert result.decision == "open:acknowledged"
-    assert "RESEARCHED PUBLIC INFORMATION" not in sim.open_prompts[-1]
-    assert store().get(research.DOSSIERS_KEY)["trainline"]["errors"]
+    record = store().get(research.DOSSIERS_KEY)["trainline"]
+    assert record["mode"] == "saved" and record["errors"] == ["model: model down"]
+    assert "RESEARCHED PUBLIC INFORMATION" in sim.open_prompts[-1]
 
 
-async def test_fixture_data_runs_never_research(sim, monkeypatch):
+async def test_fixture_data_runs_use_the_committed_dossiers_offline(sim, monkeypatch):
     from refund_eval.sim import research
 
     async def forbidden(query, objective):
@@ -203,6 +216,8 @@ async def test_fixture_data_runs_never_research(sim, monkeypatch):
     store().set("published_tool_profile", {"data_mode": "fixture"})
     await dispatch(email("customer.services@thetrainline.com"))
     assert not sim.dossier_prompts
+    assert "RESEARCHED PUBLIC INFORMATION" in sim.open_prompts[-1]
+    assert store().get(research.DOSSIERS_KEY)["trainline"]["mode"] == "saved"
 
 
 FULL = {"decision": "refunded", "body": "We've processed your refund.",
