@@ -160,7 +160,8 @@ for OpenRouter targets so native optional fields remain optional. Catalog hashes
 and adapter argument validation are unchanged. Offline schema tests verify request
 construction; paid provider-family checks require separate approval.
 
-Simulator and grader default to the chosen target model; override them with
+Simulator and grader default to `openrouter/openai/gpt-6-astra` whatever the target,
+and the prepared job records the resolved models. Override them with
 `--simulator-model` and `--grader-model`. `--world-mode friction` enables the
 existing friction simulation. `--history-tokens` (default 60000) sets the target's
 visible history window with a memory tool; `0` shows the full history (see the

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from refund_eval.config import RunConfig
+from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig
 
 # Where a Gmail snapshot sits in the trial image, relative to the source root (/app).
 SNAPSHOT_IN_IMAGE = "inbox_snapshot.json"
@@ -73,8 +73,8 @@ class TrialRequest(BaseModel):
         elif not self.model or self.model.startswith("mockllm/"):
             raise ValueError("Use smoke mode for scripted trials, or specify a real target model")
         elif any(not model.startswith("openrouter/") for model in (
-            self.model, self.settings.simulator_model or self.model,
-            self.settings.grader_model or self.model,
+            self.model, self.settings.simulator_model or DEFAULT_ROLE_MODEL,
+            self.settings.grader_model or DEFAULT_ROLE_MODEL,
         )):
             raise ValueError("The Harbor image supports OpenRouter models for all three roles")
         return self

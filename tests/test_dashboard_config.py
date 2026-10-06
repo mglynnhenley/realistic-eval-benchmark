@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from refund_eval.config import DEFAULT_ROLE_MODEL, DEFAULT_TARGET_MODEL
 from refund_eval.dashboard import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,8 +76,8 @@ def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
     try:
         record = manager.start(server.RunConfig(mode="model"))
         config = json.loads((manager.directory(record["id"]) / "config.json").read_text())
-        for role in ("model", "simulator_model", "grader_model"):
-            assert config[role] == "openrouter/anthropic/claude-opus-5"
+        assert config["model"] == "openrouter/anthropic/claude-opus-5"
+        assert config["simulator_model"] == config["grader_model"] == "openrouter/openai/gpt-6-astra"
         assert launched["env"]["OPENROUTER_API_KEY"] == "test-openrouter-key"
         assert "ANTHROPIC_API_KEY" not in launched["env"]
         assert "OPENAI_API_KEY" not in launched["env"]
@@ -278,22 +279,25 @@ def test_legacy_cannot_claim_live_data(tmp_path, data_mode):
 
 def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(monkeypatch):
     from refund_eval.published import profile
-    from refund_eval.task import DEFAULT_ROLE_MODEL
 
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
-    assert server.RunConfig().model == DEFAULT_ROLE_MODEL
+    assert server.RunConfig().model == DEFAULT_TARGET_MODEL
     chosen = "openrouter/anthropic/claude-haiku-4.5"
     monkeypatch.setenv("REFUND_EVAL_DEFAULT_MODEL", chosen)
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "Browser ready"})
     config = server.RunConfig(mode="model")
-    assert config.model == config.simulator_model == config.grader_model == chosen
-    assert server.public_config()["default_model"] == chosen
+    # The override moves the target only; the roles keep their own default.
+    assert config.model == chosen
+    assert config.simulator_model == config.grader_model == DEFAULT_ROLE_MODEL
+    public = server.public_config()
+    assert (public["default_model"], public["default_role_model"]) == (chosen, DEFAULT_ROLE_MODEL)
     assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 20, 1.0)
     explicit = server.RunConfig(model="mockllm/target", simulator_model="mockllm/simulator", grader_model="mockllm/grader")
     assert (explicit.model, explicit.simulator_model, explicit.grader_model) == (
         "mockllm/target", "mockllm/simulator", "mockllm/grader",
     )
-    assert DEFAULT_ROLE_MODEL == "openrouter/anthropic/claude-opus-5"
+    assert DEFAULT_TARGET_MODEL == "openrouter/anthropic/claude-opus-5"
+    assert DEFAULT_ROLE_MODEL == "openrouter/openai/gpt-6-astra"
 
 
 def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
@@ -316,7 +320,8 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
     for preset in (quick, longer):
         assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
         assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
-        assert preset.model == preset.simulator_model == preset.grader_model == model
+        assert preset.model == model
+        assert preset.simulator_model == preset.grader_model == DEFAULT_ROLE_MODEL
     manager = server.RunManager(tmp_path / "runs")
     try:
         record = manager.start(longer)

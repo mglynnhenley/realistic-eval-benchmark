@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from refund_eval.config import HYBRID_EXA_KEY_ENV
+from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialSettings
 from refund_eval.scenario.schema import load_scenario
 
@@ -145,8 +145,8 @@ def main() -> None:
     parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default=None)
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")
-    parser.add_argument("--simulator-model")
-    parser.add_argument("--grader-model")
+    parser.add_argument("--simulator-model", help=f"Counterparty simulator; default {DEFAULT_ROLE_MODEL}")
+    parser.add_argument("--grader-model", help=f"LLM graders; default {DEFAULT_ROLE_MODEL}")
     parser.add_argument("--max-turns", type=int, default=20)
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
@@ -163,6 +163,10 @@ def main() -> None:
     args.data_mode = args.data_mode or ("fixture" if args.smoke else "hybrid")
     from refund_eval.world.snapshot_store import file_sha256
 
+    if not args.smoke:
+        # Freeze the resolved roles in the job so its record names what ran.
+        args.simulator_model = args.simulator_model or DEFAULT_ROLE_MODEL
+        args.grader_model = args.grader_model or DEFAULT_ROLE_MODEL
     settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields
                                 if name not in {"rubric_set", "inbox_sha256"}},
                              rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None,

@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from refund_eval.config import RunConfig, dashboard_default_model
+from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig, dashboard_default_model
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.grading.behaviours import (
     BehaviourEdit,
@@ -540,6 +540,7 @@ def public_config() -> dict:
     hybrid_status = hybrid_readiness()
     return {
         "default_model": dashboard_default_model(),
+        "default_role_model": DEFAULT_ROLE_MODEL,
         "run_presets": run_presets(),
         "run_defaults": RunConfig().model_dump(),
         "model_defaults": RunConfig(mode="model").model_dump(),

@@ -9,6 +9,7 @@ from pathlib import Path
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
+from refund_eval.config import DEFAULT_ROLE_MODEL
 from refund_eval.harbor.artifacts import finite_json, grading_errors
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
 from refund_eval.published.provider import published_model_args
@@ -69,8 +70,8 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             model=request.model,
             model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
             model_roles={
-                "simulator": settings.simulator_model or request.model,
-                "grader": settings.grader_model or request.model,
+                "simulator": settings.simulator_model or DEFAULT_ROLE_MODEL,
+                "grader": settings.grader_model or DEFAULT_ROLE_MODEL,
             },
             log_dir=str(output), log_format="eval", display="none", max_samples=1,
             metadata={"harbor_trial_id": request.trial_id},
