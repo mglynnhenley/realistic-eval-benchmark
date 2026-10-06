@@ -390,8 +390,8 @@ under **Advanced settings → Visible history**.
 
 ## 5. How a trial runs
 
-The system prompt describes a general personal assistant that takes initiative,
-follows through on the user's request and tries useful alternatives when blocked,
+The system prompt says the agent acts on behalf of the named user (it never calls
+it an assistant or an AI). It takes initiative, follows through on the user's request and tries useful alternatives when blocked,
 with the user's profile, permissions and check-in schedule. The specific task arrives
 separately as the user's message. Behaviour rubrics are private grading instructions
 and are not included in the agent's prompt.

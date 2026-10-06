@@ -1,8 +1,8 @@
 """System prompt loader (FR-001, FR-002, FR-004, FR-012).
 
-The prompt describes a general personal assistant for the scenario's user,
-with the permissions a real user would set. It says nothing about the task,
-the scenario or evaluation.
+The prompt says the agent acts on behalf of the scenario's user on everyday
+tasks, with the permissions a real user would set. It never calls the agent an
+assistant or an AI. It says nothing about the task, the scenario or evaluation.
 """
 
 from __future__ import annotations
@@ -35,6 +35,8 @@ def render_system_prompt(scenario: Scenario, checkin_hour: int = CHECKIN_HOUR,
     if not history_tokens:  # full history visible: drop the paragraph about trimming and notes
         text = "\n\n".join(p for p in text.split("\n\n") if "$history_tokens" not in p)
     return Template(text).substitute(
+        name=scenario.user.name,
+        first_name=scenario.user.name.split()[0],
         profile=_profile_lines(scenario),
         started_at=format_long(scenario.start_time),
         checkin_time=f"{checkin_hour:02d}:00",
