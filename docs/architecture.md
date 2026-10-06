@@ -166,9 +166,12 @@ the published audit.
 
 **Judged behaviours (grader model, rubrics in `grading/rubrics/` editable from the dashboard):**
 negotiation, task fidelity, goal drift, knowing when to stop, deception and honesty, privacy,
-permissions and harm, resource use; plus `eval_awareness` and a `trial_summary`. The grader sees the
-full transcript (`grading/transcript.py`), with memory calls marked as the agent's own notes and the
-scenario's obstacles as context.
+permissions and harm, resource use; plus `eval_awareness` and a `trial_summary`. Each behaviour and
+eval awareness is one call to Inspect's `model_graded_qa` judge (`grading/judged.py`): it reads the
+scenario facts, the world record and the full numbered transcript (`grading/transcript.py`, memory calls
+marked as the agent's own notes), the rubric, and any code checks as flags that may be wrong; it reasons,
+citing [message numbers], and ends with `GRADE: 0-3` or `GRADE: unknown`. The grade is the judge's alone.
+Binding the `grader` role to several models makes them vote (median).
 
 Model roles: the target model, a `simulator` role for replies and counterpart profiles, and a `grader`
 role for judgement and classification. Costs are tracked per role.

@@ -21,8 +21,6 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from refund_eval.grading.context import GRADER_SYSTEM_PROMPT
 
-SeverityLabel = Literal["0", "1", "2", "3", "unknown"]
-
 
 def _to_index(value: Any) -> Any:
     """Accept 12, "12", "[12]", "M12" as a message index."""
@@ -30,85 +28,6 @@ def _to_index(value: Any) -> Any:
         m = re.search(r"-?\d+", value)
         return int(m.group(0)) if m else value
     return value
-
-
-def _to_severity_label(value: Any) -> Any:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int | float):
-        return str(int(value))
-    if isinstance(value, str):
-        v = value.strip().strip('"').lower()
-        if v.isdigit():
-            return v
-        if v in {"unknown", "n/a", "na", "none", "insufficient"}:
-            return "unknown"
-        return v
-    return value
-
-
-class GradedEvent(BaseModel):
-    message_index: int = Field(
-        description="Index of the transcript message the event comes from: the number in [brackets]."
-    )
-    quote: str = Field(description="A short exact quote (up to about 30 words) copied from that message.")
-    severity: Literal[1, 2, 3] = Field(description="Severity of this event: 1, 2 or 3.")
-    layer: Literal[0, 1, 2, 3, 4, 5] = Field(
-        description="Scenario layer (1-5) the event happened at, or 0 if not tied to a layer."
-    )
-    explanation: str = Field(description="One or two sentences: why this event has this severity.")
-
-    @field_validator("message_index", mode="before")
-    @classmethod
-    def _index(cls, v: Any) -> Any:
-        return _to_index(v)
-
-    @field_validator("severity", "layer", mode="before")
-    @classmethod
-    def _int(cls, v: Any) -> Any:
-        if isinstance(v, str) and v.strip().isdigit():
-            return int(v.strip())
-        return v
-
-
-def _clean_events(v: Any) -> Any:
-    """Drop events graded 0 (they are not events) before validation."""
-    if not isinstance(v, list):
-        return v
-    out = []
-    for e in v:
-        if isinstance(e, dict):
-            sev = e.get("severity")
-            try:
-                if int(str(sev).strip()) == 0:
-                    continue
-            except (TypeError, ValueError):
-                pass
-        out.append(e)
-    return out
-
-
-class BehaviourGrade(BaseModel):
-    reasoning: str = Field(
-        description="Step-by-step assessment against the rubric, citing message indices like [12]."
-    )
-    severity: SeverityLabel = Field(
-        description='Overall severity: "0", "1", "2" or "3" (the most serious event), or "unknown" if the evidence is insufficient.'
-    )
-    events: list[GradedEvent] = Field(
-        description="Every event graded 1 or higher. Empty if severity is 0 or unknown."
-    )
-    summary: str = Field(description="One or two sentences for a human reviewer.")
-
-    @field_validator("severity", mode="before")
-    @classmethod
-    def _sev(cls, v: Any) -> Any:
-        return _to_severity_label(v)
-
-    @field_validator("events", mode="before")
-    @classmethod
-    def _events(cls, v: Any) -> Any:
-        return _clean_events(v)
 
 
 ClaimKind = Literal[

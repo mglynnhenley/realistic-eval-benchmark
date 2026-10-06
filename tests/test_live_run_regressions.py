@@ -8,7 +8,7 @@ from inspect_ai.scorer import Score
 from inspect_ai.util import LimitExceededError
 
 from refund_eval.dashboard.worker import final_snapshot
-from refund_eval.grading.grader import BehaviourGrade, generate_structured
+from refund_eval.grading.grader import ExtractedClaims, generate_structured
 from refund_eval.grading.scorers import code_facts, false_assertion_events
 from refund_eval.grading.testing import trial_messages, trial_world
 from refund_eval.grading.transcript import world_summary
@@ -83,11 +83,11 @@ async def test_invalid_json_is_repaired_with_the_validation_error():
     calls = []
     def respond(input, tools, tool_choice, config):
         calls.append(input)
-        content = "This is prose." if len(calls) == 1 else '{"reasoning":"Evidence checked.","severity":"0","events":[],"summary":"No issue."}'
+        content = "This is prose." if len(calls) == 1 else '{"claims": []}'
         return ModelOutput.from_content("mockllm/model", content)
     model = get_model("mockllm/model", custom_outputs=respond, memoize=False)
-    result, _raw, error = await generate_structured(model, shared="Context", task="Grade", schema=BehaviourGrade, name="test")
-    assert result.severity == "0" and error is None
+    result, _raw, error = await generate_structured(model, shared="Context", task="Grade", schema=ExtractedClaims, name="test")
+    assert result.claims == [] and error is None
     assert len(calls) == 2
     assert '"properties"' in calls[0][-1].text
     assert "Validation errors" in calls[1][-1].text
@@ -98,7 +98,7 @@ async def test_model_limits_are_not_swallowed_as_parse_fallbacks():
         async def generate(self, *args, **kwargs):
             raise LimitExceededError("cost", value=2, limit=1)
     with pytest.raises(LimitExceededError):
-        await generate_structured(Limited(), shared="Context", task="Grade", schema=BehaviourGrade, name="test")
+        await generate_structured(Limited(), shared="Context", task="Grade", schema=ExtractedClaims, name="test")
 
 
 async def test_chat_cannot_promise_a_transcript_email_that_does_not_exist():

@@ -74,16 +74,25 @@ def test_saved_edits_are_versioned_and_do_not_change_existing_runs(tmp_path, mon
         reopened.close()
 
 
-async def test_configured_grader_receives_exact_rubric_without_hardcoded_floor():
+async def test_configured_grader_receives_exact_rubric_and_is_named_by_behaviour():
+    from inspect_ai._util.registry import registry_info
+
     rubric = custom_set().behaviours[0]
     mock = MockGrader()
     state = task_state(trial_messages("No cash has been returned."), trial_world())
-    score = await configured_behaviour(rubric.id, rubric.name, rubric.rubric, "abc123", model=mock.model())(state, Target(""))
+    grader = configured_behaviour(rubric.id, rubric.name, rubric.rubric, "abc123", model=mock.model())
+    score = await grader(state, Target(""))
+    assert registry_info(grader).name.split("/")[-1] == "behaviour_deception"
     assert rubric.rubric in mock.calls[0]["task"]
     assert score.metadata["behaviour"] == "deception"
     assert score.metadata["behaviour_name"] == "Deception"
     assert score.metadata["rubric_version"] == "abc123"
-    assert score.metadata["code_floor"] == 0
+    assert score.metadata["code_flags"] == []
+    # a saved rubric for a built-in behaviour reuses that scorer, with the saved text
+    built_in = configured_behaviour("fraud", "Fraud", "Saved fraud rubric.", "abc123", model=mock.model())
+    assert registry_info(built_in).name == "refund_eval/behaviour_fraud"
+    score = await built_in(state, Target(""))
+    assert "Saved fraud rubric." in mock.calls[-1]["task"] and score.metadata["rubric_version"] == "abc123"
 
 
 @pytest.mark.browser
