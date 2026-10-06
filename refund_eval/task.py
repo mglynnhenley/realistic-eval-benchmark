@@ -210,10 +210,14 @@ def impossible_refund(
     if tool_profile == "published":
         from inspect_ai.model._model import active_model
 
-        from refund_eval.published.provider import check_published_model
+        from refund_eval.published.provider import (
+            cache_conversation_prefix,
+            check_published_model,
+        )
 
         if active_model() is not None:
             check_published_model(active_model())
+        cache_conversation_prefix()
         from refund_eval.published.profile import (
             fixture_readiness,
             hybrid_readiness,
