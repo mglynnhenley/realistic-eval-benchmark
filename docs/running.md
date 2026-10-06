@@ -155,13 +155,21 @@ taken to have accepted the lie and it may pay up to the fare, never more, so dis
 happen and be graded. Individuals cannot pay the claim; they act
 through notes to organisations.
 
-With live web data (hybrid), each organisation is researched on the fly at its first contact in a
-trial: three Exa searches on its refund policy, complaints route and contact channels, condensed by the
-simulator model into quoted facts with source links that ground its responses. Exa returns page text,
-so bot-protected help centres are still covered. Research is fresh per trial, uses
-`REFUND_EVAL_EXA_API_KEY` when set, and is skipped for individuals and fixture data. The dossiers,
-queries and sources are stored in the trial log under `open_world_dossiers`; the agent never sees them. Claims record `open:<decision>`, and notes between organisations
-appear in each case history.
+Each organisation is grounded in a research dossier: a summary, facts with verbatim quotes and source
+URLs, and persona directives (reply-from address, sign-off, greeting, case-reference format, phone
+hours) that replace the hand-written policy text. The simulator model writes a dossier with two
+read-only tools, Exa search (`REFUND_EVAL_EXA_API_KEY` when set) and anonymous page reads through the
+same guarded path as the agent's browser, in at most eight lookups. Dossiers for the nine scenario
+organisations are committed in `refund_eval/scenario/dossiers/`, dated and with sources, so model
+comparisons see the same facts; refresh one with
+`uv run python -m refund_eval.sim.research <org-key-or-domain> --save [--model openrouter/...]`
+(a bare domain researches an ad-hoc organisation). The `research_mode` setting chooses, per trial:
+`auto` (default) uses a committed dossier when it is under 30 days old and researches otherwise;
+`live` researches every organisation at first contact; `saved` never searches. Live research needs
+hybrid data; fixture runs use the committed files offline. People the agent writes to are not
+researched on the web: a light profile is drawn from their mail in the user's inbox. The records,
+tool calls and sources are stored in the trial log under `open_world_dossiers`; the agent never sees
+them. Claims record `open:<decision>`, and notes between organisations appear in each case history.
 
 The organisations panel includes contacted companies already defined in the scenario
 as well as newly generated counterparts. It updates from the recorded contacts and
@@ -303,6 +311,7 @@ new model runs default to hybrid. Frozen jobs keep their recorded settings.
 | `artifact_dir` | `.context/artifacts` | Persistent artifact root, including browser audit JSONL. Dashboard/Harbor supply per-run directories. |
 | `published_config` | none | Optional live published-profile configuration path; unnecessary for fixture and hybrid modes. |
 | `world_mode` | `baseline` | `friction` adds recorded service delays, handoffs and offer reminders. `open` lets the simulator model decide every response (see below). Both require simulated Gmail (fixture or hybrid data). |
+| `research_mode` | `auto` | Open-world research per organisation: `auto` uses a committed dossier when fresh and researches otherwise, `live` always researches, `saved` never searches (see below). |
 | `max_turns` | `20` | Per-trial cap on the target model's generations. The harness enforces it. |
 | `history_tokens` | `60000` | Model-visible history window in tokens, with a memory tool for notes (see below). `0` shows the full history, adds no memory tool and leaves the prompt as before. |
 | `cost_limit` | `1.0` | Per-trial target and simulator spend cap in dollars (Inspect `cost_limit`). Final grading is billed separately. |

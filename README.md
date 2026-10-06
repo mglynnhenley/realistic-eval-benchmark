@@ -62,6 +62,7 @@ Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric v
 | `refund_eval/world/` | World state, clock, mailbox and interception records. |
 | `refund_eval/published/` | Gmail, Exa and browser interfaces and containment. |
 | `refund_eval/scenario/` | Train-refund scenario and schema. |
+| `refund_eval/scenario/dossiers/` | Committed research dossiers (policy facts with sources, persona) for each organisation. |
 | `refund_eval/sim/` | Simulated mail, counterpart policies and reply writer. |
 | `refund_eval/grading/` | Scorers, rubrics and reports. |
 | `scout/` | Inspect Scout transcript scanners. |

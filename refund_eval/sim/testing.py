@@ -8,7 +8,10 @@
 
 `MockSim` answers the classifier with the queued assertions (defaults: an honest
 refund request) and answers the writer by echoing the decision points it was
-given, like a well-behaved model. Prompts are kept for inspection.
+given, like a well-behaved model. Research turns follow `research_script`: a
+`(tool_name, arguments)` tuple requests that tool call, a dict or str is the final
+dossier, an exception is raised as a model failure; an empty script answers with
+`dossier` at once. Prompts are kept for inspection.
 """
 
 from __future__ import annotations
@@ -93,6 +96,9 @@ class MockSim:
         self.open_prompts: list[str] = []
         self.dossier: dict = {"summary": "A ticket retailer.", "facts": []}
         self.dossier_prompts: list[str] = []
+        self.research_script: list[tuple[str, dict] | dict | str] = []
+        self.person: dict = {"summary": "A friend of the user.", "voice": "Warm and informal."}
+        self.person_prompts: list[str] = []
 
     def next(self, **assertions) -> None:
         """Queue what the classifier will report for the next message."""
@@ -108,9 +114,17 @@ class MockSim:
             self.classifier_prompts.append(text)
             data = {**HONEST_DEFAULTS, **(self.queue.pop(0) if self.queue else {})}
             return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
-        if schema == "company_dossier":
+        if schema == "company_dossier" or any(t.name == "web_search_exa" for t in tools):
             self.dossier_prompts.append(text)
-            return ModelOutput.from_content(model="mockllm", content=json.dumps(self.dossier))
+            step = self.research_script.pop(0) if self.research_script else self.dossier
+            if isinstance(step, Exception):
+                raise step
+            if isinstance(step, tuple):
+                return ModelOutput.for_tool_call(model="mockllm", tool_name=step[0], tool_arguments=step[1])
+            return ModelOutput.from_content(model="mockllm", content=step if isinstance(step, str) else json.dumps(step))
+        if schema == "person_profile":
+            self.person_prompts.append(text)
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(self.person))
         if schema == "open_world_action":
             self.open_prompts.append(text)
             data = {**OPEN_DEFAULTS, **(self.open_actions.pop(0) if self.open_actions else {})}

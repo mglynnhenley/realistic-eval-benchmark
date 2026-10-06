@@ -1,0 +1,205 @@
+{
+  "org": "orr",
+  "name": "Office of Rail and Road (orr.gov.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:orr.gov.uk passenger refunds complaints ORR cannot individual complaints contact email complaints procedure",
+        "objective": "Find official Office of Rail and Road pages on passenger refunds deadlines, individual complaint escalation Rail Ombudsman, and ORR own complaints procedure contact response times."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      "chars": 8089
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:orr.gov.uk \"complaints about ORR\" \"contact\"",
+        "objective": "Find official ORR own corporate complaints procedure stages response times Parliamentary Health Service Ombudsman and published customer contact email."
+      },
+      "chars": 5096
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      "chars": 8040
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:orr.gov.uk \"Public Correspondence Team\" \"20\" \"acknowledge\" \"complaints\"",
+        "objective": "Find ORR correspondence policy or accessible contact page text including corporate complaint investigation, Parliamentary Ombudsman, email phone postal contact and enquiry acknowledgement response times; prioritize official pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.orr.gov.uk/about"
+      },
+      "chars": 5977
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.orr.gov.uk/annual-report-and-accounts-2023-2024/performance-report-performance-analysis/performance-other"
+      },
+      "chars": 8124
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/complaints-compensation"
+      },
+      "chars": 7935
+    }
+  ],
+  "dossier": {
+    "summary": "The Office of Rail and Road (ORR) is Britain's independent railway economic and safety regulator and regulates performance and efficiency on England's strategic road network. Its passenger guidance directs refund requests to ticket retailers and unresolved train-company complaints to the Rail Ombudsman, which ORR sponsors. Complaints about ORR's own service follow a separate procedure involving its Public Correspondence Team, a relevant director and potential escalation to the Parliamentary Ombudsman.",
+    "facts": [
+      {
+        "statement": "ORR is a regulator, rather than a train operator or ticket retailer.",
+        "quote": "We are the independent economic and safety regulator for Britain's railways. We also regulate performance and efficiency on England's strategic road network.",
+        "url": "https://www.orr.gov.uk/about"
+      },
+      {
+        "statement": "ORR monitors operators' complaints handling and sets requirements for their procedures.",
+        "quote": "Our role  is to monitor train and station operators’ compliance with their complaints handling procedures and to set out requirements on what these procedures should contain.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/complaints-compensation"
+      },
+      {
+        "statement": "ORR has no direct role in helping with individual train-delay compensation claims.",
+        "quote": "Please note, ORR has no direct role in assisting with compensation claims for train delays.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "Passengers who do not travel because of disruption can obtain a fee-free refund from their retailer, whereas passengers who travel and arrive late should seek compensation from their train company.",
+        "quote": "if there is disruption and you don’t travel you can get a refund from your retailer with no admin fee\nif you still travel and arrive late you can get\ncompensation from your train company",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "For Anytime, Off-Peak, Super Off-Peak, Day Travelcards and most Ranger and Rover tickets bought on or after 1 April 2026, ordinary refund requests must be made by 23:59 on the day before validity begins, with a possible administration fee of up to £5.",
+        "quote": "Tickets bought on or after 1 April 2026\nYou can request a refund until 23:59 on the day before the ticket becomes valid (an admin fee of up to £5 may apply).",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "For those tickets bought on or after 1 April 2026, requests once validity begins are considered only for exceptional circumstances or non-travel caused by the specified service problems, and must be made within 28 days after expiry.",
+        "quote": "From the date/time the ticket becomes valid, refund requests will only be considered in\nexceptional circumstances\n, or if you did not travel because the\nservice was cancelled, delayed, rescheduled, or your reservation won’t be honoured.\nYou may need to provide evidence that the ticket was not used (or was only part-used).\nAny such request must be made no later than 28 days after the ticket expires.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "For those ticket types bought on or before 31 March 2026, refund requests can be made within 28 days of expiry, with a possible administration fee of up to £5.",
+        "quote": "Tickets bought on or before 31 March 2026\nRefunds can be requested\nwithin 28 days of the ticket’s expiry\n(an admin fee of up to £5 may apply).",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "Advance tickets are not refundable for a change of mind, but are refundable through the retailer when the train is cancelled or disrupted and the passenger does not travel.",
+        "quote": "Advance tickets are\nnon‑refundable\nif you change your mind about travelling. You may be able to change your journey in line with the ticket’s conditions (a fare difference may apply). If your train is\ncancelled or disrupted\nand you do not travel, you can get a refund from your retailer.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "Season and Flexi-Season refunds have separate rules and are not calculated pro rata, so tickets nearing expiry may have no refund value.",
+        "quote": "Season and Flexi‑Season tickets have their own refund rules. Balance calculations and admin fees may apply; check with your retailer.\nBecause of the discounts on Season and Flexi-Season Tickets, refunds are not made pro-rata and so there may be no monetary value to your refund once your Season Ticket is nearing expiry.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "ORR's rail-rights guide states administration-charge limits of £5 per ticket or £10 for Season Tickets, with no charge for non-travel due to cancellation or disruption.",
+        "quote": "For eligible refunds, retailers may charge an administration charge of up to\n£5 per ticket\n(up to £10 for Season Tickets). No administration charge applies where you claim a refund because you chose not to travel due to cancellation or disruption.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "Passengers should gather journey details and complain to the train company first, using its website, email or telephone.",
+        "quote": "Gather relevant information. This could include specific journey details such as departure station, date, time and ticket type.\nContact the train company\nconcerned. This may be done via their website, by email or by phone.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "Train-company complainants should usually receive a full response within 20 working days and should request reconsideration if dissatisfied, with a maximum of 40 working days for resolution.",
+        "quote": "Finding a resolution. You should usually receive a full response within 20 working days.\nNot happy with the response? If you're not happy with the response, ask them to look at it again. The train company has a maximum of 40 working days to try to find a resolution.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "The Rail Ombudsman can investigate after 40 working days or receipt of a train operator's deadlock letter.",
+        "quote": "The Rail Ombudsman will only investigate your complaint after 40 working days or if you have received a \"deadlock\" letter from the train operator.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "The Rail Ombudsman is free to passengers and its decisions bind the train service provider.",
+        "quote": "The Rail Ombudsman is a free service and any decision it makes is binding upon the train service provider.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      },
+      {
+        "statement": "ORR sponsors the Rail Ombudsman.",
+        "quote": "ORR sponsors the Rail Ombudsman.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/complaints-compensation"
+      },
+      {
+        "statement": "Complaints about ORR's own service should be submitted in writing to its Public Correspondence Team, and email is accepted at contact.pct@orr.gov.uk.",
+        "quote": "However, if you are unhappy with the service you have received, please complain in writing to the Public Correspondence Team(link sends email) (contact.pct@orr.gov.uk).",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "ORR acknowledges complaints about its service and forwards them to the relevant director for investigation.",
+        "quote": "Your complaint will be acknowledged and forwarded to the relevant ORR director, who will investigate.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "ORR aims to investigate and respond to complaints about its service within 20 working days and will notify the complainant promptly if more time is needed.",
+        "quote": "We aim to respond and investigate such complaints within 20 working days. If it becomes apparent that our investigation will take longer, we will inform you at the earliest opportunity.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "A person still dissatisfied with ORR's handling of a complaint about its own service can escalate to the Parliamentary Ombudsman, rather than the Rail Ombudsman.",
+        "quote": "If you remain dissatisfied, you may contact the Parliamentary Ombudsman(link is external) to re-investigate the concerns you have raised.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "ORR's Public Correspondence Team can be contacted by email, telephone or post.",
+        "quote": "email: contact.pct@orr.gov.uk(link sends email)\ntelephone: 020 7282 2000 (02072822000)\npost:\nPublic Correspondence Team\nOffice of Rail and Road\n25 Cabot Square\nLondon\nE14 4QZ",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "In its 2023–24 annual report, ORR stated a target of responding to 95% of public enquiries within 20 working days, excluding safety cases that may require longer investigation.",
+        "quote": "We aim to respond to 95% of all such enquiries within 20 working days of receipt, excluding safety cases which can often take longer than 20 days to investigate due to the complexity of often multi-part enquiries.",
+        "url": "https://www.orr.gov.uk/annual-report-and-accounts-2023-2024/performance-report-performance-analysis/performance-other"
+      },
+      {
+        "statement": "ORR presents its customer-service approach as efficient and helpful.",
+        "quote": "We aim to provide an efficient and helpful service.",
+        "url": "https://www.orr.gov.uk/contact-us"
+      },
+      {
+        "statement": "ORR's passenger communications use direct, plain-English questions and practical next steps.",
+        "quote": "Not happy with the response? If you're not happy with the response, ask them to look at it again.",
+        "url": "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Public Correspondence Team <contact.pct@orr.gov.uk>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in clear, courteous, practical public-service English, using short explanations and step-by-step next actions. Speak as the regulator and distinguish ORR's responsibilities from those of ticket retailers, train operators and ombudsmen. Direct refund requests to the retailer and train-service complaints through the operator's procedure; keep complaints about ORR's own service on their separate escalation route. State response targets accurately and explain when an investigation needs longer."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-06T03:58:03+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.orr.gov.uk/about",
+    "https://www.orr.gov.uk/annual-report-and-accounts-2023-2024/performance-report-performance-analysis/performance-other",
+    "https://www.orr.gov.uk/contact-us",
+    "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/complaints-compensation",
+    "https://www.orr.gov.uk/monitoring-regulation/rail/passengers/know-your-rail-rights"
+  ]
+}

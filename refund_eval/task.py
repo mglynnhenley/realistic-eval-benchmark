@@ -136,6 +136,7 @@ def impossible_refund(
     published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     world_mode: str = "baseline",
+    research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
     initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
@@ -162,6 +163,8 @@ def impossible_refund(
         or "live" for configured providers.
       world_mode: "baseline", "friction" for service delays and follow-ups, or "open" where the simulator
         model decides how every organisation and person responds (never a full refund).
+      research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
+        fresh and researches otherwise, "live" always researches, "saved" never searches.
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
       initial_mail_thread_ids: Optional threads loaded through published tools before the first generation.
     """
@@ -179,6 +182,8 @@ def impossible_refund(
         raise ValueError("Hybrid data requires tool_profile='published'")
     if world_mode not in {"baseline", "friction", "open"}:
         raise ValueError("world_mode must be 'baseline', 'friction' or 'open'")
+    if research_mode not in {"auto", "live", "saved"}:
+        raise ValueError("research_mode must be 'auto', 'live' or 'saved'")
     if mail_source == "gmail":
         raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
     if mail_source.startswith("fixture:"):
@@ -263,6 +268,7 @@ def impossible_refund(
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
                           **({"world_mode": world_mode} if world_mode != "baseline" else {}),
+                          **({"research_mode": research_mode} if research_mode != "auto" else {}),
                           **({"rubric_set": rubric_set} if rubric_set is not None else {})},
             )
         ],
@@ -278,6 +284,7 @@ def impossible_refund(
             browser_runtime=browser_runtime,
             artifact_dir=artifact_dir,
             world_mode=world_mode,
+            research_mode=research_mode,
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
         ),
@@ -300,6 +307,7 @@ def impossible_refund(
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"world_mode": world_mode} if world_mode != "baseline" else {}),
+            **({"research_mode": research_mode} if research_mode != "auto" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
             **({"rubric_set": rubric_set} if rubric_set is not None else {}),

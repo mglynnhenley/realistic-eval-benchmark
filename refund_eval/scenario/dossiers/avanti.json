@@ -1,0 +1,233 @@
+{
+  "org": "avanti",
+  "name": "Avanti West Coast (avantiwestcoast.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.avantiwestcoast.co.uk refunds complaints handling procedure email ombudsman 28 days",
+        "objective": "Find official Avanti refund conditions with time limits, complaints process response time email contact and Rail Ombudsman. Prioritize official refunds and complaints handling pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      "chars": 8072
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      "chars": 8099
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf"
+      },
+      "error": "Unsupported content type application/pdf"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.avantiwestcoast.co.uk/help-and-support/refund-journey \"28\" \"Advance\" \"2026\"",
+        "objective": "Extract complete refund clauses including disruption refunds 28 days, Advance nonrefundability, flexible tickets changes 1 April 2026, refund processing time and fees. Find official detailed refund terms page."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy \"28 working\" \"40\" \"12 months\"",
+        "objective": "Extract lower part of official complaints policy: initial response target, internal review, Rail Ombudsman eligibility and contacts and binding decision. Return exact text."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.avantiwestcoast.co.uk/help-and-support/refund-journey \"refund\" \"days\" \"fee\"",
+        "objective": "Return exact clauses from refund page below 'Bought your ticket at one of our stations', especially disruption 28-day deadline, Advance tickets, processing time and fees."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy \"decision\" \"review\" \"Ombudsman\"",
+        "objective": "Return exact internal review stage and external Rail Ombudsman clauses from this official page, including binding decisions and eligibility. Exclude other websites."
+      },
+      "chars": 6000
+    }
+  ],
+  "dossier": {
+    "summary": "Avanti West Coast is a train company whose refund process depends on the ticket, retailer and reason for not travelling; journeys abandoned because of delays or cancellations qualify for a full refund without an administration fee. Its Customer Resolutions Team accepts complaints online, by email, telephone and post, with an internal review followed by possible escalation to the Rail Ombudsman.",
+    "facts": [
+      {
+        "statement": "Avanti West Coast is a train company and directs unresolved consumer disputes to the Rail Ombudsman.",
+        "quote": "The Rail Ombudsman is there to sort out disputes between train companies (us) and customers (you).",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Customers who bought tickets from another retailer must request their refund from that retailer.",
+        "quote": "If you bought your ticket from a different retailer then you will need to contact them for your refund.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "For tickets bought on Avanti's website, the quickest refund route is through My Account.",
+        "quote": "The quickest way to request a refund is via the 'My Account' section of our website.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "Customers unable to request a refund through the website or app should use the refund form.",
+        "quote": "If you are unable to refund your ticket through our website or app then please fill out our refund form.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "The refund page says conditions for some flexible tickets changed on 1 April 2026.",
+        "quote": "Buying or browsing flexible train tickets? Refund conditions for some ticket types changed on 1 April 2026.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "For an ordinary refund of a station-bought ticket, the refund page instructs customers to return to the selling station by 23:59 the day before validity and says a £5 administration fee applies.",
+        "quote": "Head back to the station you bought it from by 23:59 the day before your ticket becomes valid for travel. The ticket office team can sort your refund for you but please note a £5 admin fee still applies for refunding tickets bought at stations.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "Customers who abandon travel because their train is delayed or cancelled can obtain a full refund without an administration fee from the ticket seller.",
+        "quote": "If you abandoned your travel plans due to your train being delayed or cancelled, you can get a full refund without an admin fee from where you bought your ticket.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "Disruption-related refunds must be requested within 28 days of the ticket's expiry date.",
+        "quote": "In all cases, refunds due to disruption must be requested within 28 days of the ticket's expiry date.",
+        "url": "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+      },
+      {
+        "statement": "The 2026 Passenger's Charter excludes Advance tickets from ordinary refunds when the train service runs normally.",
+        "quote": "The exception to this is Advance tickets, which we do not refund if the train service was running normally.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/avanti-pdfs/avanti-policies/2026/passenger-charter-2026.pdf"
+      },
+      {
+        "statement": "The 2026 Passenger's Charter says exceptional circumstances preventing travel can still be considered for a refund.",
+        "quote": "Refunds will still be considered if exceptional circumstances meant that you were unable to use your ticket.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/avanti-pdfs/avanti-policies/2026/passenger-charter-2026.pdf"
+      },
+      {
+        "statement": "Delay Repay compensation for a journey actually taken is distinct from a full refund for abandoning travel because of disruption.",
+        "quote": "This process is different to Delay Repay as you’re applying for a full refund, whereas Delay Repay is compensation for a delay you experience when travelling with us.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/avanti-pdfs/avanti-policies/2026/passenger-charter-2026.pdf"
+      },
+      {
+        "statement": "Avanti describes its online feedback form as the quickest way to contact the Customer Resolutions Team.",
+        "quote": "It’s the quickest way to get in touch with our Customer Resolutions Team, who will help you from there.",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Customer-service complaints are accepted by email at customer.resolutions@avantiwestcoast.co.uk.",
+        "quote": "Email us at customer.resolutions@avantiwestcoast.co.uk",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "The customer-service telephone number is 0345 528 0253, open 08:00–22:00 seven days a week except Christmas Day and Boxing Day.",
+        "quote": "Or call us on 0345 528 0253. Our lines are open from 8am to 10pm, 7 days a week, except Christmas and Boxing Day",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Customers can write using the Freepost address when they do not need proof of delivery.",
+        "quote": "If you’re okay not having proof of delivery, write to us at:\nFreepost AVANTI WEST COAST",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Customers sending tickets are asked to use recorded delivery to the Customer Resolutions Centre in Sheffield.",
+        "quote": "If you’re sending tickets, please use recorded delivery and send to:\nAvanti West Coast,\nCustomer Resolutions Centre,\nThe Square,\n2 Broad Street West\nSheffield\nS1 2BQ",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Complaint submissions should include journey timing, what happened, the stations involved, ticket copies and supporting information.",
+        "quote": "The time and date of your journey\nDetails of what happened and when it happened\nThe stations you travelled to and from\nCopies of your tickets",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "The complaints-policy webpage promises investigation and aims to respond within 28 working days of contact.",
+        "quote": "We’ll look at everything carefully and aim to get back to you within 28 working days of the date you contacted us.",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "The complaints-procedure PDF gives different response targets: usually 10 working days and a commitment to a full response for 95% of complaints within 20 working days.",
+        "quote": "you can usually expect to hear back within 10 working days. As per our regulatory requirement, our commitment is to make a full response to 95% of all complaints within 20 working days.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf"
+      },
+      {
+        "statement": "The complaints-procedure PDF promises acknowledgement and a complaint reference.",
+        "quote": "we’ll always acknowledge receipt of your complaint, you will be given a reference for your complaint.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf"
+      },
+      {
+        "statement": "A dissatisfied customer can request an internal review, with its outcome communicated by letter or email.",
+        "quote": "If you feel things aren’t settled, you can ask us to look at our decision again. We’ll review everything and get back to you in writing in a letter or email.",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "The review response explains either why the original decision is upheld or what has changed.",
+        "quote": "Our reasons for upholding our original decision\nOr details of any changes to that decision",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Consumers can use the free Rail Ombudsman service after an unsatisfactory final response or after 40 working days without resolution.",
+        "quote": "The Rail Ombudsman is free to use. You can ask them to look at things if:\n\n- You’re unhappy with our final, written response to your complaint. This is sometimes called a ‘deadlock’ letter\n- You complained to us in the last 12 months\n- You can also contact them if we haven’t resolved your complaint within 40 working days of the date we received it",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "The complaints-procedure PDF defines the Ombudsman referral limit as no more than 12 months after Avanti's final response, whereas the webpage says the customer must have complained within the last 12 months.",
+        "quote": "no more than 12 months have passed since we sent you our final response.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf"
+      },
+      {
+        "statement": "Avanti must act on the Rail Ombudsman's decision if the customer accepts it.",
+        "quote": "If you agree with their decision, then we have to act on what they say.",
+        "url": "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf"
+      },
+      {
+        "statement": "The Rail Ombudsman can be contacted by telephone on 0330 094 0362 or by email at info@railombudsman.org.",
+        "quote": "Telephone: 0330 094 0362\nTextphone: 0330 094 0363\nSMS/Text: 07427 580 060\nEmail: info@railombudsman.org",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Avanti's customer-facing complaint language is welcoming, conversational and focused on putting problems right.",
+        "quote": "Whatever you'd like to say, get in touch. If it's something we can put right, we'll do it as fast as we can.",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      },
+      {
+        "statement": "Avanti says it will explain corrective action when it agrees its service fell short.",
+        "quote": "If we agree that we should have done better, we’ll tell you what we’re doing to put things right.",
+        "url": "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Customer Resolutions Team <customer.resolutions@avantiwestcoast.co.uk>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in friendly, straightforward British English, using contractions and addressing the customer directly as 'you'. Use 'we' for Avanti and keep explanations practical, with clear next steps and requests for relevant journey details. Acknowledge shortcomings when established, explain what will be done to put things right, and describe review or escalation options calmly."
+    }
+  },
+  "errors": [
+    "read_page: Unsupported content type application/pdf"
+  ],
+  "retrieved_at": "2026-10-06T04:06:57+00:00",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.avantiwestcoast.co.uk/-/media/avanti-pdfs/avanti-policies/2026/passenger-charter-2026.pdf",
+    "https://www.avantiwestcoast.co.uk/-/media/files/12886-west-coast-partnership-complaints-handling-policy.pdf",
+    "https://www.avantiwestcoast.co.uk/about-us/policies-and-procedures/complaint-handling-policy",
+    "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
+  ]
+}
