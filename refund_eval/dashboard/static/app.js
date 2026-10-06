@@ -435,7 +435,7 @@
         ? dataMode === "fixture"
           ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication or live account data."
           : dataMode === "hybrid"
-            ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access. Unsupported website writes are blocked locally."
+            ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access unless REFUND_EVAL_EXA_API_KEY is set. Unsupported website writes are blocked locally."
             : "Published Gmail, Exa and Playwright tools. Gmail sends and configured forms are simulated; other website writes are blocked and recorded."
         : "Legacy model trial using custom tools and a fixture inbox. Company replies and money movements are simulated.";
     if (worldMode === "friction") $("integrity-text").textContent += " Realistic friction is enabled in the simulated world.";
@@ -1666,7 +1666,7 @@
     const description = fixture
       ? "Simulated inbox and websites. Email uses a local test contract; Gmail authentication is not used."
       : hybrid
-        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; other website writes are blocked and recorded. Keyless Exa access has rate limits. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
+        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; other website writes are blocked and recorded. Exa is keyless and rate-limited unless REFUND_EVAL_EXA_API_KEY is set. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
         : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and configured forms are simulated; other website writes are blocked and recorded.";
     $("tool-profile-status").textContent = !profile ? "Checking browser and tool configuration…"
         : `${description} ${profile.configured ? "Ready — startup checks pending." : "Setup needed."} ${profile.reason}`;

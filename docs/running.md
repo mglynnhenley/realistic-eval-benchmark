@@ -79,9 +79,9 @@ Follow the [browser prerequisites](published-tools.md#browser-prerequisites) bef
 Choose run location, scripted or model execution, and data mode. New model runs
 default to **Simulated Gmail + live web** (`hybrid`). Gmail uses a local inbox and
 simulated sends/replies; Exa and anonymous public webpage reads are live. No Gmail
-connection, Exa key or published-tools configuration file is needed. Exa is
-keyless and rate-limited even if `EXA_API_KEY` is set; errors do not substitute
-fixture results. Web content reflects real time while mail follows simulated time.
+connection or published-tools configuration file is needed. Exa is keyless and
+rate-limited unless `REFUND_EVAL_EXA_API_KEY` is set (`EXA_API_KEY` alone is
+ignored); errors do not substitute fixture results. Web content reflects real time while mail follows simulated time.
 
 Choose **Simulated inbox and websites** (`fixture`) for authored pages and local
 search. Gmail sends and configured forms are simulated. Other website writes (non-GET
