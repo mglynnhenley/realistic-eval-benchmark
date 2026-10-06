@@ -6,6 +6,7 @@ New runs use one published tool stack: Gmail-style email, Exa `web_search_exa`, 
 
 Start with these guides:
 
+- [Architecture](docs/architecture.md): how a trial runs, from task text to graded log.
 - [Running and inspecting trials](docs/running.md): dashboard, models, budgets, rubrics and logs.
 - [Parallel trials with Harbor](docs/harbor.md): one Modal or Docker sandbox per trial, batch concurrency and cleanup.
 - [Published tools and browser setup](docs/published-tools.md): prerequisites, data modes, containment evidence and smoke tests.
