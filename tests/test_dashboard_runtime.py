@@ -161,7 +161,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
     config = {
         "mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/target",
         "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-        "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5,
+        "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
     }
     (tmp_path / "config.json").write_text(json.dumps(config))
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
@@ -183,7 +183,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
     assert call["model_roles"] == {"simulator": "mockllm/simulator", "grader": "mockllm/grader"}
     assert call["task_args"] == {
         "trials": 1, "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
-        "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5,
+        "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
         "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
     }
     assert RUN_DIR_ENV not in os.environ
@@ -332,6 +332,9 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     {"mode": "demo", "world_mode": "friction"},
     {"mode": "demo", "world_mode": "unknown"},
     {"mode": "demo", "max_turns": 1001},
+    {"mode": "demo", "history_tokens": -1},
+    {"mode": "demo", "history_tokens": 60000.5},
+    {"mode": "demo", "history_tokens": True},
     {"mode": "model", "tool_profile": "published", "data_mode": "live", "world_mode": "friction"},
     # Model runs never back-fill paid role models or reinterpret older records (C4).
     {"mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/model"},

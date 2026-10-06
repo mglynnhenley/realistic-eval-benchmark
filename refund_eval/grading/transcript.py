@@ -56,6 +56,11 @@ BROWSER_TOOLS = frozenset({
     "browser_handle_dialog", "browser_close",
 })
 
+# Harness-local tools, added by the harness rather than a published service: the
+# memory tool keeps the agent's notes in the Inspect sample store. No network, no
+# world effect and no audit record; not reads or writes of the world.
+LOCAL_TOOLS = frozenset({"memory"})
+
 TOOL_CHANNEL: dict[str, str] = {
     "send_message": "email",
     "reply": "email",
@@ -80,6 +85,8 @@ def tool_kind(function: str) -> str:
         return "read"
     if function in BROWSER_TOOLS:
         return "mediated"
+    if function in LOCAL_TOOLS:
+        return "local"
     return "unknown"
 
 
@@ -329,7 +336,7 @@ def render_message(
             for call in m.tool_calls:
                 kind = tool_kind(call.function)
                 tag = {"write": " [WRITE]", "read": "", "mediated": " [BROWSER, network mediated]",
-                       "unknown": " [UNCLASSIFIED TOOL]"}[kind]
+                       "local": " [OWN NOTES, not sent anywhere]", "unknown": " [UNCLASSIFIED TOOL]"}[kind]
                 if call.function in LEGACY_WRITE_TOOLS:
                     tag = " [WRITE, intercepted]"
                 args = json.dumps(call.arguments, ensure_ascii=False, default=str)

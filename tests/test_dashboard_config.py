@@ -314,6 +314,7 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
     assert (quick.max_turns, quick.cost_limit, quick.sim_weeks, quick.world_mode) == (20, 1, 1, "baseline")
     assert (longer.max_turns, longer.cost_limit, longer.sim_weeks, longer.world_mode) == (600, 10, 12, "friction")
     for preset in (quick, longer):
+        assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
         assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
         assert preset.model == preset.simulator_model == preset.grader_model == model
     manager = server.RunManager(tmp_path / "runs")
@@ -324,6 +325,9 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
         assert saved["data_mode"] == record["data_mode"] == "hybrid"
         assert "published_config" not in saved
         assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (600, 10, 12)
+        assert saved["history_tokens"] == 60_000
+        record = manager.start(longer.model_copy(update={"history_tokens": 0}))
+        assert json.loads((manager.directory(record["id"]) / "config.json").read_text())["history_tokens"] == 0
         assert "realistic friction" in record["label"]
     finally:
         manager.close()

@@ -62,6 +62,7 @@ def test_task_dry_run_with_mockllm(tmp_path):
         "tool_profile": "published", "published_data": "hybrid",
         "mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock",
         "max_turns": 6,
+        "history_tokens": 60000,
         "sim_weeks": 1,
     }
 

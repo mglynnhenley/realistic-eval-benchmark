@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
+import pytest
 from fixtures_harness.fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
     Script,
     harness_task,
@@ -21,13 +22,20 @@ from fixtures_harness.fakes import (  # noqa: F401  (isolated_harness is an auto
     wakeup_messages,
     world_of,
 )
+from inspect_ai.event import CompactionEvent
 from inspect_ai.model import (
     ChatMessageAssistant,
     ChatMessageSystem,
     ChatMessageTool,
     ChatMessageUser,
+    CompactionTrim,
+    ModelOutput,
+    compaction,
+    get_model,
 )
+from inspect_ai.tool import ToolCall
 
+from refund_eval.agent import harness
 from refund_eval.agent.prompt import render_system_prompt
 
 WAKEUP_RE = re.compile(
@@ -77,8 +85,8 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
     assert all(r.text.startswith("Update: all sorted") for r in world.status_reports)
     assert world.status_reports[0].time == scenario().start_time + timedelta(minutes=1)
 
-    # no submit tool, only the scenario's tools (FR-030)
-    assert script.tool_names_seen == {"fixture_search", "fixture_send"}
+    # no submit tool, only the scenario's tools and the agent's own notes (FR-030)
+    assert script.tool_names_seen == {"fixture_search", "fixture_send", "memory"}
 
     # the stand-in tools really ran through the kill-switch guard, with typed args
     tool_msgs = [m for m in sample.messages if isinstance(m, ChatMessageTool)]
@@ -134,3 +142,121 @@ def test_inspect_token_limit_stops_trial(tmp_path):
     sample = log.samples[0]
     assert sample.limit is not None and sample.limit.type == "token"
     assert world_of(sample).stop_reason == "token_limit"
+
+
+# ---------------------------------------------------------------------------
+# History window and memory (long horizons)
+
+WARNING = "Context compaction approaching"
+NOTE = "Booking ABC12345. Emailed the retailer; waiting for a reply."
+
+
+class NoteTaker(Script):
+    """Script that saves a note first, and reads its notes back when warned of trimming."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.inputs: list[list] = []
+
+    def __call__(self, input, tools, tool_choice, config):
+        self.inputs.append(list(input))
+        if self.generations == 0 or WARNING in input[-1].text:
+            self.generations += 1
+            self.tool_names_seen.update(t.name for t in tools)
+            args = ({"command": "create", "path": "/memories/notes.md", "file_text": NOTE}
+                    if self.generations == 1 else {"command": "view", "path": "/memories/notes.md"})
+            return ModelOutput.for_tool_call("mockllm/model", "memory", args)
+        return super().__call__(input, tools, tool_choice, config)
+
+
+def spy_react(monkeypatch):
+    built = []
+
+    def spy(**kwargs):
+        built.append(kwargs)
+        return real(**kwargs)
+
+    real = harness.react
+    monkeypatch.setattr(harness, "react", spy)
+    return built
+
+
+def test_history_window_builds_trim_compaction_and_memory_tool(tmp_path, monkeypatch):
+    built = spy_react(monkeypatch)
+    log = run(harness_task(max_turns=4, history_tokens=5000), NoteTaker(), tmp_path)
+    [react_args] = built
+    strategy = react_args["compaction"]
+    assert isinstance(strategy, harness.HistoryWindow) and strategy.type == "trim"
+    assert (strategy.threshold, strategy.preserve, strategy.memory) == (5000, harness.HISTORY_PRESERVE, True)
+    assert "memory" in {t.name for t in react_args["tools"]}
+    sample = log.samples[0]
+    assert "roughly 5,000 tokens" in sample.messages[0].text and "memory tool" in sample.messages[0].text
+
+    # the note was saved through the guarded tool into the sample store, at no simulated cost
+    [create] = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function == "memory"]
+    assert create.error is None and "/memories/notes.md" in create.text
+    assert sample.store["MemoryStore:files"] == {"/memories/notes.md": NOTE}
+    assert world_of(sample).status_reports[0].time == scenario().start_time  # memory call took no time
+
+
+def test_zero_history_tokens_keeps_full_history_and_no_memory_tool(tmp_path, monkeypatch):
+    built = spy_react(monkeypatch)
+    script = Script()
+    log = run(harness_task(max_turns=4, history_tokens=0), script, tmp_path)
+    assert built[0]["compaction"] is None
+    assert script.tool_names_seen == {"fixture_search", "fixture_send"}
+    system = log.samples[0].messages[0].text
+    assert system == render_system_prompt(scenario(), history_tokens=0) and "memory" not in system
+
+
+def test_trimming_shrinks_model_input_but_keeps_full_history(tmp_path):
+    script = NoteTaker()
+    log = run(harness_task(max_turns=60, sim_weeks=12, history_tokens=2500), script, tmp_path)
+    sample = log.samples[0]
+    world = world_of(sample)
+    assert world.stop_reason == "max_turns" and world.turn == 60
+
+    # Inspect trimmed the model's input several times...
+    trims = [e for e in sample.events if isinstance(e, CompactionEvent)]
+    assert len(trims) >= 2 and all(e.type == "trim" and e.tokens_after < e.tokens_before for e in trims)
+    assert max(len(i) for i in script.inputs[-5:]) < len(sample.messages) / 2
+    # ...always keeping the system prompt and the task at the front
+    task = scenario().task_text
+    assert all(i[0].role == "system" and i[1].text == task for i in script.inputs)
+
+    # ...while the sample keeps every message, so scorers and the dashboard see it all
+    assert sum(isinstance(m, ChatMessageAssistant) for m in sample.messages) == 60
+    assert [m.text for m in wakeup_messages(sample)] == [w.text for w in world.wakeups]
+    assert [m.text for m in sample.messages if isinstance(m, ChatMessageUser) and m not in wakeup_messages(sample)] == [task]
+    assert len(sample.messages) > max(len(i) for i in script.inputs)
+
+    # The memory warning goes only to the model's input, never into the history;
+    # the agent's notes survive trimming in the store.
+    assert any(WARNING in i[-1].text for i in script.inputs)
+    assert not any(WARNING in m.text for m in sample.messages)
+    views = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function == "memory"][1:]
+    assert views and all(NOTE in m.text for m in views)
+
+
+async def test_history_window_trims_past_inspects_retry_limit():
+    """Large recent results (page snapshots) defeat Inspect's three retries; the window keeps trimming."""
+    model = get_model("mockllm/model")
+    system, task = ChatMessageSystem(content="System."), ChatMessageUser(content="Task.", source="input")
+    turns = [m for n in range(20) for m in (
+        ChatMessageAssistant(content="", tool_calls=[ToolCall(id=f"c{n}", function="page", arguments={})]),
+        ChatMessageTool(content="x " * 2500, tool_call_id=f"c{n}", function="page"))]
+    messages = [system, task, *turns]
+    with pytest.raises(RuntimeError, match="Compaction insufficient"):
+        await compaction(CompactionTrim(threshold=4000, preserve=harness.HISTORY_PRESERVE),
+                         prefix=[system, task], model=model).compact_input(messages)
+    compacted, appended = await compaction(harness.HistoryWindow(4000), prefix=[system, task],
+                                           model=model).compact_input(messages)
+    assert appended is None and await model.count_tokens(compacted) <= 4000
+    assert [m.id for m in compacted] == [system.id, task.id, *(m.id for m in turns[-2:])]
+
+
+def test_window_too_small_for_the_latest_turn_stops_like_a_context_overflow(tmp_path):
+    log = run(harness_task(max_turns=10, history_tokens=1000), Script(), tmp_path)
+    sample = log.samples[0]
+    assert world_of(sample).stop_reason == "context_window" and sample.error is None
+    assert [m.role for m in sample.messages] == ["system", "user"] and "world_scorer" in sample.scores

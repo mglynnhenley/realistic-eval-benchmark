@@ -17,6 +17,7 @@ from typing import Any
 from inspect_ai import eval
 from inspect_ai.model import ChatMessageTool, ModelOutput, get_model
 
+from refund_eval.config import RunConfig
 from refund_eval.grading.testing import MockGrader
 from refund_eval.published.fixture_web import (
     TRAINLINE_CONTACT_URL,
@@ -146,6 +147,7 @@ class DemoAgent:
 def run_demo(
     output_dir: str | Path = ".context/refund-demo", *, step_delay: float = 0.0,
     max_turns: int = 30, cost_limit: float = 40.0, sim_weeks: float = 1.0,
+    history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     rubric_set: dict | None = None,
     time_limit: int | None = None,
     browser_runtime: str = "docker", data_mode: str = "fixture",
@@ -180,6 +182,7 @@ def run_demo(
             "fixture_path": str(DEFAULT_FIXTURE_PATH), "browser_runtime": browser_runtime,
             "artifact_dir": str(destination),
             "max_turns": max_turns,
+            "history_tokens": history_tokens,
             "cost_limit": cost_limit,
             "sim_weeks": sim_weeks,
             **({"time_limit": time_limit} if time_limit is not None else {}),

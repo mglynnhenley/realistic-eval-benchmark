@@ -88,10 +88,11 @@ def test_worker_reports_grader_failure_and_passes_inspect_rubrics(tmp_path, monk
     monkeypatch.setattr(worker, "eval", evaluate)
     request = TrialRequest(
         instruction=load_scenario("train_refund").task_text, model="openrouter/example/model",
-        settings=published_settings(rubric_set={"version": "frozen"}), trial_id="failed-grader",
+        settings=published_settings(rubric_set={"version": "frozen"}, history_tokens=12_000), trial_id="failed-grader",
     )
     result = run_trial(request, tmp_path / "artifacts")
     assert not result["passed"] and result["grading_status"] == "failed"
     assert result["grading_warnings"] == ["assessment: Provider failed"]
     assert calls[0]["task_args"]["rubric_set"] == {"version": "frozen"}
+    assert calls[0]["task_args"]["history_tokens"] == 12_000
     assert json.loads((tmp_path / "artifacts/scores.json").read_text())["assessment"]["value"] is None

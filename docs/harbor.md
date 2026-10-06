@@ -139,7 +139,7 @@ scripts/harbor python -m refund_eval.harbor \
   --output .context/harbor-pilot --environment modal \
   --model openrouter/anthropic/claude-haiku-4.5 \
   --trials 4 --concurrency 2 --max-turns 20 --sim-weeks 1 \
-  --cost-limit 1 --time-limit 1800
+  --history-tokens 60000 --cost-limit 1 --time-limit 1800
 
 # Export OPENROUTER_API_KEY in your shell before launching:
 scripts/harbor harbor run -c .context/harbor-pilot/job.json
@@ -158,7 +158,9 @@ construction; paid provider-family checks require separate approval.
 
 Simulator and grader default to the chosen target model; override them with
 `--simulator-model` and `--grader-model`. `--world-mode friction` enables the
-existing friction simulation. `--model` can be repeated for multiple targets. `--trials` sets attempts per model
+existing friction simulation. `--history-tokens` (default 60000) sets the target's
+visible history window with a memory tool; `0` shows the full history (see the
+[runbook](running.md#history-window-and-memory)). `--model` can be repeated for multiple targets. `--trials` sets attempts per model
 and `--concurrency` sets the maximum active trials across all models. Each trial has its own target/simulator cost cap;
 four trials with a $1 cap can spend approximately $4 plus grading and infrastructure.
 An in-flight model response can overshoot a cap. Final grading has no separate

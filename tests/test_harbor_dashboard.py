@@ -64,6 +64,7 @@ async def test_stop_cancels_job_once_and_awaits_cleanup(tmp_path, monkeypatch):
 
     def prepare(*args, **kwargs):
         assert kwargs["settings"].rubric_set == {"version": "test-snapshot"}
+        assert kwargs["settings"].history_tokens == 60_000  # config predates the setting
         path = directory / "job.json"
         dashboard.write(path, {"job_name": "fake", "jobs_dir": str(directory / "jobs")})
         return path

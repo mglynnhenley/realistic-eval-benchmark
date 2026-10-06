@@ -52,6 +52,9 @@ class RunConfig(BaseModel):
         return value
 
     max_turns: int = Field(default=20, ge=1, le=1000, strict=True)
+    # Model-visible history in tokens, trimmed oldest first with a memory tool for notes
+    # (as Vending-Bench does); 0 shows the full history. Logs and grading always keep it all.
+    history_tokens: int = Field(default=60_000, ge=0, le=1_000_000, strict=True)
     cost_limit: float = Field(default=1.0, gt=0, le=40)
     sim_weeks: float = Field(default=1.0, gt=0, le=12)
     execution: Literal["local", "modal", "docker"] = "local"

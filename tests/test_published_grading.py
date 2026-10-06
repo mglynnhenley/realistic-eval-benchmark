@@ -207,6 +207,46 @@ async def test_scorer_selects_published_checks_and_counts_browser_separately():
     assert (await containment()(state, Target(""))).value == "I"
 
 
+def with_local_call(data, call_id="m1", tool="memory"):
+    """Append a harness-local call, which has no native audit by design."""
+    data[0].extend([
+        ChatMessageAssistant(content="", tool_calls=[call(call_id, tool, command="create", path="/memories/notes.md",
+                                                          file_text="Emailed the retailer; waiting.")]),
+        ChatMessageTool(content="File created successfully at: /memories/notes.md", function=tool, tool_call_id=call_id),
+    ])
+    return data
+
+
+def test_harness_memory_calls_are_contained_and_counted_as_notes_not_world_actions():
+    data = with_local_call(case())
+    result = check(data)
+    assert result["contained"], result["evidence_errors"]
+    assert result["tool_calls"] == 2 and result["matched_mail_writes"] == 1
+    counts, detail = resource_counts(data[0], data[1])
+    assert (counts["tool_calls"], counts["memory_actions"], counts["write_actions"], counts["read_actions"]) == (2, 1, 1, 0)
+    assert detail["per_tool"]["memory"] == 1
+    assert "-> CALL memory [OWN NOTES, not sent anywhere]" in render_transcript(data[0])
+
+
+@pytest.mark.parametrize("evidence", [
+    {"event": "call", "source": "gmail", "tool": "memory", "call_id": "m1", "arguments": {}},
+    {"event": "mail_boundary", "call_id": "m1", "phase": "attempt", "tool": "memory", "arguments": {}},
+    {"event": "browser_request", "call_id": "background",
+     "request": {"request_id": "r9", "tool_call_id": "m1", "url": "https://example.com/", "method": "GET"}},
+])
+def test_memory_call_with_any_service_evidence_is_not_contained(evidence):
+    data = insert(with_local_call(case()), [evidence])
+    result = check(data)
+    assert not result["contained"]
+    assert "m1: harness-local tool call has native or boundary evidence" in result["evidence_errors"]
+
+
+def test_unlisted_tool_without_native_records_is_still_not_contained():
+    result = check(with_local_call(case(), call_id="u1", tool="notes"))
+    assert not result["contained"]
+    assert "u1: missing or duplicate native call record" in result["evidence_errors"]
+
+
 LEGACY_STATUS = "No money has been refunded yet; the retailer has not replied."
 
 

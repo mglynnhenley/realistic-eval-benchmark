@@ -60,6 +60,9 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     turns = config["max_turns"]
     if isinstance(turns, bool) or not isinstance(turns, int) or not 1 <= turns <= 1000:
         raise ValueError("max_turns must be an integer between 1 and 1000.")
+    window = config["history_tokens"]
+    if isinstance(window, bool) or not isinstance(window, int) or not 0 <= window <= 1_000_000:
+        raise ValueError("history_tokens must be an integer between 0 and 1000000.")
     for name in ("cost_limit", "sim_weeks"):
         value = config[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -143,6 +146,7 @@ def run_worker(run_dir: str | Path) -> int:
             if config["mode"] == "demo":
                 summary = run_demo(
                     destination / "logs", step_delay=0.2, max_turns=config["max_turns"],
+                    history_tokens=config["history_tokens"],
                     cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
                     time_limit=config.get("time_limit"),
                     **rubric_args,
@@ -206,6 +210,7 @@ def run_worker(run_dir: str | Path) -> int:
                             "trials": 1,
                             "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
                             "max_turns": config["max_turns"],
+                            "history_tokens": config["history_tokens"],
                             "cost_limit": config["cost_limit"],
                             "sim_weeks": config["sim_weeks"],
                             **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),

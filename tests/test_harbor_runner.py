@@ -61,6 +61,17 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
         prepare(output, settings=published_settings(smoke=True), model="mockllm/model")
 
 
+def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypatch, capsys):
+    assert published_settings().history_tokens == 60_000
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
+                                      "--model", "openrouter/example/model", "--history-tokens", "0"])
+    main()
+    job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
+    assert job.agents[0].kwargs["history_tokens"] == 0
+    with pytest.raises(ValueError):
+        published_settings(history_tokens=-1)
+
+
 def test_paid_config_uses_named_secrets_without_values(tmp_path):
     config = prepare(
         tmp_path / "paid", settings=published_settings(), model="openrouter/example/model",

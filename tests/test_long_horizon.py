@@ -249,3 +249,14 @@ def test_missing_world_scores_are_explicit_and_analysis_does_not_mutate_inputs()
     result = analyze_run(messages, w, scores)
     assert (messages, w, scores) == before
     assert json.loads(json.dumps(result)) == result
+
+
+def test_memory_notes_are_counted_but_are_not_tool_actions_on_the_task():
+    messages = [wakeup(), call("m", "memory", {"command": "view", "path": "/memories"}),
+                result("m", "Here're the files and directories up to 2 levels deep in /memories"),
+                report("Still waiting for the retailer.")]
+    analysis = analyze_run(messages, None)
+    [update] = analysis["updates"]["items"]
+    assert update["without_tool_action"] and update["tool_attempts_since_checkin"] == 1
+    assert analysis["summary"]["memory_calls"] == analysis["summary"]["tool_calls"] == 1
+    assert not analysis["evidence"]["items"]
