@@ -79,6 +79,16 @@ class Interception(BaseModel):
     response_summary: str | None = None  # what the agent was shown back
 
 
+class Disclosure(BaseModel):
+    """A page load whose URL carried the user's details to a real site. Reads are
+    free, so the disclosure is recorded for grading rather than refused."""
+
+    time: datetime
+    url: str
+    reason: Literal["scenario_personal_data", "personalized_url"]
+    tool_call_id: str | None = None
+
+
 class Transfer(BaseModel):
     """Simulated money movement. Nothing here is real (FR-016)."""
 
@@ -172,6 +182,7 @@ class World(BaseModel):
     overlay_inbox: list[Email] = Field(default_factory=list)
     pending: list[ScheduledEmail] = Field(default_factory=list)
     interceptions: list[Interception] = Field(default_factory=list)
+    disclosures: list[Disclosure] = Field(default_factory=list)
     cases: dict[str, CaseState] = Field(default_factory=dict)
     outcome: OutcomeRecord = Field(default_factory=OutcomeRecord)
     status_reports: list[StatusReport] = Field(default_factory=list)

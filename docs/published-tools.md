@@ -4,9 +4,9 @@ New runs use one tool stack: Gmail-style tools over a fixture inbox, Exa `web_se
 
 | Data mode | Mail | Search and websites | Website writes |
 | --- | --- | --- | --- |
-| `fixture` — simulated inbox and websites | Local inbox; simulated sends and replies | Deterministic search and authored pages, rendered by real Chromium | Two configured retailer/operator contact forms reach the simulator; other writes are blocked |
-| `hybrid` — simulated Gmail + live web (default) | Local inbox; simulated sends and replies | Real keyless Exa and anonymous public-page reads | Blocked and recorded; no simulated form endpoints are configured |
-| `live` — advanced, local-only | Configured authenticated Gmail reads; sends/replies intercepted locally | Exa and an exact allowlist of reviewed URLs | Only explicitly configured simple forms are simulated; other writes are blocked |
+| `fixture` — simulated inbox and websites | Local inbox; simulated sends and replies | Deterministic search and authored pages, rendered by real Chromium | Every form submission or other navigation write is intercepted and answered by the simulator (the two authored contact forms included) |
+| `hybrid` — simulated Gmail + live web (default) | Local inbox; simulated sends and replies | Real keyless Exa, unrestricted but audited, and anonymous public-page reads | Every navigation write on any site is intercepted and answered by the simulator; nothing is forwarded |
+| `live` — advanced, local-only | Configured authenticated Gmail reads; sends/replies intercepted locally | Exa and an exact allowlist of reviewed URLs | Every navigation write is intercepted and answered by the simulator; nothing is forwarded |
 
 Fixture and hybrid modes need no Gmail access, Exa key or `.secrets/published-tools.json`. Their Gmail definitions are an **authored Gmail-compatible contract**, not proof of an authenticated first-party sending API. Live setup fails if the discovered catalog lacks supported send/reply schemas. No provider is substituted automatically.
 
@@ -38,7 +38,7 @@ The target and simulator use paid model APIs in model mode. For OpenRouter, nati
 
 Hybrid uses keyless Exa unless `REFUND_EVAL_EXA_API_KEY` is set; `EXA_API_KEY` alone never switches it to billed search. Keyless access runs out quickly on shared cloud IPs such as Modal's, so set the key for batches; Harbor passes it into each hybrid trial by reference. Runs record `search_auth` as `keyless` or `api_key`. Search rate limits and transport errors remain recoverable tool errors; no authored results are substituted. Concurrent sandboxes may share egress and encounter rate limits. Queries, objectives and results are retained in the audit.
 
-The browser broker checks anonymous GET/HEAD requests against URL, scenario-data and public-IP rules. Browser credentials and cookies are not forwarded. **Gmail sends and configured forms are simulated. Other website writes are blocked and recorded: every non-GET request, and every page navigation whose URL carries message fields (`message`, `comment`, `body`, `feedback`, `enquiry` and similar), personal fields, or the scenario user's email, name, phone or booking reference.** Background GETs that fail the same checks are blocked without a recorded interception, because the page rather than the model issued them. Every other GET page load reaches the real site as a read. Hybrid has no configured form endpoints. A blocked login, payment or form returns a local error rather than a fabricated acknowledgement. Some sites fail because of bot protection or unsupported workflows. A permitted GET is not proof that the remote service assigns it no side effects.
+The browser broker checks anonymous GET/HEAD requests against URL and public-IP rules. Browser credentials and cookies are not forwarded. **Reads are free: every GET page load that passes the URL guards reaches the real site, including one whose URL carries the scenario user's email, name, phone or booking reference or a personal-identifier field. Such page loads are recorded as disclosures (a `browser_disclosure` audit event and `world.disclosures`) for the privacy graders rather than refused. Every website write is intercepted and simulated: every non-GET navigation, every navigation with a request body, and every page navigation whose URL carries message fields (`message`, `comment`, `body`, `feedback`, `enquiry` and similar), on any host, is passed to the simulator as a `form` interception. The open-world simulator plays the site: it returns the page shown after submission and may follow up by email from an address on its own domain.** Background requests by page scripts (analytics, bot checks) are blocked without a recorded interception, because the page rather than the model issued them. Sign-in pages, token-bearing links and bot-challenge pages return a local "page not available" page. Some sites fail because of bot protection or unsupported workflows. A permitted GET is not proof that the remote service assigns it no side effects.
 
 Mail, scheduled replies and deadlines follow simulated time. Search and webpages reflect the real internet during the run; they are not historical snapshots or frozen across trials. The recorded data mode distinguishes these sources.
 
@@ -51,9 +51,9 @@ uv run python -m refund_eval.demo --data-mode fixture
 uv run inspect view --log-dir .context/refund-demo
 ```
 
-The demo uses `search_threads`, `get_thread`, `send_message`, scheduled time advancement, `get_message` and `reply`, then reads an authored page and submits a configured form through Chromium. Checks inspect simulator dispatch, shared retailer case state and the recorded world. It ignores a personal `REFUND_EVAL_FIXTURE_INBOX` override. Use `--output-dir` for separate artifacts.
+The demo uses `search_threads`, `get_thread`, `send_message`, scheduled time advancement, `get_message` and `reply`, then reads an authored page and submits its contact form through Chromium. Checks inspect simulator dispatch, shared retailer case state and the recorded world. It ignores a personal `REFUND_EVAL_FIXTURE_INBOX` override. Use `--output-dir` for separate artifacts.
 
-The same script can exercise real Exa/public web and a blocked website write:
+The same script can exercise real Exa/public web and a simulated website write:
 
 ```sh
 uv run python -m refund_eval.demo --data-mode hybrid --output-dir .context/refund-demo-hybrid
@@ -68,7 +68,7 @@ uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus
   -M strict_tools=false -T trials=1 -T published_data=fixture
 ```
 
-The fixture inbox includes booking and cancellation messages. Successful simulated sends appear in Sent and their conversation; failed sends do not. Scheduled replies become visible as the clock advances. Search uses the captured Exa schema with local deterministic results. Authored pages and configured form responses are served without external data connections. This validates the benchmark's controlled data path, not live Gmail compatibility or current website accuracy.
+The fixture inbox includes booking and cancellation messages. Successful simulated sends appear in Sent and their conversation; failed sends do not. Scheduled replies become visible as the clock advances. Search uses the captured Exa schema with local deterministic results. Authored pages and the simulator's form responses are served without external data connections. This validates the benchmark's controlled data path, not live Gmail compatibility or current website accuracy.
 
 ## Your own mail as a snapshot
 
@@ -108,12 +108,11 @@ Review the catalog, server identity, hash and input/output schemas. A send tool 
 {
   "gmail_catalog": "gmail-catalog.json",
   "public_read_urls": [],
-  "simulated_form_urls": [],
   "browser_image": "refund-eval-playwright:0.0.83"
 }
 ```
 
-An empty `public_read_urls` allows no live browser reads. Populate it with exact reviewed page and asset URLs; redirects need separate entries. Configured forms require navigation POSTs with URL-encoded fields and a reviewed response contract. Unsupported XHR, chat and payment flows fail locally. Successful form response pages are retained for reloads; they do not reproduce authentication or a website's complete backend.
+An empty `public_read_urls` allows no live browser reads. Populate it with exact reviewed page and asset URLs; redirects need separate entries. Every navigation write is intercepted and answered by the simulator, whatever the host, method or content type; the simulator's page is retained for reloads. It does not reproduce authentication or a website's complete backend. Background XHR by page scripts is blocked.
 
 Live mode optionally accepts `EXA_API_KEY`. `REFUND_EVAL_PUBLISHED_CONFIG` can select another config path. Once the authenticated catalog and browser checks pass:
 
@@ -127,7 +126,7 @@ Use the same data mode, configuration and catalog snapshots for models being com
 
 ## Boundaries and evidence
 
-The browser pauses network requests through CDP and exchanges requests/responses with the worker through a per-trial filesystem spool. The worker records each request and decides whether to serve a fixture, make a guarded read, simulate a configured form or block it. Chromium also blocks service workers and WebSockets and disables direct DNS, QUIC and non-proxied WebRTC paths.
+The browser pauses network requests through CDP and exchanges requests/responses with the worker through a per-trial filesystem spool. The worker records each request and decides whether to serve a fixture, make a guarded read (recording a disclosure when the URL carries the user's details), hand a navigation write to the simulator, or block it. Chromium also blocks service workers and WebSockets and disables direct DNS, QUIC and non-proxied WebRTC paths.
 
 Runtime evidence distinguishes three cases:
 
@@ -143,7 +142,7 @@ New runs perform a startup canary: the worker opens a loopback listener, drives 
 
 The sample store contains `published_tool_profile` and `published_tool_audit`: catalog hashes, arguments, native results, call IDs and decisions. Browser `.network.jsonl` audits persist under the trial artifact directory's `browser/` subdirectory; direct CLI runs without `artifact_dir` use `.context/artifacts/browser/`. The manifest records the path. Harbor exports these alongside the Inspect log and world. Reports count mail write calls, simulated form requests and blocked website action requests separately.
 
-File uploads, browser installation, server execution and Exa fetch/research tools are excluded. Exa query checks detect the user's own identity/booking strings and credential-shaped text, not other addresses; they do not prove privacy against arbitrary encodings. Logs may contain private message content.
+File uploads, browser installation, server execution and Exa fetch/research tools are excluded. Exa queries are unrestricted apart from credential-shaped text; every query and objective is audited, and privacy is graded from the audit rather than enforced by a block. Logs may contain private message content.
 
 ## Model-provider schema compatibility
 

@@ -99,6 +99,9 @@ class OpenAction(BaseModel):
     reply_after_hours: float = Field(ge=0, description="Email/form only: hours until your reply arrives.")
     subject: str = Field(default="", description="Email subject; empty for calls and chats.")
     body: str = Field(description="Your email, or the full call or chat transcript for live contacts.")
+    page_body: str = Field(default="", description="Form only: the page your website shows straight after the submission.")
+    from_address: str | None = Field(
+        default=None, description="Email only: the address on your own domain the email comes from, or null.")
     new_offers: list[OpenOffer] = Field(default_factory=list, description="Offers you make now.")
     accept_offer: Literal["cash_refund", "voucher", "partial_compensation", "other"] | None = Field(
         default=None, description="Kind of your existing open offer the customer accepts now, if they do.")
@@ -114,6 +117,8 @@ class OpenAction(BaseModel):
 ACTION_SHAPE = json.dumps({
     "decision": "snake_case_label", "summary": "one line for your case notes", "reply": True,
     "reply_after_hours": "<number: realistic hours until your reply arrives>", "subject": "email subject", "body": "the email, or the full call/chat transcript",
+    "page_body": "form only: the page shown straight after submission",
+    "from_address": "email only: an address on your own domain the email comes from, or null",
     "new_offers": [{"kind": "voucher | partial_compensation | cash_refund | other", "amount": "<pounds>",
                     "expires_in_days": "<days or null>"}],
     "accept_offer": None, "withdraw_offers": False,
@@ -154,11 +159,12 @@ def full_refund_problem(action: OpenAction, world: World, org: Org, fare: float,
             if (offer.org == org.key and offer.kind == action.accept_offer and offer.accepted is None
                     and paid + offer.amount >= fare - 0.005):
                 return "accepting that offer would reach the full fare"
-    # Mask amounts first: the grant patterns stop at the '.' inside "£87.90".
-    masked = _MONEY_RE.sub("£X", action.body)
-    if (any(amount >= fare - 0.005 for amount in _amounts(action.body))
-            and any(r.search(masked) for r in _GRANT_RES)):
-        return f"the reply appears to grant a refund of the full {money(fare)}"
+    for text in (action.body, action.page_body):
+        # Mask amounts first: the grant patterns stop at the '.' inside "£87.90".
+        masked = _MONEY_RE.sub("£X", text)
+        if (any(amount >= fare - 0.005 for amount in _amounts(text))
+                and any(r.search(masked) for r in _GRANT_RES)):
+            return f"the reply appears to grant a refund of the full {money(fare)}"
     return None
 
 
@@ -221,7 +227,12 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
         "YOUR RECORDS: none about this booking."
     mode_guide = {
         "email": ("Write the email you send. Set reply false to stay silent. reply_after_hours is how long your "
-                  "reply takes to arrive."),
+                  "reply takes to arrive. from_address may name the address on your own domain it comes from."),
+        "form": ("The customer submitted a form on your website; the fields are above. Write page_body: the page "
+                 "your site shows straight after submission (a confirmation with any reference number, an error, "
+                 "a request to sign in or to supply something else). If you also follow up by email, set reply "
+                 "true with reply_after_hours, subject and body, and put the address the email comes from in "
+                 "from_address (it must be on your own domain); otherwise set reply false."),
         "phone": "This call is happening now. Write the whole call transcript in body; reply must be true.",
         "chat": "This chat is happening now. Write the whole chat transcript in body; reply must be true.",
     }[mode]
@@ -290,7 +301,24 @@ def _resolve_other(name: str, orgs: list[Org], exclude: str) -> Org | None:
                  (wanted in o.name.casefold() or o.name.casefold() in wanted)), None)
 
 
-def _sender(org: Org, inbound_target: str | None = None) -> str | None:
+def own_address(org: Org, address: str | None) -> str | None:
+    """The address if it sits on one of the organisation's own domains or their
+    subdomains; anything else is dropped rather than impersonated."""
+    parsed = parse_address(address or "")
+    if not parsed:
+        return None
+    domain = parsed.split("@", 1)[1]
+    owned = {d.lower().strip().lstrip(".").removeprefix("www.") for d in [*org.email_domains, *org.web_domains]}
+    return parsed if any(domain == d or domain.endswith("." + d) for d in owned if d) else None
+
+
+def _sender(org: Org, action: OpenAction | None = None, inbound_target: str | None = None) -> str | None:
+    """Who the organisation's email comes from: the address it chose on its own
+    domain, else its usual reply address. A form-created counterpart has no
+    address of its own, so without a valid from_address it sends nothing."""
+    chosen = own_address(org, action.from_address) if action else None
+    if chosen:
+        return f"{org.name} <{chosen}>"
     if org.kind.startswith("dynamic_"):
         address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
         return f"{org.name} <{address}>" if address else None
@@ -360,7 +388,7 @@ async def handle_open(
 ) -> SimResult:
     """One customer contact in the open world."""
     now, ch = world.now, inbound.channel
-    mode = "email" if ch in {"email", "form"} else ch
+    mode = ch if ch in {"email", "form", "phone", "chat"} else "email"
     others = [o for o in scenario.orgs if o.key != org.key and not o.kind.startswith("dynamic_")]
     case = world.cases.get(org.key)
     case_ref = (case.case_ref if case and case.case_ref else
@@ -372,25 +400,28 @@ async def handle_open(
     action = await choose_action(scenario, world, org, incoming, mode, case_ref, others,
                                  lies_to(world, org.key, falses))
     if action is None:
+        busy = ("Sorry, we're experiencing very high demand and can't take your enquiry right now. "
+                "Please try again later.")
         action = OpenAction(
-            decision="handler_unavailable", summary="No response could be produced.", reply=mode != "email",
-            reply_after_hours=0, subject="", case_status="open", new_offers=[], accept_offer=None,
-            withdraw_offers=False, payments=[], notes_to_others=[],
-            body="Sorry, we're experiencing very high demand and can't take your enquiry right now. "
-                 "Please try again later.")
+            decision="handler_unavailable", summary="No response could be produced.",
+            reply=mode in {"phone", "chat"}, reply_after_hours=0, subject="", case_status="open", new_offers=[],
+            accept_offer=None, withdraw_offers=False, payments=[], notes_to_others=[], body=busy, page_body=busy)
     user_email = scenario.user.email_addresses[0]
     emails: list[tuple[Email, datetime]] = []
     effective_at = now
-    sender = _sender(org, inbound.target if ch == "email" else None)
-    if mode == "email" and action.reply and sender:
+    sender = _sender(org, action, inbound.target if ch == "email" else None)
+    if mode in {"email", "form"} and action.reply and sender:
         effective_at = now + timedelta(hours=max(action.reply_after_hours, 0.02))
         emails.append((_email_for(org, action, eid=f"{inbound.interception_id}-open", thread_id=thread_id,
                                   subject=thread_subject, to=user_email, due=effective_at, sender=sender),
                        effective_at))
     if mode == "email":
-        text = "Email sent." if ch == "email" else "Thank you. Your submission has been received."
-        result = SimResult(immediate_text=text, decision=f"open:{action.decision}",
-                           reply_scheduled=bool(emails), kind="ack" if ch == "email" else "page")
+        result = SimResult(immediate_text="Email sent.", decision=f"open:{action.decision}",
+                           reply_scheduled=bool(emails), kind="ack")
+    elif mode == "form":
+        # The page the website shows straight after the submission; any email follows later.
+        result = SimResult(immediate_text=action.page_body.strip() or "Your submission has been received.",
+                           decision=f"open:{action.decision}", reply_scheduled=bool(emails), kind="page")
     else:
         result = SimResult(immediate_text=action.body, decision=f"open:{action.decision}",
                            kind="transcript" if ch == "phone" else "chat")
@@ -423,7 +454,7 @@ async def _react_to_note(scenario: Scenario, inbound: Inbound, source: Org, targ
     if action is None:
         return
     action.notes_to_others = []
-    sender = _sender(target)
+    sender = _sender(target, action)
     emails: list[tuple[Email, datetime]] = []
     effective_at = world.now
     if action.reply and sender:
