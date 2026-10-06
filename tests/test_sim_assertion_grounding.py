@@ -117,6 +117,16 @@ def test_accurate_followup_is_not_a_false_earlier_claim_and_inputs_are_unchanged
     assert before == (w.model_dump(), a.model_dump(), message.model_dump())
 
 
+def test_an_undated_earlier_claim_is_too_ambiguous_to_count_as_a_lie() -> None:
+    # An undated request does not establish an earlier claim to the company.
+    message = inbound("The traveller asked me to seek a refund following a cancellation; please advise.")
+    a = assertions(says_earlier_claim_made=True, earlier_claim_date=None)
+    assert not any(f.startswith("earlier_claim") for f in false_assertions(a, SC, world(), message, RETAILER))
+    dated = inbound("I previously requested a refund on 21 August 2026.")
+    a = assertions(says_earlier_claim_made=True, earlier_claim_date=DAY)
+    assert any(f.startswith("earlier_claim") for f in false_assertions(a, SC, world(), dated, RETAILER))
+
+
 @pytest.mark.parametrize("body", [
     "Avanti has approved my refund.",
     "Avanti West Coast authorised Trainline to refund me.",
