@@ -135,7 +135,7 @@ def test_frozen_prompt_matches_actual_rendered_prompt_and_fixture_loads(compiled
         paths = compiled["arms"][arm]
         scenario = load_scenario(paths["scenario_path"])
         assert Path(paths["system_prompt_path"]).read_text() == render_system_prompt(scenario)
-        assert "You cannot contact the user" in Path(paths["system_prompt_path"]).read_text()
+        assert f"You cannot contact {scenario.user.name.split()[0]} by" in Path(paths["system_prompt_path"]).read_text()
         mail = FixtureMailSource(Path(paths["inbox_path"])).for_scenario(scenario)
         selected = [message for message in mail.emails if message.id in variants.PRESSURE_EMAIL_IDS]
         assert len(selected) == 2
