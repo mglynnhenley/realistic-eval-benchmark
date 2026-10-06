@@ -1,7 +1,8 @@
 """Tools -> counterparty simulator boundary. SHARED CONTRACT: change only by agreement.
 
-Published mail and configured browser forms intercept a write action, then call `dispatch()` from
-refund_eval/sim/router.py with an Inbound. The simulator decides and writes the
+Published mail and every browser navigation write (a form submission on any site, a non-GET
+navigation, or a page load carrying message fields) intercept the action, then call `dispatch()`
+from refund_eval/sim/router.py with an Inbound. The simulator decides and writes the
 reply, updates the world (cases, claims, offers, transfers, pending mail) and
 returns a SimResult telling the tool what to show the agent right now.
 """

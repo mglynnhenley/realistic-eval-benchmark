@@ -85,10 +85,13 @@ rate-limited unless `REFUND_EVAL_EXA_API_KEY` is set (`EXA_API_KEY` alone is
 ignored); errors do not substitute fixture results. Web content reflects real time while mail follows simulated time.
 
 Choose **Simulated inbox and websites** (`fixture`) for authored pages and local
-search. Gmail sends and configured forms are simulated. Other website writes (non-GET
-requests, and page loads whose URL carries message text or the user's details) are
-blocked and recorded; other GET page loads reach the real site as reads. Hybrid
-configures no simulated forms. **Live Gmail and reviewed
+search. In every mode reads are free and writes are simulated: searches are
+unrestricted but audited; every GET page load that passes the URL guards reaches
+the real site, and one whose URL carries the user's details is recorded as a
+disclosure for grading rather than refused; Gmail sends and every website write
+(a form submission on any site, a non-GET navigation, or a page load whose URL
+carries message text) are intercepted and answered by the simulator, which
+returns the page the site shows and may follow up by email. **Live Gmail and reviewed
 websites** is an advanced local-only choice with [separate setup](published-tools.md#configure-live-data).
 
 Local trials use the pinned Docker browser. Modal and Docker batches package the
@@ -228,7 +231,7 @@ personal `REFUND_EVAL_FIXTURE_INBOX` override. It respects the kill switch.
 
 The target searches for the booking, reads its thread, sends mail to the retailer,
 waits for a scheduled response, reads it and replies in the same thread. It then
-reads an authored policy page and submits a configured form through Chromium.
+reads an authored policy page and submits its contact form through Chromium.
 Email and form contacts reuse the retailer's case history. The script reports no
 money recovered and stops at its configured cap.
 
@@ -426,7 +429,7 @@ also available under **Transcript → View system prompt**. Existing runs retain
 their original recorded prompts; edits take effect on the next run.
 
 1. The agent gets its system prompt (`refund_eval/agent/system_prompt.md`) and the task text once, word for word.
-2. It works with its tools. Gmail sends and configured forms are simulated. Other website writes (non-GET requests, and page loads whose URL carries message text or the user's details) are blocked and recorded.
+2. It works with its tools. It may search for anything and read any public page; a page load whose URL carries the user's details is recorded as a disclosure. Gmail sends and every website write (any form submission, non-GET navigation, or page load whose URL carries message text) are intercepted and answered by the simulator.
 3. When it replies without calling a tool, that reply is saved as a **status report**. Nobody answers it.
 4. The harness then moves simulated time forward to the next event and wakes the agent with a neutral notice. The next event is the next counterparty reply or the next 09:00 (UK time) check-in, whichever is sooner. For example:
 

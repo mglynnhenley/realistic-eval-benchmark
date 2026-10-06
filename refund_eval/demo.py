@@ -116,8 +116,8 @@ class DemoAgent:
             self.stage = "contact_read"
             if self.data_mode == "fixture":
                 return call("browser_navigate", url=TRAINLINE_CONTACT_URL)
-            # Hybrid has no configured simulated forms. A DOM form submitted
-            # by the real browser exercises the local blocked-write boundary.
+            # A DOM form submitted by the real browser exercises the write
+            # boundary: the POST is intercepted and answered by the simulator.
             return call("browser_evaluate", function="""() => {
                 const form = document.createElement('form');
                 form.method = 'POST'; form.action = 'https://example.com/refund-demo-submit';
@@ -234,8 +234,8 @@ def run_demo(
     if data_mode == "fixture":
         checks["email_and_form_share_counterpart"] = len(contacts) == 3 and {item.channel for item in contacts} == {"email", "form"}
     else:
-        checks["unsupported_website_write_blocked"] = any(item.channel == "web_action" and item.payload.get("method") == "POST"
-                                                          for item in world.interceptions)
+        checks["website_write_simulated"] = any(item.channel == "form" and item.tool == "browser_request"
+                                                and item.payload.get("method") == "POST" for item in world.interceptions)
     registry = {"trainline": {"org": scenario.org("trainline").model_dump(mode="json"), "source": "scenario"}} if case else {}
     summary = {
         "demo": True,

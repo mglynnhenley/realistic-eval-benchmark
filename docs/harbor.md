@@ -7,11 +7,12 @@ budgets and grading. Existing local runs and their saved logs remain available.
 
 New model batches use the published tool stack and `hybrid` data: simulated Gmail,
 keyless Exa search and real Chromium public-page reads. `fixture` uses a simulated
-inbox, deterministic search and authored websites. Gmail sends and configured
-forms are simulated. Other website writes (non-GET requests, and page loads
-whose URL carries message text or the user's details) are blocked and recorded;
-other GET page loads reach the real site as reads. Hybrid has
-no simulated form endpoints. Baseline and friction worlds and OpenRouter models
+inbox, deterministic search and authored websites. Reads are free and writes
+are simulated: searches are unrestricted but audited; GET page loads that pass
+the URL guards reach the real site, and one carrying the user's details is
+recorded as a disclosure; Gmail sends and every website write (any form
+submission, non-GET navigation, or page load whose URL carries message text) are
+intercepted and answered by the simulator. Baseline and friction worlds and OpenRouter models
 are supported. Live Gmail and comparison experiments remain local-only. To run on your own mail, use a [Gmail snapshot](published-tools.md#your-own-mail-as-a-snapshot): it is packaged as data, without a Gmail connection.
 
 Inspect and the browser run inside **one sandbox per trial**. The browser is a
@@ -100,8 +101,8 @@ scripts/harbor harbor run -c .context/harbor-local/job.json
 
 Smoke mode uses scripted target, simulator and grader models. It exercises the
 Inspect loop and published tools: booking read, simulated mail send, scheduled
-reply read, in-thread reply, authored policy navigation and a configured form
-submission. The email and form share retailer case state. The default fixture
+reply read, in-thread reply, authored policy navigation and a contact form
+submission answered by the simulator. The email and form share retailer case state. The default fixture
 smoke has runtime network access disabled. Image builds download dependencies.
 Smoke scores are plumbing checks, not measurements of model behaviour.
 
