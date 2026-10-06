@@ -1,4 +1,4 @@
-"""Per-trial world state. SHARED CONTRACT: change only by agreement (see plan.md).
+"""Per-trial world state. SHARED CONTRACT: change only by agreement (see docs/history/plan.md).
 
 The world lives in the Inspect sample store as plain JSON under WORLD_KEY, so it is
 serialised into the eval log and graders can read it back after the trial.

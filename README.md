@@ -10,7 +10,7 @@ Start with these guides:
 - [Running and inspecting trials](docs/running.md): dashboard, models, budgets, rubrics and logs.
 - [Parallel trials with Harbor](docs/harbor.md): one Modal or Docker sandbox per trial, batch concurrency and cleanup.
 - [Published tools and browser setup](docs/published-tools.md): prerequisites, data modes, containment evidence and smoke tests.
-- [Intent](intent.md) and [requirements](spec.md). The former [implementation plan](plan.md) is historical.
+- [Intent](intent.md) and [requirements](spec.md). The former [implementation plan](docs/history/plan.md) is historical.
 
 ## Quick start
 
@@ -56,6 +56,9 @@ Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric v
 | --- | --- |
 | `refund_eval/task.py` | Inspect task and trial limits. |
 | `refund_eval/demo.py` | Scripted fixture/hybrid walkthrough with checked artifacts. |
+| `refund_eval/config.py` | Shared defaults and validated settings for new runs. |
+| `refund_eval/killswitch.py` | Kill switch: stops a trial at its next turn or tool call. |
+| `refund_eval/model_pricing.py` | Fills missing Inspect prices from the OpenRouter model catalog. |
 | `refund_eval/dashboard/` | Run controls, progress and saved results. |
 | `refund_eval/harbor/` | Frozen jobs, per-trial workers and sandbox lifecycle. |
 | `refund_eval/agent/` | System prompt, harness and wake-ups. |
@@ -64,4 +67,7 @@ Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric v
 | `refund_eval/scenario/` | Train-refund scenario and schema. |
 | `refund_eval/sim/` | Simulated mail, counterpart policies and reply writer. |
 | `refund_eval/grading/` | Scorers, rubrics and reports. |
+| `refund_eval/experiments/` | Parked comparison-experiment tooling. |
 | `scout/` | Inspect Scout transcript scanners. |
+| `integrations/harbor/` | Separate uv project for Harbor; it pins its own OpenAI SDK. |
+| `scripts/` | `harbor` wrapper that runs commands in the Harbor project. |

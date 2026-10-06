@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fixtures_harness.fakes import scenario
+from fixtures.harness_fakes import scenario
 
 from refund_eval.agent.prompt import PROMPT_PATH, render_system_prompt
 

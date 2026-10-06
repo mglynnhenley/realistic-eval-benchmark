@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 
-from fixtures_harness.fakes import isolated_harness  # noqa: F401  (autouse fixture)
+from fixtures.harness_fakes import isolated_harness  # noqa: F401  (autouse fixture)
 
 from refund_eval.agent.harness import initial_world, wake
 from refund_eval.agent.schedule import (
@@ -190,7 +190,7 @@ def test_new_mail_that_never_arrives_falls_back_to_checkin(monkeypatch):
 
 
 def test_initial_world_seeds_overlay_and_clock():
-    from fixtures_harness.fakes import scenario
+    from fixtures.harness_fakes import scenario
 
     sc = scenario()
     w = initial_world(sc)

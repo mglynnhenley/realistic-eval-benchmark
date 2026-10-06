@@ -86,8 +86,9 @@ them so every call is audited (`published/adapter.py`). The model sees the tools
   inbox plus simulated replies. Reads are local. Sends and replies are intercepted: the message is
   recorded, passed to the simulator, and appears in Sent. In `live` mode (local-only, untested against
   a real inbox) reads come from a real Gmail account and sends are still intercepted.
-- **Search** (`published/search.py`). Keyless Exa `web_search_exa`, real results. A policy refuses
-  queries that contain the user's own details or credential-shaped text.
+- **Search** (`published/search.py`). Exa `web_search_exa`, real results; keyless unless
+  `REFUND_EVAL_EXA_API_KEY` is set. A policy refuses queries that contain the user's own details or
+  credential-shaped text.
 - **Browser** (`published/browser.py`, `browser_runtimes.py`, `browser_runtime/server.mjs`). The
   upstream Playwright MCP server runs Chromium inside the sandbox with its network cut off. Every HTTP
   request the page makes is paused and sent to the Python side, which decides (`published/network.py`):

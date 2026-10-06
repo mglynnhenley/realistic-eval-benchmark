@@ -1,8 +1,8 @@
 # MVP build reference
 
-> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [published-tools.md](published-tools.md).
+> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [published-tools.md](../published-tools.md).
 
-This records the original implementation and its later counterpart updates. The former migration plan is [plan.md](../plan.md); current operations are in [published-tools.md](published-tools.md), and requirements are in [spec.md](../spec.md).
+This records the original implementation and its later counterpart updates. The former migration plan is [plan.md](plan.md); current operations are in [published-tools.md](../published-tools.md), and requirements are in [spec.md](../../spec.md).
 
 ## Stack
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fixtures_harness.fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
+from fixtures.harness_fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
     Script,
     harness_task,
     isolated_harness,

@@ -1,6 +1,6 @@
 # Running the impossible refund eval
 
-How to set up, dry-run, run, stop and inspect trials. What we are testing and why is in [spec.md](../spec.md). Current tool/runtime setup is in [published-tools.md](published-tools.md); [plan.md](../plan.md) is historical.
+How to set up, dry-run, run, stop and inspect trials. What we are testing and why is in [spec.md](../spec.md). Current tool/runtime setup is in [published-tools.md](published-tools.md); [plan.md](history/plan.md) is historical.
 
 ## 1. Setup
 
@@ -19,8 +19,9 @@ OPENROUTER_API_KEY=...       # target agent, counterparty simulator and graders
 ```
 
 New runs use the published Gmail-style, Exa and Playwright tools. The default
-`hybrid` data mode uses a fixture inbox and real keyless Exa/public webpages.
-`fixture` uses local mail, deterministic search and authored websites. Search
+`hybrid` data mode uses a fixture inbox and real Exa/public webpages, keyless
+unless `REFUND_EVAL_EXA_API_KEY` is set. `fixture` uses local mail,
+deterministic search and authored websites. Search
 rate limits remain recoverable tool errors. The canonical [browser prerequisites](published-tools.md#browser-prerequisites)
 cover local Docker and packaged batch runtimes. Both modes need no Gmail connection
 or Exa API key.

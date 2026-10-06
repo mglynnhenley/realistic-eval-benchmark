@@ -38,6 +38,6 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "browser: real Chromium smoke (set REFUND_EVAL_BROWSER_SMOKE=1; see docs/published-tools.md)",
-    "hybrid: real keyless Exa and public-web smoke (set REFUND_EVAL_HYBRID_SMOKE=1)",
+    "hybrid: real Exa (keyless unless REFUND_EVAL_EXA_API_KEY is set) and public-web smoke (set REFUND_EVAL_HYBRID_SMOKE=1)",
     "harbor: Harbor runner integration (run through scripts/harbor)",
 ]
