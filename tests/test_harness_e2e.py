@@ -13,7 +13,7 @@ import re
 from datetime import timedelta
 
 import pytest
-from fixtures_harness.fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
+from fixtures.harness_fakes import (  # noqa: F401  (isolated_harness is an autouse fixture)
     Script,
     harness_task,
     isolated_harness,

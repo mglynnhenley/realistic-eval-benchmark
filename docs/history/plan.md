@@ -1,11 +1,11 @@
 # Build plan — published tools in Inspect
 
-> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [docs/published-tools.md](docs/published-tools.md).
+> Historical reference — 2026-10-04. This records an earlier design or implementation and is not an operational runbook. Current tools, data modes and runtime limits are documented in [docs/published-tools.md](../published-tools.md).
 
-Status: integration implemented and offline validation complete. See [setup and current limitations](docs/published-tools.md).
+Status: integration implemented and offline validation complete. See [setup and current limitations](../published-tools.md).
 Gmail is not connected yet; live sending capability remains a setup dependency.
-Requirements: [spec.md](spec.md). Background: [docs/real-tools.md](docs/real-tools.md).
-Original implementation notes: [MVP build reference](docs/mvp-build-plan.md).
+Requirements: [spec.md](../../spec.md). Background: [real-tools.md](real-tools.md).
+Original implementation notes: [MVP build reference](mvp-build-plan.md).
 
 ## Agreed direction
 
@@ -220,7 +220,7 @@ Implementation resumed on the user's instruction. The published profile is wired
 dashboard, with offline contract tests and an actual pinned Playwright container for containment tests.
 The original tools remain as the explicitly labelled legacy profile. Gmail catalog discovery is ready,
 but no authenticated account is connected and native send/reply capability remains unverified. The
-live-read pilot and cross-model behavioral runs have not been performed. See the [runbook](docs/published-tools.md)
+live-read pilot and cross-model behavioral runs have not been performed. See the [runbook](../published-tools.md)
 for the supported read/form surface and setup. OpenClaw is not used.
 
 Validation on 2026-10-01 covers the regression suite, the real pinned Playwright/Chromium container,
@@ -233,4 +233,4 @@ model trial or cross-model behavioral comparison was performed.
 - [Exa MCP documentation](https://exa.ai/docs/get-started/exa-mcp); the captured live schema is in [the search service](refund_eval/published/search.py).
 - [Playwright MCP](https://github.com/microsoft/playwright-mcp)
 - [Provisional email candidate, immutable source](https://github.com/klodr/gmail-mcp/tree/ddb9da01c6552b549125f612e11772b1db25db86)
-- [Existing browser containment review](.context/browser-containment-redteam.md)
+- [Existing browser containment review](../../.context/browser-containment-redteam.md)

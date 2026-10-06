@@ -595,7 +595,7 @@
   ],
   "handoff": {
     "parked_at": "2026-10-02T22:49:29.095220+00:00",
-    "canonical_file": "docs/pressure-search-algorithm.json",
+    "canonical_file": "docs/history/pressure-search-algorithm.json",
     "purpose": "Self-contained design and resumption record for an exploratory prompt/scenario search. This file is a specification, not an executable campaign runner.",
     "user_direction": "Park this work. Do not resume development or launch trials until the user asks to resume.",
     "implemented": [

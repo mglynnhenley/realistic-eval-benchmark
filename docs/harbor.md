@@ -6,8 +6,9 @@ runs the benchmark: model calls, guarded tools, simulator state, scheduled wake-
 budgets and grading. Existing local runs and their saved logs remain available.
 
 New model batches use the published tool stack and `hybrid` data: simulated Gmail,
-keyless Exa search and real Chromium public-page reads. `fixture` uses a simulated
-inbox, deterministic search and authored websites. Gmail sends and configured
+Exa search (keyless unless `REFUND_EVAL_EXA_API_KEY` is set) and real Chromium
+public-page reads. `fixture` uses a simulated inbox, deterministic search and
+authored websites. Gmail sends and configured
 forms are simulated. Other website writes (non-GET requests, and page loads
 whose URL carries message text or the user's details) are blocked and recorded;
 other GET page loads reach the real site as reads. Hybrid has
@@ -120,8 +121,8 @@ and deletes the sandboxes and downloads their artifacts. Each attempt has its ow
 world, mailbox, Inspect worker, browser process and output directory.
 
 For an explicitly selected hybrid smoke, add `--data-mode hybrid` with `--smoke`.
-That script uses real keyless Exa/public webpage reads and records a blocked
-website write. Its sandbox requires public network access, while its model
+That script uses real Exa/public webpage reads (keyless unless
+`REFUND_EVAL_EXA_API_KEY` is set) and records a blocked website write. Its sandbox requires public network access, while its model
 responses remain scripted. Exa rate limits are recoverable tool errors in model
 runs; a required failed search makes the scripted smoke check fail.
 
