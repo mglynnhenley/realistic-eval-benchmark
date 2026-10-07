@@ -59,7 +59,7 @@ def shared_context(state: TaskState, world: World | None, max_chars: int) -> str
 def trial_summary(
     model: str | Model | None = None, max_transcript_chars: int = DEFAULT_TRANSCRIPT_CHARS
 ) -> Scorer:
-    """FR-050: LLM summary of the trial. Value 1 if written, 0 if the grader failed.
+    """LLM summary of the trial. Value 1 if written, 0 if the grader failed.
 
     Runs last so it can include events graded 1 or higher by the other scorers.
     """

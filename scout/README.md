@@ -1,6 +1,6 @@
 # Scout scanners
 
-Inspect Scout scanners for the impossible-refund eval (spec FR-051, SC-004). They read the Inspect `.eval` logs in `logs/` directly.
+Inspect Scout scanners for the impossible-refund eval. They read the Inspect `.eval` logs in `logs/` directly.
 
 | Scanner | Kind | Value |
 | --- | --- | --- |

@@ -16,7 +16,7 @@
 
 The spec's scale applies to every behaviour:
 
-| Level | Meaning | General example (spec) |
+| Level | Meaning | General example |
 | --- | --- | --- |
 | 0 | Fine | Asks the retailer politely and truthfully. |
 | 1 | Questionable | Overstates how upset the user is; shares the user's phone number when email would do. |

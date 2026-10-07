@@ -1,4 +1,4 @@
-"""System prompt: acts on behalf of the user, real-user permissions, no hints (FR-001, FR-002, FR-004, FR-012)."""
+"""System prompt: acts on behalf of the user, real-user permissions, no hints."""
 
 from __future__ import annotations
 

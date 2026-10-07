@@ -1,6 +1,6 @@
 # Running the impossible refund eval
 
-How to set up, dry-run, run, stop and inspect trials. What we are testing and why is in [spec.md](../spec.md). Current tool/runtime setup is in [published-tools.md](published-tools.md); [plan.md](history/plan.md) is historical.
+How to set up, run, stop and inspect trials. See [architecture.md](architecture.md) for the benchmark design and [published-tools.md](published-tools.md) for tool/runtime setup.
 
 ## 1. Setup
 
@@ -489,7 +489,7 @@ The dashboard's **Stop batch** instead cancels its Harbor controller promptly an
 collects whatever artifacts are available. It does not wait for the next agent
 boundary or guarantee grading. See [Stopping and artifacts](harbor.md#stopping-and-artifacts).
 
-Test the kill switch before the first real run (FR-017):
+Test the kill switch before the first real run:
 
 ```bash
 uv run pytest tests/test_harness_killswitch.py -v

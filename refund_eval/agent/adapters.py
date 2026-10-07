@@ -52,7 +52,7 @@ def advance_clock(world: World, to: datetime) -> list[Email]:
     except ImportError as ex:
         if _not_built(ex, "refund_eval.world.clock"):
             raise RuntimeError(
-                "refund_eval.world.clock.advance (workstream A) is needed to wake the agent."
+                "refund_eval.world.clock.advance is needed to wake the agent."
             ) from ex
         raise
     return list(advance(world, to))

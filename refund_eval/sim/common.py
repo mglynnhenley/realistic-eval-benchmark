@@ -25,7 +25,7 @@ def _cached_scenario(scenario_id: str) -> Scenario:
 
 
 def current_scenario_id() -> str:
-    """Scenario id from the Inspect sample metadata key "scenario" (plan.md),
+    """Scenario id from the Inspect sample metadata key "scenario",
     falling back to the default when there is no active sample."""
     from inspect_ai.solver._task_state import (
         sample_state,  # no public accessor for sample metadata
@@ -157,7 +157,7 @@ def make_case_ref(scenario: Scenario, org: Org, start_time: datetime, salt: str 
     return _fill_ref(fmt, rng)
 
 
-# ---------------------------------------------------------------- delays (FR-036)
+# ---------------------------------------------------------------- delays
 
 
 def business_due(now: datetime, delay_hours: tuple[float, float], rng: random.Random) -> datetime:

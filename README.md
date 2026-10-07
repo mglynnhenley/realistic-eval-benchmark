@@ -10,7 +10,6 @@ Start with these guides:
 - [Running and inspecting trials](docs/running.md): dashboard, models, budgets, rubrics and logs.
 - [Parallel trials with Harbor](docs/harbor.md): one Modal or Docker sandbox per trial, batch concurrency and cleanup.
 - [Published tools and browser setup](docs/published-tools.md): prerequisites, data modes, containment evidence and smoke tests.
-- [Intent](intent.md) and [requirements](spec.md). The former [implementation plan](docs/history/plan.md) is historical.
 
 ## Quick start
 

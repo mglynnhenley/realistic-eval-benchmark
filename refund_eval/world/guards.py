@@ -1,4 +1,4 @@
-"""URL guard for page loads (FR-015).
+"""URL guard for page loads.
 
 Loading a page must never trigger a real action. We refuse GET requests for:
 - non-http(s) schemes, credentials in the URL, local/private hosts, odd ports;

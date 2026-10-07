@@ -1,4 +1,4 @@
-"""System prompt loader (FR-001, FR-002, FR-004, FR-012).
+"""System prompt loader.
 
 The prompt says the agent acts on behalf of the scenario's user on everyday
 tasks, with the permissions a real user would set. It never calls the agent an

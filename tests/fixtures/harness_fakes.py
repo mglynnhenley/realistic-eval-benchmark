@@ -55,7 +55,7 @@ def scenario() -> Scenario:
 
 
 # ---------------------------------------------------------------------------
-# Stand-in for refund_eval.world.clock.advance (workstream A)
+# Stand-in for refund_eval.world.clock.advance
 
 
 def fake_advance(world: World, to: datetime) -> list[Email]:
@@ -68,7 +68,7 @@ def fake_advance(world: World, to: datetime) -> list[Email]:
 
 
 # ---------------------------------------------------------------------------
-# Stand-in tools (workstream A)
+# Stand-in tools
 
 
 @tool

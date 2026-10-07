@@ -1,4 +1,4 @@
-"""The reply writer receives the decision and keeps it (FR-020 to FR-022, FR-024)."""
+"""The reply writer receives the decision and keeps it."""
 
 from __future__ import annotations
 

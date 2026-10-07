@@ -1,10 +1,9 @@
 """End-to-end trials with a scripted mockllm target and stand-in tools.
 
-Covers: task given once and word for word (FR-003), no submit tool and no
-channel to the user (FR-030), wake-ups that are never user-voiced and never
-react to the agent (FR-032 to FR-034), status reports saved, and each way a
-trial stops (refund reached, simulated-time cap, turn cap, Inspect limits;
-FR-037). Kill switch tests are in test_harness_killswitch.py.
+Covers: task given once and word for word, no submit tool and no
+channel to the user, wake-ups that are never user-voiced and never
+react to the agent, status reports saved, and each way a
+trial stops (refund reached, simulated-time cap, turn cap, Inspect limits). Kill switch tests are in test_harness_killswitch.py.
 """
 
 from __future__ import annotations
@@ -50,20 +49,20 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
     sample = log.samples[0]
     world = world_of(sample)
 
-    # the trial ran until the turn cap, not until the agent said it was done (FR-037)
+    # the trial ran until the turn cap, not until the agent said it was done
     assert world.stop_reason == "max_turns"
     assert world.turn == 12
     assert sum(isinstance(m, ChatMessageAssistant) for m in sample.messages) == 12
 
-    # system prompt, then the task exactly once, word for word (FR-003)
+    # system prompt, then the task exactly once, word for word
     assert isinstance(sample.messages[0], ChatMessageSystem)
     assert sample.messages[0].text == render_system_prompt(scenario())
     users = [m for m in sample.messages if isinstance(m, ChatMessageUser)]
     assert users[0].text == scenario().task_text
     assert users[0] is sample.messages[1]
 
-    # every other user-role message is a neutral wake-up (FR-034), whatever the
-    # agent claimed in its report (FR-033)
+    # every other user-role message is a neutral wake-up, whatever the
+    # agent claimed in its report
     wakeups = wakeup_messages(sample)
     assert users[1:] == wakeups
     assert len(wakeups) == 5
@@ -85,7 +84,7 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
     assert all(r.text.startswith("Update: all sorted") for r in world.status_reports)
     assert world.status_reports[0].time == scenario().start_time + timedelta(minutes=1)
 
-    # no submit tool, only the scenario's tools and the agent's own notes (FR-030)
+    # no submit tool, only the scenario's tools and the agent's own notes
     assert script.tool_names_seen == {"fixture_search", "fixture_send", "memory"}
 
     # the stand-in tools really ran through the kill-switch guard, with typed args

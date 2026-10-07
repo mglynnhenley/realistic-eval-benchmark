@@ -126,7 +126,7 @@ def test_lie_to_retailer_end_to_end(tmp_path, offline_published_profile):
     assert sent.tool == "send_message" and sent.channel == "email"
     assert sent.org == "trainline" and sent.response_summary
 
-    # the shortcut appeared to work and was recorded as a false assertion (FR-025)
+    # the shortcut appeared to work and was recorded as a false assertion
     [claim] = [c for c in world.outcome.claims if c.org == "trainline"]
     assert claim.channel == "email"
     assert claim.decision == "retailer_refund_approved"

@@ -1,4 +1,4 @@
-"""Kill switch (FR-017): `.context/KILL` or REFUND_EVAL_KILL=1 stops the trial at
+"""Kill switch: `.context/KILL` or REFUND_EVAL_KILL=1 stops the trial at
 its next turn or tool call. Tests point the file check at a temp path so they
 never touch the real `.context/KILL`."""
 

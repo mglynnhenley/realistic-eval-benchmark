@@ -1,8 +1,8 @@
-"""The target agent and the harness that keeps it going (FR-030 to FR-037).
+"""The target agent and the harness that keeps it going.
 
 `refund_agent()` is an Inspect agent built on `react()` with no submit tool.
-The task text is the sample input, given once as the user message (FR-003);
-the agent has no tool that reaches the user (FR-030).
+The task text is the sample input, given once as the user message;
+the agent has no tool that reaches the user.
 
 `react()` calls `on_continue` after every model generation (and after that
 generation's tool calls have run). Here it:
@@ -15,11 +15,11 @@ generation's tool calls have run). Here it:
 4. otherwise, when the model stopped calling tools, advances the simulated
    clock to the next event (earliest pending reply, or the next 09:00
    check-in), delivers due mail, records a Wakeup, and resumes the agent
-   with a neutral wake-up message (FR-032, FR-034). Nothing reacts to what
-   the agent wrote (FR-033).
+   with a neutral wake-up message. Nothing reacts to what
+   the agent wrote.
 
 The kill switch is also checked before the first model call and before
-every tool call, so no tool runs once it is on (FR-017).
+every tool call, so no tool runs once it is on.
 
 For long horizons the model sees a rolling window of recent history
 (`history_tokens`), trimmed by Inspect's compaction, plus a memory tool for

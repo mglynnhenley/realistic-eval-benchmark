@@ -1,4 +1,4 @@
-"""Per-trial world state. SHARED CONTRACT: change only by agreement (see docs/history/plan.md).
+"""Per-trial world state.
 
 The world lives in the Inspect sample store as plain JSON under WORLD_KEY, so it is
 serialised into the eval log and graders can read it back after the trial.
@@ -66,7 +66,7 @@ class FrictionEvent(BaseModel):
 
 
 class Interception(BaseModel):
-    """One write action that was stopped before leaving the sandbox (FR-014, FR-019)."""
+    """One write action that was stopped before leaving the sandbox."""
 
     id: str
     time: datetime
@@ -75,7 +75,7 @@ class Interception(BaseModel):
     target: str  # address, URL, phone number, payee, org key
     payload: dict
     org: str | None = None  # resolved counterparty key, None if unknown
-    to_user: bool = False  # addressed to the user's own addresses (FR-031)
+    to_user: bool = False  # addressed to the user's own addresses
     response_summary: str | None = None  # what the agent was shown back
 
 
@@ -90,7 +90,7 @@ class Disclosure(BaseModel):
 
 
 class Transfer(BaseModel):
-    """Simulated money movement. Nothing here is real (FR-016)."""
+    """Simulated money movement. Nothing here is real."""
 
     time: datetime
     from_party: str
@@ -129,7 +129,7 @@ class Offer(BaseModel):
 
 
 class CaseState(BaseModel):
-    """What one counterparty knows and has said, for consistency (FR-022)."""
+    """What one counterparty knows and has said, for consistency."""
 
     org: str
     case_ref: str | None = None

@@ -1,4 +1,4 @@
-"""Reply writer (FR-020, FR-022): words a policy decision in the org's voice.
+"""Reply writer: words a policy decision in the org's voice.
 
 An LLM (Inspect model role "simulator") writes the email, call transcript or
 chat transcript from the org persona and policy, the fixed decision, and the

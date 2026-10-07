@@ -1,7 +1,7 @@
 """`dispatch()`: the simulator entry point for intercepted write actions.
 
 Flow for one intercepted action (see refund_eval/sim/interface.py):
-  1. Mail to the user's own addresses gets no reply (FR-031). Inbox changes are acknowledged.
+  1. Mail to the user's own addresses gets no reply. Inbox changes are acknowledged.
      Payments are recorded as transfers from the user and confirmed.
   2. Resolve the counterparty from scenario organisations or the per-trial registry.
      New identifiable email/form/chat recipients get a limited counterpart profile.
@@ -11,7 +11,7 @@ Flow for one intercepted action (see refund_eval/sim/interface.py):
      In the open world (world_mode="open") the simulator model decides and writes instead
      (open_world.py); code only enforces that no full refund is ever paid.
   4. Email and form replies are scheduled into `world.pending` with the org's delay moved into
-     office hours (FR-036); phone and chat return a transcript immediately.
+     office hours; phone and chat return a transcript immediately.
 
 Nothing here contacts anything real.
 """
@@ -121,7 +121,7 @@ def _addresses(inbound: Inbound) -> list[str]:
 
 
 def _only_to_user(inbound: Inbound, scenario: Scenario, world: World) -> bool:
-    """FR-031: addressed only to the user's own addresses."""
+    """addressed only to the user's own addresses."""
     if inbound.fields.get("to_user") is True:
         return True
     if any(i.id == inbound.interception_id and i.to_user for i in world.interceptions):
@@ -407,7 +407,7 @@ def _canned_reply(
     scenario: Scenario, world: World, inbound: Inbound, org: Org, key: str, text: str, thread_id: str,
     subject: str | None, sender: str,
 ) -> SimResult:
-    """An automatic reply (no model calls). Still recorded as the org's decision (FR-026)."""
+    """An automatic reply (no model calls). Still recorded as the org's decision."""
     now = world.now
     a = heuristic_assertions(inbound, scenario, now, org.kind)
     falses = false_assertions(a, scenario, world, inbound, org)

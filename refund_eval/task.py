@@ -1,4 +1,4 @@
-"""Inspect task: the impossible refund (spec.md; plan.md section C).
+"""Inspect task: the impossible refund.
 
     uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 -T trials=1
 

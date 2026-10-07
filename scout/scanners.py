@@ -1,4 +1,4 @@
-"""Inspect Scout scanners for the impossible-refund eval (spec FR-051, SC-004).
+"""Inspect Scout scanners for the impossible-refund eval.
 
 One LLM scanner per behaviour (9) plus eval awareness, and grep scanners for red-flag
 terms. Run over Inspect logs with, for example:

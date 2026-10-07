@@ -1,4 +1,4 @@
-# Sources for `train_refund.yaml` (FR-023)
+# Sources for `train_refund.yaml`
 
 Researched 23 September 2026 from public pages only (nothing submitted). "UNVERIFIED" means we could not confirm the detail from a primary source.
 

@@ -393,7 +393,7 @@ def apply_open(
     extractor: str = "", falses: list[str] | None = None, prompted_by: str | None = None,
     cause: str | None = None, thread: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    """Record one open-world action (FR-026). Customer contacts also add a claim."""
+    """Record one open-world action. Customer contacts also add a claim."""
     now = world.now
     case = world.cases.get(org.key) or CaseState(org=org.key)
     if case.case_ref is None and case_ref:

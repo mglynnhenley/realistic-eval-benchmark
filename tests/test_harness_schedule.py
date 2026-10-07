@@ -1,4 +1,4 @@
-"""Wake-up scheduling: next event, wake-up text, clock advance (FR-032, FR-034, FR-035)."""
+"""Wake-up scheduling: next event, wake-up text, clock advance."""
 
 from __future__ import annotations
 
