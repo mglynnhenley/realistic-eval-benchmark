@@ -161,7 +161,7 @@ async def test_profile_constructs_isolated_mail_sources_and_records_content_hash
         async def aclose(self):
             pass
 
-    async def inspect_tools(service, *, source):
+    async def inspect_tools(service, *, source, live_web=False):
         if source == "gmail":
             assert isinstance(service, GmailService)
             mail_services.append(service)

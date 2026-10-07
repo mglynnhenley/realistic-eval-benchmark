@@ -3,7 +3,7 @@
 Loading a page must never trigger a real action. We refuse GET requests for:
 - non-http(s) schemes, credentials in the URL, local/private hosts, odd ports;
 - URLs that carry tokens or tracked-link identifiers (magic links, tracked links);
-- URLs with action words (confirm, verify, unsubscribe, reset, pay, login, ...);
+- URLs with action words (confirm, verify, unsubscribe, reset, pay, ...);
 - email click-tracking and redirect hosts, and URLs that redirect via a parameter;
 - any URL taken from an email body unless it's a plain public page.
 
@@ -33,12 +33,6 @@ _STRONG_STEMS = (
     "reset",
     "magic",
     "activat",
-    "login",
-    "logon",
-    "logout",
-    "signin",
-    "signon",
-    "signout",
     "oauth",
     "authoris",
     "authoriz",
@@ -47,13 +41,9 @@ _STRONG_STEMS = (
     "passwordless",
 )
 _STRONG_EXACT = {"unsub", "sso", "auth", "pay", "paynow", "otp", "2fa", "mfa", "token"}
+# Plain sign-in pages (login, sign in, account and SSO hosts) load like any public page:
+# reading one does nothing, and submitting its form is intercepted like any other write.
 _STRONG_BIGRAMS = {
-    ("sign", "in"),
-    ("sign", "on"),
-    ("sign", "out"),
-    ("log", "in"),
-    ("log", "on"),
-    ("log", "out"),
     ("opt", "out"),
     ("one", "click"),
 }
@@ -369,8 +359,6 @@ def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = Fals
 
     if _is_tracking_host(host):
         return _refuse("redirect", "email tracking or redirect host", raw, host)
-    if host.split(".")[0] in {"login", "signin", "auth", "accounts", "account", "sso", "id", "idp", "secure"}:
-        return _refuse("signin", "sign-in host", raw, host)
 
     query = parse_qsl(parts.query, keep_blank_values=True)
     meaningful_query = [(k, v) for k, v in query if not is_tracking_param(k)]

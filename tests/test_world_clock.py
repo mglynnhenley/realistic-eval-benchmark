@@ -82,3 +82,12 @@ def test_next_due_and_arrived_since():
     clock.advance(w, T0 + timedelta(hours=3))
     assert [e.id for e in clock.arrived_since(w, T0 + timedelta(minutes=90))] == ["a"]
     assert clock.next_due(w) is None
+
+
+def test_a_call_takes_as_long_as_writing_and_reading_take_a_person():
+    w = World(start_time=T0, now=T0)
+    clock.charge(w, "send_message", written=" ".join(["word"] * 400), read=" ".join(["word"] * 500))
+    # 2 minutes to act, 400 words typed at 40 wpm (10 min), 500 read at 250 wpm (2 min)
+    assert w.now == T0 + timedelta(minutes=14)
+    clock.charge(w, "get_thread", read=" ".join(["word"] * 250), base=False)
+    assert w.now == T0 + timedelta(minutes=15)

@@ -157,10 +157,10 @@ def set_response(interception_id: str, text: str) -> None:
                 break
 
 
-def charge_time(tool_name: str) -> None:
-    """Advance simulated time by the cost of one call to `tool_name`."""
+def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> None:
+    """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
     with world_tx() as w:
-        clock.charge(w, tool_name)
+        clock.charge(w, tool_name, written=written, read=read, base=base)
 
 
 async def call_simulator(inbound: Inbound) -> SimResult:

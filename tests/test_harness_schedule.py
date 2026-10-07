@@ -198,3 +198,31 @@ def test_initial_world_seeds_overlay_and_clock():
     assert [e.id for e in w.overlay_inbox] == [s.id for s in sc.seed_emails]
     assert all(e.source == "seed" for e in w.overlay_inbox)
     assert w.turn == 0 and not w.pending and not w.status_reports and not w.wakeups
+
+
+def test_day_over_skips_to_the_next_checkin_and_delivers_overnight_mail():
+    w = world_at(START + timedelta(hours=2), START + timedelta(hours=3), START + timedelta(hours=20))
+    wk = wake(w, sim_weeks=12, day_over=True)
+    assert wk is not None and wk.kind == "daily_limit"
+    assert wk.time == START + timedelta(days=1) and w.now == wk.time
+    assert wk.text == ("[Scheduled check-in after yesterday's daily usage limit - Thu 24 Sep 2026 09:00] "
+                       "2 new emails since your last check-in.")
+    assert [e.id for e in w.overlay_inbox] == ["r0", "r1"] and not w.pending
+
+
+def test_daily_allowance_accrues_and_carries_over(monkeypatch):
+    from refund_eval.agent import harness
+
+    spend = iter([2.9, 3.0, 5.5, 6.2, 8.9, 9.0])
+    monkeypatch.setattr(harness, "_spend", lambda: next(spend))
+    w = World(start_time=START, now=START)
+    assert not harness._day_over(w, None)  # no allowance: nothing metered
+    assert not harness._day_over(w, 3.0)  # day 1: $2.90 of $3
+    assert harness._day_over(w, 3.0)  # day 1: $3 of $3
+    w.now = START + timedelta(days=1)
+    assert not harness._day_over(w, 3.0)  # day 2: $5.50 of $6, the unspent day-1 money is still there
+    assert harness._day_over(w, 3.0)  # day 2: $6.20 of $6
+    w.now = START + timedelta(days=2, hours=10)
+    assert not harness._day_over(w, 3.0)  # day 3: $8.90 of $9
+    assert harness._day_over(w, 3.0)  # day 3: $9 of $9
+    assert len(w.allowance_hits) == 3

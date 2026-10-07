@@ -178,14 +178,20 @@ async def run_batch(directory: Path) -> int:
             simulator_model=config["simulator_model"] if config["mode"] == "model" else None,
             grader_model=config["grader_model"] if config["mode"] == "model" else None,
             rubric_set=read(directory / "rubrics.json"),
+            llm_grading=config.get("llm_grading", True),
+            daily_allowance=config.get("daily_allowance"),
+            use_full_allowance=config.get("use_full_allowance", False),
+            scenario=config.get("scenario", "train_refund"),
             inbox_sha256=config.get("inbox_sha256"),
+            resume_sha256=config.get("resume_sha256"),
         )
         inbox = None
         if config.get("inbox_snapshot"):
             from refund_eval.world.snapshot_store import snapshot_path
 
             inbox = snapshot_path(config["inbox_snapshot"])
-        path = prepare(directory / "harbor", settings=settings, inbox=inbox,
+        resume = Path(config["resume_log"]) if config.get("resume_log") else None
+        path = prepare(directory / "harbor", settings=settings, inbox=inbox, resume=resume,
                        models=batch_models(config),
                        environment=config["execution"], trials=config["trials"], concurrency=config["concurrency"])
         job_config = JobConfig.model_validate_json(path.read_text())

@@ -25,7 +25,13 @@ from inspect_ai.model import (
 
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
-from refund_eval.config import DEFAULT_ROLE_MODEL, DEFAULT_TARGET_MODEL, RunConfig
+from refund_eval.agent.prompt import task_message
+from refund_eval.config import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_ROLE_MODEL,
+    DEFAULT_TARGET_MODEL,
+    RunConfig,
+)
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.scenario.schema import load_scenario
 
@@ -49,6 +55,10 @@ DEFAULT_MODEL_COSTS: dict[str, ModelCost] = {
     # tokens; the budget counts the base rate.
     DEFAULT_ROLE_MODEL: ModelCost(
         input=10.0, output=50.0, input_cache_write=12.5, input_cache_read=1.0
+    ),
+    # Verified 2026-10-06.
+    DEFAULT_GRADER_MODEL: ModelCost(
+        input=1.0, output=5.0, input_cache_write=1.25, input_cache_read=0.10
     ),
 }
 _FREE = ModelCost(input=0.0, output=0.0, input_cache_write=0.0, input_cache_read=0.0)
@@ -92,8 +102,11 @@ def _is_mock(model: str | None) -> bool:
 def default_model_roles(eval_model: str | None) -> dict[str, str]:
     """Roles not already given with --model-role / eval(model_roles=...)."""
     given = model_roles()
-    fallback = DRY_RUN_ROLE_MODEL if _is_mock(eval_model) else DEFAULT_ROLE_MODEL
-    return {role: fallback for role in MODEL_ROLES if role not in given}
+    if _is_mock(eval_model):
+        defaults = dict.fromkeys(MODEL_ROLES, DRY_RUN_ROLE_MODEL)
+    else:
+        defaults = {"simulator": DEFAULT_ROLE_MODEL, "grader": DEFAULT_GRADER_MODEL}
+    return {role: defaults[role] for role in MODEL_ROLES if role not in given}
 
 
 def _given_role_models() -> list[str]:
@@ -146,6 +159,10 @@ def impossible_refund(
     initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
+    llm_grading: bool = True,
+    resume_log: str | None = None,
+    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
+    use_full_allowance: bool = False,
 ) -> Task:
     """The impossible refund.
 
@@ -159,6 +176,8 @@ def impossible_refund(
       cost_limit: Per-trial model spend cap in dollars (Inspect cost_limit;
         counts every model call in the trial, including the simulator).
       sim_weeks: Per-trial cap on simulated time.
+      daily_allowance: Worst-case dollars of model spend per simulated day (same calls as
+        cost_limit). An agent that uses it up stops for the day and wakes at the next check-in.
       message_limit: Optional Inspect message limit.
       token_limit: Optional Inspect token limit.
       time_limit: Optional Inspect wall-clock limit in seconds.
@@ -251,20 +270,23 @@ def impossible_refund(
     roles = default_model_roles(eval_model)
     register_default_costs(
         [m for m in [eval_model, *roles.values(), *_given_role_models()] if m],
-        fetch_openrouter=cost_limit is not None,
+        fetch_openrouter=cost_limit is not None or daily_allowance is not None,
     )
 
     if rubric_set is not None:
         from refund_eval.grading.behaviours import BehaviourSnapshot
 
         rubric_set = BehaviourSnapshot.model_validate(rubric_set).model_dump(mode="json")
-    scorers = adapters.load_scorers() if rubric_set is None else adapters.load_scorers(rubric_set)
+    if not llm_grading:
+        scorers = adapters.load_scorers(rubric_set, llm=False)
+    else:
+        scorers = adapters.load_scorers() if rubric_set is None else adapters.load_scorers(rubric_set)
 
     return Task(
         dataset=[
             Sample(
                 id=sc.id,
-                input=sc.task_text,
+                input=task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),
@@ -292,6 +314,9 @@ def impossible_refund(
             research_mode=research_mode,
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
+            **({"resume_log": resume_log} if resume_log else {}),
+            **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
+            **({"use_full_allowance": True} if use_full_allowance else {}),
         ),
         scorer=scorers or None,
         epochs=trials,
@@ -309,6 +334,7 @@ def impossible_refund(
             "max_turns": max_turns,
             "history_tokens": history_tokens,
             "sim_weeks": sim_weeks,
+            **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
             **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"world_mode": world_mode} if world_mode != "baseline" else {}),

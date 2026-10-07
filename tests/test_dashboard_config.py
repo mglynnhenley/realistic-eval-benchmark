@@ -9,7 +9,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from refund_eval.config import DEFAULT_ROLE_MODEL, DEFAULT_TARGET_MODEL
+from refund_eval.config import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_ROLE_MODEL,
+    DEFAULT_TARGET_MODEL,
+)
 from refund_eval.dashboard import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,7 +81,8 @@ def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
         record = manager.start(server.RunConfig(mode="model"))
         config = json.loads((manager.directory(record["id"]) / "config.json").read_text())
         assert config["model"] == "openrouter/anthropic/claude-opus-5"
-        assert config["simulator_model"] == config["grader_model"] == "openrouter/openai/gpt-6-astra"
+        assert config["simulator_model"] == "openrouter/openai/gpt-6-astra"
+        assert config["grader_model"] == "openrouter/anthropic/claude-haiku-4.5"
         assert launched["env"]["OPENROUTER_API_KEY"] == "test-openrouter-key"
         assert "ANTHROPIC_API_KEY" not in launched["env"]
         assert "OPENAI_API_KEY" not in launched["env"]
@@ -288,7 +293,7 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
     config = server.RunConfig(mode="model")
     # The override moves the target only; the roles keep their own default.
     assert config.model == chosen
-    assert config.simulator_model == config.grader_model == DEFAULT_ROLE_MODEL
+    assert (config.simulator_model, config.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     public = server.public_config()
     assert (public["default_model"], public["default_role_model"]) == (chosen, DEFAULT_ROLE_MODEL)
     assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 20, 1.0)
@@ -321,7 +326,7 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
         assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
         assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
         assert preset.model == model
-        assert preset.simulator_model == preset.grader_model == DEFAULT_ROLE_MODEL
+        assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     manager = server.RunManager(tmp_path / "runs")
     try:
         record = manager.start(longer)
@@ -513,3 +518,20 @@ def test_published_interceptions_count_as_organisation_contact():
     assert contact_attempts(attempts) == [True, True, True, True, False, False, False, False]
     # The rendered "On the other side" cards must use this same classification.
     assert "window.RefundActivity.contactAttempt(attempt)" in (STATIC / "app.js").read_text()
+
+
+def test_unknown_model_ids_are_caught_before_launch_with_suggestions():
+    from refund_eval.dashboard.models import unknown_models
+
+    catalog = {"all_ids": ["openrouter/openai/gpt-6-astra", "openrouter/anthropic/claude-opus-5.5",
+                           "openrouter/anthropic/claude-haiku-4.5", "openrouter/some/embedder"],
+               "models": [{"id": "openrouter/openai/gpt-6-astra"}, {"id": "openrouter/anthropic/claude-opus-5.5"},
+                          {"id": "openrouter/anthropic/claude-haiku-4.5"}]}
+    ok = {"target": "openrouter/anthropic/claude-opus-5.5", "simulator": "openrouter/openai/gpt-6-astra",
+          "grader": "openrouter/anthropic/claude-haiku-4.5"}
+    assert unknown_models(ok, catalog) == []
+    [problem] = unknown_models({**ok, "simulator": "openrouter/openai/gpt-astra-5"}, catalog)
+    assert problem.startswith("simulator: openrouter/openai/gpt-astra-5 is not an OpenRouter model.")
+    assert "Did you mean openrouter/openai/gpt-6-astra" in problem
+    assert "can't call tools" in unknown_models({**ok, "target": "openrouter/some/embedder"}, catalog)[0]
+    assert unknown_models({"simulator": "openrouter/x/y"}, {"all_ids": [], "models": []}) == []  # offline: allow

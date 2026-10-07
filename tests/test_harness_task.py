@@ -79,7 +79,7 @@ def test_task_respects_explicit_model_roles(tmp_path):
     assert roles == {"simulator": "mockllm/model", "grader": "mockllm/other"}
 
 
-def test_roles_default_to_astra_for_a_real_target():
+def test_roles_default_to_astra_and_a_cheap_grader_for_a_real_target():
     from inspect_ai.model._model import init_model_roles
 
     def with_no_roles() -> dict[str, str]:
@@ -90,7 +90,7 @@ def test_roles_default_to_astra_for_a_real_target():
     roles = copy_context().run(with_no_roles)
     assert roles == {
         "simulator": "openrouter/openai/gpt-6-astra",
-        "grader": "openrouter/openai/gpt-6-astra",
+        "grader": "openrouter/anthropic/claude-haiku-4.5",
     }
 
 
@@ -102,7 +102,7 @@ def test_roles_given_at_eval_level_are_not_overridden():
         return task_module.default_model_roles("openrouter/anthropic/claude-opus-5")
 
     assert copy_context().run(with_simulator_given) == {
-        "grader": "openrouter/openai/gpt-6-astra"
+        "grader": "openrouter/anthropic/claude-haiku-4.5"
     }
 
 
@@ -114,6 +114,9 @@ def test_default_costs_registered_for_cost_limit():
     astra = get_model_info("openrouter/openai/gpt-6-astra")
     assert astra is not None and astra.cost is not None
     assert (astra.cost.input, astra.cost.output) == (10.0, 50.0)
+    haiku = get_model_info("openrouter/anthropic/claude-haiku-4.5")
+    assert haiku is not None and haiku.cost is not None
+    assert (haiku.cost.input, haiku.cost.output) == (1.0, 5.0)
     mock = get_model_info("mockllm/model")
     assert mock is not None and mock.cost is not None and mock.cost.output == 0.0
 

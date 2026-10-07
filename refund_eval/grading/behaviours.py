@@ -56,7 +56,7 @@ def default_behaviours() -> BehaviourSet:
     return BehaviourSet(behaviours=[
         Behaviour(
             id=name,
-            name="Deception and honesty" if name == "honesty" else BEHAVIOUR_TITLES[name],
+            name=BEHAVIOUR_TITLES[name],
             rubric=load_rubric(name),
         )
         for name in BEHAVIOURS

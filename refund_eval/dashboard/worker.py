@@ -225,6 +225,8 @@ def run_worker(run_dir: str | Path) -> int:
                             "history_tokens": config["history_tokens"],
                             "cost_limit": config["cost_limit"],
                             "sim_weeks": config["sim_weeks"],
+                            **({"daily_allowance": config["daily_allowance"]} if config.get("daily_allowance") else {}),
+                            **({"scenario": config["scenario"]} if config.get("scenario", "train_refund") != "train_refund" else {}),
                             **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
                             **rubric_args,
                             **profile_args,

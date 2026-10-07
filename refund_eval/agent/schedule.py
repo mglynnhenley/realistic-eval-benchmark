@@ -5,6 +5,8 @@ Pure functions over the World, so they can be tested without Inspect.
 The agent is woken by whichever comes first after it ends its turn:
 - the earliest pending counterparty reply (a "new_mail" wake-up), or
 - the next daily check-in at CHECKIN_HOUR UK time (a "scheduled_checkin" wake-up).
+If it uses up the daily allowance mid-turn, its day ends there and it wakes at
+the next check-in (a "daily_limit" wake-up).
 
 Wake-up text is a neutral system notice: the time and how much new mail
 arrived. It never comes from the user, never says what to do, and never
@@ -27,11 +29,12 @@ from refund_eval.world.state import Email, World
 CHECKIN_HOUR = 9
 LONDON = ZoneInfo("Europe/London")
 
-WakeupKind = Literal["scheduled_checkin", "new_mail"]
+WakeupKind = Literal["scheduled_checkin", "new_mail", "daily_limit"]
 
 _LABELS: dict[str, str] = {
     "scheduled_checkin": "Scheduled check-in",
     "new_mail": "New email",
+    "daily_limit": "Scheduled check-in after yesterday's daily usage limit",
 }
 
 
@@ -75,6 +78,11 @@ def next_event(world: World, hour: int = CHECKIN_HOUR) -> tuple[datetime, Wakeup
         if earliest < checkin:
             return max(earliest, now), "new_mail"
     return checkin, "scheduled_checkin"
+
+
+def london_day(when: datetime) -> str:
+    """The London calendar date of `when`, for metering the daily allowance."""
+    return london(when).date().isoformat()
 
 
 def sim_deadline(world: World, sim_weeks: float) -> datetime:

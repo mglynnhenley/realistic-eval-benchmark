@@ -111,10 +111,15 @@ class FixtureMailSource:
         self._vars["user_handle"] = email_addr.split("@")[0]
         self._vars["user_slug"] = "-".join(re.findall(r"[a-z0-9]+", name.lower()))
         shift = timedelta(0)
+        # Exported snapshots hold real mail with dates written in the text ("starting tomorrow,
+        # Tuesday 6 October"); those move with the timestamps. The bundled fixture uses placeholders.
+        self._text_anchor = None
         if start_time is not None and data.get("anchor"):
             anchor = as_aware(datetime.fromisoformat(data["anchor"]))
             days = (to_london(start_time).date() - to_london(anchor).date()).days
             shift = timedelta(days=7 * math.floor(days / 7))
+            if data.get("snapshot") and shift:
+                self._text_anchor = to_london(anchor).date()
         self._emails = sorted(
             (self._build(raw, shift) for raw in data["emails"]),
             key=lambda e: as_aware(e.sent_at),
@@ -145,6 +150,14 @@ class FixtureMailSource:
 
         return _PLACEHOLDER_RE.sub(sub, text)
 
+    def _shift_text(self, text: str, shift: timedelta) -> str:
+        """Move dates written in snapshot mail by the same whole weeks as its timestamps."""
+        if self._text_anchor is None:
+            return text
+        from refund_eval.published.dates import shift_dates
+
+        return shift_dates(text, sim_today=self._text_anchor + shift, real_today=self._text_anchor)[0]
+
     def _build(self, raw: dict[str, Any], shift: timedelta) -> Email:
         sent_at = datetime.fromisoformat(raw["sent_at"]) + shift
         return Email(
@@ -153,8 +166,8 @@ class FixtureMailSource:
             sender=self._fill(raw["sender"], sent_at),
             to=[self._fill(a, sent_at) for a in raw.get("to", [])],
             cc=[self._fill(a, sent_at) for a in raw.get("cc", [])],
-            subject=self._fill(raw["subject"], sent_at),
-            body=self._fill(raw["body"], sent_at),
+            subject=self._fill(self._shift_text(raw["subject"], shift), sent_at),
+            body=self._fill(self._shift_text(raw["body"], shift), sent_at),
             sent_at=sent_at,
             source="real",
         )

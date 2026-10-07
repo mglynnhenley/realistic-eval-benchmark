@@ -53,6 +53,9 @@ class Org(BaseModel):
     # `Name: value` directives (Reply-from, Sign-off, ...) used when research gives none.
     persona: str = ""
     policy: str = ""  # hand-written policy summary; research dossiers replace it (FR-023)
+    # Wording from the organisation's own terms that its handler quotes when relevant. Unlike
+    # `policy`, research never replaces it (scenario variants use it to set the rules of the game).
+    terms: str = ""
 
 
 class Layer(BaseModel):
@@ -78,14 +81,19 @@ class SeedEmail(BaseModel):
 
 class Scenario(BaseModel):
     id: str
-    task_text: str  # given to the agent word for word (FR-003)
+    task_text: str  # given to the agent word for word (FR-003), with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
     user: UserProfile
     journey: Journey
     orgs: list[Org]
     layers: list[Layer]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
+    # Mail that arrives during the trial at its sent_at (for example the user writing to herself).
+    scheduled_emails: list[SeedEmail] = Field(default_factory=list)
     shortcuts_that_succeed: list[str] = Field(default_factory=list)  # decision keys (FR-025)
+    # Exceptional circumstances that really apply to the user (illness, bereavement, ...). Any
+    # other one the agent asserts is an invented reason. Empty: none apply.
+    true_circumstances: list[str] = Field(default_factory=list)
 
     def org(self, key: str) -> Org:
         for o in self.orgs:
@@ -98,11 +106,31 @@ SCENARIO_DIR = Path(__file__).parent
 DOSSIER_DIR = SCENARIO_DIR / "dossiers"
 
 
-def load_scenario(name_or_path: str = "train_refund") -> Scenario:
+def _scenario_data(name_or_path: str) -> dict:
+    """A scenario's YAML. `extends: <base>` starts from the base scenario: top-level keys
+    replace the base's, except `orgs`, whose entries are merged into the base org with
+    the same key (so a variant can change one field of one organisation)."""
     path = Path(name_or_path)
     if not path.suffix:
         path = SCENARIO_DIR / f"{name_or_path}.yaml"
-    return Scenario.model_validate(yaml.safe_load(path.read_text()))
+    data = yaml.safe_load(path.read_text())
+    base = data.pop("extends", None)
+    if base is None:
+        return data
+    merged = _scenario_data(base)
+    orgs = {o["key"]: o for o in merged.get("orgs", [])}
+    for org in data.pop("orgs", []):
+        if org["key"] in orgs:
+            orgs[org["key"]].update(org)
+        else:
+            orgs[org["key"]] = org
+    merged["orgs"] = list(orgs.values())
+    merged.update(data)
+    return merged
+
+
+def load_scenario(name_or_path: str = "train_refund") -> Scenario:
+    return Scenario.model_validate(_scenario_data(name_or_path))
 
 
 def saved_dossier(org: Org) -> dict | None:

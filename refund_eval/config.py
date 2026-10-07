@@ -9,8 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
-# The simulator and the graders share one default; the target is chosen per run.
+# Role defaults; the target is chosen per run. Grading is ~15 judge calls per trial over
+# the full transcript, so the grader defaults to a much cheaper model than the simulator.
 DEFAULT_ROLE_MODEL = "openrouter/openai/gpt-6-astra"
+DEFAULT_GRADER_MODEL = "openrouter/anthropic/claude-haiku-4.5"
 DEFAULT_TARGET_MODEL = "openrouter/anthropic/claude-opus-5"
 # Hybrid search is keyless unless this is set, so an existing EXA_API_KEY never
 # silently switches comparisons to billed, differently rate-limited search.
@@ -27,7 +29,7 @@ class RunConfig(BaseModel):
 
     `model` (the target) defaults to `dashboard_default_model()`, so
     REFUND_EVAL_DEFAULT_MODEL changes it per dashboard instance. The simulator
-    and grader roles default to DEFAULT_ROLE_MODEL regardless of that variable;
+    role defaults to DEFAULT_ROLE_MODEL and the grader to DEFAULT_GRADER_MODEL, regardless of that variable;
     override them per run instead.
     """
 
@@ -42,7 +44,7 @@ class RunConfig(BaseModel):
                        pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     simulator_model: str = Field(default=DEFAULT_ROLE_MODEL, min_length=1, max_length=160,
                                  pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
-    grader_model: str = Field(default=DEFAULT_ROLE_MODEL, min_length=1, max_length=160,
+    grader_model: str = Field(default=DEFAULT_GRADER_MODEL, min_length=1, max_length=160,
                               pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9._:/-]+$")
     models: list[Annotated[str, Field(min_length=1, max_length=160,
                                      pattern=r"^openrouter/[A-Za-z0-9._:/-]+$")]] | None = Field(
@@ -69,11 +71,11 @@ class RunConfig(BaseModel):
             raise ValueError("Choose each model only once")
         return value
 
-    max_turns: int = Field(default=20, ge=1, le=1000, strict=True)
+    max_turns: int = Field(default=20, ge=1, le=10000, strict=True)
     # Model-visible history in tokens, trimmed oldest first with a memory tool for notes
     # (as Vending-Bench does); 0 shows the full history. Logs and grading always keep it all.
     history_tokens: int = Field(default=60_000, ge=0, le=1_000_000, strict=True)
-    cost_limit: float = Field(default=1.0, gt=0, le=40)
+    cost_limit: float = Field(default=1.0, gt=0, le=500)
     sim_weeks: float = Field(default=1.0, gt=0, le=12)
     execution: Literal["local", "modal", "docker"] = "local"
     trials: int = Field(default=1, ge=1, le=100, strict=True)
@@ -84,5 +86,16 @@ class RunConfig(BaseModel):
     all_role_cost_limit: float | None = Field(default=None, gt=0, le=40)
     experiment_budget_file: str | None = Field(default=None, min_length=1)
     # A saved Gmail snapshot (.secrets/inboxes/<name>.json) to use instead of the bundled inbox.
+    # False skips the LLM judges during the run (code checks still run); grade the logs later with `inspect score`.
+    llm_grading: bool = True
+    # Bundled scenario: train_refund, or a variant such as train_refund_pressure.
+    scenario: str = Field(default="train_refund", pattern=r"^train_refund(_[a-z]+)?$")
+    # Worst-case dollars of model spend per simulated day; an agent that uses it up
+    # stops for the day and wakes at the next check-in. None means no allowance.
+    daily_allowance: float | None = Field(default=None, gt=0, le=100)
+    # Tell the agent it is expected to spend its whole allowance by the deadline.
+    use_full_allowance: bool = False
+    # Continue an earlier trial from its .eval log (one model, one trial, the same target model).
+    resume_log: str | None = Field(default=None, max_length=1000, pattern=r"\.eval$|snapshot\.json$")
     inbox_snapshot: str | None = Field(default=None, pattern=SNAPSHOT_NAME_PATTERN)
 

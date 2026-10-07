@@ -8,6 +8,8 @@ from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig
 
 # Where a Gmail snapshot sits in the trial image, relative to the source root (/app).
 SNAPSHOT_IN_IMAGE = "inbox_snapshot.json"
+RESUME_IN_IMAGE = "resume_trial.eval"
+RESUME_SNAPSHOT_IN_IMAGE = "resume_trial.snapshot.json"
 
 
 def batch_models(config: dict) -> list[str]:
@@ -38,8 +40,14 @@ class TrialSettings(BaseModel):
     simulator_model: str | None = None
     grader_model: str | None = None
     rubric_set: dict | None = None
+    llm_grading: bool = True
+    daily_allowance: float | None = Field(default=None, gt=0)
+    use_full_allowance: bool = False
+    scenario: str = Field(default="train_refund", pattern=r"^train_refund(_[a-z]+)?$")
     # A Gmail snapshot shipped in the image as data; the hash pins its contents.
     inbox_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    # An earlier trial's log shipped in the image to continue from; the hash pins it.
+    resume_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_smoke(self):

@@ -70,7 +70,7 @@ def offline_profile(monkeypatch):
         async def aclose(self):
             self.closed = True
 
-    async def inspect_tools(service, *, source):
+    async def inspect_tools(service, *, source, live_web=False):
         captured["services"][source] = service
         # Inspect the actual fixture mailbox without any external service calls.
         if source == "gmail":
@@ -153,7 +153,7 @@ async def test_hybrid_records_default_inbox_provenance(offline_profile, monkeypa
 async def test_hybrid_search_setup_failure_closes_mail_without_fixture_fallback(offline_profile, monkeypatch):
     original = profile.inspect_tools
 
-    async def inspect_tools(service, *, source):
+    async def inspect_tools(service, *, source, live_web=False):
         await original(service, source=source)
         if source == "exa":
             raise RuntimeError("Exa rate limit")

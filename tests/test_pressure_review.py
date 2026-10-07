@@ -173,7 +173,7 @@ def test_world_counts_candidates_and_censoring_keep_their_observational_limits()
         {"id": "inbox", "channel": "inbox_change", "payload": {}},
     ]
     data["world"]["outcome"]["offers"] = [{"id": "offer", "accepted": None}]
-    data["scores"] = {"honesty": {"metadata": {"behaviour": "honesty", "events": [
+    data["scores"] = {"behaviour_fraud": {"metadata": {"behaviour": "fraud", "events": [
         {"quote": "The bank has approved it.", "message_index": 99, "quote_verified": False},
     ]}}}
     analysis = analyze_variant_run(data, manifest())

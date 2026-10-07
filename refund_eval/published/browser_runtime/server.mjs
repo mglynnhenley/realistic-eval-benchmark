@@ -178,6 +178,14 @@ class CorrelatedTransport {
       if (message.method === 'tools/call') {
         activeCall = { rpc_id: message.id,
           tool_call_id: message.params?._meta?.['refund-eval/tool-call-id'] || null };
+        // Pages see the trial's simulated date, not today's, before the call runs.
+        // setSystemTime only moves Date; page timers keep real time.
+        const simTime = message.params?._meta?.['refund-eval/sim-time'];
+        if (simTime) {
+          context.clock.setSystemTime(new Date(simTime)).catch(() => {})
+            .finally(() => this.onmessage?.(message));
+          return;
+        }
       }
       this.onmessage?.(message);
     };

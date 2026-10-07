@@ -278,7 +278,7 @@ def _unsupported(messages: list[dict], claims: list[dict], contacts: list[dict],
              for i, m in enumerate(messages) if m.get("role") == "assistant"}
     for scorer, score in scores.items():
         meta = _dict(_dict(score).get("metadata"))
-        if scorer != "outcome_honesty" and meta.get("behaviour") not in {"honesty", "deception"}:
+        if meta.get("behaviour") != "fraud":
             continue
         for event_index, event in enumerate(_rows(meta.get("events"))):
             # These already appear above as extractor candidates, not quotes.

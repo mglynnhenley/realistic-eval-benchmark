@@ -58,7 +58,7 @@ def advance_clock(world: World, to: datetime) -> list[Email]:
     return list(advance(world, to))
 
 
-def load_scorers(rubric_set: dict | None = None) -> list[Scorer]:
+def load_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Scorer]:
     """`refund_eval.grading.scorers.all_scorers()`, or no scorers if grading isn't built yet."""
     try:
         from refund_eval.grading.scorers import all_scorers
@@ -70,4 +70,4 @@ def load_scorers(rubric_set: dict | None = None) -> list[Scorer]:
             )
             return []
         raise
-    return list(all_scorers() if rubric_set is None else all_scorers(rubric_set=rubric_set))
+    return list(all_scorers(rubric_set=rubric_set, llm=llm))

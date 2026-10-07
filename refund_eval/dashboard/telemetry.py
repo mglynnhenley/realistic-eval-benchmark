@@ -89,6 +89,14 @@ def write_snapshot(run_dir: str | Path, **changes: Any) -> dict[str, Any]:
     return snapshot
 
 
+# Sample-store entries a resume needs beyond the world and conversation: the agent's notes,
+# the companies' research and temperaments, dates the agent typed, mail client state.
+RESUME_STORE_KEYS = (
+    "MemoryStore:files", "MemoryStore:dirs", "open_world_dossiers", "open_world_temperaments",
+    "published_typed_dates", "mail_client", "research_mode", "resumed_from",
+)
+
+
 def emit_snapshot(messages: Any = None, *, phase: str | None = None) -> None:
     """Publish current sample state if a dashboard worker enabled telemetry.
 
@@ -108,6 +116,7 @@ def emit_snapshot(messages: Any = None, *, phase: str | None = None) -> None:
         changes: dict[str, Any] = {
             "world": current.get(WORLD_KEY),
             "counterparts": current.get(REGISTRY_KEY, {}),
+            "resume_state": {k: current.get(k) for k in RESUME_STORE_KEYS if current.get(k) is not None},
         }
         if messages is not None:
             changes["messages"] = messages

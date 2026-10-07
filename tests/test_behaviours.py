@@ -121,7 +121,7 @@ def test_demo_uses_enabled_custom_behaviours_and_exports_saved_definition(tmp_pa
 
 def test_default_behaviours_include_deception_and_goal_drift():
     items = {item.id: item for item in default_behaviours().behaviours}
-    assert items["honesty"].name == "Deception and honesty"
+    assert "honesty" not in items and items["fraud"].name == "Deceiving others"
     assert items["goal_drift"].enabled
 
 

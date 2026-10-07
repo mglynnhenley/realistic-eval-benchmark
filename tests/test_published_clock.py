@@ -2,7 +2,7 @@
 
 import copy
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from inspect_ai import Task, eval
@@ -17,6 +17,7 @@ from refund_eval.published.adapter import AUDIT_KEY, inspect_tools
 from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import load_scenario
+from refund_eval.world import clock
 from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox
 from refund_eval.world.state import (
@@ -64,8 +65,11 @@ async def test_validation_precedes_clock_charge_and_raw_arguments_are_unchanged(
     assert not service.calls
     args = {"query": "refund", "objective": "Find a policy"}
     await tool.tool(**args)
-    assert service.calls == [("web_search_exa", args, scenario.start_time + timedelta(minutes=1))]
-    assert load_world().now == scenario.start_time + timedelta(minutes=1)
+    # One minute for the action plus the time to type the query (4 words at WRITE_WPM),
+    # charged before dispatch; reading the results is charged after.
+    typed = scenario.start_time + timedelta(minutes=1 + 4 / clock.WRITE_WPM)
+    assert service.calls == [("web_search_exa", args, typed)]
+    assert typed < load_world().now < typed + timedelta(minutes=1)
     assert [event["arguments"] for event in store().get(AUDIT_KEY) if event["event"] == "call"] == [
         {"query": "refund"}, args,
     ]
@@ -97,16 +101,16 @@ async def test_native_send_charges_two_minutes_once_before_interception(scenario
     # Exercise the shared send path with an offline counterparty response.
     await tools["send_message"].tool(to=["support@example.org"], subject="Notes", body="My case notes.")
     world = load_world()
-    assert world.now == scenario.start_time + timedelta(minutes=2)
+    sent = world.interceptions[0].time  # two minutes plus typing the message
+    assert scenario.start_time + timedelta(minutes=2) < sent < scenario.start_time + timedelta(minutes=3)
+    assert sent <= world.now < sent + timedelta(minutes=1)  # then reading the reply
     assert len(world.interceptions) == 1
-    assert world.interceptions[0].time == world.now
     assert service.remote.calls == []
     message_id = world.interceptions[0].payload["message_id"]
     await tools["reply"].tool(messageId=message_id, body="Another case note.")
     world = load_world()
-    assert world.now == scenario.start_time + timedelta(minutes=4)
+    assert world.interceptions[1].time - world.interceptions[0].time > timedelta(minutes=2)
     assert len(world.interceptions) == 2
-    assert world.interceptions[1].time == world.now
     assert service.remote.calls == []
 
 
@@ -149,7 +153,8 @@ def test_actual_inspect_tool_sequence_delivers_mail_without_a_status_report(tmp_
     sample = log.samples[0]
     assert sample.error is None, sample.error
     world = World.model_validate(sample.store["world"])
-    assert world.now == scenario.start_time + timedelta(minutes=3)
+    # three one-minute actions, plus typing and reading
+    assert scenario.start_time + timedelta(minutes=3) <= world.now < scenario.start_time + timedelta(minutes=5)
     assert world.status_reports == []
     assert world.wakeups == []
     assert world.pending == []
@@ -159,6 +164,7 @@ def test_actual_inspect_tool_sequence_delivers_mail_without_a_status_report(tmp_
     assert "Checkpoint update" in tool_messages[1].text
     assert "The pending update has arrived." in tool_messages[2].text
     results = [event for event in sample.store[AUDIT_KEY] if event["event"] == "result"]
-    assert [event["sim_time"] for event in results] == [
-        (scenario.start_time + timedelta(minutes=minute)).isoformat() for minute in (1, 2, 3)
-    ]
+    times = [datetime.fromisoformat(event["sim_time"]) for event in results]
+    assert times == sorted(times) and len(times) == 3
+    for n, when in enumerate(times, start=1):  # n one-minute actions, plus typing and reading so far
+        assert scenario.start_time + timedelta(minutes=n) <= when < scenario.start_time + timedelta(minutes=n + 1)

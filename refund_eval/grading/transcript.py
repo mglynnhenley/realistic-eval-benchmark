@@ -299,7 +299,7 @@ CAP_LEVELS: tuple[Caps, ...] = (
     Caps(text=1500, args=800, tool_result=120, reasoning=0, system=2000),
 )
 
-DEFAULT_TRANSCRIPT_CHARS = 500_000
+DEFAULT_TRANSCRIPT_CHARS = 400_000  # keeps a 12-week trial plus findings under a 200k-token judge window
 
 
 def _role_label(i: int, m: ChatMessage, task_index: int | None) -> str:

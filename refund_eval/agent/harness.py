@@ -31,19 +31,20 @@ from __future__ import annotations
 
 import inspect as pyinspect
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, get_type_hints
 
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
 from inspect_ai.model import ChatMessage, ChatMessageUser, CompactionTrim, Model
 from inspect_ai.tool import Tool, ToolDef, ToolInfo, memory
-from inspect_ai.util import LimitExceededError, store
+from inspect_ai.util import LimitExceededError, sample_limits, store
 
 from refund_eval.agent import adapters
 from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import (
     CHECKIN_HOUR,
     aware,
+    london_day,
     new_mail_count,
     next_checkin,
     next_event,
@@ -59,6 +60,7 @@ from refund_eval.world.interception import DISPATCH_LIMIT_KEY
 from refund_eval.world.state import (
     WORLD_KEY,
     Email,
+    ScheduledEmail,
     StatusReport,
     Wakeup,
     World,
@@ -130,11 +132,93 @@ def initial_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
         )
         for s in scenario.seed_emails
     ]
+    scheduled = [
+        ScheduledEmail(due_at=s.sent_at, email=Email(
+            id=s.id, thread_id=s.id, sender=s.sender, to=list(s.to), subject=s.subject,
+            body=s.body, sent_at=s.sent_at, source="seed", org=s.org,
+        ))
+        for s in scenario.scheduled_emails
+    ]
     return World(
-        start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed,
+        start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed, pending=scheduled,
         world_mode=world_mode,
         friction_version=FRICTION_VERSION if world_mode == "friction" else None,
     )
+
+
+RESUMED_KEY = "resumed_from"
+
+
+def restore_trial(log_path: str) -> list[ChatMessage]:
+    """Restore an earlier trial from its log so it can continue: every sample-store entry
+    (world, company cases and dossiers, temperaments, the agent's memory notes, tool audit)
+    and the conversation. The world's stop is cleared. Returns the conversation without its
+    system message, which the agent loop adds again."""
+    from inspect_ai.log import read_eval_log
+
+    log = read_eval_log(log_path)
+    if not log.samples:
+        raise ValueError(f"No trial to resume in {log_path}")
+    sample = log.samples[0]
+    for key, value in sample.store.items():
+        store().set(key, value)
+    with world_tx() as world:
+        stopped = world.stop_reason
+        world.stop_reason, world.killed = None, False
+        resumed = {"log": str(log_path), "turn": world.turn, "sim_time": world.now.isoformat(),
+                   "previous_stop": stopped, "previous_limit": sample.limit.type if sample.limit else None}
+    store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
+    messages = list(sample.messages)
+    if messages and messages[0].role == "system":
+        messages = messages[1:]
+    logger.info("Resuming %s at turn %s (%s)", log_path, resumed["turn"], resumed["sim_time"])
+    return messages
+
+
+async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
+    """Restore an earlier trial from its dashboard snapshot (snapshot.json), which is written
+    while the trial runs and survives a stopped batch. It holds the world, the conversation and
+    the simulated counterparts; newer snapshots also hold the rest of the store (notes, company
+    research and temperaments). For older ones the agent's notes are rebuilt by replaying its
+    memory-tool calls, and companies keep their saved research but get a new temperament."""
+    import json
+    from pathlib import Path
+
+    from pydantic import TypeAdapter
+
+    from refund_eval.sim.counterparts import REGISTRY_KEY
+
+    snap = json.loads(Path(snapshot_path).read_text())
+    if not snap.get("world") or not snap.get("messages"):
+        raise ValueError(f"No trial to resume in {snapshot_path}")
+    messages = [TypeAdapter(ChatMessage).validate_python(m) for m in snap["messages"]]
+    store().set(WORLD_KEY, snap["world"])
+    store().set(REGISTRY_KEY, snap.get("counterparts") or {})
+    extra = snap.get("resume_state") or {}
+    for key, value in extra.items():
+        store().set(key, value)
+    if "MemoryStore:files" not in extra:
+        from inspect_ai.tool import ToolError, memory
+
+        notes = memory()
+        for message in messages:
+            for call in getattr(message, "tool_calls", None) or []:
+                if call.function == "memory" and call.arguments.get("command") != "view":
+                    try:
+                        await notes(**call.arguments)
+                    except ToolError:
+                        pass  # it failed the first time too
+    with world_tx() as world:
+        stopped = world.stop_reason
+        world.stop_reason, world.killed = None, False
+        resumed = {"snapshot": str(snapshot_path), "turn": world.turn, "sim_time": world.now.isoformat(),
+                   "previous_stop": stopped, "previous_phase": snap.get("phase"),
+                   "rebuilt": [] if "MemoryStore:files" in extra else ["memory notes", "temperaments"]}
+    store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
+    if messages and messages[0].role == "system":
+        messages = messages[1:]
+    logger.info("Resuming %s at turn %s (%s)", snapshot_path, resumed["turn"], resumed["sim_time"])
+    return messages
 
 
 def init_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
@@ -223,15 +307,21 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
 
 
 def wake(
-    world: World, *, sim_weeks: float, checkin_hour: int = CHECKIN_HOUR
+    world: World, *, sim_weeks: float, checkin_hour: int = CHECKIN_HOUR, day_over: bool = False
 ) -> Wakeup | None:
     """Advance the clock to the next event, deliver due mail, record the wake-up.
+
+    With day_over (the daily allowance ran out), skip to the next check-in instead,
+    delivering everything that arrived overnight.
 
     Returns None (and leaves the clock alone) if the next event is past the
     simulated-time cap."""
     deadline = sim_deadline(world, sim_weeks)
     since = world.wakeups[-1].time if world.wakeups else world.start_time
-    when, kind = next_event(world, checkin_hour)
+    if day_over:
+        when, kind = next_checkin(aware(world.now), checkin_hour), "daily_limit"
+    else:
+        when, kind = next_event(world, checkin_hour)
     if when > deadline:
         return None
     arrived = _advance(world, when)
@@ -247,10 +337,12 @@ def wake(
     return wakeup
 
 
-async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10) -> None:
+async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10,
+                                  day_over: bool = False) -> None:
     """Open world: fire each counterparty follow-up that falls due before the agent's
     next wake-up, moving the clock to it first. Each may schedule mail that brings
-    the wake-up forward, so the next event is recomputed every time."""
+    the wake-up forward, so the next event is recomputed every time. With day_over
+    the next wake-up is the next check-in, whatever mail arrives before it."""
     from refund_eval.sim.open_world import next_follow_up
     from refund_eval.sim.router import follow_up
 
@@ -259,7 +351,8 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: in
         item = next_follow_up(world) if world.world_mode == "open" else None
         if item is None:
             return
-        when, _kind = next_event(world, checkin_hour)
+        when = (next_checkin(aware(world.now), checkin_hour) if day_over
+                else next_event(world, checkin_hour)[0])
         if aware(item.due_at) > min(when, sim_deadline(world, sim_weeks)):
             return
         with world_tx() as w:
@@ -285,14 +378,38 @@ def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
     )
 
 
+def _spend() -> float:
+    """Model spend so far in this trial (every call, including the simulator)."""
+    try:
+        return float(sample_limits().cost.usage)
+    except RuntimeError:  # no running sample (unit tests)
+        return 0.0
+
+
+def _day_over(world: World, daily_allowance: float | None) -> bool:
+    """True once the trial's spend reaches its allowance so far: daily_allowance for each
+    simulated day begun (London dates), so what a day leaves unspent carries over."""
+    if daily_allowance is None:
+        return False
+    days = (date.fromisoformat(london_day(world.now)) - date.fromisoformat(london_day(world.start_time))).days + 1
+    if _spend() < daily_allowance * days:
+        return False
+    world.allowance_hits.append(world.now)
+    return True
+
+
 def make_on_continue(
     *,
     fare: float,
     max_turns: int,
     sim_weeks: float,
     checkin_hour: int = CHECKIN_HOUR,
+    daily_allowance: float | None = None,
 ):
-    """Build the `on_continue` hook for react()."""
+    """Build the `on_continue` hook for react().
+
+    daily_allowance is a worst-case backstop, not a pace: it accrues per simulated day, and an
+    agent that spends all it has accrued stops there and wakes at the next check-in."""
 
     async def on_continue(state: AgentState) -> bool | AgentState:
         # Inspect turns a limit raised inside a tool into a tool error. Rethrow
@@ -306,8 +423,11 @@ def make_on_continue(
         reason = kill_reason()
         wakeup: Wakeup | None = None
 
+        day_over = False
         with world_tx() as world:
             world.turn += 1
+            if not ended_turn and reason is None:
+                day_over = _day_over(world, daily_allowance)
             if ended_turn:
                 world.status_reports.append(
                     StatusReport(
@@ -327,12 +447,12 @@ def make_on_continue(
                 world.stop_reason = STOP_MAX_TURNS
             stop_reason = world.stop_reason
 
-        if ended_turn and reason is None and stop_reason is None:
+        if (ended_turn or day_over) and reason is None and stop_reason is None:
             # Counterparties keep promises made before the next wake-up, which may
             # bring that wake-up forward. Then wake the agent.
-            await _follow_ups_before_wake(sim_weeks, checkin_hour)
+            await _follow_ups_before_wake(sim_weeks, checkin_hour, day_over=day_over)
             with world_tx() as world:
-                wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour)
+                wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour, day_over=day_over)
                 if wakeup is None:
                     world.stop_reason = STOP_SIM_TIME_CAP
                 stop_reason = world.stop_reason
@@ -383,6 +503,9 @@ def refund_agent(
     initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
+    resume_log: str | None = None,
+    daily_allowance: float | None = None,
+    use_full_allowance: bool = False,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -397,6 +520,14 @@ def refund_agent(
       checkin_hour: Hour of the daily scheduled check-in.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
       initial_mail_thread_ids: Matched mailbox context read before target generation.
+      resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
+        from: its world, companies, notes and conversation are restored and the agent carries
+        on where it stopped.
+      daily_allowance: Dollars of model spend per simulated day, carried over when unspent. An
+        agent that uses up what it has accrued stops for the day and wakes at the next check-in.
+        None means no allowance.
+      use_full_allowance: Tell the agent it is expected to spend its whole allowance by the
+        deadline (a pressure condition; off by default).
     """
     from refund_eval.agent.mail_context import validate_thread_ids
 
@@ -412,6 +543,9 @@ def refund_agent(
 
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
+        if resume_log:
+            state.messages = (await restore_snapshot(resume_log) if resume_log.endswith(".json")
+                              else restore_trial(resume_log))
         init_world(scenario, world_mode=world_mode)
         store().set(RESEARCH_MODE_KEY, research_mode)
         emit_snapshot(state.messages, phase="running")
@@ -428,7 +562,8 @@ def refund_agent(
             local = [memory()] if history_tokens else []
             return react(
                 prompt=AgentPrompt(
-                    instructions=render_system_prompt(scenario, checkin_hour, history_tokens),
+                    instructions=render_system_prompt(scenario, checkin_hour, history_tokens, sim_weeks,
+                                                      daily_allowance, use_full_allowance),
                     handoff_prompt=None,
                     assistant_prompt=None,
                     submit_prompt=None,
@@ -441,6 +576,7 @@ def refund_agent(
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
                     checkin_hour=checkin_hour,
+                    daily_allowance=daily_allowance,
                 ),
             )
 
