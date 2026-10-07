@@ -316,7 +316,7 @@
   }
 
   function selectedDataMode() {
-    return $("run-form").elements.mode.value === "demo" ? "fixture" : $("data-mode").value;
+    return $("data-mode").value;
   }
 
   function publishedDataStatus() {
@@ -358,13 +358,12 @@
       button.title = anyActive ? "Finish or stop the active run before starting another." : "Start a new run";
     });
     const setupMissing = publishedSetupMissing();
-    const worldProblem = worldSelectionProblem();
     $("submit-run").disabled = anyActive || state.starting;
-    $("submit-run").type = setupMissing || worldProblem ? "button" : "submit";
+    $("submit-run").type = setupMissing ? "button" : "submit";
     $("submit-run").textContent = state.starting ? "Starting…"
-      : worldProblem ? "Review world settings" : setupMissing ? "Check run setup"
+      : setupMissing ? "Check run setup"
         : $("execution").value !== "local" ? "Start batch ↗"
-          : $("run-form").elements.mode.value === "model" ? "Start paid model trial ↗" : "Start offline demo ↗";
+          : "Start paid model trial ↗";
     const active = ACTIVE.has(state.run?.status);
     $("stop-run").hidden = !active;
     $("stop-run").disabled = state.stopping || state.run?.status === "stopping";
@@ -398,15 +397,13 @@
     const dataMode = run.data_mode || run.config?.data_mode || "live";
     const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
       : dataMode === "fixture" ? "Simulated data" : "Live data";
-    const worldMode = run.world_mode || run.config?.world_mode || "baseline";
     const targetLabel = !run.parent_batch_id && run.config?.models?.length > 1
       ? `${run.config.models.length} target models` : run.model || "Model trial";
     const runtime = run.browser_runtime || run.config?.browser_runtime;
     const runtimeLabel = runtime === "subprocess" ? "Browser in trial sandbox"
       : runtime === "docker" ? "Docker browser" : "";
     const toolsLabel = profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools";
-    const model = run.mode === "demo" ? `Scripted offline demo · ${toolsLabel} · No API calls`
-      : `${targetLabel} · ${toolsLabel} · ${worldMode === "friction" ? "Realistic friction" : worldMode === "open" ? "Open world" : "Standard world"}`;
+    const model = `${targetLabel} · ${toolsLabel} · Open world`;
     const stopping = run.stop_reason ? ` · ${title(run.stop_reason)}` : "";
     $("selected-subtitle").textContent = `${model}${runtimeLabel ? ` · ${runtimeLabel}` : ""} · ${date(run.created_at)}${stopping}`;
     $("selected-dot").className = `status-dot ${run.status}`;
@@ -429,17 +426,10 @@
     $("download-log").setAttribute("download", "");
     $("wall-time").textContent = `Wall time ${elapsed(run)} · ${live ? "in progress" : human(run.status)}`;
     $("world-phase").textContent = human(state.snapshot?.phase || run.status).toUpperCase();
-    $("integrity-text").textContent = run.mode === "demo"
-      ? `Scripted demo using ${profile === "published" ? "published Gmail and browser tools" : "legacy custom tools"}. Company identities and model grades are fixtures, not measured behavioural results.`
-      : profile === "published"
-        ? dataMode === "fixture"
-          ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication or live account data."
-          : dataMode === "hybrid"
-            ? "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated; no Gmail connection is required. Exa uses keyless access unless REFUND_EVAL_EXA_API_KEY is set. Every website form or write is intercepted and simulated."
-            : "Published Gmail, Exa and Playwright tools. Gmail sends and every website form or write are intercepted and simulated."
-        : "Legacy model trial using custom tools and a fixture inbox. Company replies and money movements are simulated.";
-    if (worldMode === "friction") $("integrity-text").textContent += " Realistic friction is enabled in the simulated world.";
-    if (worldMode === "open") $("integrity-text").textContent += " Open world: the simulator model decided how every organisation and person responded; a full refund was never possible.";
+    $("integrity-text").textContent = dataMode === "fixture"
+      ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication is required."
+      : "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated. Every website form or write is intercepted and simulated.";
+    $("integrity-text").textContent += " The simulator model decided how every organisation and person responded; a full refund was never possible.";
     if (state.snapshot?.review_note) $("integrity-text").textContent += ` Recorded-run review: ${state.snapshot.review_note}`;
     const count = state.snapshot?.messages?.length || 0;
     $("feed-footer-text").textContent = `${count} recorded messages${live ? " · following the live trial" : " · " + human(run.stop_reason || run.status)}`;
@@ -800,7 +790,6 @@
     });
     intro.append(exportButton);
     fragment.append(intro);
-    if (state.run?.mode === "demo") fragment.append(element("p", "score-notice", "Scripted demo: these counts describe the walkthrough, not measured model behavior."));
     const dimensions = [
       ["approaches", "distinct_approaches", "Approach categories", "Counterparty × channel × claim kind"],
       ["branches", "delivered_branches", "Delivered branches", `${summary.pending_branches ?? "—"} pending distinct branches`],
@@ -1020,7 +1009,6 @@
       intro.append(element("p", "field-help", "This older run has no saved rubric version. Its recorded scores are shown below."));
     }
     fragment.append(intro);
-    if (state.run?.mode === "demo") fragment.append(element("div", "score-notice", "Scripted demo: these scorer outputs check the pipeline. Behaviour grades are mock placeholders, not measurements of an agent."));
     const entries = Object.entries(scores);
     const fixedDiagnostics = new Set(["containment", "resource_use", "permission_checks", "outcome_honesty", "trial_summary", "eval_awareness", "long_horizon_activity"]);
     const isBehaviour = ([name, score]) => !fixedDiagnostics.has(name)
@@ -1207,6 +1195,7 @@
       if (!state.defaultsApplied && state.config.model_defaults) {
         if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
         state.defaultsApplied = true;
+        applyRunPreset();
       }
       const scenario = state.config.scenario || {};
       if (scenario.task_text && !state.selected) {
@@ -1479,18 +1468,6 @@
     root.querySelectorAll(".new-run").forEach((button) => button.addEventListener("click", openRunDialog));
   }
 
-  function worldSelectionProblem() {
-    return $("run-form").elements.mode.value === "model" && $("world-mode").value !== "baseline"
-      && selectedDataMode() === "live"
-      ? "Realistic friction and the open world require simulated Gmail. Choose Simulated Gmail + live web, simulated inbox and websites, or use the Standard world." : "";
-  }
-
-  function showWorldRequirement() {
-    $("form-error").textContent = worldSelectionProblem();
-    $("form-error").hidden = false;
-    $("form-error").scrollIntoView({block: "nearest"});
-  }
-
   function presetRoles(settings) {
     return settings.simulator_model === settings.grader_model
       ? `the simulator and grader to ${settings.simulator_model}`
@@ -1513,10 +1490,11 @@
   function applyRunPreset() {
     const preset = (state.config?.run_presets || []).find((item) => item.name === $("run-preset").value);
     if (preset) {
-      const fields = {"data-mode": "data_mode", "world-mode": "world_mode",
+      const fields = {"data-mode": "data_mode", scenario: "scenario", "daily-allowance": "daily_allowance",
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
         "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens"};
       for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
+      $("llm-grading").checked = preset.settings.llm_grading;
       $("form-error").hidden = true;
       updateProfileStatus();
     }
@@ -1614,17 +1592,15 @@
   function updateBatchSettings() {
     const batch = $("execution").value !== "local";
     $("batch-settings").hidden = !batch;
-    document.querySelector(".mini-badge").textContent = batch ? "NO MODEL COST" : "FREE";
     $("batch-settings").querySelectorAll("input").forEach((input) => { input.disabled = !batch; });
     $("batch-help").textContent = "Each trial gets its own sandbox, browser, inbox and saved rubrics. " + ($("execution").value === "modal"
-      ? "Modal compute charges apply, including for scripted demos. Configure Modal credentials on this computer first."
+      ? "Modal compute charges apply. Configure Modal credentials on this computer first."
       : "Docker must be running on this computer.");
-    const paid = $("run-form").elements.mode.value === "model";
-    const multi = batch && paid;
+    const multi = batch;
     $("model-picker-field").hidden = !multi;
     $("single-model-field").hidden = multi;
-    $("model").disabled = !paid || multi;
-    $("model").required = paid && !multi;
+    $("model").disabled = multi;
+    $("model").required = !multi;
     $("batch-trials-label").textContent = multi ? "Trials per model" : "Trials";
     if (multi) {
       const initial = $("model").value.trim() || state.config?.default_model;
@@ -1638,21 +1614,13 @@
     const count = multi ? selectedModels.size : 1;
     const total = count * Number($("batch-trials").value);
     const budget = total * Number($("cost-limit").value);
-    $("batch-budget").textContent = paid
-      ? `${count} models × ${$("batch-trials").value} trials = ${total} total trials; up to ${Math.min(total, Number($("batch-concurrency").value))} running at once. Agent and simulator budgets total $${budget.toFixed(2)}, plus final grading and compute. Maximum 100 total trials.`
-      : "Scripted trials make no model API calls. Their grades are pipeline checks, not behavioural measurements.";
+    $("batch-budget").textContent = `${count} models × ${$("batch-trials").value} trials = ${total} total trials; up to ${Math.min(total, Number($("batch-concurrency").value))} running at once. Agent and simulator budgets total $${budget.toFixed(2)}, plus optional LLM judging and compute. Maximum 100 total trials.`;
   }
 
   $("execution").addEventListener("change", () => { updateMode(); });
   ["batch-trials", "batch-concurrency", "cost-limit"].forEach((id) => $(id).addEventListener("input", updateBatchSettings));
 
   function updateMode() {
-    const isModel = $("run-form").elements.mode.value === "model";
-    $("model-settings").hidden = !isModel;
-    $("demo-explanation").hidden = isModel;
-    $("model").required = isModel;
-    $("model-settings").querySelectorAll("input").forEach((input) => { input.disabled = !isModel; });
-    $("submit-run").textContent = isModel ? "Start paid model trial ↗" : "Start offline demo ↗";
     $("form-error").hidden = true;
     updateProfileStatus();
   }
@@ -1660,43 +1628,26 @@
   function updateProfileStatus() {
     updateBatchSettings();
     const batch = $("execution").value !== "local";
-    const isModel = $("run-form").elements.mode.value === "model";
     const fixture = selectedDataMode() === "fixture";
     const hybrid = selectedDataMode() === "hybrid";
     const simulated = fixture || hybrid;
-    $("run-preset").disabled = !isModel || !state.config?.run_presets;
-    $("world-mode-field").hidden = !isModel || !simulated;
-    $("world-mode").disabled = !isModel || !simulated;
-    $("data-mode").querySelector('[value="live"]').disabled = batch || $("world-mode").value !== "baseline";
-    $("world-mode-help").textContent = $("world-mode").value === "open"
-      ? "The simulator model decides how each organisation and anyone else contacted responds, differently every run. It can pay, refuse, escalate or contact other organisations, but never gives a full refund. Needs simulated Gmail."
-      : $("world-mode").value === "friction"
-      ? "A more demanding simulated world, available with simulated Gmail and either live or fixture web data. To use live Gmail, first choose Standard."
-      : "Use the standard simulated world, or add realistic friction for a stress test.";
-    $("inbox-field").hidden = !isModel || !simulated;
-    $("inbox-snapshot").disabled = !isModel || !simulated;
-    $("data-mode").disabled = !isModel;
+    $("run-preset").disabled = !state.config?.run_presets;
+    $("data-mode").querySelector('[value="live"]').disabled = batch;
+    $("inbox-field").hidden = !simulated;
+    $("inbox-snapshot").disabled = !simulated;
     const profile = publishedDataStatus();
     const description = fixture
-      ? "Simulated inbox and websites. Email uses a local test contract; Gmail authentication is not used."
-      : hybrid
-        ? `Live Exa search and public webpages reflect the actual date. Gmail sends and replies are simulated; every website form or write is intercepted and simulated. Exa is keyless and rate-limited unless REFUND_EVAL_EXA_API_KEY is set. ${batch ? "The browser runs inside each trial sandbox." : "Docker runs the local browser."} Startup checks each tool contract.`
-        : "Live Gmail and reviewed websites, available only on this computer. Gmail sends and every website form or write are intercepted and simulated.";
+      ? "Inbox and websites are simulated."
+      : hybrid ? "Gmail is simulated; the browser uses public websites."
+      : "Live Gmail is enabled for this local trial.";
     $("tool-profile-status").textContent = !profile ? "Checking browser and tool configuration…"
-        : `${description} ${profile.configured ? "Ready — startup checks pending." : "Setup needed."} ${profile.reason}`;
-    $("demo-runtime-status").textContent = batch
-      ? `The scripted demo runs published Gmail and Playwright tools inside each trial sandbox. ${profile?.reason || "Checking run setup…"}`
-      : `The scripted demo uses real Chromium and needs the local Docker browser image. ${profile?.reason || "Checking browser setup…"}`;
+      : profile.configured ? `${description} Sends and website writes are intercepted. Startup checks pending.`
+        : `${description} Setup needed: ${profile.reason}`;
     updatePresetHelp();
     updateControls();
   }
 
   $("submit-run").addEventListener("click", async (event) => {
-    if (worldSelectionProblem()) {
-      event.preventDefault();
-      showWorldRequirement();
-      return;
-    }
     if (!publishedSetupMissing()) return;
     event.preventDefault();
     await loadConfig();
@@ -1708,47 +1659,41 @@
   $("run-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     if (state.starting) return;
-    if (worldSelectionProblem()) {
-      showWorldRequirement();
-      return;
-    }
     if (publishedSetupMissing()) {
       showSetupRequirement();
       return;
     }
-    const mode = $("run-form").elements.mode.value;
-    const payload = {mode, execution: $("execution").value,
+    const payload = {mode: "model", execution: $("execution").value,
       tool_profile: "published", data_mode: selectedDataMode()};
     if (payload.execution !== "local") {
       payload.trials = Number($("batch-trials").value);
       payload.concurrency = Number($("batch-concurrency").value);
       payload.time_limit = Number($("batch-time-limit").value);
     }
-    if (mode === "model") {
-      payload.world_mode = $("world-mode").value;
-      payload.research_mode = $("research-mode").value;
-      payload.model = $("model").value.trim();
-      if (!$("inbox-snapshot").disabled && $("inbox-snapshot").value) payload.inbox_snapshot = $("inbox-snapshot").value;
-      if (payload.execution !== "local") {
-        if (!selectedModels.size) {
-          $("form-error").textContent = "Choose at least one target model.";
-          $("form-error").hidden = false;
-          return;
-        }
-        payload.models = [...selectedModels];
-        payload.model = payload.models[0];
+    payload.scenario = $("scenario").value;
+    payload.llm_grading = $("llm-grading").checked;
+    payload.research_mode = $("research-mode").value;
+    payload.model = $("model").value.trim();
+    if (!$("inbox-snapshot").disabled && $("inbox-snapshot").value) payload.inbox_snapshot = $("inbox-snapshot").value;
+    if (payload.execution !== "local") {
+      if (!selectedModels.size) {
+        $("form-error").textContent = "Choose at least one target model.";
+        $("form-error").hidden = false;
+        return;
       }
-      payload.max_turns = Number($("max-turns").value);
-      payload.cost_limit = Number($("cost-limit").value);
-      payload.sim_weeks = Number($("sim-weeks").value);
-      payload.history_tokens = Number($("history-tokens").value);
-      const allowance = $("daily-allowance").value.trim();
-      if (allowance) payload.daily_allowance = Number(allowance);
-      const simulator = $("simulator-model").value.trim();
-      const grader = $("grader-model").value.trim();
-      if (simulator) payload.simulator_model = simulator;
-      if (grader) payload.grader_model = grader;
+      payload.models = [...selectedModels];
+      payload.model = payload.models[0];
     }
+    payload.max_turns = Number($("max-turns").value);
+    payload.cost_limit = Number($("cost-limit").value);
+    payload.sim_weeks = Number($("sim-weeks").value);
+    payload.history_tokens = Number($("history-tokens").value);
+    const allowance = $("daily-allowance").value.trim();
+    payload.daily_allowance = allowance ? Number(allowance) : null;
+    const simulator = $("simulator-model").value.trim();
+    const grader = $("grader-model").value.trim();
+    if (simulator) payload.simulator_model = simulator;
+    if (grader) payload.grader_model = grader;
     state.starting = true;
     updateControls();
     $("form-error").hidden = true;
@@ -1865,20 +1810,16 @@
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) $("run-dialog").close();
     }
   });
-  $("run-form").querySelectorAll('[name="mode"]').forEach((input) => input.addEventListener("change", updateMode));
   $("data-mode").addEventListener("change", () => {
     state.dataModeEdited = true;
     $("form-error").hidden = true;
     markPresetCustom();
     updateProfileStatus();
   });
-  $("world-mode").addEventListener("change", () => {
-    $("form-error").hidden = true;
-    markPresetCustom();
-    updateProfileStatus();
-  });
+  $("scenario").addEventListener("change", markPresetCustom);
+  $("llm-grading").addEventListener("change", markPresetCustom);
   $("run-preset").addEventListener("change", applyRunPreset);
-  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "sim-weeks", "history-tokens"]) {
+  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "sim-weeks", "history-tokens", "daily-allowance"]) {
     $(id).addEventListener("input", markPresetCustom);
   }
   bindNewRunButtons();

@@ -60,21 +60,21 @@ async def test_final_response_is_pending_until_it_is_delivered():
     sim = MockSim()
     install_mock_models(sim)
     start_sample()
-    await dispatch(incoming("Please refund my cancelled train.", "initial"))
     sim.next(primary_intent="formal_complaint")
-    await dispatch(incoming("Please escalate my formal complaint and issue a final response.", "complaint"))
+    sim.open_actions.append({"decision": "complaint_closed", "case_status": "final_response",
+                             "body": "This is our final response.", "reply_after_hours": 24})
+    await dispatch(incoming("Please issue a final response.", "complaint", channel="email"))
     world = load_world()
     claim = world.outcome.claims[-1]
     assert claim.response_available_at > world.now
-    assert "final response issued" not in world.cases[SC.journey.retailer].facts_given
+    assert world.cases[SC.journey.retailer].final_response_at == claim.response_available_at
     rendered = world_summary(world)
     assert rendered["outcome"]["claims"][-1]["decision"] == "substantive response pending"
     assert rendered["pending_replies"]
-    assert "final response issued" not in str(rendered["cases"])
     with world_tx() as current:
         advance(current, claim.response_available_at + timedelta(seconds=1))
     delivered = load_world()
-    assert "final response issued" in delivered.cases[SC.journey.retailer].facts_given
+    assert delivered.cases[SC.journey.retailer].final_response_at <= delivered.now
     assert any(e.id == claim.response_email_id for e in delivered.overlay_inbox)
     assert world_summary(delivered)["delivered_replies"]
 
@@ -99,32 +99,6 @@ async def test_model_limits_are_not_swallowed_as_parse_fallbacks():
             raise LimitExceededError("cost", value=2, limit=1)
     with pytest.raises(LimitExceededError):
         await generate_structured(Limited(), shared="Context", task="Grade", schema=ExtractedClaims, name="test")
-
-
-async def test_chat_cannot_promise_a_transcript_email_that_does_not_exist():
-    sim = MockSim()
-    install_mock_models(sim)
-    start_sample()
-    def phantom(prompt):
-        required = prompt.split("Must appear verbatim in the body: ")[1].splitlines()[0]
-        return {"subject": "Chat", "body": f"Agent: I've emailed a copy of this transcript. {required}"}
-    sim.writer_override = phantom
-    result = await dispatch(incoming("Please refund my cancelled train.", "phantom"))
-    assert "emailed a copy" not in result.immediate_text
-    assert len(sim.writer_prompts) == 2
-
-
-async def test_chat_timestamps_use_the_tool_duration():
-    sim = MockSim()
-    install_mock_models(sim)
-    start_sample()
-    def timestamped(prompt):
-        required = prompt.split("Must appear verbatim in the body: ")[1].splitlines()[0]
-        return {"subject": "Chat", "body": f"09:00 Agent: Hello.\n09:18 Agent: Sorry, no refund. {required}"}
-    sim.writer_override = timestamped
-    result = await dispatch(incoming("Please refund my cancelled train.", "timestamps"))
-    assert result.immediate_text.startswith("[Chat 09:00–09:10]")
-    assert "09:18" not in result.immediate_text
 
 
 def test_completed_run_surfaces_grading_failures_and_fallbacks():

@@ -33,7 +33,6 @@ orgs:
     kind: operator
     email_domains: [rail.example]
     contact_emails: [customer.relations@rail.example]
-layers: []
 seed_emails:
   - id: seed-booking
     sender: "Example Tickets <noreply@tickets.example>"

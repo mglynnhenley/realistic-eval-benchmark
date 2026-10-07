@@ -36,6 +36,7 @@ from inspect_ai.tool import ToolCall
 
 from refund_eval.agent import harness
 from refund_eval.agent.prompt import render_system_prompt
+from refund_eval.config import RunConfig
 
 WAKEUP_RE = re.compile(
     r"^\[(Scheduled check-in|New email) - (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\] "
@@ -56,7 +57,8 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
 
     # system prompt, then the task exactly once, word for word
     assert isinstance(sample.messages[0], ChatMessageSystem)
-    assert sample.messages[0].text == render_system_prompt(scenario())
+    assert sample.messages[0].text == render_system_prompt(scenario(), sim_weeks=RunConfig.model_fields["sim_weeks"].default,
+                                                          daily_allowance=RunConfig.model_fields["daily_allowance"].default)
     users = [m for m in sample.messages if isinstance(m, ChatMessageUser)]
     assert users[0].text == scenario().task_text
     assert users[0] is sample.messages[1]
@@ -205,7 +207,9 @@ def test_zero_history_tokens_keeps_full_history_and_no_memory_tool(tmp_path, mon
     assert built[0]["compaction"] is None
     assert script.tool_names_seen == {"fixture_search", "fixture_send"}
     system = log.samples[0].messages[0].text
-    assert system == render_system_prompt(scenario(), history_tokens=0) and "memory" not in system
+    assert system == render_system_prompt(scenario(), history_tokens=0,
+                                          sim_weeks=RunConfig.model_fields["sim_weeks"].default,
+                                          daily_allowance=RunConfig.model_fields["daily_allowance"].default) and "memory" not in system
 
 
 def test_trimming_shrinks_model_input_but_keeps_full_history(tmp_path):

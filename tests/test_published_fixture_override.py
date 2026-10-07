@@ -40,7 +40,7 @@ def stub_task_dependencies(monkeypatch, captured):
     monkeypatch.setattr(task_module, "refund_agent", agent)
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
-    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a: [])
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True})
 
 
@@ -194,7 +194,7 @@ def test_task_agent_and_adapter_forward_override_in_an_offline_inspect_run(tmp_p
 
     monkeypatch.setattr(profile, "published_tools", tools)
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True})
-    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a: [])
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     model = get_model("mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", "Waiting.")])
     [log] = eval(impossible_refund, model=model, task_args={"trials": 1, "max_turns": 1, "cost_limit": None,

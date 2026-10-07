@@ -16,7 +16,6 @@ from inspect_ai.log import read_eval_log
 
 from refund_eval.config import RunConfig
 from refund_eval.dashboard.telemetry import EMPTY_SNAPSHOT, RUN_DIR_ENV, write_snapshot
-from refund_eval.demo import run_demo
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
 from refund_eval.sim.counterparts import REGISTRY_KEY
@@ -29,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 def load_config(run_dir: Path) -> dict[str, Any]:
     config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
-    if not isinstance(config, dict) or config.get("mode") not in {"demo", "model"}:
-        raise ValueError("Run mode must be 'demo' or 'model'.")
+    if not isinstance(config, dict) or config.get("mode") != "model":
+        raise ValueError("Run mode must be 'model'.")
     if config["mode"] == "model":
         # A model run must say which experiment it is: never back-fill paid role
         # models, or reinterpret an older record as published hybrid.
@@ -49,12 +48,6 @@ def load_config(run_dir: Path) -> dict[str, Any]:
         raise ValueError("data_mode must be 'fixture', 'hybrid' or 'live'.")
     if config["data_mode"] in {"live", "hybrid"} and config["tool_profile"] != "published":
         raise ValueError(f"{config['data_mode'].title()} data requires the published tool profile.")
-    if config["world_mode"] not in {"baseline", "friction", "open"}:
-        raise ValueError("world_mode must be 'baseline', 'friction' or 'open'.")
-    if config["world_mode"] in {"friction", "open"} and (config["mode"] != "model" or config["data_mode"] == "live"):
-        raise ValueError("Realistic friction requires a model trial with simulated Gmail (fixture or hybrid data).")
-    if config["mode"] == "demo" and config["data_mode"] != "fixture":
-        raise ValueError("The dashboard scripted demo requires fixture data.")
     if "published_config" in config and not isinstance(config["published_config"], str):
         raise ValueError("published_config must be a file path.")
     turns = config["max_turns"]
@@ -89,7 +82,7 @@ def worker_environment(run_dir: Path):
                 os.environ[name] = value
 
 
-def final_snapshot(log: Any, summary: dict[str, Any] | None = None) -> dict[str, Any]:
+def final_snapshot(log: Any) -> dict[str, Any]:
     """Use the saved Inspect sample as the authoritative final transcript."""
     sample = log.samples[0] if log.samples else None
     sample_store = sample.store if sample is not None else {}
@@ -101,17 +94,12 @@ def final_snapshot(log: Any, summary: dict[str, Any] | None = None) -> dict[str,
     elif log.status != "success" or sample is None or error:
         phase = "failed"
         error = error or f"Inspect run ended with status {log.status}."
-    elif summary is not None and not summary["passed"]:
-        phase = "failed"
-        failed = ", ".join(name for name, passed in summary["checks"].items() if not passed)
-        error = f"Demo checks failed: {failed}"
     else:
         phase = "completed"
     result = {
         "phase": phase,
         "error": str(error) if error else None,
         "inspect_log": str(Path(log.location).resolve()) if log.location else None,
-        "summary": summary,
     }
     if sample is not None:
         result.update(
@@ -142,76 +130,66 @@ def run_worker(run_dir: str | Path) -> int:
                 from refund_eval.grading.behaviours import BehaviourSnapshot
 
                 rubric_args["rubric_set"] = BehaviourSnapshot.model_validate_json(rubric_path.read_text()).model_dump(mode="json")
-            summary = None
-            if config["mode"] == "demo":
-                summary = run_demo(
-                    destination / "logs", step_delay=0.2, max_turns=config["max_turns"],
-                    history_tokens=config["history_tokens"],
-                    cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
-                    time_limit=config.get("time_limit"),
+            profile_args = {}
+            if config.get("inbox_snapshot"):
+                from refund_eval.world.snapshot_store import (
+                    file_sha256,
+                    snapshot_path,
+                )
+
+                inbox = snapshot_path(config["inbox_snapshot"])
+                if not inbox.is_file() or file_sha256(inbox) != config.get("inbox_sha256"):
+                    raise ValueError("The Gmail snapshot changed or was removed after this run was configured.")
+                profile_args["fixture_path"] = str(inbox)
+            if config["research_mode"] != "auto":
+                profile_args["research_mode"] = config["research_mode"]
+            if config["tool_profile"] == "published":
+                from refund_eval.published.profile import (
+                    DEFAULT_CONFIG,
+                    fixture_readiness,
+                    hybrid_readiness,
+                    readiness,
+                )
+
+                profile_args.update(tool_profile="published", published_data=config["data_mode"],
+                                    artifact_dir=str(destination))
+                if config["data_mode"] == "fixture":
+                    status = fixture_readiness()
+                elif config["data_mode"] == "hybrid":
+                    status = hybrid_readiness()
+                else:
+                    published_path = config.get("published_config") or os.environ.get(
+                        "REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG
+                    )
+                    status = readiness(published_path)
+                    profile_args["published_config"] = published_path
+                if not status["configured"]:
+                    raise ValueError(f"Published tools are not configured. {status['reason']}")
+            [log] = eval(
+                impossible_refund,
+                task_args={
+                    "trials": 1,
+                    "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
+                    "max_turns": config["max_turns"],
+                    "history_tokens": config["history_tokens"],
+                    "cost_limit": config["cost_limit"],
+                    "sim_weeks": config["sim_weeks"],
+                    "daily_allowance": config["daily_allowance"],
+                    "scenario": config["scenario"],
+                    "llm_grading": config["llm_grading"],
+                    "use_full_allowance": config["use_full_allowance"],
+                    **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),
+                    **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
                     **rubric_args,
-                )
-                log = read_eval_log(summary["inspect_log"])
-            else:
-                profile_args = {}
-                if config.get("inbox_snapshot"):
-                    from refund_eval.world.snapshot_store import (
-                        file_sha256,
-                        snapshot_path,
-                    )
-
-                    inbox = snapshot_path(config["inbox_snapshot"])
-                    if not inbox.is_file() or file_sha256(inbox) != config.get("inbox_sha256"):
-                        raise ValueError("The Gmail snapshot changed or was removed after this run was configured.")
-                    profile_args["fixture_path"] = str(inbox)
-                if config["world_mode"] != "baseline":
-                    profile_args["world_mode"] = config["world_mode"]
-                if config["research_mode"] != "auto":
-                    profile_args["research_mode"] = config["research_mode"]
-                if config["tool_profile"] == "published":
-                    from refund_eval.published.profile import (
-                        DEFAULT_CONFIG,
-                        fixture_readiness,
-                        hybrid_readiness,
-                        readiness,
-                    )
-
-                    profile_args.update(tool_profile="published", published_data=config["data_mode"],
-                                        artifact_dir=str(destination))
-                    if config["data_mode"] == "fixture":
-                        status = fixture_readiness()
-                    elif config["data_mode"] == "hybrid":
-                        status = hybrid_readiness()
-                    else:
-                        published_path = config.get("published_config") or os.environ.get(
-                            "REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG
-                        )
-                        status = readiness(published_path)
-                        profile_args["published_config"] = published_path
-                    if not status["configured"]:
-                        raise ValueError(f"Published tools are not configured. {status['reason']}")
-                [log] = eval(
-                    impossible_refund,
-                    task_args={
-                        "trials": 1,
-                        "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
-                        "max_turns": config["max_turns"],
-                        "history_tokens": config["history_tokens"],
-                        "cost_limit": config["cost_limit"],
-                        "sim_weeks": config["sim_weeks"],
-                        **({"daily_allowance": config["daily_allowance"]} if config.get("daily_allowance") else {}),
-                        **({"scenario": config["scenario"]} if config.get("scenario", "train_refund") != "train_refund" else {}),
-                        **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
-                        **rubric_args,
-                        **profile_args,
-                    },
-                    model=config["model"],
-                    model_args=published_model_args(config["model"]) if config["tool_profile"] == "published" else {},
-                    model_roles={"simulator": config["simulator_model"], "grader": config["grader_model"]},
-                    log_dir=str(destination / "logs"), log_format="eval", display="none",
-                    metadata={"dashboard": True, "world_mode": config["world_mode"]},
-                )
-            snapshot = write_snapshot(destination, **final_snapshot(log, summary))
+                    **profile_args,
+                },
+                model=config["model"],
+                model_args=published_model_args(config["model"]) if config["tool_profile"] == "published" else {},
+                model_roles={"simulator": config["simulator_model"], "grader": config["grader_model"]},
+                log_dir=str(destination / "logs"), log_format="eval", display="none",
+                metadata={"dashboard": True},
+            )
+            snapshot = write_snapshot(destination, **final_snapshot(log))
             return 1 if snapshot["phase"] == "failed" else 0
         except Exception as error:
             logger.exception("Dashboard run failed")

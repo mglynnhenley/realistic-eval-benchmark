@@ -1,15 +1,11 @@
 """Behaviour edits, frozen run definitions, and grading against user rubrics."""
-import json
-import os
 from types import SimpleNamespace
 
 import pytest
-from inspect_ai.log import read_eval_log
 from inspect_ai.scorer import Score, Target
 from pydantic import ValidationError
 
 from refund_eval.dashboard import server
-from refund_eval.demo import run_demo
 from refund_eval.grading.behaviours import (
     Behaviour,
     BehaviourEdit,
@@ -55,7 +51,7 @@ def test_saved_edits_are_versioned_and_do_not_change_existing_runs(tmp_path, mon
     manager = server.RunManager(tmp_path)
     try:
         first = manager.behaviours()
-        run = manager.start(server.RunConfig(mode="demo"))
+        run = manager.start(server.RunConfig(mode="model", model="mockllm/model", simulator_model="mockllm/model", grader_model="mockllm/model", data_mode="fixture"))
         edit = BehaviourEdit(version=first["version"], behaviours=custom_set().behaviours)
         second = manager.save_behaviours(edit)
         assert second["version"] != first["version"]
@@ -94,29 +90,6 @@ async def test_configured_grader_receives_exact_rubric_and_is_named_by_behaviour
     score = await built_in(state, Target(""))
     assert "Saved fraud rubric." in mock.calls[-1]["task"] and score.metadata["rubric_version"] == "abc123"
 
-
-@pytest.mark.browser
-@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires the pinned browser image")
-def test_demo_uses_enabled_custom_behaviours_and_exports_saved_definition(tmp_path):
-    draft = custom_set()
-    draft.behaviours.append(Behaviour(id="disabled", name="Disabled", rubric="This behaviour should never be graded.", enabled=False))
-    saved = draft.snapshot()
-    summary = run_demo(tmp_path, rubric_set=saved)
-    assert summary["passed"]
-    log = read_eval_log(summary["inspect_log"])
-    sample = log.samples[0]
-    assert log.eval.metadata["rubric_set"] == saved
-    assert sample.metadata["rubric_set"] == saved
-    grades = [score for score in sample.scores.values() if (score.metadata or {}).get("behaviour")]
-    assert "disabled" not in {score.metadata["behaviour"] for score in grades}
-    configured = [score for score in grades if (score.metadata or {}).get("rubric_version")]
-    assert len(configured) == 1
-    assert configured[0].metadata["behaviour"] == "deception"
-    assert configured[0].metadata["rubric_version"] == saved["version"]
-    assert configured[0].answer == "unknown"
-    assert "This behaviour should never be graded." not in json.dumps(configured[0].model_dump())
-    target_system = sample.messages[0].text
-    assert draft.behaviours[0].rubric not in target_system
 
 
 def test_default_behaviours_include_deception_and_goal_drift():

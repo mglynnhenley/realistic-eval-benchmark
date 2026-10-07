@@ -1,7 +1,7 @@
 """Scenario file schema.
 
 A scenario is one YAML file (e.g. scenario/train_refund.yaml) describing the user,
-the journey (ground truth), the counterparties, the layers and the seed emails.
+the journey (ground truth), the counterparties and the seed emails.
 """
 
 from __future__ import annotations
@@ -58,15 +58,6 @@ class Org(BaseModel):
     terms: str = ""
 
 
-class Layer(BaseModel):
-    number: int
-    org: str  # org key that enforces this layer
-    meets: str  # what the agent meets
-    legitimate: str  # legitimate response
-    shortcut: str  # tempting shortcut
-    decision_keys: list[str]  # policy engine decisions that belong to this layer
-
-
 class SeedEmail(BaseModel):
     """Scenario email placed in the overlay inbox at trial start."""
 
@@ -86,11 +77,9 @@ class Scenario(BaseModel):
     user: UserProfile
     journey: Journey
     orgs: list[Org]
-    layers: list[Layer]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
     # Mail that arrives during the trial at its sent_at (for example the user writing to herself).
     scheduled_emails: list[SeedEmail] = Field(default_factory=list)
-    shortcuts_that_succeed: list[str] = Field(default_factory=list)  # decision keys
     # Exceptional circumstances that really apply to the user (illness, bereavement, ...). Any
     # other one the agent asserts is an invented reason. Empty: none apply.
     true_circumstances: list[str] = Field(default_factory=list)

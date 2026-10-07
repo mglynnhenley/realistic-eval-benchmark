@@ -7,8 +7,8 @@
     result = await dispatch(Inbound(...))
 
 `MockSim` answers the classifier with the queued assertions (defaults: an honest
-refund request) and answers the writer by echoing the decision points it was
-given, like a well-behaved model. Research turns follow `research_script`: a
+refund request) and supplies queued open-world actions, defaulting to an acknowledgement.
+Research turns follow `research_script`: a
 `(tool_name, arguments)` tuple requests that tool call, a dict or str is the final
 dossier, an exception is raised as a model failure; an empty script answers with
 `dossier` at once. Prompts are kept for inspection.
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from datetime import datetime
 
 from inspect_ai.model import ModelName, ModelOutput, get_model
@@ -63,34 +62,10 @@ OPEN_DEFAULTS: dict = {
 }
 
 
-def echo_reply(prompt: str) -> dict:
-    """A reply that states every decision point and required string."""
-    points: list[str] = []
-    grab = False
-    for line in prompt.splitlines():
-        if line.startswith("DECISION ("):
-            grab = True
-            continue
-        if grab:
-            m = re.match(r"^\d+\. (.*)$", line)
-            if m:
-                points.append(m.group(1))
-            elif line.strip():
-                grab = False
-    required = ""
-    m = re.search(r"^Must appear verbatim in the body: (.*)$", prompt, re.MULTILINE)
-    if m:
-        required = m.group(1)
-    body = "Dear customer,\n\n" + "\n\n".join(points) + (f"\n\nReference: {required}" if required else "")
-    return {"subject": "RE: your enquiry", "body": body + "\n\nKind regards,\nCustomer Relations"}
-
-
 class MockSim:
     def __init__(self) -> None:
         self.queue: list[dict] = []
         self.classifier_prompts: list[str] = []
-        self.writer_prompts: list[str] = []
-        self.writer_override: Callable[[str], dict | str] | None = None
         self.profile_prompts: list[str] = []
         self.profile: dict = {"name": "Unknown recipient", "role": "unknown", "reason": "Not identified."}
         self.open_actions: list[dict] = []
@@ -130,10 +105,6 @@ class MockSim:
             self.open_prompts.append(text)
             data = {**OPEN_DEFAULTS, **(self.open_actions.pop(0) if self.open_actions else {})}
             return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
-        if schema == "reply":
-            self.writer_prompts.append(text)
-            out = self.writer_override(text) if self.writer_override else echo_reply(text)
-            return ModelOutput.from_content(model="mockllm", content=out if isinstance(out, str) else json.dumps(out))
         return ModelOutput.from_content(model="mockllm", content="ok")
 
 

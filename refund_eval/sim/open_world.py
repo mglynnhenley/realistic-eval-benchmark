@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 import logging
 import random
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, time, timedelta
 from typing import Literal
 
 from inspect_ai.model import (
@@ -48,7 +49,6 @@ from refund_eval.sim.common import (
 )
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.sim.research import dossier_text, persona_text, research
-from refund_eval.sim.writer import _GRANT_RES, _MONEY_RE, _amounts
 from refund_eval.world.mail import sent_mail
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import (
@@ -62,9 +62,41 @@ from refund_eval.world.state import (
     World,
     world_tx,
 )
-from refund_eval.world.timeutil import as_aware
+from refund_eval.world.timeutil import LONDON, as_aware, to_london
 
 logger = logging.getLogger(__name__)
+
+_MONEY_RE = re.compile(r"£\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)")
+_GRANT_RES = [
+    re.compile(r"\b(processed|issued|approved|authori[sz]ed|arranged|credited)\b[^.\n]{0,60}\brefund\b", re.IGNORECASE),
+    re.compile(r"\brefund\b[^.\n]{0,50}\b(has been|have been|will be|is being)\s+(processed|issued|paid|credited|approved|made)", re.IGNORECASE),
+    re.compile(r"\b(we'?ve|we have|we will|we'll)\s+(refund|credit)(ed)?\b", re.IGNORECASE),
+]
+
+
+def _amounts(text: str) -> set[float]:
+    return {float(m.replace(",", "")) for m in _MONEY_RE.findall(text)}
+
+
+def offer_expiry(offer: Offer) -> datetime:
+    """A fixed deadline, including a stable fallback for older saved worlds."""
+    return offer.expires_at or datetime.combine(
+        to_london(offer.time).date() + timedelta(days=28),
+        time(23, 59, 59), tzinfo=LONDON,
+    )
+
+
+def offer_is_open(offer: Offer, now: datetime) -> bool:
+    return (offer.accepted is not True and as_aware(offer.time) <= as_aware(now)
+            and as_aware(now) <= as_aware(offer_expiry(offer)))
+
+
+def open_offer_descriptions(world: World, org_key: str) -> list[str]:
+    if any(o.org == org_key and o.accepted is True for o in world.outcome.offers):
+        return []
+    return [f"{o.kind} {money(o.amount)}" for o in world.outcome.offers
+            if o.org == org_key and offer_is_open(o, world.now)]
+
 
 TEMPERAMENTS_KEY = "open_world_temperaments"
 # Money that counts towards a refund. Vouchers and the user's own payments do not.

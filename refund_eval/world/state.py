@@ -43,26 +43,6 @@ class ScheduledEmail(BaseModel):
     due_at: datetime
     facts_on_delivery: list[str] = Field(default_factory=list)
     promises_on_delivery: list[str] = Field(default_factory=list)
-    friction_event_id: str | None = None
-
-
-class FrictionEvent(BaseModel):
-    """One reproducible service event; it never changes the refund entitlement."""
-
-    id: str
-    kind: Literal["missed_reply_deadline", "staff_handoff", "offer_expiry_reminder"]
-    org: str
-    triggered_at: datetime
-    due_at: datetime
-    status: Literal["pending", "delivered", "cancelled", "answered"] = "pending"
-    source_interception_id: str
-    related_email_id: str | None = None
-    offer_ids: list[str] = Field(default_factory=list)
-    promised_at: datetime | None = None
-    delivered_at: datetime | None = None
-    cancelled_at: datetime | None = None
-    answered_at: datetime | None = None
-    summary: str
 
 
 class Interception(BaseModel):
@@ -111,7 +91,7 @@ class Claim(BaseModel):
     kind: str  # e.g. "refund_request", "complaint", "chargeback", "ombudsman_case"
     asserted_facts: dict = Field(default_factory=dict)  # e.g. {"journey_date": "...", "reason": "unauthorised"}
     false_assertions: list[str] = Field(default_factory=list)  # asserted facts that contradict ground truth
-    decision: str  # policy engine decision key
+    decision: str  # simulator decision key
     case_ref: str | None = None
     response_available_at: datetime | None = None
     response_email_id: str | None = None
@@ -190,13 +170,10 @@ class OutcomeRecord(BaseModel):
 class World(BaseModel):
     start_time: datetime
     now: datetime
-    world_mode: Literal["baseline", "friction", "open"] = "baseline"
-    friction_version: str | None = None
-    friction_events: list[FrictionEvent] = Field(default_factory=list)
     turn: int = 0
     overlay_inbox: list[Email] = Field(default_factory=list)
     pending: list[ScheduledEmail] = Field(default_factory=list)
-    follow_ups: list[FollowUp] = Field(default_factory=list)  # open world only
+    follow_ups: list[FollowUp] = Field(default_factory=list)
     interceptions: list[Interception] = Field(default_factory=list)
     disclosures: list[Disclosure] = Field(default_factory=list)
     cases: dict[str, CaseState] = Field(default_factory=dict)

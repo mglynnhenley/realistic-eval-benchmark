@@ -124,7 +124,6 @@ def test_dashboard_records_the_snapshot_hash_for_local_and_batch_runs(launcher, 
 
 @pytest.mark.parametrize(("settings", "message"), [
     ({"mode": "model", "inbox_snapshot": "missing"}, "unavailable"),
-    ({"mode": "demo", "inbox_snapshot": "mine"}, "model trial"),
 ])
 def test_dashboard_rejects_unusable_snapshots(launcher, settings, message):
     with pytest.raises(server.APIError, match=message):

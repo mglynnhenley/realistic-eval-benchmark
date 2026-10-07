@@ -1,5 +1,5 @@
 """Small helpers shared by the simulator modules: money and date formatting,
-org persona directives, case reference generation, business-hours delays and
+org persona directives, case reference generation and
 the current scenario lookup."""
 
 from __future__ import annotations
@@ -8,12 +8,13 @@ import json
 import random
 import re
 import string
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from functools import lru_cache
 
+from refund_eval.config import RunConfig
 from refund_eval.scenario.schema import Org, Scenario, load_scenario
 
-DEFAULT_SCENARIO = "train_refund"
+DEFAULT_SCENARIO = RunConfig.model_fields["scenario"].default
 
 
 # ---------------------------------------------------------------- scenario
@@ -49,10 +50,6 @@ def money(amount: float) -> str:
 
 def long_date(d: date | datetime) -> str:
     return f"{d:%A} {d.day} {d:%B %Y}"
-
-
-def short_date(d: date | datetime) -> str:
-    return f"{d.day} {d:%B %Y}"
 
 
 def first_name(full_name: str) -> str:
@@ -98,10 +95,6 @@ def reply_from(org: Org) -> str:
     return persona_directive(org, "Reply-from") or (
         f"{org.name} <{org.contact_emails[0]}>" if org.contact_emails else f"{org.name} <no-reply@{org.email_domains[0]}>"
     )
-
-
-def sign_off(org: Org) -> str:
-    return persona_directive(org, "Sign-off") or f"Kind regards,\n{org.name}"
 
 
 def phone_hours(org: Org) -> tuple[int, int, int]:
@@ -155,43 +148,3 @@ def make_case_ref(scenario: Scenario, org: Org, start_time: datetime, salt: str 
     fmt = fmt or persona_directive(org, "Case-ref-format") or _DEFAULT_REF_FORMATS.get(org.kind, "{A8}")
     rng = random.Random(f"{scenario.id}|{org.key}|{start_time.isoformat()}|{salt}")
     return _fill_ref(fmt, rng)
-
-
-# ---------------------------------------------------------------- delays
-
-
-def business_due(now: datetime, delay_hours: tuple[float, float], rng: random.Random) -> datetime:
-    """Now plus a delay drawn from the range, moved into office hours
-    (Mon-Fri 08:00-18:00) because replies are written by staff."""
-    lo, hi = delay_hours
-    due = now + timedelta(hours=rng.uniform(lo, max(lo, hi)))
-    if due.weekday() < 5 and 8 <= due.hour < 18:
-        return due
-    day = due
-    if due.hour >= 18 or due.weekday() >= 5:
-        day = due + timedelta(days=1)
-    while day.weekday() >= 5:
-        day += timedelta(days=1)
-    return day.replace(hour=rng.randint(8, 16), minute=rng.randint(0, 59), second=rng.randint(0, 59), microsecond=0)
-
-
-def add_working_days(start: datetime, days: int) -> datetime:
-    d = start
-    added = 0
-    while added < days:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            added += 1
-    return d
-
-
-def working_days_between(a: datetime, b: datetime) -> int:
-    if b <= a:
-        return 0
-    days = 0
-    d = a
-    while d.date() < b.date():
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            days += 1
-    return days

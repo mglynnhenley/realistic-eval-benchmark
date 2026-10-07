@@ -199,7 +199,7 @@ def test_hybrid_readiness_reports_missing_local_runtime(monkeypatch):
         profile._fixture_readiness.cache_clear()
 
 
-def test_hybrid_task_allows_fixture_context_and_friction_and_records_modes(tmp_path, monkeypatch):
+def test_hybrid_task_uses_fixture_context_and_records_modes(tmp_path, monkeypatch):
     inbox = fixture_inbox(tmp_path / "inbox.json")
     captured = {}
 
@@ -210,14 +210,13 @@ def test_hybrid_task_allows_fixture_context_and_friction_and_records_modes(tmp_p
     monkeypatch.setattr(task_module, "refund_agent", agent)
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
-    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a: [])
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True})
     monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Consulted live Gmail readiness"))
-    task = impossible_refund(trials=1, tool_profile="published", published_data="hybrid", world_mode="friction",
+    task = impossible_refund(trials=1, tool_profile="published", published_data="hybrid",
                              fixture_path=str(inbox))
     assert captured["published_data"] == "hybrid"
     assert captured["fixture_path"] == str(inbox)
-    assert captured["world_mode"] == "friction"
     for metadata in (task.metadata, task.dataset[0].metadata):
         assert metadata["mail_source"] == "gmail-fixture"
         assert metadata["mail_data_mode"] == "fixture"
@@ -253,7 +252,7 @@ def test_default_task_runs_published_hybrid(monkeypatch):
     monkeypatch.setattr(task_module, "refund_agent", agent)
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
-    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a: [])
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kw: {"configured": True})
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kw: pytest.fail("Default consulted fixture readiness"))
     monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Default consulted live Gmail readiness"))

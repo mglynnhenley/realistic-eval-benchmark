@@ -144,7 +144,7 @@ def test_actual_inspect_tool_sequence_delivers_mail_without_a_status_report(tmp_
     ]
     [log] = eval(
         Task(dataset=[Sample(input="Check my email")], solver=refund_agent(
-            tool_profile="published", published_data="fixture", max_turns=3,
+            scenario_id=scenario.id, tool_profile="published", published_data="fixture", max_turns=3,
         )),
         model=get_model("mockllm/model", custom_outputs=outputs),
         log_dir=str(tmp_path), display="none",

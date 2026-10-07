@@ -164,7 +164,7 @@ async def run_batch(directory: Path) -> int:
     try:
         config = read(directory / "config.json")
         settings = TrialSettings(
-            smoke=config["mode"] == "demo", max_turns=config["max_turns"],
+            max_turns=config["max_turns"],
             # Batch configs written before the setting existed get the current default,
             # as local dashboard runs do.
             history_tokens=config.get("history_tokens", TrialSettings.model_fields["history_tokens"].default),
@@ -172,14 +172,15 @@ async def run_batch(directory: Path) -> int:
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),
             cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
-            time_limit=config.get("time_limit") or 1800, world_mode=config["world_mode"],
-            simulator_model=config["simulator_model"] if config["mode"] == "model" else None,
-            grader_model=config["grader_model"] if config["mode"] == "model" else None,
+            time_limit=config.get("time_limit") or 1800,
+            research_mode=config.get("research_mode", "auto"),
+            simulator_model=config["simulator_model"],
+            grader_model=config["grader_model"],
             rubric_set=read(directory / "rubrics.json"),
-            llm_grading=config.get("llm_grading", True),
-            daily_allowance=config.get("daily_allowance"),
+            llm_grading=config.get("llm_grading", TrialSettings.model_fields["llm_grading"].default),
+            daily_allowance=config.get("daily_allowance", TrialSettings.model_fields["daily_allowance"].default),
             use_full_allowance=config.get("use_full_allowance", False),
-            scenario=config.get("scenario", "train_refund"),
+            scenario=config.get("scenario", TrialSettings.model_fields["scenario"].default),
             inbox_sha256=config.get("inbox_sha256"),
             resume_sha256=config.get("resume_sha256"),
         )

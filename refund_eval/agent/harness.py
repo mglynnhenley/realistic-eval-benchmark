@@ -114,10 +114,8 @@ class HistoryWindow(CompactionTrim):
 # World setup
 
 
-def initial_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
+def initial_world(scenario: Scenario) -> World:
     """A clean world at the scenario's start time with the seed mail in the overlay."""
-    from refund_eval.sim.friction import FRICTION_VERSION
-
     seed = [
         Email(
             id=s.id,
@@ -141,8 +139,6 @@ def initial_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
     ]
     return World(
         start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed, pending=scheduled,
-        world_mode=world_mode,
-        friction_version=FRICTION_VERSION if world_mode == "friction" else None,
     )
 
 
@@ -221,13 +217,11 @@ async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
     return messages
 
 
-def init_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
+def init_world(scenario: Scenario) -> World:
     """Create the world for this sample (a no-op if it already exists, e.g. on resume)."""
     if store().get(WORLD_KEY) is None:
-        save_world(initial_world(scenario, world_mode=world_mode))
+        save_world(initial_world(scenario))
     world = load_world()
-    if world.world_mode != world_mode:
-        raise ValueError("Cannot change world_mode while resuming a trial")
     return world
 
 
@@ -348,7 +342,7 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: in
 
     for _ in range(limit):
         world = load_world()
-        item = next_follow_up(world) if world.world_mode == "open" else None
+        item = next_follow_up(world)
         if item is None:
             return
         when = (next_checkin(aware(world.now), checkin_hour) if day_over
@@ -404,7 +398,7 @@ def make_on_continue(
     max_turns: int,
     sim_weeks: float,
     checkin_hour: int = CHECKIN_HOUR,
-    daily_allowance: float | None = None,
+    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
 ):
     """Build the `on_continue` hook for react().
 
@@ -488,7 +482,7 @@ def _record_stop(reason: str) -> None:
 
 @agent
 def refund_agent(
-    scenario_id: str = "train_refund",
+    scenario_id: str = RunConfig.model_fields["scenario"].default,
     mail_source_kind: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
@@ -497,13 +491,12 @@ def refund_agent(
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
-    world_mode: str = "baseline",
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
     resume_log: str | None = None,
-    daily_allowance: float | None = None,
+    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
     use_full_allowance: bool = False,
 ) -> Agent:
     """Personal-assistant agent for one trial.
@@ -536,7 +529,7 @@ def refund_agent(
         if resume_log:
             state.messages = (await restore_snapshot(resume_log) if resume_log.endswith(".json")
                               else restore_trial(resume_log))
-        init_world(scenario, world_mode=world_mode)
+        init_world(scenario)
         store().set(RESEARCH_MODE_KEY, research_mode)
         emit_snapshot(state.messages, phase="running")
 

@@ -81,7 +81,7 @@ def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
         record = manager.start(server.RunConfig(mode="model"))
         config = json.loads((manager.directory(record["id"]) / "config.json").read_text())
         assert config["model"] == "openrouter/anthropic/claude-opus-5"
-        assert config["simulator_model"] == "openrouter/openai/gpt-6-astra"
+        assert config["simulator_model"] == DEFAULT_ROLE_MODEL
         assert config["grader_model"] == "openrouter/anthropic/claude-haiku-4.5"
         assert launched["env"]["OPENROUTER_API_KEY"] == "test-openrouter-key"
         assert "ANTHROPIC_API_KEY" not in launched["env"]
@@ -200,24 +200,13 @@ def test_published_selection_persists_server_config_path_without_fallback(tmp_pa
         manager.close()
 
 
-def test_scripted_demo_is_labelled_with_published_tools(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
-    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
-    manager = server.RunManager(tmp_path / "runs")
-    try:
-        record = manager.start(server.RunConfig(mode="demo"))
-        assert record["label"] == "Scripted demo · published tools"
-        assert record["tool_profile"] == "published"
-        assert record["data_mode"] == "fixture"
-    finally:
-        manager.close()
 
 
-def test_demo_requires_published_tools(tmp_path):
+def test_requires_published_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(ValueError, match="published"):
-            manager.start(server.RunConfig(mode="demo", tool_profile="unknown"))
+            manager.start(server.RunConfig(mode="model", tool_profile="unknown"))
         assert not manager.list()
     finally:
         manager.close()
@@ -296,16 +285,16 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
     assert (config.simulator_model, config.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     public = server.public_config()
     assert (public["default_model"], public["default_role_model"]) == (chosen, DEFAULT_ROLE_MODEL)
-    assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 20, 1.0)
+    assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 1000, 6.0)
     explicit = server.RunConfig(model="mockllm/target", simulator_model="mockllm/simulator", grader_model="mockllm/grader")
     assert (explicit.model, explicit.simulator_model, explicit.grader_model) == (
         "mockllm/target", "mockllm/simulator", "mockllm/grader",
     )
     assert DEFAULT_TARGET_MODEL == "openrouter/anthropic/claude-opus-5"
-    assert DEFAULT_ROLE_MODEL == "openrouter/openai/gpt-6-astra"
+    assert DEFAULT_ROLE_MODEL == "openrouter/anthropic/claude-opus-5.5"
 
 
-def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
+def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     from refund_eval.published import profile
 
@@ -318,57 +307,35 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
     monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     presets = {item["name"]: item["settings"] for item in server.public_config()["run_presets"]}
-    quick = server.RunConfig.model_validate(presets["quick"])
-    longer = server.RunConfig.model_validate(presets["long"])
-    assert (quick.max_turns, quick.cost_limit, quick.sim_weeks, quick.world_mode) == (20, 1, 1, "baseline")
-    assert (longer.max_turns, longer.cost_limit, longer.sim_weeks, longer.world_mode) == (600, 10, 12, "friction")
-    for preset in (quick, longer):
-        assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
-        assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
-        assert preset.model == model
-        assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
+    preset = server.RunConfig.model_validate(presets["default"])
+    assert (preset.max_turns, preset.cost_limit, preset.sim_weeks) == (1000, 1, 6)
+    assert preset.scenario == "train_refund_pressure"
+    assert preset.daily_allowance == 3 and not preset.llm_grading
+    assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
+    assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
+    assert preset.model == model
+    assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     manager = server.RunManager(tmp_path / "runs")
     try:
-        record = manager.start(longer)
+        record = manager.start(preset)
         saved = json.loads((manager.directory(record["id"]) / "config.json").read_text())
-        assert saved["world_mode"] == record["world_mode"] == "friction"
+        assert saved["scenario"] == record["scenario"] == "train_refund_pressure"
         assert saved["data_mode"] == record["data_mode"] == "hybrid"
         assert "published_config" not in saved
-        assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (600, 10, 12)
+        assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (1000, 1, 6)
         assert saved["history_tokens"] == 60_000
-        record = manager.start(longer.model_copy(update={"history_tokens": 0}))
+        record = manager.start(preset.model_copy(update={"history_tokens": 0}))
         assert json.loads((manager.directory(record["id"]) / "config.json").read_text())["history_tokens"] == 0
-        assert "realistic friction" in record["label"]
     finally:
         manager.close()
 
 
-@pytest.mark.parametrize("settings", [
-    {"mode": "demo", "world_mode": "friction"},
-    {"mode": "model", "tool_profile": "published", "data_mode": "live", "world_mode": "friction"},
-])
-def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path, monkeypatch, settings):
-    from refund_eval.published import profile
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("Invalid world mode must fail before setup or worker launch")
-
-    monkeypatch.setattr(profile, "readiness", forbidden)
-    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
-    manager = server.RunManager(tmp_path)
-    try:
-        with pytest.raises(server.APIError, match="Realistic friction requires"):
-            manager.start(server.RunConfig(**settings))
-        assert not manager.list()
-    finally:
-        manager.close()
 
 
 @pytest.mark.parametrize(('settings', 'message'), [
     ({'execution': 'local', 'trials': 2}, 'multiple trials'),
     ({'execution': 'modal', 'data_mode': 'live'}, 'Live Gmail is local-only'),
     ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
-    ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
     ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),
 ])
 def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, message):
@@ -382,6 +349,7 @@ def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, mess
 
 
 def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     commands = []
     monkeypatch.setattr(server.subprocess, 'Popen', lambda command, **kwargs: (
         commands.append(command) or SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0)))
@@ -438,7 +406,6 @@ def test_invalid_model_list_is_rejected(settings):
 
 @pytest.mark.parametrize('settings, message', [
     ({'mode': 'model', 'execution': 'local'}, 'Harbor model batch'),
-    ({'mode': 'demo', 'execution': 'modal'}, 'Harbor model batch'),
     ({'mode': 'model', 'execution': 'modal', 'trials': 51}, '100 total trials'),
 ])
 def test_multi_model_scope_and_total_limits(tmp_path, settings, message):

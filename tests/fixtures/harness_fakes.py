@@ -240,7 +240,7 @@ def isolated_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: {"configured": True})
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: {"configured": True})
     monkeypatch.setattr(adapters, "advance_clock", fake_advance)
-    monkeypatch.setattr(adapters, "load_scorers", lambda: [world_scorer()])
+    monkeypatch.setattr(adapters, "load_scorers", lambda *args, **kwargs: [world_scorer()])
     yield
 
 

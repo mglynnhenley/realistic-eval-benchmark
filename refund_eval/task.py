@@ -51,9 +51,13 @@ DEFAULT_MODEL_COSTS: dict[str, ModelCost] = {
     DEFAULT_TARGET_MODEL: ModelCost(
         input=5.0, output=25.0, input_cache_write=6.25, input_cache_read=0.50
     ),
+    # Verified 2026-10-07: Opus 5.5 simulator prices.
+    DEFAULT_ROLE_MODEL: ModelCost(
+        input=4.0, output=20.0, input_cache_write=5.0, input_cache_read=0.20
+    ),
     # Verified 2026-10-05. The catalog charges double above 272k prompt
     # tokens; the budget counts the base rate.
-    DEFAULT_ROLE_MODEL: ModelCost(
+    "openrouter/openai/gpt-6-astra": ModelCost(
         input=10.0, output=50.0, input_cache_write=12.5, input_cache_read=1.0
     ),
     # Verified 2026-10-06.
@@ -141,7 +145,7 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
 @task
 def impossible_refund(
     trials: int = RunConfig.model_fields["trials"].default,
-    scenario: str = "train_refund",
+    scenario: str = RunConfig.model_fields["scenario"].default,
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
@@ -155,12 +159,11 @@ def impossible_refund(
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
-    world_mode: str = "baseline",
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
-    llm_grading: bool = True,
+    llm_grading: bool = RunConfig.model_fields["llm_grading"].default,
     resume_log: str | None = None,
     daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
     use_full_allowance: bool = False,
@@ -186,8 +189,6 @@ def impossible_refund(
       tool_profile: Published MCP tools.
       published_data: "fixture" for local data, "hybrid" for local mail and live public web,
         or "live" for configured providers.
-      world_mode: "baseline", "friction" for service delays and follow-ups, or "open" where the simulator
-        model decides how every organisation and person responds (never a full refund).
       research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
         fresh and researches otherwise, "live" always researches, "saved" never searches.
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
@@ -204,8 +205,6 @@ def impossible_refund(
         raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
     if published_data == "hybrid" and tool_profile != "published":
         raise ValueError("Hybrid data requires tool_profile='published'")
-    if world_mode not in {"baseline", "friction", "open"}:
-        raise ValueError("world_mode must be 'baseline', 'friction' or 'open'")
     if research_mode not in {"auto", "live", "saved"}:
         raise ValueError("research_mode must be 'auto', 'live' or 'saved'")
     if mail_source == "gmail":
@@ -229,10 +228,6 @@ def impossible_refund(
         if not path.is_absolute() and not path.exists() and (PROJECT_ROOT / path).exists():
             path = PROJECT_ROOT / path
         fixture_path = validate_fixture_path(str(path), data_mode=published_data)
-    if world_mode in {"friction", "open"} and (
-        published_data not in {"fixture", "hybrid"}
-    ):
-        raise ValueError(f"The {world_mode} world requires simulated data")
     if tool_profile == "published":
         from inspect_ai.model._model import active_model
 
@@ -286,7 +281,6 @@ def impossible_refund(
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"world_mode": world_mode} if world_mode != "baseline" else {}),
                           **({"research_mode": research_mode} if research_mode != "auto" else {}),
                           **({"rubric_set": rubric_set} if rubric_set is not None else {})},
             )
@@ -302,11 +296,10 @@ def impossible_refund(
             published_data=published_data,
             browser_runtime=browser_runtime,
             artifact_dir=artifact_dir,
-            world_mode=world_mode,
             research_mode=research_mode,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
-            **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
+            daily_allowance=daily_allowance,
             **({"use_full_allowance": True} if use_full_allowance else {}),
         ),
         scorer=scorers or None,
@@ -327,7 +320,6 @@ def impossible_refund(
             "sim_weeks": sim_weeks,
             **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
-            **({"world_mode": world_mode} if world_mode != "baseline" else {}),
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
