@@ -155,7 +155,7 @@ async def fake_tool_scope(scenario: Scenario, mail_source_kind: str, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Stand-in scorer (workstream D)
+# Stand-in scorer
 
 
 @scorer(metrics=[mean()])

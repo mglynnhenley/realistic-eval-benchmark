@@ -62,7 +62,7 @@ def load_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Score
         if _not_built(ex, "refund_eval.grading"):
             logger.warning(
                 "refund_eval.grading.scorers.all_scorers is not available yet; "
-                "running without scorers (score the logs later with `inspect score`)."
+                "running without scorers (see docs/running.md for post-run judging)."
             )
             return []
         raise

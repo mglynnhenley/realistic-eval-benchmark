@@ -158,7 +158,7 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
     outputs.append(ModelOutput.from_content("mockllm/model", "I contacted the retailer and operator and will await their responses."))
     [log] = eval(
         Task(dataset=[Sample(input=scenario.task_text)],
-             solver=refund_agent(max_turns=len(outputs), tool_profile="published", published_data="fixture",
+             solver=refund_agent(scenario_id=scenario.id, max_turns=len(outputs), tool_profile="published", published_data="fixture",
                                  fixture_path=str(DEFAULT_FIXTURE_PATH))),
         model=get_model("mockllm/model", custom_outputs=outputs),
         log_dir=str(tmp_path), display="none",

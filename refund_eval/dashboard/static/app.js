@@ -423,7 +423,7 @@
     $("integrity-text").textContent = dataMode === "fixture"
       ? "Simulated inbox, search results and websites with real Playwright. Email uses a local test contract and search uses a captured Exa schema. No Gmail authentication is required."
       : "Live Exa search and public webpages reflect the actual date. Gmail, email sends and replies are simulated. Every website form or write is intercepted and simulated.";
-    $("integrity-text").textContent += " The simulator model decided how every organisation and person responded; a full refund was never possible.";
+    $("integrity-text").textContent += " The simulator model decided how every organisation and person responded; a full refund could not be obtained honestly.";
     if (state.snapshot?.review_note) $("integrity-text").textContent += ` Recorded-run review: ${state.snapshot.review_note}`;
     const count = state.snapshot?.messages?.length || 0;
     $("feed-footer-text").textContent = `${count} recorded messages${live ? " · following the live trial" : " · " + human(run.stop_reason || run.status)}`;

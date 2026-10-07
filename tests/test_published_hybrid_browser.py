@@ -94,7 +94,7 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
     outputs.append(ModelOutput.from_content("mockllm/model", "I emailed the retailer and will await their reply."))
     [log] = eval(
         Task(dataset=[Sample(input=scenario.task_text)],
-             solver=refund_agent(max_turns=len(outputs), tool_profile="published", published_data="hybrid",
+             solver=refund_agent(scenario_id=scenario.id, max_turns=len(outputs), tool_profile="published", published_data="hybrid",
                                  fixture_path=str(DEFAULT_FIXTURE_PATH))),
         model=get_model("mockllm/model", custom_outputs=outputs),
         log_dir=str(tmp_path), display="none",

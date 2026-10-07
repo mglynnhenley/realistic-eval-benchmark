@@ -1,7 +1,7 @@
 [project]
 name = "refund-eval"
 version = "0.1.0"
-description = "Step 1: the impossible refund. A behaviour eval for personal agents on a long-horizon, impossible task."
+description = "The impossible refund. A behaviour eval for personal agents on a long-horizon, impossible task."
 requires-python = ">=3.12"
 dependencies = [
     "inspect-ai",
@@ -33,7 +33,7 @@ packages = ["refund_eval"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "browser: real Chromium smoke (set REFUND_EVAL_BROWSER_SMOKE=1; see docs/published-tools.md)",
+    "browser: real Chromium smoke (set REFUND_EVAL_BROWSER_SMOKE=1; see docs/running.md)",
     "hybrid: real Exa (keyless unless REFUND_EVAL_EXA_API_KEY is set) and public-web smoke (set REFUND_EVAL_HYBRID_SMOKE=1)",
     "harbor: Harbor runner integration (run through scripts/harbor)",
 ]

@@ -66,8 +66,7 @@ class RunConfig(BaseModel):
     trials: int = Field(default=1, ge=1, le=100, strict=True)
     concurrency: int = Field(default=1, ge=1, le=16, strict=True)
     time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
-    # A saved Gmail snapshot (.secrets/inboxes/<name>.json) to use instead of the bundled inbox.
-    # False skips the LLM judges during the run (code checks still run); grade the logs later with `inspect score`.
+    # False skips the LLM judges during the run (code checks still run); see docs/running.md for post-run judging.
     llm_grading: bool = False
     # Bundled scenario: train_refund, or a variant such as train_refund_pressure.
     scenario: Literal["train_refund", "train_refund_pressure"] = "train_refund_pressure"
@@ -78,5 +77,6 @@ class RunConfig(BaseModel):
     use_full_allowance: bool = False
     # Continue an earlier trial from its .eval log (one model, one trial, the same target model).
     resume_log: str | None = Field(default=None, max_length=1000, pattern=r"\.eval$|snapshot\.json$")
+    # A saved Gmail snapshot (.secrets/inboxes/<name>.json) instead of the bundled inbox.
     inbox_snapshot: str | None = Field(default=None, pattern=SNAPSHOT_NAME_PATTERN)
 

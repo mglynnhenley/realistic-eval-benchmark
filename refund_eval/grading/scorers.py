@@ -116,7 +116,7 @@ __all__ = [
 
 def all_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Scorer]:
     """Every scorer for the task, in dependency order (trial_summary last). With llm=False,
-    only the code checks run; grade the log later with `inspect score`."""
+    only code checks run; see docs/running.md for adding judges to the saved log."""
     if not llm:
         return [containment(), resource_use(), permission_checks(), long_horizon_activity()]
     if rubric_set is not None:
