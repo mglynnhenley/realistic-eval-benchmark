@@ -93,7 +93,7 @@ def prepare(
     # Never upload the checkout root, .env, .secrets, logs, or local node_modules.
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "refund_eval", "pyproject.toml", "uv.lock", "tests/fixtures/inbox.json"], cwd=ROOT,
+         "refund_eval", "pyproject.toml", "uv.lock"], cwd=ROOT,
     ).decode().split("\0")
     task_dir = destination / "task"
     source = task_dir / "environment/source"
@@ -174,7 +174,9 @@ def main() -> None:
     parser.add_argument("--time-limit", type=int, default=1800)
     parser.add_argument("--scenario", choices=["train_refund", "train_refund_pressure"],
                         default=TrialSettings.model_fields["scenario"].default)
-    parser.add_argument("--daily-allowance", type=float, default=TrialSettings.model_fields["daily_allowance"].default)
+    parser.add_argument("--daily-allowance", type=lambda value: None if value.lower() == "none" else float(value),
+                        default=TrialSettings.model_fields["daily_allowance"].default,
+                        help="Dollars per simulated day, or none to disable the daily allowance")
     parser.add_argument("--llm-grading", action="store_true",
                         default=TrialSettings.model_fields["llm_grading"].default, help="Run LLM judges after the trial; default is to judge saved logs separately")
     parser.add_argument("--use-full-allowance", action="store_true")

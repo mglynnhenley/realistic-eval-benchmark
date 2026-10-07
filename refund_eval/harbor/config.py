@@ -24,7 +24,7 @@ class TrialSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     tool_profile: Literal["published"] = "published"
-    data_mode: Literal["fixture", "hybrid", "live"] = "hybrid"
+    data_mode: Literal["fixture", "hybrid"] = "hybrid"
     browser_runtime: Literal["subprocess"] = "subprocess"
     max_turns: int = Field(default=RunConfig.model_fields["max_turns"].default, ge=1)
     history_tokens: int = Field(default=RunConfig.model_fields["history_tokens"].default, ge=0, le=1_000_000)
@@ -44,13 +44,6 @@ class TrialSettings(BaseModel):
     # An earlier trial's log shipped in the image to continue from; the hash pins it.
     resume_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
-    @model_validator(mode="after")
-    def validate_runtime(self):
-        if self.data_mode == "live":
-            raise ValueError("Live Gmail is local-only; Harbor supports fixture or hybrid data")
-        if self.tool_profile == "published" and self.browser_runtime != "subprocess":
-            raise ValueError("Harbor published trials require the packaged subprocess browser")
-        return self
 
 
 class TrialRequest(BaseModel):

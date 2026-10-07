@@ -489,7 +489,6 @@ def refund_agent(
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     checkin_hour: int = CHECKIN_HOUR,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
-    published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
@@ -503,7 +502,7 @@ def refund_agent(
 
     Args:
       scenario_id: Scenario name or YAML path (see load_scenario()).
-      mail_source_kind: "fixture" or "gmail" (see refund_eval.world.mail).
+      mail_source_kind: Local inbox source (see refund_eval.world.mail).
       max_turns: Stop after this many model generations.
       history_tokens: Model-visible history in tokens, trimmed oldest first, with a
         memory tool for notes; 0 shows the full history and adds no memory tool.
@@ -565,7 +564,6 @@ def refund_agent(
 
         try:
             async with adapters.tool_scope(scenario, mail_source_kind, profile=tool_profile,
-                                           published_config=published_config,
                                            published_data=published_data,
                                            **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
                                            **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),

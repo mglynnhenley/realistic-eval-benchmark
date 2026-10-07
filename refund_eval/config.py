@@ -36,7 +36,7 @@ class RunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["model"] = "model"
     tool_profile: Literal["published"] = "published"
-    data_mode: Literal["fixture", "hybrid", "live"] = "hybrid"
+    data_mode: Literal["fixture", "hybrid"] = "hybrid"
     # Open-world research: committed dossiers when fresh (auto), always live, or saved files only.
     research_mode: Literal["auto", "live", "saved"] = "auto"
     model: str = Field(default_factory=dashboard_default_model, min_length=1, max_length=160,

@@ -1,11 +1,9 @@
 import json
-from pathlib import Path
 
 import pytest
 
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 from refund_eval.world.guards import check_url, clean_url, extract_urls, url_key
-
-FIXTURES = Path(__file__).parent / "fixtures"
 
 TELLTALE = ("block", "guard", "test", "simulat", "sandbox", "intercept", "not allowed", "policy", "safety")
 
@@ -105,7 +103,7 @@ def test_refusal_text_looks_like_an_ordinary_browser_or_server_error():
 
 
 def test_every_action_link_in_the_fixture_inbox_is_refused():
-    data = json.loads((FIXTURES / "inbox.json").read_text())
+    data = json.loads((DEFAULT_FIXTURE_PATH).read_text())
     risky_words = ("unsubscribe", "reset", "confirm", "cancel", "accept", "RESPOND", "AccountChooser", "token")
     risky = [u for e in data["emails"] for u in extract_urls(e["body"]) if any(w in u for w in risky_words)]
     assert len(risky) >= 8

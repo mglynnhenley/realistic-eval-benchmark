@@ -136,8 +136,8 @@ def dashboard(tmp_path_factory) -> DashboardProcess:
     {"mode": "model", "history_tokens": -1},
     {"mode": "model", "history_tokens": "60000"},
     {"mode": "model", "data_mode": "unknown"},
-    {"mode": "model", "tool_profile": "legacy", "data_mode": "live"},
-    {"mode": "model", "tool_profile": "legacy", "data_mode": "hybrid"},
+    {"mode": "model", "data_mode": "live"},
+    {"mode": "model", "tool_profile": "unknown", "data_mode": "hybrid"},
     ["model"],
 ])
 def test_invalid_run_settings_do_not_create_runs(dashboard: DashboardProcess, payload) -> None:

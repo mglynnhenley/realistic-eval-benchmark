@@ -131,7 +131,7 @@ def test_trials_must_be_positive():
 
 
 @pytest.mark.parametrize(("mail_source", "reason"), [
-    ("gmail", "published_data=live"),
+    ("gmail", "Unknown mail_source"),
     ("Gmail", "Unknown mail_source"),
     ("gmail:me@example.test", "Unknown mail_source"),
     ("fixtures", "Unknown mail_source"),

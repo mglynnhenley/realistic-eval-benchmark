@@ -121,56 +121,12 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
     assert RUN_DIR_ENV not in os.environ
 
 
-def test_published_worker_passes_explicit_profile_and_rechecks_readiness(tmp_path, monkeypatch):
-    from refund_eval.published import profile
-
-    config_path = str(tmp_path / "published.json")
-    (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "data_mode": "live", "published_config": config_path,
-        "model": "mockllm/target", "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-    }))
-    checked = []
-    calls = []
-
-    def ready(path):
-        checked.append(path)
-        return {"configured": True, "reason": "Configured"}
-
-    def evaluate(*args, **kwargs):
-        calls.append(kwargs)
-        return [SimpleNamespace(samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
-            status="success", error=None, location=str(tmp_path / "mock.eval"))]
-
-    monkeypatch.setattr(profile, "readiness", ready)
-    monkeypatch.setattr(worker, "eval", evaluate)
-    assert worker.run_worker(tmp_path) == 0
-    assert checked == [config_path]
-    assert calls[0]["task_args"]["tool_profile"] == "published"
-    assert calls[0]["task_args"]["published_data"] == "live"
-    assert calls[0]["task_args"]["published_config"] == config_path
 
 
-def test_published_worker_fails_before_model_when_configuration_disappears(tmp_path, monkeypatch):
-    from refund_eval.published import profile
-
-    (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "data_mode": "live", "model": "mockllm/target",
-        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-    }))
-    monkeypatch.setattr(profile, "readiness", lambda path: {"configured": False, "reason": "Gmail is not connected"})
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("No model call and no legacy fallback are allowed")
-
-    monkeypatch.setattr(worker, "eval", forbidden)
-    assert worker.run_worker(tmp_path) == 1
-    snapshot = read_snapshot(tmp_path)
-    assert snapshot["phase"] == "failed"
-    assert "Gmail is not connected" in snapshot["error"]
 
 
 @pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
-def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, data_mode):
+def test_simulated_gmail_worker_uses_selected_runtime(tmp_path, monkeypatch, data_mode):
     from refund_eval.published import profile
 
     (tmp_path / "config.json").write_text(json.dumps({
@@ -178,12 +134,11 @@ def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, data_
         "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
         "max_turns": 600, "cost_limit": 10, "sim_weeks": 12,
     }))
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "unavailable-gmail.json"))
     calls = []
     checks = []
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("Workers must only check the requested data mode, without fallback or live Gmail setup")
+        raise AssertionError("Workers must only check the requested data mode, without fallback")
 
     def ready():
         checks.append(data_mode)
@@ -194,7 +149,6 @@ def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, data_
         return [SimpleNamespace(samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
             status="success", error=None, location=str(tmp_path / "mock.eval"))]
 
-    monkeypatch.setattr(profile, "readiness", forbidden)
     monkeypatch.setattr(profile, "fixture_readiness", forbidden)
     monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
     monkeypatch.setattr(profile, f"{data_mode}_readiness", ready)
@@ -260,8 +214,8 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
      "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader"},
     *[{"mode": "model", "tool_profile": "published", "data_mode": "fixture", "model": "mockllm/target",
        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader", **invalid}
-      for invalid in ({"cost_limit": float("nan")}, {"max_turns": 0}, {"max_turns": 1001},
-                      {"tool_profile": "unknown"}, {"data_mode": "unknown"},
+      for invalid in ({"cost_limit": float("nan")}, {"max_turns": 0}, {"max_turns": 10001},
+                      {"tool_profile": "unknown"}, {"data_mode": "unknown"}, {"data_mode": "live"},
                       {"history_tokens": -1}, {"history_tokens": 60000.5}, {"history_tokens": True})],
 ])
 def test_worker_records_config_errors_without_running_models(tmp_path, monkeypatch, config):

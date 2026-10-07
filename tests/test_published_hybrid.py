@@ -45,15 +45,11 @@ def offline_profile(monkeypatch):
         pytest.fail("Hybrid setup attempted a live call or loaded Gmail configuration")
 
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True})
-    monkeypatch.setattr(profile, "load_config", forbid)
-    monkeypatch.setattr(profile, "readiness", forbid)
     monkeypatch.setattr("refund_eval.published.mcp.MCPHTTPClient.call_tool", forbid)
     monkeypatch.setattr("refund_eval.published.mcp.MCPHTTPClient.list_tools", forbid)
     monkeypatch.setattr("refund_eval.world.mail.GmailMailSource.service", forbid)
     monkeypatch.setattr("refund_eval.published.fixture_web.fixture_web_config", forbid)
     monkeypatch.setattr("refund_eval.published.fixture_web.FixtureSearchService", forbid)
-    monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", "/nonexistent/published-tools.json")
     monkeypatch.setenv("EXA_API_KEY", "unused-test-key")
     monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
 
@@ -97,8 +93,7 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
         return SimResult(immediate_text="Message sent.")
 
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", simulate)
-    async with profile.published_tools(scenario, data_mode="hybrid", fixture_path=str(inbox),
-                                       config_path="/nonexistent/explicit.json"):
+    async with profile.published_tools(scenario, data_mode="hybrid", fixture_path=str(inbox)):
         services = offline_profile["services"]
         mail = services["gmail"]
         read = await mail.call_tool("get_thread", {"threadId": "1111111111111111"})
@@ -121,7 +116,7 @@ async def test_hybrid_uses_fixture_mail_keyless_exa_and_public_browser(offline_p
         assert metadata["public_read_policy"] == "public_web"
         assert "simulated_form_urls" not in metadata
         assert metadata["fixture_provenance"]["inbox"] == {
-            "path": str(inbox), "sha256": hashlib.sha256(inbox.read_bytes()).hexdigest(),
+            "name": inbox.name, "sha256": hashlib.sha256(inbox.read_bytes()).hexdigest(),
         }
         assert "web_dataset" not in metadata["fixture_provenance"]
         ready = next(event for event in store().get(AUDIT_KEY) if event["event"] == "profile_ready")
@@ -142,11 +137,10 @@ async def test_hybrid_search_uses_only_the_opt_in_exa_key(offline_profile, monke
 
 
 async def test_hybrid_records_default_inbox_provenance(offline_profile, monkeypatch):
-    monkeypatch.delenv("REFUND_EVAL_FIXTURE_INBOX", raising=False)
     async with profile.published_tools(load_scenario("train_refund"), data_mode="hybrid"):
         source = offline_profile["services"]["gmail"].remote.source
         recorded = store().get(profile.PROFILE_KEY)["fixture_provenance"]["inbox"]
-        assert recorded == {"path": str(source.path.resolve()),
+        assert recorded == {"name": source.path.name,
                             "sha256": hashlib.sha256(source.path.read_bytes()).hexdigest()}
 
 
@@ -179,7 +173,6 @@ def test_hybrid_readiness_is_local_and_independent_of_gmail(monkeypatch):
 
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
     monkeypatch.setattr(profile.subprocess, "run", run)
-    monkeypatch.setattr(profile, "load_config", lambda *a: pytest.fail("Read Gmail config"))
     try:
         status = profile.hybrid_readiness()
         assert status["configured"]
@@ -212,7 +205,6 @@ def test_hybrid_task_uses_fixture_context_and_records_modes(tmp_path, monkeypatc
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
     monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True})
-    monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Consulted live Gmail readiness"))
     task = impossible_refund(trials=1, tool_profile="published", published_data="hybrid",
                              fixture_path=str(inbox))
     assert captured["published_data"] == "hybrid"
@@ -239,7 +231,7 @@ async def test_adapter_preserves_explicit_hybrid_mode(tmp_path, monkeypatch):
     async with adapters.tool_scope(load_scenario("train_refund"), "gmail-fixture", profile="published",
                                    published_data="hybrid", fixture_path=str(inbox)):
         pass
-    assert captured == [{"config_path": None, "data_mode": "hybrid", "fixture_path": str(inbox)}]
+    assert captured == [{"data_mode": "hybrid", "fixture_path": str(inbox)}]
 
 
 def test_default_task_runs_published_hybrid(monkeypatch):
@@ -255,7 +247,6 @@ def test_default_task_runs_published_hybrid(monkeypatch):
     monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kw: {"configured": True})
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kw: pytest.fail("Default consulted fixture readiness"))
-    monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Default consulted live Gmail readiness"))
     task = impossible_refund()
     for metadata in (task.metadata, task.dataset[0].metadata):
         assert metadata["tool_profile"] == "published"

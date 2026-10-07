@@ -11,7 +11,7 @@ from refund_eval.published.mail import _visible_id
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import Email, World, load_world, save_world, world_tx
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -28,7 +28,7 @@ def ctx(monkeypatch):
         raise AssertionError("Mail to the user reached a counterparty simulator")
 
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", forbidden_dispatch)
-    return ToolContext(scenario, Mailbox(FixtureMailSource(FIXTURES / "inbox.json"), scenario))
+    return ToolContext(scenario, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), scenario))
 
 
 def assert_delivered_to_user(before):

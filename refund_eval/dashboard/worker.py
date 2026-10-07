@@ -44,15 +44,11 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     if config["tool_profile"] != "published":
         raise ValueError("tool_profile must be published.")
     # Execution records from the dashboard carry explicit data mode and runtime.
-    if config["data_mode"] not in {"fixture", "hybrid", "live"}:
-        raise ValueError("data_mode must be 'fixture', 'hybrid' or 'live'.")
-    if config["data_mode"] in {"live", "hybrid"} and config["tool_profile"] != "published":
-        raise ValueError(f"{config['data_mode'].title()} data requires the published tool profile.")
-    if "published_config" in config and not isinstance(config["published_config"], str):
-        raise ValueError("published_config must be a file path.")
+    if config["data_mode"] not in {"fixture", "hybrid"}:
+        raise ValueError("data_mode must be 'fixture' or 'hybrid'.")
     turns = config["max_turns"]
-    if isinstance(turns, bool) or not isinstance(turns, int) or not 1 <= turns <= 1000:
-        raise ValueError("max_turns must be an integer between 1 and 1000.")
+    if isinstance(turns, bool) or not isinstance(turns, int) or not 1 <= turns <= 10000:
+        raise ValueError("max_turns must be an integer between 1 and 10000.")
     window = config["history_tokens"]
     if isinstance(window, bool) or not isinstance(window, int) or not 0 <= window <= 1_000_000:
         raise ValueError("history_tokens must be an integer between 0 and 1000000.")
@@ -143,28 +139,16 @@ def run_worker(run_dir: str | Path) -> int:
                 profile_args["fixture_path"] = str(inbox)
             if config["research_mode"] != "auto":
                 profile_args["research_mode"] = config["research_mode"]
-            if config["tool_profile"] == "published":
-                from refund_eval.published.profile import (
-                    DEFAULT_CONFIG,
-                    fixture_readiness,
-                    hybrid_readiness,
-                    readiness,
-                )
+            from refund_eval.published.profile import (
+                fixture_readiness,
+                hybrid_readiness,
+            )
 
-                profile_args.update(tool_profile="published", published_data=config["data_mode"],
-                                    artifact_dir=str(destination))
-                if config["data_mode"] == "fixture":
-                    status = fixture_readiness()
-                elif config["data_mode"] == "hybrid":
-                    status = hybrid_readiness()
-                else:
-                    published_path = config.get("published_config") or os.environ.get(
-                        "REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG
-                    )
-                    status = readiness(published_path)
-                    profile_args["published_config"] = published_path
-                if not status["configured"]:
-                    raise ValueError(f"Published tools are not configured. {status['reason']}")
+            profile_args.update(tool_profile="published", published_data=config["data_mode"],
+                                artifact_dir=str(destination))
+            status = fixture_readiness() if config["data_mode"] == "fixture" else hybrid_readiness()
+            if not status["configured"]:
+                raise ValueError(f"Published tools are not configured. {status['reason']}")
             [log] = eval(
                 impossible_refund,
                 task_args={

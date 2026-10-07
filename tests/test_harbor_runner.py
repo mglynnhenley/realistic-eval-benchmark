@@ -55,7 +55,7 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert "node:24.16.0" in dockerfile
     assert task.config.environment.cpus == 2
     assert task.config.environment.memory_mb == 4096
-    assert (source / "tests/fixtures/inbox.json").is_file()
+    assert (source / "refund_eval/scenario/inbox.json").is_file()
     assert not any(p.name in {".env", ".secrets", "node_modules", ".venv", ".context"}
                    for p in source.rglob("*"))
     with pytest.raises(FileExistsError):
@@ -66,12 +66,13 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
     assert published_settings().history_tokens == 60_000
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
                                       "--model", "openrouter/example/model", "--history-tokens", "0",
-                                      "--scenario", "train_refund", "--llm-grading"])
+                                      "--scenario", "train_refund", "--llm-grading", "--daily-allowance", "none"])
     main()
     job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
     assert job.agents[0].kwargs["history_tokens"] == 0
     assert job.agents[0].kwargs["scenario"] == "train_refund"
     assert job.agents[0].kwargs["llm_grading"]
+    assert job.agents[0].kwargs["daily_allowance"] is None
     assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund").task_text.strip()
     with pytest.raises(ValueError):
         published_settings(history_tokens=-1)
@@ -197,7 +198,7 @@ def test_prepare_packages_a_gmail_snapshot_as_data_only(tmp_path):
     from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE
 
     inbox = tmp_path / "mine.json"
-    inbox.write_bytes((Path(__file__).parent / "fixtures/inbox.json").read_bytes())
+    inbox.write_bytes((Path(__file__).resolve().parents[1] / "refund_eval/scenario/inbox.json").read_bytes())
     sha = hashlib.sha256(inbox.read_bytes()).hexdigest()
     settings = published_settings(data_mode="hybrid", inbox_sha256=sha)
     config = prepare(tmp_path / "job", settings=settings, model="openrouter/example/model", inbox=inbox)

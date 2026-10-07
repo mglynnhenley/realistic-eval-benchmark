@@ -15,7 +15,7 @@ from refund_eval.world.mail import FixtureMailSource
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.timeutil import as_aware
 
-OWN = "matilda.real@example.com"
+OWN = "jessica.real@example.com"
 
 
 def gmail_message(mid, sender, to, subject, body, when, labels=("INBOX",)):
@@ -29,13 +29,13 @@ def gmail_message(mid, sender, to, subject, body, when, labels=("INBOX",)):
 
 
 MESSAGES = [
-    gmail_message("a1", f"Matilda Glynn <{OWN}>", "Sam Lee <sam@example.org>", "Dinner",
-                  "Hi Sam, Matilda here. Template text {{name}} stays. Reach me at MATILDA.REAL@example.com.",
+    gmail_message("a1", f"Jessica Smith <{OWN}>", "Sam Lee <sam@example.org>", "Dinner",
+                  "Hi Sam, Jessica here. Template text {{name}} stays. Reach me at JESSICA.REAL@example.com.",
                   datetime(2026, 10, 2, 18, tzinfo=UTC), labels=("SENT",)),
-    gmail_message("a2", "Sam Lee <sam@example.org>", f"Matilda Glynn <{OWN}>", "Re: Dinner",
-                  "Thanks Matilda Glynn, see you Friday. Jobs for matilda at linkedin.com/in/matilda-glynn "
-                  "and medium.com/@matilda.real?se=matilda.real%40example.com. HeyMatilda, signed in as mglynn.", datetime(2026, 10, 3, 9, tzinfo=UTC)),
-    gmail_message("a3", f"Matilda Glynn <{OWN}>", "Sam Lee <sam@example.org>", "Unsent",
+    gmail_message("a2", "Sam Lee <sam@example.org>", f"Jessica Smith <{OWN}>", "Re: Dinner",
+                  "Thanks Jessica Smith, see you Friday. Jobs for jessica at linkedin.com/in/jessica-smith "
+                  "and medium.com/@jessica.real?se=jessica.real%40example.com. HeyJessica, signed in as jsmith.", datetime(2026, 10, 3, 9, tzinfo=UTC)),
+    gmail_message("a3", f"Jessica Smith <{OWN}>", "Sam Lee <sam@example.org>", "Unsent",
                   "Draft text", datetime(2026, 10, 3, 10, tzinfo=UTC), labels=("DRAFT",)),
 ]
 
@@ -47,11 +47,11 @@ def snapshot_dir(tmp_path, monkeypatch):
 
 
 def test_snapshot_replaces_identity_and_loads_before_scenario_start(snapshot_dir):
-    data = snapshot.build_snapshot(MESSAGES, own_address=OWN, days=30, handles=["mglynn"],
+    data = snapshot.build_snapshot(MESSAGES, own_address=OWN, days=30, handles=["jsmith"],
                                    exported_at=datetime(2026, 10, 5, tzinfo=UTC))
     path = snapshot.write_snapshot(data, snapshot_store.snapshot_path("mine"))
     raw = path.read_text()
-    assert "Matilda" not in raw and "matilda.real" not in raw.lower() and "Glynn" not in raw
+    assert "Jessica" not in raw and "jessica.real" not in raw.lower() and "Smith" not in raw
     assert data["snapshot"] == {"source": "gmail", "exported_at": "2026-10-05T00:00:00+00:00", "days": 30,
                                 "query": "", "count": 4, "pressure_thread": True}
 
@@ -72,7 +72,7 @@ def test_snapshot_replaces_identity_and_loads_before_scenario_start(snapshot_dir
 
 
 def test_snapshot_without_pressure_thread_needs_a_name_or_sent_mail():
-    data = snapshot.build_snapshot(MESSAGES[1:2], own_address=OWN, days=7, name="Matilda Glynn",
+    data = snapshot.build_snapshot(MESSAGES[1:2], own_address=OWN, days=7, name="Jessica Smith",
                                    include_pressure_thread=False)
     assert [e["id"] for e in data["emails"]] == ["a2"]
     with pytest.raises(ValueError, match="--name"):

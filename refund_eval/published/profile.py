@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -16,7 +15,6 @@ from functools import lru_cache
 from pathlib import Path
 
 from inspect_ai.util import store
-from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.config import HYBRID_EXA_KEY_ENV, RunConfig
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
@@ -28,7 +26,6 @@ from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
 
 PROFILE_KEY = "published_tool_profile"
-DEFAULT_CONFIG = ".secrets/published-tools.json"
 
 
 def validate_fixture_path(fixture_path: str | None, *, data_mode: str) -> str | None:
@@ -45,54 +42,6 @@ def validate_fixture_path(fixture_path: str | None, *, data_mode: str) -> str | 
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         raise ValueError(f"Invalid fixture inbox at {path}: {error}") from error
     return str(path)
-
-
-class PublishedConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    gmail_catalog: str
-    gmail_token_env: str = "GMAIL_MCP_ACCESS_TOKEN"
-    gmail_project_env: str = "GOOGLE_CLOUD_PROJECT"
-    exa_key_env: str = "EXA_API_KEY"
-    public_read_urls: list[str] = Field(default_factory=list)
-    browser_image: str = DEFAULT_BROWSER_IMAGE
-
-
-def load_config(path: str | None = None) -> PublishedConfig:
-    location = (
-        Path(path or os.environ.get("REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG))
-        .expanduser()
-        .resolve()
-    )
-    if not location.is_file():
-        raise ValueError(
-            f"Published tools need a config file at {location}. See docs/published-tools.md."
-        )
-    config = PublishedConfig.model_validate_json(location.read_text())
-    catalog = Path(config.gmail_catalog).expanduser()
-    if not catalog.is_absolute():
-        catalog = location.parent / catalog
-    config.gmail_catalog = str(catalog.resolve())
-    return config
-
-
-def readiness(path: str | None = None) -> dict:
-    """Local configuration checks only; live contracts are verified on startup."""
-    try:
-        config = load_config(path)
-        if not Path(config.gmail_catalog).is_file():
-            raise ValueError(
-                "Gmail catalog has not been captured. Run the discovery command first."
-            )
-        if not os.environ.get(config.gmail_token_env):
-            raise ValueError(
-                f"Gmail is not connected: {config.gmail_token_env} is missing."
-            )
-    except (OSError, ValueError) as exc:
-        return {"configured": False, "reason": str(exc)}
-    return {
-        "configured": True,
-        "reason": "Configured; live Gmail, Exa and browser contracts checked before model execution.",
-    }
 
 
 def fixture_readiness(*, browser_runtime: str = "docker") -> dict:
@@ -159,22 +108,21 @@ def search_policy(scenario: Scenario):
 
 @asynccontextmanager
 async def published_tools(
-    scenario: Scenario, *, config_path: str | None = None, data_mode: str = RunConfig.model_fields["data_mode"].default,
+    scenario: Scenario, *, data_mode: str = RunConfig.model_fields["data_mode"].default,
     fixture_path: str | None = None, browser_runtime: str = "docker",
     artifact_dir: str | None = None,
 ):
     from refund_eval.published.browser import PublishedBrowserService
-    from refund_eval.published.mail import GMAIL_ENDPOINT, GmailService
-    from refund_eval.published.mcp import MCPHTTPClient
+    from refund_eval.published.fixtures import FIXTURE_MAIL_PROVENANCE, make_fixture_mail
     from refund_eval.published.network import BrowserBoundary
     from refund_eval.published.search import ExaSearchService
 
-    if data_mode not in {"fixture", "hybrid", "live"}:
-        raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
+    if data_mode not in {"fixture", "hybrid"}:
+        raise ValueError("published_data must be 'fixture' or 'hybrid'")
     fixture_path = validate_fixture_path(fixture_path, data_mode=data_mode)
     runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
     status = (fixture_readiness(**runtime_args) if data_mode == "fixture" else
-              hybrid_readiness(**runtime_args) if data_mode == "hybrid" else readiness(config_path))
+              hybrid_readiness(**runtime_args))
     if not status["configured"]:
         raise ValueError(status["reason"])
     from refund_eval.dashboard.telemetry import emit_snapshot
@@ -186,11 +134,10 @@ async def published_tools(
                      "web_time_basis": "wall_clock",
                      "search_auth": "api_key" if os.environ.get(HYBRID_EXA_KEY_ENV) else "keyless"}
                     if data_mode == "hybrid" else {})
-    if data_mode in {"fixture", "hybrid"}:
-        from refund_eval.published.fixtures import (
-            FIXTURE_MAIL_PROVENANCE,
-            make_fixture_mail,
-        )
+    inbox_provenance = {
+        "name": source.path.name,
+        "sha256": hashlib.sha256(source.path.read_bytes()).hexdigest(),
+    }
 
     if data_mode == "fixture":
         from refund_eval.published.fixture_web import (
@@ -204,32 +151,23 @@ async def published_tools(
             "data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
             "web_dataset": FIXTURE_WEB_DATASET, "browser_image": browser_image,
             "web_sha256": fingerprint(boundary_config),
-            **({"inbox": {"path": fixture_path,
-                          "sha256": hashlib.sha256(Path(fixture_path).read_bytes()).hexdigest()}}
-               if fixture_path is not None else {}),
+            "inbox": inbox_provenance,
         }
-    elif data_mode == "hybrid":
+    else:
         boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
         browser_image = DEFAULT_BROWSER_IMAGE
         profile_config = {
             "data_mode": "hybrid", **mode_details,
             "mail": FIXTURE_MAIL_PROVENANCE, "browser_image": browser_image,
             "public_read_policy": "public_web", "search_provider": "exa",
-            "inbox": {"path": str(source.path.resolve()),
-                      "sha256": hashlib.sha256(source.path.read_bytes()).hexdigest()},
+            "inbox": inbox_provenance,
         }
-    else:
-        config = load_config(config_path)
-        snapshot = json.loads(Path(config.gmail_catalog).read_text())
-        boundary_config = {"public_read_urls": config.public_read_urls}
-        browser_image = config.browser_image
-        profile_config = config.model_dump()
     store().set(
         PROFILE_KEY,
         {
             "name": "published",
             "data_mode": data_mode,
-            **({"fixture_provenance": profile_config} if data_mode in {"fixture", "hybrid"} else {}),
+            "fixture_provenance": profile_config,
             **mode_details,
             "config_sha256": fingerprint(profile_config),
             "browser_network": "unverified",
@@ -243,15 +181,7 @@ async def published_tools(
             stack.enter_context(tempfile.TemporaryDirectory(prefix="refund-browser-"))
         )
         spool = trial_dir / "exchange"
-        if data_mode in {"fixture", "hybrid"}:
-            mail = make_fixture_mail(ctx, audit=audit)
-        else:
-            headers = {"Authorization": f"Bearer {os.environ[config.gmail_token_env]}"}
-            if project := os.environ.get(config.gmail_project_env):
-                headers["x-goog-user-project"] = project
-            remote = MCPHTTPClient(GMAIL_ENDPOINT, headers=headers)
-            stack.push_async_callback(remote.aclose)
-            mail = GmailService(remote, ctx, catalog_snapshot=snapshot, audit=audit)
+        mail = make_fixture_mail(ctx, audit=audit)
         stack.push_async_callback(mail.aclose)
         # Fail Gmail capability checks before starting the browser or paid models.
         tools = await inspect_tools(mail, source="gmail")
@@ -267,7 +197,7 @@ async def published_tools(
             search = ExaSearchService(
                 policy=search_policy(scenario),
                 audit=search_audit,
-                api_key=os.environ.get(HYBRID_EXA_KEY_ENV if data_mode == "hybrid" else config.exa_key_env),
+                api_key=os.environ.get(HYBRID_EXA_KEY_ENV),
             )
         stack.push_async_callback(search.aclose)
         tools.extend(await inspect_tools(search, source="exa", live_web=data_mode != "fixture"))

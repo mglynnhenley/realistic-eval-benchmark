@@ -71,7 +71,6 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
         dispatched.append(inbound)
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr(profile, "load_config", forbidden)
     monkeypatch.setattr("refund_eval.world.mail.GmailMailSource.service", forbidden)
     monkeypatch.setattr("refund_eval.published.fixture_web.FixtureSearchService", forbidden)
     monkeypatch.setattr("refund_eval.published.fixture_web.fixture_web_config", forbidden)
@@ -80,7 +79,6 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
     monkeypatch.setattr("refund_eval.published.network.aiohttp.ClientSession", forbidden)
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     monkeypatch.setenv("EXA_API_KEY", "must-not-be-used")
-    monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
     scenario = load_scenario("train_refund")
     calls = [
         ("search_threads", {"query": scenario.journey.booking_ref}),

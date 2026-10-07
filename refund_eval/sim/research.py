@@ -140,7 +140,7 @@ READ_DESCRIPTION = ("Fetch a public web page anonymously and return its visible 
 
 def live_web() -> bool:
     profile = store().get("published_tool_profile") or {}
-    return profile.get("data_mode") in {"hybrid", "live"}
+    return profile.get("data_mode") == "hybrid"
 
 
 def research_mode() -> str:

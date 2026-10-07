@@ -41,14 +41,9 @@ def test_fixture_readiness_does_not_require_live_configuration(monkeypatch):
         calls.append((args, kwargs))
         return SimpleNamespace(returncode=0)
 
-    def forbidden(*args, **kwargs):
-        pytest.fail("Simulated readiness consulted live Gmail configuration")
-
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
     monkeypatch.setattr(profile.subprocess, "run", run)
-    monkeypatch.setattr(profile, "load_config", forbidden)
     monkeypatch.setattr(profile.time, "monotonic", lambda: 10)
-    monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     result = profile.fixture_readiness()
     assert result["configured"] is True
@@ -105,17 +100,16 @@ async def test_adapter_preserves_explicit_fixture_selection_and_lifetime(monkeyp
     monkeypatch.setattr(profile, "published_tools", scope)
     with pytest.raises(RuntimeError, match="consumer stopped"):
         async with adapters.tool_scope(scenario, "fixture", profile="published",
-                                       published_data="fixture", published_config="unused.json") as tools:
+                                       published_data="fixture") as tools:
             assert tools == [sentinel]
             raise RuntimeError("consumer stopped")
-    assert events == [(scenario, {"config_path": "unused.json", "data_mode": "fixture"}), "closed"]
+    assert events == [(scenario, {"data_mode": "fixture"}), "closed"]
 
 
 async def test_fixture_profile_never_falls_back_when_browser_is_unavailable(monkeypatch):
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {
         "configured": False, "reason": "The local browser needs to be built.",
     })
-    monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Live fallback attempted"))
     with pytest.raises(ValueError, match="local browser needs"):
         async with profile.published_tools(load_scenario("train_refund"), data_mode="fixture"):
             pytest.fail("Unconfigured profile entered")
@@ -127,13 +121,10 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
     def forbidden(*args, **kwargs):
         pytest.fail("Fixture profile contacted or configured a live service")
 
-    monkeypatch.setattr(profile, "load_config", forbidden)
     monkeypatch.setattr("refund_eval.published.mcp.MCPHTTPClient.__init__", forbidden)
     monkeypatch.setattr("refund_eval.published.search.ExaSearchService.__init__", forbidden)
     monkeypatch.setattr("refund_eval.world.mail.GmailMailSource.service", forbidden)
     monkeypatch.setattr("refund_eval.published.network.aiohttp.ClientSession", forbidden)
-    for key in ("GMAIL_MCP_ACCESS_TOKEN", "GOOGLE_CLOUD_PROJECT", "EXA_API_KEY", "REFUND_EVAL_PUBLISHED_CONFIG"):
-        monkeypatch.delenv(key, raising=False)
     dispatched = []
 
     async def dispatch(inbound):

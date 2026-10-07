@@ -17,25 +17,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
-                     profile: str = RunConfig.model_fields["tool_profile"].default, published_config: str | None = None,
+                     profile: str = RunConfig.model_fields["tool_profile"].default,
                      published_data: str = RunConfig.model_fields["data_mode"].default, fixture_path: str | None = None,
                      browser_runtime: str = "docker", artifact_dir: str | None = None):
     """Own all tool connections for one trial, including exception cleanup."""
     if profile != "published":
         raise ValueError("tool_profile must be published")
-    if fixture_path is not None and (profile != "published" or published_data not in {"fixture", "hybrid"}):
-        raise ValueError("fixture_path requires the published fixture or hybrid profile")
-    if profile == "published":
-        from refund_eval.published.profile import published_tools
+    if published_data not in {"fixture", "hybrid"}:
+        raise ValueError("published_data must be 'fixture' or 'hybrid'")
+    from refund_eval.published.profile import published_tools
 
-        async with published_tools(scenario, config_path=published_config,
-                                   data_mode=published_data,
-                                   **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
-                                   **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
-                                   **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
-            yield tools
-    else:
-        raise ValueError("tool_profile must be published")
+    async with published_tools(scenario, data_mode=published_data,
+                               **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                               **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
+                               **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
+        yield tools
 
 
 def _not_built(ex: ImportError, package: str) -> bool:

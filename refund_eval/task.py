@@ -157,7 +157,6 @@ def impossible_refund(
     working_limit: int | None = None,
     rubric_set: dict | None = None,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
-    published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
@@ -173,7 +172,7 @@ def impossible_refund(
     Args:
       trials: Number of trials (Inspect epochs of the single sample).
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
-      mail_source: Bundled fixture, or fixture:path alias; real Gmail uses published_data=live.
+      mail_source: Bundled inbox, or a fixture:path alias for a saved inbox file.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
         agent gets a memory tool. 0 shows the full history. The log always keeps it all.
@@ -187,8 +186,7 @@ def impossible_refund(
       time_limit: Optional Inspect wall-clock limit in seconds.
       working_limit: Optional Inspect working-time limit in seconds.
       tool_profile: Published MCP tools.
-      published_data: "fixture" for local data, "hybrid" for local mail and live public web,
-        or "live" for configured providers.
+      published_data: "fixture" for local data, or "hybrid" for local mail and live public web.
       research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
         fresh and researches otherwise, "live" always researches, "saved" never searches.
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
@@ -199,29 +197,18 @@ def impossible_refund(
         raise ValueError("browser_runtime must be docker or subprocess")
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
-    if published_data == "live" and browser_runtime != "docker":
-        raise ValueError("Live Gmail is local-only; use fixture or hybrid data in a sandbox.")
-    if published_data not in {"fixture", "hybrid", "live"}:
-        raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
-    if published_data == "hybrid" and tool_profile != "published":
-        raise ValueError("Hybrid data requires tool_profile='published'")
+    if published_data not in {"fixture", "hybrid"}:
+        raise ValueError("published_data must be 'fixture' or 'hybrid'")
     if research_mode not in {"auto", "live", "saved"}:
         raise ValueError("research_mode must be 'auto', 'live' or 'saved'")
-    if mail_source == "gmail":
-        raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
     if mail_source.startswith("fixture:"):
-        # Workers pass the bundled inbox alias on every run; it names an inbox only
-        # when mail is simulated. Live data reads the configured Gmail provider.
-        if published_data in {"fixture", "hybrid"} and fixture_path is None:
+        if fixture_path is None:
             fixture_path = mail_source.split(":", 1)[1]
     elif mail_source not in {"fixture", "gmail-fixture"}:
         raise ValueError(
-            f"Unknown mail_source {mail_source!r}; use 'fixture', 'fixture:<path>' "
-            "or published_data=live for real Gmail"
+            f"Unknown mail_source {mail_source!r}; use 'fixture' or 'fixture:<path>'"
         )
     if fixture_path is not None:
-        if tool_profile != "published" or published_data not in {"fixture", "hybrid"}:
-            raise ValueError("fixture_path requires tool_profile='published' and published_data='fixture' or 'hybrid'")
         from refund_eval.published.profile import validate_fixture_path
 
         path = Path(fixture_path).expanduser()
@@ -242,15 +229,14 @@ def impossible_refund(
         from refund_eval.published.profile import (
             fixture_readiness,
             hybrid_readiness,
-            readiness,
         )
 
         runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
         status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
-                  hybrid_readiness(**runtime_args) if published_data == "hybrid" else readiness(published_config))
+                  hybrid_readiness(**runtime_args))
         if not status["configured"]:
             raise ValueError(status["reason"])
-        mail_source = "gmail-fixture" if published_data in {"fixture", "hybrid"} else "gmail-mcp"
+        mail_source = "gmail-fixture"
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
 
@@ -292,7 +278,6 @@ def impossible_refund(
             history_tokens=history_tokens,
             sim_weeks=sim_weeks,
             tool_profile=tool_profile,
-            published_config=published_config,
             published_data=published_data,
             browser_runtime=browser_runtime,
             artifact_dir=artifact_dir,

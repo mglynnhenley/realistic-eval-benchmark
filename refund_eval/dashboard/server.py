@@ -233,8 +233,6 @@ class RunManager:
         if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
             raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
         if config.execution != "local":
-            if config.data_mode == "live":
-                raise APIError(422, "Live Gmail is local-only; choose fixture or hybrid data for Harbor.")
             if config.concurrency > total:
                 raise APIError(422, "Concurrency cannot exceed the number of trials.")
             if config.mode == "model" and any(not name.startswith("openrouter/") for name in (
@@ -282,23 +280,13 @@ class RunManager:
             if str(original) != targets[0]:
                 raise APIError(422, f"That trial ran {original}; resume it with the same model.")
             resume_sha256 = file_sha256(Path(config.resume_log))
-        if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
-            raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
-        published_path = None
-        if config.tool_profile == "published" and config.execution == "local":
+        if config.execution == "local":
             from refund_eval.published.profile import (
                 fixture_readiness,
                 hybrid_readiness,
-                readiness,
             )
 
-            if config.data_mode == "fixture":
-                status = fixture_readiness()
-            elif config.data_mode == "hybrid":
-                status = hybrid_readiness()
-            else:
-                published_path = published_config_path()
-                status = readiness(published_path)
+            status = fixture_readiness() if config.data_mode == "fixture" else hybrid_readiness()
             if not status["configured"]:
                 raise APIError(422, f"Published tools are not configured. {status['reason']}")
         if config.mode == "model":
@@ -326,16 +314,13 @@ class RunManager:
             settings["browser_runtime"] = "docker" if config.execution == "local" else "subprocess"
             if config.mode == "model":
                 settings["model"] = targets[0]
-            if published_path:
-                settings["published_config"] = published_path
             if inbox_sha256:
                 settings["inbox_sha256"] = inbox_sha256
             if resume_sha256:
                 settings["resume_sha256"] = resume_sha256
             record = {
                 "id": run_id, "label": {"fixture": "Published tools · simulated data",
-                      "hybrid": "Simulated Gmail + live web",
-                      "live": "Published tools · live data"}[config.data_mode],
+                      "hybrid": "Simulated Gmail + live web"}[config.data_mode],
                 "mode": config.mode, "status": "starting", "created_at": now(), "updated_at": now(),
                 "tool_profile": config.tool_profile,
                 "data_mode": config.data_mode,
@@ -486,18 +471,12 @@ class RunManager:
             self._ownership.close()
 
 
-def published_config_path() -> str:
-    from refund_eval.published.profile import DEFAULT_CONFIG
-
-    path = Path(os.environ.get("REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG)).expanduser()
-    return str((path if path.is_absolute() else PROJECT_ROOT / path).resolve())
 
 
 def public_config() -> dict:
     from refund_eval.published.profile import (
         fixture_readiness,
         hybrid_readiness,
-        readiness,
     )
 
     scenario = load_scenario(RunConfig.model_fields["scenario"].default)
@@ -528,7 +507,6 @@ def public_config() -> dict:
              "default_data_mode": "hybrid", "data_modes": [
                  {"name": "hybrid", "label": "Simulated Gmail + live web", **hybrid_status},
                  {"name": "fixture", "label": "Simulated inbox and websites", **fixture_status},
-                 {"name": "live", "label": "Live Gmail and reviewed websites", **readiness(published_config_path())},
              ]},
         ],
     }

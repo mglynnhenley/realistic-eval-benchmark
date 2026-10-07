@@ -322,9 +322,6 @@
   function publishedDataStatus() {
     const execution = $("execution").value;
     if (execution !== "local") {
-      if (selectedDataMode() === "live") {
-        return {configured: false, reason: "Live Gmail is available only for runs on this computer. Choose simulated Gmail or change the run location."};
-      }
       return state.config?.execution_readiness?.[execution];
     }
     const published = (state.config?.tool_profiles || []).find((profile) => profile.name === "published");
@@ -339,8 +336,6 @@
     const profile = publishedDataStatus();
     const requirement = $("execution").value !== "local"
       ? `${title($("execution").value)} runs the browser inside each trial sandbox.`
-      : selectedDataMode() === "live"
-      ? "Live data needs verified Gmail access and native send/reply tools."
       : selectedDataMode() === "hybrid"
         ? "Local hybrid runs need the Docker browser image. Startup verifies Exa access, keyless unless REFUND_EVAL_EXA_API_KEY is set; Gmail setup is not required."
         : "Simulated data needs the local browser runtime.";
@@ -393,16 +388,15 @@
     $("scenario-quote").textContent = original ? `“${asText(original.content)}”`
       : state.snapshot === null ? "Loading this run’s request…" : "No user request recorded.";
     $("selected-title").textContent = run.label || `${title(run.mode)} run`;
-    const profile = run.tool_profile || run.config?.tool_profile || "legacy";
-    const dataMode = run.data_mode || run.config?.data_mode || "live";
+    const dataMode = run.data_mode || run.config?.data_mode || "hybrid";
     const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
-      : dataMode === "fixture" ? "Simulated data" : "Live data";
+      : "Simulated data";
     const targetLabel = !run.parent_batch_id && run.config?.models?.length > 1
       ? `${run.config.models.length} target models` : run.model || "Model trial";
     const runtime = run.browser_runtime || run.config?.browser_runtime;
     const runtimeLabel = runtime === "subprocess" ? "Browser in trial sandbox"
       : runtime === "docker" ? "Docker browser" : "";
-    const toolsLabel = profile === "published" ? `Published tools · ${dataLabel}` : "Legacy tools";
+    const toolsLabel = `Published tools · ${dataLabel}`;
     const model = `${targetLabel} · ${toolsLabel} · Open world`;
     const stopping = run.stop_reason ? ` · ${title(run.stop_reason)}` : "";
     $("selected-subtitle").textContent = `${model}${runtimeLabel ? ` · ${runtimeLabel}` : ""} · ${date(run.created_at)}${stopping}`;
@@ -1079,12 +1073,11 @@
       fragment.append(element("p", "field-help", state.run.status === "stopping"
         ? "Cancelling queued trials and cleaning up active sandboxes…"
         : `${title(state.run.config.execution)} · up to ${state.run.config.concurrency} trials at once. Open a trial to view activity, scores and its Inspect log.`));
-      const profile = state.run.tool_profile || state.run.config.tool_profile;
       const runtime = state.run.browser_runtime || state.run.config.browser_runtime;
       const dataMode = state.run.data_mode || state.run.config.data_mode;
       const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
-        : dataMode === "fixture" ? "Simulated inbox and websites" : "Live data";
-      fragment.append(element("p", "field-help", `${profile === "published" ? "Published tools" : "Legacy tools"} · ${dataLabel}${runtime ? ` · Browser: ${runtime === "subprocess" ? "inside each trial sandbox" : "Docker container"}` : ""}`));
+        : "Simulated inbox and websites";
+      fragment.append(element("p", "field-help", `Published tools · ${dataLabel}${runtime ? ` · Browser: ${runtime === "subprocess" ? "inside each trial sandbox" : "Docker container"}` : ""}`));
       const groups = element("div", "batch-models");
       for (const group of batch?.models || []) {
         const active = ["starting", "running", "grading", "stopping"].reduce((sum, status) => sum + (group.counts[status] || 0), 0);
@@ -1099,10 +1092,9 @@
         const button = element("button", "button batch-trial");
         button.type = "button";
         button.append(element("strong", "", trial.label), element("span", "", `${title(trial.status)} · ${trial.turns || 0} turns · ${trial.stage || "Queued"}`));
-        const trialProfile = trial.tool_profile || profile;
         const trialRuntime = trial.browser_runtime || runtime;
         const trialData = trial.data_mode || dataMode;
-        button.append(element("span", "batch-trial-tools", `${trialProfile === "published" ? "Published tools" : "Legacy tools"} · ${trialData === "hybrid" ? "Simulated Gmail + live web" : trialData === "fixture" ? "Simulated inbox and websites" : "Live data"}${trialRuntime ? ` · ${trialRuntime === "subprocess" ? "Browser in trial sandbox" : "Docker browser"}` : ""}`));
+        button.append(element("span", "batch-trial-tools", `Published tools · ${trialData === "hybrid" ? "Simulated Gmail + live web" : "Simulated inbox and websites"}${trialRuntime ? ` · ${trialRuntime === "subprocess" ? "Browser in trial sandbox" : "Docker browser"}` : ""}`));
         button.addEventListener("click", () => selectRun(trial.id));
         list.append(button);
       }
@@ -1627,19 +1619,14 @@
 
   function updateProfileStatus() {
     updateBatchSettings();
-    const batch = $("execution").value !== "local";
     const fixture = selectedDataMode() === "fixture";
-    const hybrid = selectedDataMode() === "hybrid";
-    const simulated = fixture || hybrid;
     $("run-preset").disabled = !state.config?.run_presets;
-    $("data-mode").querySelector('[value="live"]').disabled = batch;
-    $("inbox-field").hidden = !simulated;
-    $("inbox-snapshot").disabled = !simulated;
+    $("inbox-field").hidden = false;
+    $("inbox-snapshot").disabled = false;
     const profile = publishedDataStatus();
     const description = fixture
       ? "Inbox and websites are simulated."
-      : hybrid ? "Gmail is simulated; the browser uses public websites."
-      : "Live Gmail is enabled for this local trial.";
+      : "Gmail is simulated; the browser uses public websites.";
     $("tool-profile-status").textContent = !profile ? "Checking browser and tool configuration…"
       : profile.configured ? `${description} Sends and website writes are intercepted. Startup checks pending.`
         : `${description} Setup needed: ${profile.reason}`;
