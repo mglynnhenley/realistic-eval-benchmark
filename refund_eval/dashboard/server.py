@@ -23,7 +23,13 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from refund_eval.config import DEFAULT_ROLE_MODEL, RunConfig, dashboard_default_model
+from refund_eval.agent.prompt import task_message
+from refund_eval.config import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_ROLE_MODEL,
+    RunConfig,
+    dashboard_default_model,
+)
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.grading.behaviours import (
     BehaviourEdit,
@@ -267,6 +273,14 @@ class RunManager:
             status = execution_readiness(config.execution)
             if not status["configured"]:
                 raise APIError(422, status["reason"])
+        if config.mode == "model":
+            from refund_eval.dashboard.models import unknown_models
+
+            roles = {**{f"target{'' if len(targets) == 1 else f' {n + 1}'}": m for n, m in enumerate(targets)},
+                     "simulator": config.simulator_model, "grader": config.grader_model}
+            problems = unknown_models(roles)
+            if problems:
+                raise APIError(422, " ".join(problems))
         experiment = None
         if config.experiment_manifest:
             from refund_eval.experiments.protocol import experiment_settings
@@ -303,6 +317,23 @@ class RunManager:
             except ValueError as error:
                 raise APIError(422, f"Gmail snapshot unavailable: {error}") from error
             inbox_sha256 = file_sha256(path)
+        resume_sha256 = None
+        if config.resume_log:
+            from refund_eval.world.snapshot_store import file_sha256
+
+            if config.mode != "model" or len(targets) != 1 or config.trials != 1:
+                raise APIError(422, "Resuming continues one trial: choose one model and one trial.")
+            if not Path(config.resume_log).is_file():
+                raise APIError(422, f"No trial log at {config.resume_log}.")
+            if config.resume_log.endswith(".json"):  # a dashboard snapshot: its run's config names the model
+                original = read_json(Path(config.resume_log).parent / "config.json", {}).get("model")
+            else:
+                from inspect_ai.log import read_eval_log
+
+                original = read_eval_log(config.resume_log, header_only=True).eval.model
+            if str(original) != targets[0]:
+                raise APIError(422, f"That trial ran {original}; resume it with the same model.")
+            resume_sha256 = file_sha256(Path(config.resume_log))
         if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
             raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
         if config.world_mode in {"friction", "open"} and (config.mode != "model" or config.data_mode == "live"):
@@ -354,6 +385,8 @@ class RunManager:
                 settings["published_config"] = published_path
             if inbox_sha256:
                 settings["inbox_sha256"] = inbox_sha256
+            if resume_sha256:
+                settings["resume_sha256"] = resume_sha256
             record = {
                 "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
                 else {"fixture": "Published tools · simulated data",
@@ -541,6 +574,7 @@ def public_config() -> dict:
     return {
         "default_model": dashboard_default_model(),
         "default_role_model": DEFAULT_ROLE_MODEL,
+        "default_grader_model": DEFAULT_GRADER_MODEL,
         "run_presets": run_presets(),
         "run_defaults": RunConfig().model_dump(),
         "model_defaults": RunConfig(mode="model").model_dump(),
@@ -548,7 +582,7 @@ def public_config() -> dict:
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
                       for name, keys in PROVIDER_KEYS.items()],
-        "scenario": {"id": scenario.id, "task_text": scenario.task_text,
+        "scenario": {"id": scenario.id, "task_text": task_message(scenario),
                      "fare": scenario.journey.fare, "currency": scenario.journey.currency,
                      "organisations": [{"key": org.key, "name": org.name, "kind": org.kind}
                                        for org in scenario.orgs]},

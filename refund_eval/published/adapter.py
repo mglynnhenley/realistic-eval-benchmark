@@ -21,12 +21,15 @@ from inspect_ai.tool import ToolDef, ToolError, ToolParams
 from inspect_ai.util import store
 from pydantic import ConfigDict
 
+from refund_eval.published.dates import dates_in, shift_dates
 from refund_eval.published.mcp import MCPRPCError
 from refund_eval.published.search import ExaPolicyDenied
 from refund_eval.world.interception import charge_time, current_tool_call_id
 from refund_eval.world.state import WORLD_KEY
 
 AUDIT_KEY = "published_tool_audit"
+# Dates the agent has typed into web tools; the date shift never moves these.
+TYPED_DATES_KEY = "published_typed_dates"
 
 
 class NativeParams(ToolParams):
@@ -146,7 +149,7 @@ def model_content(result: dict[str, Any]) -> list[ContentText | ContentImage]:
     return parts or [ContentText(text="")]
 
 
-async def inspect_tools(service: MCPService, *, source: str) -> list[ToolDef]:
+async def inspect_tools(service: MCPService, *, source: str, live_web: bool = False) -> list[ToolDef]:
     catalog = await service.list_tools()
     audit(
         {
@@ -164,12 +167,45 @@ async def inspect_tools(service: MCPService, *, source: str) -> list[ToolDef]:
             raise ValueError(f"Duplicate MCP tool name: {name}")
         names.add(name)
         params = inspect_parameters(descriptor["inputSchema"])
-        tools.append(_tool(service, descriptor, params, source))
+        tools.append(_tool(service, descriptor, params, source, live_web=live_web))
     return tools
 
 
+def _strings(value: Any) -> str:
+    """All text in a tool's arguments or result, for timing how long it takes to write or read."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_strings(v) for v in value.values())
+    if isinstance(value, list | tuple):
+        return " ".join(_strings(v) for v in value)
+    text = getattr(value, "text", None)
+    return text if isinstance(text, str) else ""
+
+
+def _sim_dates(content: list, arguments: dict[str, Any], source: str, name: str, call_id: str | None) -> None:
+    """Live web only: move dates near the real today to the simulated today, so the
+    real date never reaches the agent (see refund_eval.published.dates)."""
+    from refund_eval.agent.schedule import london
+    from refund_eval.world.state import load_world
+
+    real_today = london(datetime.now(UTC)).date()
+    typed = {*store().get(TYPED_DATES_KEY, []), *(d.isoformat() for d in dates_in(_strings(arguments), real_today))}
+    store().set(TYPED_DATES_KEY, sorted(typed))
+    sim_today = london(load_world().now).date()
+    keep = {datetime.fromisoformat(d).date() for d in typed}
+    shifted = 0
+    for part in content:
+        if isinstance(part, ContentText):
+            part.text, n = shift_dates(part.text, sim_today=sim_today, real_today=real_today, keep=keep)
+            shifted += n
+    if shifted:
+        audit({"event": "dates_shifted", "source": source, "tool": name, "call_id": call_id, "count": shifted,
+               "real_today": real_today.isoformat(), "sim_today": sim_today.isoformat()})
+
+
 def _tool(
-    service: MCPService, descriptor: dict, params: ToolParams, source: str
+    service: MCPService, descriptor: dict, params: ToolParams, source: str, *, live_web: bool = False
 ) -> ToolDef:
     name = descriptor["name"]
     accepts_id = "tool_call_id" in inspect.signature(service.call_tool).parameters
@@ -209,7 +245,7 @@ def _tool(
             # use. Advance before dispatch so this call can observe that mail.
             # Catalog/adapter consumers outside a trial have no World to move.
             if store().get(WORLD_KEY) is not None:
-                charge_time(name)
+                charge_time(name, written=_strings(arguments))
             result = await service.call_tool(
                 name, arguments, **({"tool_call_id": call_id} if accepts_id else {})
             )
@@ -271,7 +307,12 @@ def _tool(
                 "result": result,
             }
         )
-        return model_content(result)
+        content = model_content(result)
+        if live_web and store().get(WORLD_KEY) is not None:
+            _sim_dates(content, arguments, source, name, call_id)
+        if store().get(WORLD_KEY) is not None:  # reading what came back takes time too
+            charge_time(name, read=_strings(content), base=False)
+        return content
 
     return ToolDef(
         execute,

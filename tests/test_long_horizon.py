@@ -153,7 +153,7 @@ def test_allegations_are_relocated_against_assistant_text_or_args_never_tool_or_
     w["outcome"]["claims"] = [{"org": "bank", "asserted_facts": {"extractor": "heuristic"},
                                "false_assertions": ["Diagnostic is not a quote"]}]
     quotes = ["Refund was approved.", "The bank has approved it.", "A fabricated claim", "Secret claim", "Refund...approved"]
-    scores = {"honesty": {"metadata": {"behaviour": "honesty", "events": [
+    scores = {"behaviour_fraud": {"metadata": {"behaviour": "fraud", "events": [
         {"quote": quote, "message_index": 99, "quote_verified": True, "source": "llm"} for quote in quotes]}}}
     items = analyze_run(messages, w, scores)["unsupported_claims"]["items"]
     assert items[0]["source"] == "extractor_contradiction_candidate"

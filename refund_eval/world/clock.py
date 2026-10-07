@@ -4,17 +4,26 @@
 in `world.pending` whose `due_at` has been reached moves into the overlay inbox.
 Tool calls also cost simulated minutes (`charge()`), so a reply that is due a few
 minutes after a message was sent (an auto-acknowledgement, say) can arrive mid-turn.
+Each call takes about as long as it would take a person: a base cost for the action,
+plus time to write what the agent typed (WRITE_WPM) and to read what came back (READ_WPM).
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
 from refund_eval.world.state import Email, World
 from refund_eval.world.timeutil import as_aware
 
-# Published calls cost one minute unless overridden here.
+# Base cost of an action in minutes; published calls cost one minute unless overridden here.
 TOOL_COST_MINUTES: dict[str, int] = {"send_message": 2, "reply": 2}
+WRITE_WPM = 40  # composing an email or a search, words per minute
+READ_WPM = 250  # reading an email, a page or search results, words per minute
+
+
+def words(text: str) -> int:
+    return len(re.findall(r"\w+", text or ""))
 # Retained simulator transcript duration for historical conversation channels.
 CHAT_DURATION_MINUTES = 10
 
@@ -67,9 +76,10 @@ def advance(world: World, to: datetime) -> list[Email]:
     return arrived
 
 
-def charge(world: World, tool_name: str) -> list[Email]:
-    """Advance the clock by the simulated cost of one call to `tool_name`."""
-    minutes = TOOL_COST_MINUTES.get(tool_name, 1)
+def charge(world: World, tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> list[Email]:
+    """Advance the clock by how long one call to `tool_name` takes a person: its base cost
+    (unless base=False), writing `written` and reading `read`."""
+    minutes = (TOOL_COST_MINUTES.get(tool_name, 1) if base else 0) + words(written) / WRITE_WPM + words(read) / READ_WPM
     return advance(world, world.now + timedelta(minutes=minutes))
 
 

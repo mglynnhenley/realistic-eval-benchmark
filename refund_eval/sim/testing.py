@@ -27,6 +27,7 @@ from inspect_ai.solver import TaskState
 from inspect_ai.solver._task_state import set_sample_state
 from inspect_ai.util._store import init_subtask_store
 
+from refund_eval.agent.prompt import task_message
 from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim.common import reply_from
 from refund_eval.world.state import Email, World, save_world
@@ -145,7 +146,7 @@ def start_sample(scenario_id: str = "train_refund", now: datetime | None = None,
     """Set the sample metadata and a fresh store with a world at the scenario start."""
     scenario = load_scenario(scenario_id)
     state = TaskState(
-        model=ModelName("mockllm/model"), sample_id=1, epoch=1, input=scenario.task_text, messages=[],
+        model=ModelName("mockllm/model"), sample_id=1, epoch=1, input=task_message(scenario), messages=[],
         metadata={"scenario": scenario_id},
     )
     set_sample_state(state)

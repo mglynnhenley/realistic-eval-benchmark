@@ -9,7 +9,7 @@ from pathlib import Path
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
-from refund_eval.config import DEFAULT_ROLE_MODEL
+from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
 from refund_eval.harbor.artifacts import finite_json, grading_errors
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
 from refund_eval.published.provider import published_model_args
@@ -23,8 +23,22 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(finite_json(value), indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def _resume_args(settings) -> dict:
+    """The packaged trial log to continue from, checked against its pinned hash."""
+    if not settings.resume_sha256:
+        return {}
+    from refund_eval.harbor.config import RESUME_IN_IMAGE, RESUME_SNAPSHOT_IN_IMAGE
+    from refund_eval.world.snapshot_store import file_sha256
+
+    root = Path(__file__).resolve().parents[2]
+    path = root / RESUME_SNAPSHOT_IN_IMAGE if (root / RESUME_SNAPSHOT_IN_IMAGE).is_file() else root / RESUME_IN_IMAGE
+    if not path.is_file() or file_sha256(path) != settings.resume_sha256:
+        raise ValueError("The packaged trial log to resume is missing or does not match this batch")
+    return {"resume_log": str(path)}
+
+
 def run_trial(request: TrialRequest, output: Path) -> dict:
-    if request.instruction.strip() != load_scenario("train_refund").task_text.strip():
+    if request.instruction.strip() != load_scenario(request.settings.scenario).task_text.strip():
         raise ValueError("Harbor instruction must match the benchmark scenario exactly")
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -65,13 +79,18 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
                 "world_mode": settings.world_mode, "research_mode": settings.research_mode,
                 "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
                 "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),
+                "llm_grading": settings.llm_grading,
+                "daily_allowance": settings.daily_allowance,
+                "use_full_allowance": settings.use_full_allowance,
+                "scenario": settings.scenario,
+                **_resume_args(settings),
                 **rubric_args,
             },
             model=request.model,
             model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
             model_roles={
                 "simulator": settings.simulator_model or DEFAULT_ROLE_MODEL,
-                "grader": settings.grader_model or DEFAULT_ROLE_MODEL,
+                "grader": settings.grader_model or DEFAULT_GRADER_MODEL,
             },
             log_dir=str(output), log_format="eval", display="none", max_samples=1,
             metadata={"harbor_trial_id": request.trial_id},

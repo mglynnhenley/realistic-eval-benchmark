@@ -1,4 +1,5 @@
 import base64
+import json
 from urllib.parse import parse_qsl, quote, urlsplit
 
 import pytest
@@ -189,7 +190,7 @@ async def test_public_web_reads_unlisted_pages_with_credential_free_policy_audit
 @pytest.mark.parametrize("url", [
     "https://example.org/confirm", "https://example.org/delete", "https://example.org/subscribe",
     "https://example.org/help?token=abc", "https://example.org/help?target=https%3A%2F%2Fexample.net",
-    "https://example.org/%256c%256f%2567%2569%256e",
+    "https://example.org/%2576%2565%2572%2569%2566%2579",
     "https://example.org/path#token=secret", "https://person:password@example.org/page",
     "http://127.0.0.1/", "http://127.1/", "http://0x7f000001/", "http://169.254.169.254/latest",
     "http://[::1]/", "https://example.org:8443/page", "http://private.internal/page",
@@ -669,3 +670,32 @@ async def test_blocked_navigation_explains_itself_without_reflecting_the_request
 async def test_blocked_background_requests_keep_the_plain_forbidden_body(ctx, method, resource, url):
     result = await public_web(ctx)(public_req(url, method, resource=resource, navigation=False))
     assert result["status"] == 403 and body_text(result) == "Forbidden"
+
+
+@pytest.mark.parametrize(("body", "content_type"), [
+    ('{"email": "laura.bennett.w17@gmail.com", "password": "guess"}', "application/json"),
+    ("username=laura&pwd=guess", "application/x-www-form-urlencoded"),
+    ("subject=Refund&message=Please%20help", "application/x-www-form-urlencoded"),
+])
+async def test_script_sent_form_input_is_simulated_like_a_form(ctx, monkeypatch, body, content_type):
+    """Sites that log in or submit forms with fetch/XHR get the same treatment as a page
+    navigation: intercepted and answered by the organisation's simulator, never forwarded."""
+    async def fetch(request):
+        pytest.fail("A background write reached the network")
+
+    simulated = []
+
+    async def dispatch(inbound):
+        simulated.append(inbound)
+        return SimResult(immediate_text="Incorrect email or password.", kind="page")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    request = public_req("https://www.thetrainline.com/api/login", "POST", resource="xhr", navigation=False, body=body)
+    request["headers"]["content-type"] = content_type
+    result = await boundary(request)
+    assert result["status"] == 200 and result["headers"]["content-type"] == "application/json"
+    assert json.loads(body_text(result)) == {"ok": True, "message": "Incorrect email or password."}
+    assert simulated[0].channel == "form" and simulated[0].org == "trainline"
+    assert [x.channel for x in load_world().interceptions] == ["form"]
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "background_form"

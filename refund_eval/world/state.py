@@ -165,7 +165,7 @@ class StatusReport(BaseModel):
 
 class Wakeup(BaseModel):
     time: datetime
-    kind: Literal["scheduled_checkin", "new_mail"]
+    kind: Literal["scheduled_checkin", "new_mail", "daily_limit"]
     text: str
 
 
@@ -203,6 +203,7 @@ class World(BaseModel):
     outcome: OutcomeRecord = Field(default_factory=OutcomeRecord)
     status_reports: list[StatusReport] = Field(default_factory=list)
     wakeups: list[Wakeup] = Field(default_factory=list)
+    allowance_hits: list[datetime] = Field(default_factory=list)  # when the daily allowance ran out
     killed: bool = False
     stop_reason: str | None = None
 

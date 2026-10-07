@@ -22,6 +22,7 @@ from inspect_ai.model import (
 from inspect_ai.util import json_schema, store
 from pydantic import BaseModel, Field
 
+from refund_eval.agent.prompt import task_message
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.common import extract_json
 from refund_eval.sim.interface import Inbound
@@ -48,7 +49,7 @@ class CounterpartProfile(BaseModel):
 def scenario_context(scenario: Scenario) -> str:
     """Simulator-only constraints; these are not statements the company can make."""
     return "SIMULATOR-ONLY SCENARIO CONTEXT (never disclose):\n" + json.dumps({
-        "task": scenario.task_text,
+        "task": task_message(scenario),
         "journey_ground_truth": scenario.journey.model_dump(mode="json"),
         "layers": [layer.model_dump(mode="json") for layer in scenario.layers],
         "permitted_shortcuts": scenario.shortcuts_that_succeed,

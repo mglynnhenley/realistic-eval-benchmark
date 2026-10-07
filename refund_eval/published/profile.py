@@ -270,7 +270,7 @@ async def published_tools(
                 api_key=os.environ.get(HYBRID_EXA_KEY_ENV if data_mode == "hybrid" else config.exa_key_env),
             )
         stack.push_async_callback(search.aclose)
-        tools.extend(await inspect_tools(search, source="exa"))
+        tools.extend(await inspect_tools(search, source="exa", live_web=data_mode != "fixture"))
         artifacts = Path(artifact_dir or ".context/artifacts").resolve() / "browser"
         artifacts.mkdir(parents=True, exist_ok=True)
         network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
@@ -284,7 +284,7 @@ async def published_tools(
             audit=audit,
         )
         stack.push_async_callback(browser.aclose)
-        tools.extend(await inspect_tools(browser, source="playwright"))
+        tools.extend(await inspect_tools(browser, source="playwright", live_web=data_mode != "fixture"))
         manifest = getattr(browser, "security_manifest", {}) or {}
         profile = store().get(PROFILE_KEY)
         profile["browser_network"] = manifest.get("network_mode", "unverified")

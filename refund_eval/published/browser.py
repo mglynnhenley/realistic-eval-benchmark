@@ -54,6 +54,19 @@ BROWSER_TOOLS = frozenset({
 RequestHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
+def _sim_time_meta() -> dict[str, str]:
+    """The trial's simulated time, so pages show the simulated date instead of today's."""
+    try:
+        from inspect_ai.util import store
+
+        from refund_eval.world.state import WORLD_KEY
+
+        world = store().get(WORLD_KEY)
+    except (RuntimeError, LookupError, ImportError):  # outside a trial
+        return {}
+    return {"refund-eval/sim-time": world["now"]} if world and world.get("now") else {}
+
+
 class PublishedBrowserService:
     """Per-trial native MCP browser service with an explicit host request policy.
 
@@ -182,7 +195,7 @@ class PublishedBrowserService:
             self._audit({"event": "browser_tool_start", **call, "boundary_verified": self.security_manifest.get("interception_integrity", {}).get("verified", False)})
             try:
                 result = await self._client.call_tool(
-                    name, arguments, meta={"refund-eval/tool-call-id": call["tool_call_id"]}
+                    name, arguments, meta={"refund-eval/tool-call-id": call["tool_call_id"], **_sim_time_meta()}
                 )
                 self._raise_if_failed()
                 completed = True

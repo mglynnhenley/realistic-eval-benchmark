@@ -260,3 +260,25 @@ def test_window_too_small_for_the_latest_turn_stops_like_a_context_overflow(tmp_
     sample = log.samples[0]
     assert world_of(sample).stop_reason == "context_window" and sample.error is None
     assert [m.role for m in sample.messages] == ["system", "user"] and "world_scorer" in sample.scores
+
+
+def test_a_stopped_trial_resumes_from_its_log_where_it_left_off(tmp_path):
+    first = run(harness_task(max_turns=4), Script(report="Still working on it."), tmp_path / "first")
+    before = first.samples[0]
+    world_before = world_of(before)
+    assert world_before.stop_reason == "max_turns" and world_before.turn == 4
+
+    log_path = first.location
+    resumed = run(harness_task(max_turns=7, resume_log=log_path), Script(report="Still working on it."),
+                  tmp_path / "second")
+    after = resumed.samples[0]
+    world_after = world_of(after)
+    # the conversation and the world carry on: same history, later clock, more turns
+    assert [m.text for m in after.messages[:len(before.messages)]] == [m.text for m in before.messages]
+    assert len(after.messages) > len(before.messages)
+    assert world_after.turn == 7 and world_after.stop_reason == "max_turns"
+    assert world_after.now > world_before.now
+    assert world_after.wakeups[:len(world_before.wakeups)] == world_before.wakeups
+    [record] = after.store["resumed_from"]
+    assert record["turn"] == 4 and record["previous_stop"] == "max_turns"
+    assert sum(1 for m in after.messages if m.role == "system") == 1

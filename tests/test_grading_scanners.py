@@ -101,7 +101,7 @@ async def test_behaviour_llm_scanner_parses_structured_answer(scanners: ModuleTy
         )
 
     model = get_model("mockllm/model", custom_outputs=answer, memoize=False)
-    result = await scanners.behaviour_scanner("honesty", model=model)(transcript)
+    result = await scanners.behaviour_scanner("fraud", model=model)(transcript)
     assert result.value == "3"
     assert result.metadata["events"][0]["severity"] == 3
     assert [ref.cite for ref in result.references] == ["[M2]"]

@@ -1022,7 +1022,7 @@
     fragment.append(intro);
     if (state.run?.mode === "demo") fragment.append(element("div", "score-notice", "Scripted demo: these scorer outputs check the pipeline. Behaviour grades are mock placeholders, not measurements of an agent."));
     const entries = Object.entries(scores);
-    const fixedDiagnostics = new Set(["containment", "resource_use", "outcome_honesty", "trial_summary", "eval_awareness", "long_horizon_activity"]);
+    const fixedDiagnostics = new Set(["containment", "resource_use", "permission_checks", "outcome_honesty", "trial_summary", "eval_awareness", "long_horizon_activity"]);
     const isBehaviour = ([name, score]) => !fixedDiagnostics.has(name)
       && (Boolean(score.metadata?.behaviour) || name.startsWith("behaviour_"));
     function scoreCard(name, score, behavioural) {
@@ -1202,6 +1202,7 @@
     try {
       const previousDefault = state.config?.default_model;
       const previousRoleDefault = state.config?.default_role_model;
+      const previousGraderDefault = state.config?.default_grader_model;
       state.config = await request("/api/config");
       if (!state.defaultsApplied && state.config.model_defaults) {
         if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
@@ -1226,12 +1227,12 @@
         if (!$("model").value || $("model").value === previousDefault) $("model").value = state.config.default_model;
         $("model").placeholder = state.config.default_model;
       }
-      if (state.config.default_role_model) {
-        // Only fields still holding the previous role default follow a changed default.
-        for (const id of ["simulator-model", "grader-model"]) {
-          if ($(id).value && $(id).value === previousRoleDefault) $(id).value = state.config.default_role_model;
-          $(id).placeholder = state.config.default_role_model;
-        }
+      // Only fields still holding the previous role default follow a changed default.
+      for (const [id, previous, next] of [["simulator-model", previousRoleDefault, state.config.default_role_model],
+        ["grader-model", previousGraderDefault, state.config.default_grader_model]]) {
+        if (!next) continue;
+        if ($(id).value && $(id).value === previous) $(id).value = next;
+        $(id).placeholder = next;
       }
       const openrouter = (state.config.providers || []).find((provider) => provider.name === "openrouter");
       $("provider-info").textContent = openrouter?.configured
@@ -1741,6 +1742,8 @@
       payload.cost_limit = Number($("cost-limit").value);
       payload.sim_weeks = Number($("sim-weeks").value);
       payload.history_tokens = Number($("history-tokens").value);
+      const allowance = $("daily-allowance").value.trim();
+      if (allowance) payload.daily_allowance = Number(allowance);
       const simulator = $("simulator-model").value.trim();
       const grader = $("grader-model").value.trim();
       if (simulator) payload.simulator_model = simulator;

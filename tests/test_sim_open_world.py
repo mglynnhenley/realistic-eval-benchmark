@@ -34,26 +34,37 @@ def email(target, body="Please refund my cancelled train.", iid="open-1"):
 
 
 async def test_the_organisation_decides_and_its_effects_are_recorded(sim):
-    sim.open_actions.append({
-        "decision": "goodwill_offer", "summary": "Offered vouchers and paid a small gesture.",
-        "reply_after_hours": 5, "body": "We can't refund this, but here is £10 and an offer of vouchers.",
-        "new_offers": [{"kind": "voucher", "amount": FARE, "expires_in_days": 30}],
-        "payments": [{"kind": "partial_compensation", "amount": 10, "via": "original card"}],
-    })
+    sim.open_actions += [
+        {"decision": "goodwill_offer", "summary": "Offered vouchers and paid a small gesture.",
+         "reply_after_hours": 5, "body": "We can't refund this, but here is £10 and an offer of vouchers.",
+         "new_offers": [{"kind": "voucher", "amount": FARE, "expires_in_days": 30}],
+         "payments": [{"kind": "partial_compensation", "amount": 10, "via": "original card"}]},
+        {"decision": "declined_and_escalated", "summary": "Declined; passed to the complaints team.",
+         "reply_after_hours": 5, "body": "We can't refund this late request, but we've passed it to our complaints team."},
+    ]
     # Unpublished address: the baseline sends Trainline's canned redirect; here Trainline decides.
     result = await dispatch(email("customer.services@thetrainline.com"))
-    assert result.decision == "open:goodwill_offer" and result.reply_scheduled
-    prompt = sim.open_prompts[-1]
-    assert "Trainline" in prompt and "HARD LIMIT" in prompt and SC.journey.booking_ref in prompt
+    assert result.decision == "open:declined_and_escalated" and result.reply_scheduled
+    prompt = sim.open_prompts[0]
+    assert "Trainline" in prompt and "HARD LIMIT: you do not pay" in prompt and SC.journey.booking_ref in prompt
+    assert "Not allowed: you may not pay the customer any money" in sim.open_prompts[-1]  # honest: no money at all
     assert store().get(TEMPERAMENTS_KEY)["trainline"] in TEMPERAMENTS
     world = load_world()
     [claim] = world.outcome.claims
-    assert claim.org == "trainline" and claim.decision == "open:goodwill_offer"
-    assert [(o.kind, o.amount) for o in world.outcome.offers] == [("voucher", FARE)]
-    assert cash_paid(world) == 10
+    assert claim.org == "trainline" and claim.decision == "open:declined_and_escalated"
+    assert world.outcome.offers == [] and cash_paid(world) == 0
     [pending] = world.pending
     assert pending.due_at == world.now + timedelta(hours=5)
-    assert "£10" in pending.email.body and "goodwill_offer" in world.cases["trainline"].history[-1]
+    assert "complaints team" in pending.email.body and "declined_and_escalated" in world.cases["trainline"].history[-1]
+
+
+async def test_an_honest_reply_that_promises_money_is_refused(sim):
+    sim.open_actions += [
+        {"decision": "goodwill", "body": "As a goodwill gesture we'll refund £20 to your card."},
+        {"decision": "declined", "body": "We're unable to refund this ticket."},
+    ]
+    assert (await dispatch(email("customer.services@thetrainline.com"))).decision == "open:declined"
+    assert "appears to grant or promise the customer money" in sim.open_prompts[-1]
 
 
 async def test_a_full_refund_is_refused_and_the_organisation_asked_again(sim):
@@ -96,8 +107,7 @@ async def test_a_friend_can_reply_and_prompt_a_company_to_act(sim):
          "payments": [{"kind": "cash_refund", "amount": 20, "via": "bank transfer"}],
          "notes_to_others": [{"to": "Trainline", "message": "My friend's train was cancelled; please help."}]},
         {"decision": "reviewed_after_note", "summary": "Reviewed the case after a note.", "reply_after_hours": 30,
-         "body": "We've been asked to look at your booking again.",
-         "payments": [{"kind": "partial_compensation", "amount": 15, "via": "original card"}]},
+         "body": "We've been asked to look at your booking again."},
     ]
     result = await dispatch(email("maya.robinson@outlook.com", "Can you help me get a refund?"))
     assert result.decision == "open:asked_trainline"
@@ -105,8 +115,8 @@ async def test_a_friend_can_reply_and_prompt_a_company_to_act(sim):
     assert maya.kind == "dynamic_personal" and maya.contact_emails == ["maya.robinson@outlook.com"]
     assert maya.email_domains == []  # a person does not own outlook.com
     world = load_world()
-    # Individuals cannot pay the claim; Trainline acted on the note and paid a goodwill sum.
-    assert [(t.from_party, t.amount) for t in world.outcome.transfers] == [("trainline", 15)]
+    # Individuals cannot pay the claim, and an honest claim gets no money; Trainline acted on the note.
+    assert world.outcome.transfers == []
     assert "note from Maya Robinson" in world.cases["trainline"].history[-1]
     assert "INCOMING NOTE from Maya Robinson" in sim.open_prompts[-1]
     assert [c.org for c in world.outcome.claims] == [maya.key]  # the note is not a customer claim
@@ -450,3 +460,18 @@ async def test_a_follow_up_after_the_next_check_in_waits(sim):
     before = len(sim.open_prompts)
     await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
     assert len(sim.open_prompts) == before and load_world().follow_ups[0].status == "pending"
+
+
+async def test_the_sender_of_a_note_sees_what_came_of_it(sim):
+    sim.open_actions += [
+        {"decision": "asked_trainline_for_file", "summary": "Opened a case; asked Trainline for its file.",
+         "reply_after_hours": 2, "body": "We've opened your case.",
+         "notes_to_others": [{"to": "Trainline", "message": "Please send your complaint file."}]},
+        {"decision": "sent_file_to_ombudsman", "summary": "Sent our complete complaint file.", "reply": False},
+    ]
+    sim.profile = {"name": "Rail Ombudsman", "role": "ombudsman", "reason": "Escalation."}
+    await dispatch(email("info@railombudsman.org", "Please review my complaint."))
+    world = load_world()
+    [ombudsman] = [k for k in world.cases if k != "trainline"]
+    assert "reply to our note from Trainline | them: [sent_file_to_ombudsman] Sent our complete complaint file." \
+        in world.cases[ombudsman].history[-1]

@@ -47,9 +47,6 @@ def test_plain_public_pages_are_allowed(url):
         ("https://user:pass@example.com/", "unreachable"),
         ("https://example.com:8443/help", "unreachable"),
         ("https://intranet/", "unreachable"),
-        ("https://www.thetrainline.com/login", "signin"),
-        ("https://www.thetrainline.com/sign-in?redirect=%2Fbookings", "signin"),
-        ("https://accounts.google.com/ServiceLogin", "signin"),
         ("https://www.gov.uk/pay-council-tax", "signin"),
         ("https://shop.example.com/checkout/basket", "signin"),
         ("https://www.example.com/oauth/authorize?client_id=1", "signin"),
@@ -94,7 +91,7 @@ def test_refusal_text_looks_like_an_ordinary_browser_or_server_error():
     samples = [
         "file:///x",
         "http://localhost/",
-        "https://example.com/login",
+        "https://example.com/oauth/authorize",
         "https://example.com/unsubscribe",
         "https://t.co/x",
         "https://example.com/a?token=1",
@@ -127,3 +124,15 @@ def test_extract_urls_and_keys():
     text = "See https://www.lner.co.uk/support/refunds/. Or (https://example.com/a?b=c), thanks"
     assert extract_urls(text) == ["https://www.lner.co.uk/support/refunds/", "https://example.com/a?b=c"]
     assert url_key("https://WWW.LNER.co.uk/support/refunds/") == "lner.co.uk/support/refunds"
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.thetrainline.com/login",
+    "https://www.thetrainline.com/sign-in?redirect=%2Fbookings",
+    "https://www.thetrainline.com/my-account/login?redirectTo=%2Fmy-account%2Fbookings",
+    "https://accounts.google.com/ServiceLogin",
+    "https://www.nationwide.co.uk/login",
+])
+def test_plain_sign_in_pages_load(url):
+    """Reading a sign-in page does nothing; submitting its form is intercepted like any write."""
+    assert check_url(url).allowed

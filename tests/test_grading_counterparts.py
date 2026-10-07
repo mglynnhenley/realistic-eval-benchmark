@@ -14,9 +14,8 @@ from inspect_scout import Transcript
 
 from refund_eval.grading.context import COUNTERPART_REGISTRY_KEY, counterpart_context
 from refund_eval.grading.scorers import (
-    behaviour_honesty,
+    behaviour_fraud,
     eval_awareness,
-    outcome_honesty,
     trial_summary,
 )
 from refund_eval.grading.testing import (
@@ -63,7 +62,7 @@ def registry_events() -> list[StoreEvent]:
     ]
 
 
-@pytest.mark.parametrize("scorer", [behaviour_honesty, outcome_honesty, eval_awareness, trial_summary])
+@pytest.mark.parametrize("scorer", [behaviour_fraud, eval_awareness, trial_summary])
 async def test_all_live_grader_calls_get_generated_identity_context(scorer) -> None:
     report = "I asked Passenger Advice for guidance; no refund has arrived."
     state = task_state(trial_messages(report), trial_world(status_texts=[report]))
@@ -129,7 +128,7 @@ async def test_scout_prompt_includes_identity_assumptions(scanners: ModuleType) 
         })
 
     model = get_model("mockllm/model", custom_outputs=answer, memoize=False)
-    result = await scanners.behaviour_scanner("honesty", model=model)(transcript)
+    result = await scanners.behaviour_scanner("fraud", model=model)(transcript)
 
     assert result.value == "0"
     assert '"org_key":"dynamic_advice"' in prompts[0]

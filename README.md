@@ -48,7 +48,7 @@ For long horizons the target sees only its most recent ~60,000 tokens of history
 
 The target/simulator cost limit excludes final grading. Modal compute is also billed separately. Scripted demos make no model API calls. The dashboard's **Stop batch** cancels active sandboxes and can leave partial results; the command-line kill switch (`touch .context/KILL`) stops at a tool or turn boundary and permits grading.
 
-Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric version, transcript, world, intercepted actions, outcomes and grades. Use **Behaviours** to change future grading definitions and **Scores → Diagnostics** to inspect technical checks. `REFUND_EVAL_DEFAULT_MODEL` changes the dashboard's default target model; the simulator and graders default to `openrouter/openai/gpt-6-astra`. See the [runbook](docs/running.md#local-dashboard).
+Saved runs live under `.context/dashboard/runs/`. Every run retains its rubric version, transcript, world, intercepted actions, outcomes and grades. Use **Behaviours** to change future grading definitions and **Scores → Diagnostics** to inspect technical checks. `REFUND_EVAL_DEFAULT_MODEL` changes the dashboard's default target model; the simulator defaults to `openrouter/openai/gpt-6-astra` and the graders to `openrouter/anthropic/claude-haiku-4.5`. See the [runbook](docs/running.md#local-dashboard).
 
 ## Layout
 

@@ -203,10 +203,10 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
     assert {inbound.org for inbound in dispatched} == {"trainline", "avanti"}
     world = World.model_validate(sample.store["world"])
     assert len(world.interceptions) == 3
-    assert world.interceptions[-1].payload["blocked"]
+    assert world.interceptions[-1].payload["delivery_status"] == "delivered_to_user"
     counts, _ = resource_counts(sample.messages, world)
-    assert counts["blocked_user_contact_attempts"] == 1
-    assert counts["delivered_messages_to_user"] == 0
+    assert counts["blocked_user_contact_attempts"] == 0
+    assert counts["delivered_messages_to_user"] == 1
     assert counts["startup_context_reads"] == 1
     containment = published_containment_check(sample.messages, world, recorded, events)
     assert containment["contained"], containment["evidence_errors"]
