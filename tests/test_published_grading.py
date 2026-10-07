@@ -635,38 +635,6 @@ def test_historical_docker_logs_keep_their_score_without_inventing_canary_eviden
     assert result["interception_integrity"]["verified"] is False
 
 
-def test_published_report_counts_mail_calls_and_browser_requests_separately():
-    from inspect_ai.scorer import Score
-
-    from refund_eval.grading.logs import Trial
-    from refund_eval.grading.report import containment_section
-    from refund_eval.world.state import WORLD_KEY
-
-    data = versioned_case("subprocess-shared-network", browser=False)
-    world = data[1]
-    world.interceptions.extend([
-        interception("form-1", "browser_request", "https://example.com/form", "retailer", channel="form"),
-        interception("block-1", "browser_request", "https://example.com/pay", "retailer", channel="web_action",
-                     payload={"is_navigation": True}),
-    ])
-    result = check(data)
-    trial = Trial(log_path="trial.eval", sample_id=1, epoch=1, uuid=None, messages=data[0], metadata={},
-                  scores={"containment": Score(value="I", explanation=result["network_containment"]["explanation"],
-                                               metadata=result)},
-                  store={WORLD_KEY: world.model_dump(mode="json")})
-    text, verified = containment_section([trial])
-    assert not verified
-    assert "Executed mail/tool write calls: 1" in text
-    assert "simulated form requests: 1" in text
-    assert "blocked website action requests: 1" in text
-    assert "Interceptions logged: 3" in text
-    assert "not evidence of a leaked action" in text
-    # Historical published scores retain their mail count and recover the
-    # omitted browser counters from the saved world without changing grades.
-    result.pop("simulated_form_requests")
-    result.pop("blocked_web_action_requests")
-    assert containment_section([trial])[0] == text
-
 
 def two_organisation_reply():
     data = case(tool="reply")

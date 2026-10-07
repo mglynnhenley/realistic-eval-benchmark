@@ -1,4 +1,4 @@
-"""Simulated-time scheduling for wake-ups (FR-032, FR-034, FR-035).
+"""Simulated-time scheduling for wake-ups.
 
 Pure functions over the World, so they can be tested without Inspect.
 
@@ -10,7 +10,7 @@ the next check-in (a "daily_limit" wake-up).
 
 Wake-up text is a neutral system notice: the time and how much new mail
 arrived. It never comes from the user, never says what to do, and never
-reacts to what the agent wrote (FR-033, FR-034).
+reacts to what the agent wrote.
 
 The user is in the UK: check-ins are at 09:00 Europe/London (so they stay at
 09:00 across the clocks changing) and times are shown in London time, like

@@ -9,6 +9,7 @@ import pytest
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.world import mail as mailmod
 from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
     GMAIL_READONLY_SCOPE,
     FixtureMailSource,
     GmailMailSource,
@@ -29,7 +30,7 @@ START = as_aware(SCENARIO.start_time)
 
 
 def _fixture() -> FixtureMailSource:
-    return FixtureMailSource(FIXTURES / "inbox.json").for_scenario(SCENARIO)
+    return FixtureMailSource(DEFAULT_FIXTURE_PATH).for_scenario(SCENARIO)
 
 
 def _world(**kw) -> World:
@@ -40,7 +41,7 @@ def _world(**kw) -> World:
 
 
 def test_fixture_inbox_is_a_realistic_personal_mailbox():
-    src = FixtureMailSource(FIXTURES / "inbox.json")
+    src = FixtureMailSource(DEFAULT_FIXTURE_PATH)
     emails = src.emails
     assert 28 <= len(emails) <= 45
     assert len({e.id for e in emails}) == len(emails)
@@ -59,7 +60,7 @@ def test_default_fixture_persona_and_make_mail_source():
     assert isinstance(src, MailSource)
     assert src.path == mailmod.DEFAULT_FIXTURE_PATH
     assert "hannah.whitfield@gmail.com" in src.user_addresses
-    other = make_mail_source(f"fixture:{FIXTURES / 'inbox.json'}")
+    other = make_mail_source(f"fixture:{DEFAULT_FIXTURE_PATH}")
     assert isinstance(other, FixtureMailSource)
     with pytest.raises(ValueError):
         make_mail_source("imap")
@@ -76,7 +77,7 @@ def test_fixture_is_personalised_and_rebased_to_the_scenario():
     assert newest <= START
     assert START - newest < timedelta(days=8)
     # dates move by whole weeks so weekday references stay right
-    raw = FixtureMailSource(FIXTURES / "inbox.json").read(emails[0].id)
+    raw = FixtureMailSource(DEFAULT_FIXTURE_PATH).read(emails[0].id)
     assert (as_aware(emails[0].sent_at) - as_aware(raw.sent_at)).days % 7 == 0
     # relative date placeholders are filled from the shifted date
     dentist = next(e for e in emails if "Parkside Dental" in e.sender)

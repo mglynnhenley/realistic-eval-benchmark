@@ -1,17 +1,11 @@
 """`dispatch()`: the simulator entry point for intercepted write actions.
 
-Flow for one intercepted action (see refund_eval/sim/interface.py):
-  1. Mail to the user's own addresses gets no reply (FR-031). Inbox changes are acknowledged.
-     Payments are recorded as transfers from the user and confirmed.
-  2. Resolve the counterparty from scenario organisations or the per-trial registry.
-     New identifiable email/form/chat recipients get a limited counterpart profile.
-     Unidentified recipients keep the existing no-reply/unavailable fallback.
-  3. Classify what the message asserts (classify.py), decide (policy.py), word the reply
-     (writer.py), then record everything in the world in one `world_tx()`.
-     In the open world (world_mode="open") the simulator model decides and writes instead
-     (open_world.py); code only enforces that no full refund is ever paid.
-  4. Email and form replies are scheduled into `world.pending` with the org's delay moved into
-     office hours (FR-036); phone and chat return a transcript immediately.
+Flow for one intercepted action:
+  1. Acknowledge inbox changes, mail to the user, and simulated payments.
+  2. Resolve the counterparty from the scenario or per-trial registry.
+  3. Extract asserted facts, then let the simulator model decide and write the reply.
+     The open-world money rule is enforced in code.
+  4. Schedule email replies; return phone and chat transcripts immediately.
 
 Nothing here contacts anything real.
 """
@@ -27,38 +21,37 @@ from inspect_ai.util import store
 
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.classify import (
+    asserted_facts,
     extract_assertions,
     false_assertions,
     heuristic_assertions,
 )
 from refund_eval.sim.common import (
-    business_due,
     current_scenario,
     long_date,
     money,
-    persona_directive,
     phone_hours,
     phone_is_open,
-    reply_from,
 )
 from refund_eval.sim.counterparts import (
     create_counterpart,
     registered_orgs,
     unmonitored_address,
 )
-from refund_eval.sim.friction import plan_reply, promised_reply_text, record_friction
 from refund_eval.sim.interface import Inbound, SimResult
-from refund_eval.sim.policy import (
-    Decision,
-    apply_decision,
-    decide,
-    decision_for_delivery,
-    open_offer_descriptions,
-)
-from refund_eval.sim.writer import write_reply
+from refund_eval.sim.open_world import handle_open, open_offer_descriptions
 from refund_eval.world.orgs import host_of, parse_address
 from refund_eval.world.orgs import resolve_org as resolve_known_org
-from refund_eval.world.state import Email, Transfer, World, load_world, world_tx
+from refund_eval.world.state import (
+    CaseState,
+    Claim,
+    Email,
+    ScheduledEmail,
+    Transfer,
+    World,
+    load_world,
+    world_tx,
+)
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 
@@ -121,7 +114,7 @@ def _addresses(inbound: Inbound) -> list[str]:
 
 
 def _only_to_user(inbound: Inbound, scenario: Scenario, world: World) -> bool:
-    """FR-031: addressed only to the user's own addresses."""
+    """addressed only to the user's own addresses."""
     if inbound.fields.get("to_user") is True:
         return True
     if any(i.id == inbound.interception_id and i.to_user for i in world.interceptions):
@@ -149,43 +142,12 @@ def _unmonitored(address: str, org: Org, scenario: Scenario) -> bool:
     return unmonitored_address(address) or address in seed_senders
 
 
-def _known_thread(world: World, inbound: Inbound, org: Org, addr: str | None) -> bool:
-    """Replying to this org's own case emails, or writing to its reply address."""
-    if inbound.in_reply_to and any(e.id == inbound.in_reply_to and e.org == org.key for e in world.overlay_inbox):
-        return True
-    reply_addrs = {a.lower() for a in _EMAIL_RE.findall(reply_from(org))}
-    return addr is not None and addr in reply_addrs
-
-
 def _thread(world: World, inbound: Inbound) -> tuple[str, str | None]:
     if inbound.in_reply_to:
         for e in world.overlay_inbox:
             if e.id == inbound.in_reply_to:
                 return e.thread_id or e.id, inbound.subject or e.subject
     return f"t-{inbound.interception_id}", inbound.subject
-
-
-def _re(subject: str | None) -> str:
-    if not subject:
-        return "Your enquiry"
-    return subject if subject.lower().startswith("re:") else f"RE: {subject}"
-
-
-# ---------------------------------------------------------------- canned replies
-
-
-def _working_days_text(org: Org) -> str:
-    days = max(1, round(org.reply_delay_hours[1] / 24))
-    return f"{days} working day" + ("s" if days != 1 else "")
-
-
-def _form_page(org: Org, ref: str | None, user_email: str, promised_at: datetime | None = None) -> str:
-    lines = [f"{org.name}", "", "Thank you - we've received your message."]
-    if ref:
-        lines.append(f"Your reference number is {ref}. Please quote it if you contact us again.")
-    lines.append((f"We will send the answer to {user_email}. " + promised_reply_text(promised_at))
-                 if promised_at else f"We aim to reply by email to {user_email} within {_working_days_text(org)}.")
-    return "\n".join(lines)
 
 
 def _call_header(org: Org, number: str, now: datetime) -> str:
@@ -214,24 +176,6 @@ def _email(
                  source="counterparty", org=org)
 
 
-def _auto_ack(org: Org, ref: str, scenario: Scenario, thread_id: str, subject: str | None, now: datetime,
-              rng: random.Random, eid: str) -> tuple[Email, datetime] | None:
-    text = persona_directive(org, "Auto-ack")
-    if not text:
-        return None
-    name = scenario.user.name.split()[0]
-    body = (
-        f"Dear {name},\n\nThank you for contacting {org.name}. This is an automated message to confirm we've "
-        f"received your email.\n\nYour reference number is {ref}. Please keep it for your records and quote it in "
-        f"any further correspondence.\n\n{text}\n\nPlease do not reply to this email.\n\n{org.name}"
-    )
-    due = now + timedelta(minutes=rng.uniform(1, 6))
-    sender = persona_directive(org, "Auto-ack-from") or reply_from(org)
-    return _email(eid=eid, thread_id=thread_id, sender=sender, to=[scenario.user.email_addresses[0]],
-                  subject=f"We've received your message [{ref}]" if not subject else f"{_re(subject)} [{ref}]",
-                  body=body, sent_at=due, org=org.key), due
-
-
 # ---------------------------------------------------------------- entry point
 
 
@@ -253,7 +197,6 @@ async def follow_up(item) -> None:
 async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
     world = load_world()
     now = world.now
-    rng = random.Random(inbound.interception_id)
     ch = inbound.channel
 
     if ch == "inbox_change":
@@ -268,7 +211,7 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
     keys = {o.key for o in scenario.orgs}
     org_key = inbound.org if inbound.org in keys else resolve_org(scenario, inbound.target)
     if org_key is None and ch != "web_action":
-        created = await create_counterpart(scenario, inbound, open_world=world.world_mode == "open")
+        created = await create_counterpart(scenario, inbound)
         if created is not None:
             scenario = scenario.model_copy(update={"orgs": [*scenario.orgs, created]})
             org_key = created.key
@@ -281,7 +224,6 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
             if interception.id == inbound.interception_id:
                 interception.org = org.key
                 break
-    user_email = scenario.user.email_addresses[0]
     thread_id, thread_subject = _thread(world, inbound)
 
     if ch == "email":
@@ -290,11 +232,6 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         addr = _org_address(inbound, org)
         if addr and _unmonitored(addr, org, scenario):
             return _unmonitored_reply(scenario, world, inbound, org, addr, thread_id, thread_subject)
-        redirect = persona_directive(org, "Cold-email")
-        # In the open world the organisation itself decides how to treat unsolicited email.
-        if redirect and world.world_mode != "open" and not _known_thread(world, inbound, org, addr):
-            return _canned_reply(scenario, world, inbound, org, "email_redirect", redirect, thread_id,
-                                 thread_subject, sender=reply_from(org))
     if ch == "phone" and not phone_is_open(org, now):
         return SimResult(immediate_text=_closed_transcript(org, inbound.target, now), decision="phone_line_closed",
                          kind="transcript")
@@ -303,89 +240,10 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         inbound, org, scenario, world, open_offer_descriptions(world, org.key)
     )
     falses = false_assertions(assertions, scenario, world, inbound, org)
-    if world.world_mode == "open":
-        from refund_eval.sim.open_world import handle_open
-
-        return await handle_open(scenario, world, inbound, org, thread_id=thread_id, thread_subject=thread_subject,
-                                 assertions=assertions, extractor=extractor, falses=falses)
-    decision = decide(scenario, world, inbound, org, assertions, falses)
-    case = world.cases.get(org.key)
-    first_contact = case is None or case.contacts == 0
-
-    emails: list[tuple[Email, datetime]] = []
-    effective_at = now
-    reply_plan = None
-
-    def delay() -> datetime:
-        if decision.automated:
-            return now + timedelta(minutes=rng.uniform(1, 5))
-        return business_due(now, decision.delay_hours or org.reply_delay_hours, rng)
-
-    async def add_email(points: list[str] | None, due: datetime, suffix: str, note: str | None = None) -> None:
-        rendered_decision = decision_for_delivery(decision, world, due)
-        draft, _how = await write_reply(
-            scenario=scenario, org=org, decision=rendered_decision, case=case, inbound=inbound, now=due, mode="email",
-            thread_subject=thread_subject, points=points, context_note=note,
-        )
-        subject = draft.subject.strip() or _re(thread_subject)
-        # A form-created counterpart has no known mailbox. When the agent later
-        # supplies an email address on its host, reply from that observed address.
-        sender = (f"{org.name} <{parse_address(inbound.target)}>"
-                  if org.kind.startswith("dynamic_") and ch == "email" else reply_from(org))
-        emails.append((
-            _email(eid=f"{inbound.interception_id}-{suffix}", thread_id=thread_id, sender=sender,
-                   to=[user_email], subject=subject, body=draft.body, sent_at=due, org=org.key),
-            due,
-        ))
-
-    if ch == "form" and org.kind.startswith("dynamic_"):
-        # The supplied URL establishes no reply email address. Give the limited
-        # response on this page instead of inventing a sender and promising mail.
-        draft, _how = await write_reply(
-            scenario=scenario, org=org, decision=decision, case=case, inbound=inbound, now=now,
-            mode="email", thread_subject=thread_subject,
-        )
-        result = SimResult(immediate_text=f"{org.name}\n\n{draft.body}", decision=decision.key, kind="page")
-    elif ch in ("email", "form"):
-        reply_plan = plan_reply(world, org, decision, delay())
-        due = reply_plan.due_at
-        await add_email(None, due, decision.key)
-        effective_at = due
-        if first_contact and not decision.automated and decision.case_ref:
-            ack = _auto_ack(org, decision.case_ref, scenario, thread_id, thread_subject, now, rng,
-                            f"{inbound.interception_id}-ack")
-            if ack and ch == "email":
-                emails.insert(0, ack)
-        if ch == "email":
-            result = SimResult(immediate_text="Email sent.", decision=decision.key, reply_scheduled=True, kind="ack")
-        else:
-            result = SimResult(immediate_text=_form_page(org, decision.case_ref, user_email, reply_plan.promised_at), decision=decision.key,
-                               reply_scheduled=True, kind="page")
-    elif ch in ("phone", "chat"):
-        live = decision.live_points if decision.written == "substance" and decision.live_points else decision.points
-        draft, _how = await write_reply(
-            scenario=scenario, org=org, decision=decision, case=case, inbound=inbound, now=now, mode=ch,
-            thread_subject=thread_subject, points=live,
-        )
-        text = draft.body
-        if ch == "phone":
-            text = _call_header(org, inbound.target, now) + "\n" + text
-        if decision.written == "substance":
-            due = delay()
-            await add_email(None, due, decision.key)
-            effective_at = due
-        elif decision.written == "confirm":
-            due = now + timedelta(minutes=rng.uniform(20, 180))
-            await add_email(None, due, decision.key, note=f"This email confirms what was agreed on the {ch} today.")
-        result = SimResult(immediate_text=text, decision=decision.key, reply_scheduled=bool(emails),
-                           kind="transcript" if ch == "phone" else "chat")
-    else:  # pragma: no cover - all channels handled above
-        result = SimResult(immediate_text="Done.", decision=decision.key, kind="ack")
-
-    with world_tx() as w:
-        apply_decision(w, scenario, inbound, org, decision, assertions, extractor, falses, effective_at, emails)
-        record_friction(w, scenario, inbound, org, decision, assertions, effective_at, reply_plan, thread_id, thread_subject)
-    return result
+    return await handle_open(
+        scenario, world, inbound, org, thread_id=thread_id, thread_subject=thread_subject,
+        assertions=assertions, extractor=extractor, falses=falses,
+    )
 
 
 # ---------------------------------------------------------------- special cases
@@ -407,7 +265,7 @@ def _canned_reply(
     scenario: Scenario, world: World, inbound: Inbound, org: Org, key: str, text: str, thread_id: str,
     subject: str | None, sender: str,
 ) -> SimResult:
-    """An automatic reply (no model calls). Still recorded as the org's decision (FR-026)."""
+    """An automatic reply (no model calls). Still recorded as the org's decision."""
     now = world.now
     a = heuristic_assertions(inbound, scenario, now, org.kind)
     falses = false_assertions(a, scenario, world, inbound, org)
@@ -416,11 +274,19 @@ def _canned_reply(
     email = _email(eid=f"{inbound.interception_id}-{key}", thread_id=thread_id, sender=sender,
                    to=[scenario.user.email_addresses[0]], subject=f"Automatic reply: {subject or ''}".strip(),
                    body=body, sent_at=due, org=org.key)
-    decision = Decision(key=key, org=org.key, claim_kind="automatic_reply",
-                        summary="Automatic reply; message not read by staff.", points=[body])
     with world_tx() as w:
-        apply_decision(w, scenario, inbound, org, decision, a, "heuristic", falses, due, [(email, due)])
-    return SimResult(immediate_text="Email sent.", decision=decision.key, reply_scheduled=True, kind="ack")
+        case = w.cases.setdefault(org.key, CaseState(org=org.key))
+        case.contacts += 1
+        case.history.append(
+            f"{now:%Y-%m-%d %H:%M} {inbound.channel}: automatic reply; message not read by staff."
+        )
+        w.outcome.claims.append(Claim(
+            time=now, org=org.key, channel=inbound.channel, kind="automatic_reply",
+            asserted_facts=asserted_facts(a, "heuristic"), false_assertions=falses,
+            decision=key, case_ref=case.case_ref, response_available_at=due, response_email_id=email.id,
+        ))
+        w.pending.append(ScheduledEmail(email=email, due_at=due))
+    return SimResult(immediate_text="Email sent.", decision=key, reply_scheduled=True, kind="ack")
 
 
 def _unknown(inbound: Inbound, now: datetime, known: bool = False) -> SimResult:

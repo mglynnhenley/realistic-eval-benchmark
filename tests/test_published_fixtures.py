@@ -18,7 +18,7 @@ from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.clock import advance
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import (
     Email,
     ScheduledEmail,
@@ -44,7 +44,7 @@ def ctx(monkeypatch):
     init_subtask_store(Store())
     save_world(World(start_time=SCENARIO.start_time, now=SCENARIO.start_time,
                      overlay_inbox=seed_emails(SCENARIO)))
-    return ToolContext(SCENARIO, Mailbox(FixtureMailSource(FIXTURES / "inbox.json"), SCENARIO))
+    return ToolContext(SCENARIO, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), SCENARIO))
 
 
 async def test_fixture_provenance_and_normal_descriptions_are_preserved(ctx):

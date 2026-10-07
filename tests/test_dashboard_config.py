@@ -81,7 +81,7 @@ def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
         record = manager.start(server.RunConfig(mode="model"))
         config = json.loads((manager.directory(record["id"]) / "config.json").read_text())
         assert config["model"] == "openrouter/anthropic/claude-opus-5"
-        assert config["simulator_model"] == "openrouter/openai/gpt-6-astra"
+        assert config["simulator_model"] == DEFAULT_ROLE_MODEL
         assert config["grader_model"] == "openrouter/anthropic/claude-haiku-4.5"
         assert launched["env"]["OPENROUTER_API_KEY"] == "test-openrouter-key"
         assert "ANTHROPIC_API_KEY" not in launched["env"]
@@ -140,7 +140,6 @@ def test_unsupported_provider_alias_is_not_advertised(tmp_path):
 def test_published_profile_status_is_local_and_not_connected(tmp_path, monkeypatch):
     from refund_eval.published import profile
 
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "missing.json"))
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "Browser ready"})
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True, "reason": "Docker ready; Exa verified at startup"})
     profiles = {item["name"]: item for item in server.public_config()["tool_profiles"]}
@@ -151,73 +150,20 @@ def test_published_profile_status_is_local_and_not_connected(tmp_path, monkeypat
     assert modes["fixture"]["configured"] is True
     assert modes["hybrid"]["configured"] is True
     assert modes["hybrid"]["label"] == "Simulated Gmail + live web"
-    assert modes["live"]["configured"] is False
-    assert "config file" in modes["live"]["reason"]
+    assert set(modes) == {"fixture", "hybrid"}
 
 
-def test_unavailable_published_profile_never_starts_a_worker(tmp_path, monkeypatch):
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "missing.json"))
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("No worker may start without published tool setup")
-
-    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
-    manager = server.RunManager(tmp_path / "runs")
-    try:
-        with pytest.raises(server.APIError, match="Published tools are not configured") as caught:
-            manager.start(server.RunConfig(mode="model", tool_profile="published", data_mode="live"))
-        assert caught.value.status == 422
-        assert not manager.list()
-    finally:
-        manager.close()
 
 
-def test_published_selection_persists_server_config_path_without_fallback(tmp_path, monkeypatch):
-    from refund_eval.published import profile
-
-    config_path = tmp_path / "published.json"
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(config_path))
-    checked = []
-
-    def ready(path):
-        checked.append(path)
-        return {"configured": True, "reason": "Local setup is present"}
-
-    monkeypatch.setattr(profile, "readiness", ready)
-    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
-    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
-    manager = server.RunManager(tmp_path / "runs")
-    try:
-        record = manager.start(server.RunConfig(mode="model", tool_profile="published", data_mode="live", model="mockllm/target",
-            simulator_model="mockllm/sim", grader_model="mockllm/grader"))
-        saved = json.loads((manager.directory(record["id"]) / "config.json").read_text())
-        assert saved["tool_profile"] == record["tool_profile"] == "published"
-        assert saved["published_config"] == str(config_path)
-        assert checked == [str(config_path)]
-        assert saved["data_mode"] == record["data_mode"] == "live"
-        assert record["label"] == "Published tools · live data"
-    finally:
-        manager.close()
 
 
-def test_scripted_demo_is_labelled_with_published_tools(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
-    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
-    manager = server.RunManager(tmp_path / "runs")
-    try:
-        record = manager.start(server.RunConfig(mode="demo"))
-        assert record["label"] == "Scripted demo · published tools"
-        assert record["tool_profile"] == "published"
-        assert record["data_mode"] == "fixture"
-    finally:
-        manager.close()
 
 
-def test_demo_cannot_request_retired_legacy_tools(tmp_path):
+def test_requires_published_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(ValueError, match="Legacy execution is retired"):
-            manager.start(server.RunConfig(mode="demo", tool_profile="legacy"))
+        with pytest.raises(ValueError, match="published"):
+            manager.start(server.RunConfig(mode="model", tool_profile="unknown"))
         assert not manager.list()
     finally:
         manager.close()
@@ -227,7 +173,7 @@ def test_demo_cannot_request_retired_legacy_tools(tmp_path):
     ("fixture", "Published tools · simulated data"),
     ("hybrid", "Simulated Gmail + live web"),
 ])
-def test_simulated_gmail_never_reads_live_config(tmp_path, monkeypatch, data_mode, label):
+def test_simulated_gmail_checks_only_selected_runtime(tmp_path, monkeypatch, data_mode, label):
     from refund_eval.published import profile
 
     def forbidden(*args, **kwargs):
@@ -236,8 +182,6 @@ def test_simulated_gmail_never_reads_live_config(tmp_path, monkeypatch, data_mod
     monkeypatch.setattr(profile, "fixture_readiness", forbidden)
     monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
     monkeypatch.setattr(profile, f"{data_mode}_readiness", lambda: {"configured": True, "reason": "Browser ready"})
-    monkeypatch.setattr(profile, "readiness", forbidden)
-    monkeypatch.setattr(server, "published_config_path", forbidden)
     monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     manager = server.RunManager(tmp_path / "runs")
@@ -271,12 +215,12 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
         manager.close()
 
 
-@pytest.mark.parametrize("data_mode", ["live", "hybrid"])
-def test_legacy_cannot_claim_live_data(tmp_path, data_mode):
+@pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
+def test_unknown_profile_is_rejected(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(ValueError, match="Legacy execution is retired"):
-            manager.start(server.RunConfig(mode="model", tool_profile="legacy", data_mode=data_mode))
+        with pytest.raises(ValueError, match="published"):
+            manager.start(server.RunConfig(mode="model", tool_profile="unknown", data_mode=data_mode))
         assert not manager.list()
     finally:
         manager.close()
@@ -296,16 +240,16 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
     assert (config.simulator_model, config.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     public = server.public_config()
     assert (public["default_model"], public["default_role_model"]) == (chosen, DEFAULT_ROLE_MODEL)
-    assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 20, 1.0)
+    assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 1000, 6.0)
     explicit = server.RunConfig(model="mockllm/target", simulator_model="mockllm/simulator", grader_model="mockllm/grader")
     assert (explicit.model, explicit.simulator_model, explicit.grader_model) == (
         "mockllm/target", "mockllm/simulator", "mockllm/grader",
     )
     assert DEFAULT_TARGET_MODEL == "openrouter/anthropic/claude-opus-5"
-    assert DEFAULT_ROLE_MODEL == "openrouter/openai/gpt-6-astra"
+    assert DEFAULT_ROLE_MODEL == "openrouter/anthropic/claude-opus-5.5"
 
 
-def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
+def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     from refund_eval.published import profile
 
@@ -318,59 +262,35 @@ def test_long_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, mon
     monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     presets = {item["name"]: item["settings"] for item in server.public_config()["run_presets"]}
-    quick = server.RunConfig.model_validate(presets["quick"])
-    longer = server.RunConfig.model_validate(presets["long"])
-    assert (quick.max_turns, quick.cost_limit, quick.sim_weeks, quick.world_mode) == (20, 1, 1, "baseline")
-    assert (longer.max_turns, longer.cost_limit, longer.sim_weeks, longer.world_mode) == (600, 10, 12, "friction")
-    for preset in (quick, longer):
-        assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
-        assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
-        assert preset.model == model
-        assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
+    preset = server.RunConfig.model_validate(presets["default"])
+    assert (preset.max_turns, preset.cost_limit, preset.sim_weeks) == (1000, 1, 6)
+    assert preset.scenario == "train_refund_pressure"
+    assert preset.daily_allowance == 3 and not preset.llm_grading
+    assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
+    assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
+    assert preset.model == model
+    assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     manager = server.RunManager(tmp_path / "runs")
     try:
-        record = manager.start(longer)
+        record = manager.start(preset)
         saved = json.loads((manager.directory(record["id"]) / "config.json").read_text())
-        assert saved["world_mode"] == record["world_mode"] == "friction"
+        assert saved["scenario"] == record["scenario"] == "train_refund_pressure"
         assert saved["data_mode"] == record["data_mode"] == "hybrid"
         assert "published_config" not in saved
-        assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (600, 10, 12)
+        assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (1000, 1, 6)
         assert saved["history_tokens"] == 60_000
-        record = manager.start(longer.model_copy(update={"history_tokens": 0}))
+        record = manager.start(preset.model_copy(update={"history_tokens": 0}))
         assert json.loads((manager.directory(record["id"]) / "config.json").read_text())["history_tokens"] == 0
-        assert "realistic friction" in record["label"]
     finally:
         manager.close()
 
 
-@pytest.mark.parametrize("settings", [
-    {"mode": "demo", "world_mode": "friction"},
-    {"mode": "model", "tool_profile": "published", "data_mode": "live", "world_mode": "friction"},
-])
-def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path, monkeypatch, settings):
-    from refund_eval.published import profile
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("Invalid world mode must fail before setup or worker launch")
-
-    monkeypatch.setattr(profile, "readiness", forbidden)
-    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
-    manager = server.RunManager(tmp_path)
-    try:
-        with pytest.raises(server.APIError, match="Realistic friction requires"):
-            manager.start(server.RunConfig(**settings))
-        assert not manager.list()
-    finally:
-        manager.close()
 
 
 @pytest.mark.parametrize(('settings', 'message'), [
     ({'execution': 'local', 'trials': 2}, 'multiple trials'),
-    ({'execution': 'modal', 'data_mode': 'live'}, 'Live Gmail is local-only'),
     ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
-    ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
     ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),
-    ({'execution': 'modal', 'experiment_manifest': 'comparison.json'}, 'local only'),
 ])
 def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, message):
     manager = server.RunManager(tmp_path)
@@ -383,6 +303,7 @@ def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, mess
 
 
 def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     commands = []
     monkeypatch.setattr(server.subprocess, 'Popen', lambda command, **kwargs: (
         commands.append(command) or SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0)))
@@ -439,7 +360,6 @@ def test_invalid_model_list_is_rejected(settings):
 
 @pytest.mark.parametrize('settings, message', [
     ({'mode': 'model', 'execution': 'local'}, 'Harbor model batch'),
-    ({'mode': 'demo', 'execution': 'modal'}, 'Harbor model batch'),
     ({'mode': 'model', 'execution': 'modal', 'trials': 51}, '100 total trials'),
 ])
 def test_multi_model_scope_and_total_limits(tmp_path, settings, message):
@@ -473,7 +393,6 @@ def test_multi_model_launch_counts_trials_and_checks_all_models(tmp_path, monkey
 
 def test_hybrid_data_mode_label_matches_the_picker_everywhere(tmp_path, monkeypatch):
     """The saved-run label, /api/config and every app.js subtitle read exactly as the data picker does."""
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "missing.json"))
     picker = re.search(r'<option value="hybrid"[^>]*>([^<]+)</option>', (STATIC / "index.html").read_text()).group(1)
     assert picker == "Simulated Gmail + live web"
     modes = {item["name"]: item for item in server.public_config()["tool_profiles"][0]["data_modes"]}

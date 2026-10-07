@@ -1,4 +1,4 @@
-"""Kill switch (FR-017).
+"""Kill switch.
 
 A trial stops at its next turn or tool call when either of these is true:
 

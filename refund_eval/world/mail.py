@@ -38,11 +38,7 @@ from refund_eval.world.state import Email, World
 from refund_eval.world.timeutil import as_aware, epoch_seconds, to_london
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_BUNDLED_FIXTURE_PATH = Path(__file__).resolve().parents[1] / "data" / "inbox.json"
-DEFAULT_FIXTURE_PATH = (
-    _BUNDLED_FIXTURE_PATH if _BUNDLED_FIXTURE_PATH.exists()
-    else PROJECT_ROOT / "tests" / "fixtures" / "inbox.json"
-)
+DEFAULT_FIXTURE_PATH = Path(__file__).resolve().parents[1] / "scenario" / "inbox.json"
 SECRETS_DIR = PROJECT_ROOT / ".secrets"
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SCOPES = [GMAIL_READONLY_SCOPE]
@@ -376,10 +372,6 @@ def parse_gmail_message(msg: dict[str, Any]) -> Email:
 # --------------------------------------------------------------------------- factory
 
 
-def default_fixture_path() -> Path:
-    return Path(os.environ.get("REFUND_EVAL_FIXTURE_INBOX", DEFAULT_FIXTURE_PATH))
-
-
 def make_mail_source(kind: str) -> MailSource:
     """'fixture' (the bundled inbox), 'fixture:<path>', or 'gmail' (read-only real Gmail).
 
@@ -388,7 +380,7 @@ def make_mail_source(kind: str) -> MailSource:
     """
     k = (kind or "").strip()
     if k == "fixture":
-        return FixtureMailSource(default_fixture_path())
+        return FixtureMailSource(DEFAULT_FIXTURE_PATH)
     if k.startswith("fixture:"):
         return FixtureMailSource(k.split(":", 1)[1])
     if k == "gmail":

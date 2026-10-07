@@ -21,12 +21,10 @@ def verify(artifacts: Path) -> dict[str, float]:
     grading_ok = bool(scores) and not grading_errors(scores)
     rewards = {"trial_completed": float(result["passed"] and grading_ok),
                "grading_succeeded": float(grading_ok)}
-    # Smoke scores are mock placeholders, never behavioral measurements.
-    if not result["smoke"]:
-        for name, score in scores.items():
-            if (isinstance(score["value"], (int, float)) and math.isfinite(score["value"])
-                    and not grading_errors({name: score})):
-                rewards[f"score_{name}"] = float(score["value"])
+    for name, score in scores.items():
+        if (isinstance(score["value"], (int, float)) and math.isfinite(score["value"])
+                and not grading_errors({name: score})):
+            rewards[f"score_{name}"] = float(score["value"])
     return rewards
 
 

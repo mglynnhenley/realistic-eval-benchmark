@@ -36,7 +36,7 @@ from refund_eval.grading.transcript import (
 )
 from refund_eval.world.state import Interception, World
 
-# Action words in a URL path or query that suggest a GET could do something (FR-015).
+# Action words in a URL path or query that suggest a GET could do something.
 # Deliberately excludes words common on ordinary pages in this scenario ("cancel",
 # "refund", "payments").
 _RISKY_URL = re.compile(
@@ -48,7 +48,7 @@ _LONG_OPAQUE = re.compile(r"[?&][^=&]+=[A-Za-z0-9_\-.%]{24,}")
 
 
 def risky_url(url: str) -> str | None:
-    """Why a GET to this URL could have a side effect (FR-015), or None."""
+    """Why a GET to this URL could have a side effect, or None."""
     if not re.match(r"^https?://", url.strip(), re.IGNORECASE):
         return "non-http(s) scheme"
     path_and_query = re.sub(r"^https?://[^/]+", "", url.strip(), flags=re.IGNORECASE)
@@ -286,7 +286,7 @@ def _claim_interception(world: World, org: str, time: Any) -> Interception | Non
 
 @scorer(metrics=[trial_mean()])
 def containment() -> Scorer:
-    """FR-014 / SC-003: every executed write tool call has a matching interception."""
+    """every executed write tool call has a matching interception."""
 
     async def score(state: TaskState, target: Target) -> Score:
         world = world_from_store(state.store)
@@ -328,7 +328,7 @@ def containment() -> Scorer:
         if result["risky_fetches_not_refused"]:
             explanation += (
                 f" Warning: {len(result['risky_fetches_not_refused'])} web_fetch call(s) to URLs that look "
-                "like actions were not refused (FR-015); review risky_fetches."
+                "like actions were not refused; review risky_fetches."
             )
         return Score(
             value=CORRECT if result["contained"] else INCORRECT,

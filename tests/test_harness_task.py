@@ -63,7 +63,8 @@ def test_task_dry_run_with_mockllm(tmp_path):
         "mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock",
         "max_turns": 6,
         "history_tokens": 60000,
-        "sim_weeks": 1,
+        "sim_weeks": 6,
+        "daily_allowance": 3,
     }
 
 
@@ -79,7 +80,7 @@ def test_task_respects_explicit_model_roles(tmp_path):
     assert roles == {"simulator": "mockllm/model", "grader": "mockllm/other"}
 
 
-def test_roles_default_to_astra_and_a_cheap_grader_for_a_real_target():
+def test_roles_default_to_opus_and_a_cheap_grader_for_a_real_target():
     from inspect_ai.model._model import init_model_roles
 
     def with_no_roles() -> dict[str, str]:
@@ -89,7 +90,7 @@ def test_roles_default_to_astra_and_a_cheap_grader_for_a_real_target():
     # The roles do not follow the target model.
     roles = copy_context().run(with_no_roles)
     assert roles == {
-        "simulator": "openrouter/openai/gpt-6-astra",
+        "simulator": "openrouter/anthropic/claude-opus-5.5",
         "grader": "openrouter/anthropic/claude-haiku-4.5",
     }
 
@@ -117,6 +118,9 @@ def test_default_costs_registered_for_cost_limit():
     haiku = get_model_info("openrouter/anthropic/claude-haiku-4.5")
     assert haiku is not None and haiku.cost is not None
     assert (haiku.cost.input, haiku.cost.output) == (1.0, 5.0)
+    simulator = get_model_info("openrouter/anthropic/claude-opus-5.5")
+    assert simulator is not None and simulator.cost is not None
+    assert (simulator.cost.input, simulator.cost.output) == (4.0, 20.0)
     mock = get_model_info("mockllm/model")
     assert mock is not None and mock.cost is not None and mock.cost.output == 0.0
 
@@ -127,7 +131,7 @@ def test_trials_must_be_positive():
 
 
 @pytest.mark.parametrize(("mail_source", "reason"), [
-    ("gmail", "published_data=live"),
+    ("gmail", "Unknown mail_source"),
     ("Gmail", "Unknown mail_source"),
     ("gmail:me@example.test", "Unknown mail_source"),
     ("fixtures", "Unknown mail_source"),
@@ -153,17 +157,28 @@ def test_scorers_fall_back_to_none_when_grading_is_missing(monkeypatch, caplog):
 
 
 @pytest.mark.parametrize("entrypoint", ["task", "tool_scope"])
-async def test_explicit_legacy_request_fails_before_starting_published_tools(monkeypatch, entrypoint):
+async def test_unknown_profile_fails_before_starting_published_tools(monkeypatch, entrypoint):
     monkeypatch.undo()  # Exercise real routing and validation.
 
     def forbidden(*args, **kwargs):
-        pytest.fail("A legacy request must not launch the replacement tool stack")
+        pytest.fail("An unknown profile must not launch the replacement tool stack")
 
     monkeypatch.setattr("refund_eval.published.profile.published_tools", forbidden)
     monkeypatch.setattr("refund_eval.published.profile.hybrid_readiness", forbidden)
-    with pytest.raises(ValueError, match="(?i)(retired|migration|no longer supported)"):
+    with pytest.raises(ValueError, match="tool_profile must be published"):
         if entrypoint == "task":
-            impossible_refund(tool_profile="legacy", scenario=SCENARIO_PATH)
+            impossible_refund(tool_profile="unknown", scenario=SCENARIO_PATH)
         else:
-            async with adapters.tool_scope(scenario(), "fixture", profile="legacy"):
-                pytest.fail("Retired tool scope entered")
+            async with adapters.tool_scope(scenario(), "fixture", profile="unknown"):
+                pytest.fail("Unknown tool scope entered")
+
+
+def test_explicit_none_disables_default_daily_allowance(tmp_path):
+    log = run(
+        impossible_refund,
+        Script(),
+        tmp_path,
+        task_args={"trials": 1, "scenario": SCENARIO_PATH, "max_turns": 2, "daily_allowance": None},
+    )
+    assert "daily_allowance" not in log.eval.metadata
+    assert "daily allowance" not in log.samples[0].messages[0].text.lower()

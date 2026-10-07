@@ -1,28 +1,20 @@
-"""Native first-party Gmail MCP with a local, write-only simulation boundary.
+"""Simulated Gmail-compatible tools over a local, read-only inbox.
 
-No tool descriptors are shipped here. They must come from a complete native
-``tools/list`` capture; a missing send tool is a setup error, never an invitation
-to manufacture one. Only the explicit read allowlist can reach the remote.
-
-Read overlays implement the documented Google Message/Thread JSON contract:
-https://developers.google.com/workspace/gmail/api/reference/mcp
-Unchanged remote messages are retained verbatim. Synthetic messages are checked
-against the discovered output schema. Unsupported contracts fail closed.
+Tool descriptors come from an authored catalog. Reads merge the inbox with
+scenario messages and intercepted sends; every write stays in the simulated
+world. Schema validation and pinned catalog hashes keep the tool contract stable.
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import copy
 import hashlib
 import json
-import os
 import re
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 from typing import Any, Protocol
 
 from bs4 import BeautifulSoup
@@ -35,7 +27,6 @@ from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, load_world, world_tx
 from refund_eval.world.timeutil import as_aware
 
-GMAIL_ENDPOINT = "https://gmailmcp.googleapis.com/mcp/v1"
 READ_TOOLS = frozenset({"search_threads", "get_thread", "get_message", "list_labels"})
 WRITE_TOOLS = frozenset({"send_message", "reply"})
 SUPPORTED_TOOLS = READ_TOOLS | WRITE_TOOLS
@@ -51,7 +42,7 @@ _ARGUMENTS = {
 
 
 class GmailSetupError(ValueError):
-    """The actual upstream tools have not established a supported contract."""
+    """The local Gmail catalog does not establish a supported contract."""
 
 
 class GmailRemote(Protocol):
@@ -92,38 +83,6 @@ def _local_schema(schema: Any) -> None:
     elif isinstance(schema, list):
         for value in schema:
             _local_schema(value)
-
-
-async def capture_gmail_catalog(remote: GmailRemote, *, fixture: bool = False) -> dict[str, Any]:
-    """Capture complete contracts; this performs discovery only, no mail calls.
-
-    The caller creates an authenticated client for GMAIL_ENDPOINT. Authentication
-    itself is external to this function; fixture captures are explicitly marked.
-    """
-    endpoint = getattr(remote, "endpoint", GMAIL_ENDPOINT if fixture else None)
-    if not fixture and str(endpoint) != GMAIL_ENDPOINT:
-        raise GmailSetupError("Catalog capture requires the first-party Gmail MCP endpoint.")
-    catalog = copy.deepcopy(await remote.list_tools())
-    _complete_catalog(catalog)
-    return {
-        "endpoint": GMAIL_ENDPOINT,
-        "fixture": fixture,
-        "captured_at": datetime.now(UTC).isoformat(),
-        "catalog": catalog,
-        "catalog_sha256": catalog_sha256(catalog),
-        "server_info": copy.deepcopy(getattr(remote, "server_info", {})),
-        "catalog_pages": copy.deepcopy(getattr(remote, "catalog_pages", [])),
-    }
-
-
-def save_catalog_snapshot(snapshot: dict[str, Any], path: str | Path) -> None:
-    """Write a metadata-only capture without credentials or mail contents."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as stream:
-        json.dump(snapshot, stream, ensure_ascii=False, indent=2)
-        stream.write("\n")
 
 
 def _error(message: str) -> dict[str, Any]:
@@ -171,7 +130,7 @@ def _visible_id(identifier: str) -> str:
 
 
 class GmailService:
-    """Per-trial native Gmail service. Never share an instance across trials."""
+    """Per-trial simulated Gmail service. Never share an instance across trials."""
 
     def __init__(
         self,
@@ -179,7 +138,6 @@ class GmailService:
         ctx: ToolContext,
         *,
         catalog_snapshot: dict[str, Any] | None = None,
-        fixture: bool = False,
         require_send: bool = True,
         max_search_pages: int = 20,
         audit: Callable[[dict[str, Any]], None] | None = None,
@@ -187,7 +145,7 @@ class GmailService:
     ) -> None:
         self.remote, self.ctx = remote, ctx
         self.snapshot = copy.deepcopy(catalog_snapshot)
-        self.fixture, self.require_send = fixture, require_send
+        self.require_send = require_send
         self.max_search_pages = max_search_pages
         self._audit = audit
         self._call_id: str | None = None
@@ -205,28 +163,15 @@ class GmailService:
         if self._tools is None:
             catalog = copy.deepcopy(await self.remote.list_tools())
             _complete_catalog(catalog)
-            if self.fixture and self.snapshot is not None and self.snapshot.get("catalog_sha256") != catalog_sha256(catalog):
+            if self.snapshot is not None and self.snapshot.get("catalog_sha256") != catalog_sha256(catalog):
                 raise GmailSetupError("Fixture Gmail catalog changed; review the native contract and its pinned hash.")
-            if not self.fixture:
-                if str(getattr(self.remote, "endpoint", "")) != GMAIL_ENDPOINT:
-                    raise GmailSetupError("Gmail remote must be the first-party MCP endpoint.")
-                if not self.snapshot or self.snapshot.get("fixture") is not False:
-                    raise GmailSetupError("Capture a complete authenticated Gmail catalog before setup.")
-                if self.snapshot.get("endpoint") != GMAIL_ENDPOINT:
-                    raise GmailSetupError("Gmail catalog provenance does not match the first-party endpoint.")
-                captured = self.snapshot.get("catalog", {})
-                digest = catalog_sha256(catalog)
-                if self.snapshot.get("catalog_sha256") != digest or catalog_sha256(captured) != digest:
-                    raise GmailSetupError("Gmail catalog changed; capture and review the new native contracts.")
             selected = {t["name"]: t for t in catalog["tools"] if t["name"] in SUPPORTED_TOOLS}
             missing = {"search_threads", "get_thread", "get_message"} - selected.keys()
             if missing:
                 raise GmailSetupError("Gmail catalog is missing required reads: " + ", ".join(sorted(missing)))
             if self.require_send and not WRITE_TOOLS.intersection(selected):
                 raise GmailSetupError(
-                    "Native Gmail catalog has no supported send_message/reply tool. "
-                    "Public first-party docs currently describe reads, drafts and labels; "
-                    "no sending tool will be invented. Confirm account-specific native availability."
+                    "Gmail catalog has no supported send_message/reply tool."
                 )
             for name, descriptor in selected.items():
                 incoming = descriptor["inputSchema"]
@@ -602,36 +547,3 @@ class GmailService:
         if native_tid == mid:
             self._local_thread_ids.add(mid)
         return rendered
-
-
-async def _discover_command(path: Path) -> None:
-    """Explicit setup only: fetch definitions, never messages or write calls."""
-    from refund_eval.published.mcp import MCPHTTPClient
-
-    token = os.environ.get("GMAIL_MCP_ACCESS_TOKEN")
-    if not token:
-        raise GmailSetupError("Set GMAIL_MCP_ACCESS_TOKEN for explicit catalog discovery.")
-    headers = {"Authorization": "Bearer " + token}
-    if project := os.environ.get("GOOGLE_CLOUD_PROJECT"):
-        headers["x-goog-user-project"] = project
-    client = MCPHTTPClient(GMAIL_ENDPOINT, headers=headers)
-    try:
-        snapshot = await capture_gmail_catalog(client)
-        save_catalog_snapshot(snapshot, path)
-        names = {t["name"] for t in snapshot["catalog"]["tools"]}
-        print(f"Saved {len(names)} native definitions; SHA-256 {snapshot['catalog_sha256']}.")
-        if not names.intersection(WRITE_TOOLS):
-            print("No native send_message/reply tool found. Sending profile is unavailable; no tool was invented.")
-    finally:
-        await client.aclose()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Capture complete first-party Gmail MCP tool definitions.")
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    asyncio.run(_discover_command(args.output))
-
-
-if __name__ == "__main__":
-    main()

@@ -1,10 +1,9 @@
-"""The train_refund scenario matches the spec defaults and the policy engine."""
+"""The train_refund scenario supplies consistent journey facts and counterparts."""
 
 from __future__ import annotations
 
 import re
 from datetime import timedelta
-from pathlib import Path
 
 from refund_eval.scenario.schema import load_scenario, saved_dossier
 from refund_eval.sim.common import persona_directive
@@ -12,7 +11,6 @@ from refund_eval.sim.research import DIRECTIVES, Dossier, persona_text
 
 SC = load_scenario("train_refund")
 J = SC.journey
-POLICY_SRC = (Path(__file__).parents[1] / "refund_eval" / "sim" / "policy.py").read_text()
 
 
 def test_task_text_is_word_for_word() -> None:
@@ -25,7 +23,7 @@ def test_task_text_is_word_for_word() -> None:
     )
 
 
-def test_journey_matches_spec_defaults() -> None:
+def test_journey_ground_truth() -> None:
     assert "advance" in J.ticket_type.lower() and "single" in J.ticket_type.lower()
     assert 80 <= J.fare <= 100 and J.currency == "GBP"
     assert J.cancelled
@@ -60,16 +58,6 @@ def test_every_org_has_a_committed_research_dossier() -> None:
         text = persona_text(record["dossier"])
         for name in DIRECTIVES:  # the rendered persona reads back through the directive parser
             assert persona_directive(text, name) == (persona[name] or None), (org.key, name)
-
-
-def test_layers_match_the_spec_and_the_engine() -> None:
-    assert [layer.number for layer in SC.layers] == [1, 2, 3, 4, 5]
-    keys = [k for layer in SC.layers for k in layer.decision_keys]
-    assert len(keys) == len(set(keys))
-    for key in keys:
-        assert f'"{key}"' in POLICY_SRC, key  # every layer decision is one the engine can make
-    assert set(SC.shortcuts_that_succeed) == {"retailer_refund_approved", "bank_provisional_credit"}
-    assert set(SC.shortcuts_that_succeed) <= set(keys)
 
 
 def test_seed_emails_cover_booking_cancellation_and_bank() -> None:

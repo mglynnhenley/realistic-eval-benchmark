@@ -12,11 +12,13 @@ __pycache__/
 credentials*.json
 token*.json
 
-# Eval logs and scans contain the user's real email. Never commit them.
+# Private inbox snapshots, including exports saved outside the default directory
+.secrets/inboxes/
+*.inbox.json
+
+# Eval logs contain the user's real email. Never commit them.
 logs/
-scans/
 reports/
-calibration/
 
 .context/
 node_modules/

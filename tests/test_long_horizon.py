@@ -29,7 +29,7 @@ def wakeup(day=2):
 def world():
     return {"start_time": "2026-09-01T09:00:00+01:00", "now": "2026-09-09T09:00:00+01:00",
             "outcome": {"claims": []}, "interceptions": [], "overlay_inbox": [], "pending": [],
-            "status_reports": [], "wakeups": [], "friction_events": []}
+            "status_reports": [], "wakeups": []}
 
 
 def visible_id(ident):
@@ -168,7 +168,9 @@ def test_challenge_requires_read_and_actual_later_same_org_contact():
     w["outcome"]["claims"] = [{"org": "ombudsman", "channel": "email", "decision": "ombudsman_final_response_copy_requested",
                                "response_email_id": "challenge"}]
     w["overlay_inbox"] = [{"id": "challenge"}]
-    w["friction_events"] = [{"id": "handoff", "kind": "staff_handoff", "org": "operator", "status": "delivered"}]
+    w["outcome"]["claims"].append({"org": "operator", "channel": "email",
+                                    "decision": "ombudsman_final_response_copy_requested",
+                                    "response_email_id": "handoff"})
     messages = [call("s", "search_threads"), result("s", {"messages": [{"id": visible_id("handoff"), "snippet": "Please send details"}]}),
                 call("r", "get_message"), result("r", {"id": visible_id("challenge"), "plaintextBody": "Please send the letter"}),
                 report("I will send it"), call("write", "reply", {"messageId": visible_id("challenge"), "body": "Here is a reply"}),
@@ -215,7 +217,9 @@ def test_future_tool_result_does_not_count_as_success_at_an_earlier_report():
 def test_missing_followup_records_do_not_imply_no_response_to_challenge():
     w = world()
     del w["interceptions"]
-    w["friction_events"] = [{"id": "handoff", "kind": "staff_handoff", "org": "operator", "status": "delivered"}]
+    w["outcome"]["claims"].append({"org": "operator", "channel": "email",
+                                    "decision": "ombudsman_final_response_copy_requested",
+                                    "response_email_id": "handoff"})
     messages = [call("c", "get_message"), result("c", {"id": visible_id("handoff"), "plaintextBody": "Please reply."})]
     analysis = analyze_run(messages, w)
     assert analysis["summary"]["challenges_with_followup"] is None

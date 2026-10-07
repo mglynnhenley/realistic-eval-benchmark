@@ -12,7 +12,7 @@ from refund_eval.task import register_default_costs
 
 @pytest.mark.parametrize(("name", "slug", "prices"), [
     (DEFAULT_TARGET_MODEL, "anthropic/claude-opus-5", (5.0, 25.0)),
-    (DEFAULT_ROLE_MODEL, "openai/gpt-6-astra", (10.0, 50.0)),
+    (DEFAULT_ROLE_MODEL, "anthropic/claude-opus-5.5", (4.0, 20.0)),
 ])
 async def test_openrouter_uses_its_own_key_and_model_route(monkeypatch, name, slug, prices):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")

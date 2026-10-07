@@ -23,8 +23,6 @@ def sim():
     mock = MockSim()
     install_mock_models(mock)
     start_sample()
-    with world_tx() as world:
-        world.world_mode = "open"
     return mock
 
 
@@ -42,7 +40,7 @@ async def test_the_organisation_decides_and_its_effects_are_recorded(sim):
         {"decision": "declined_and_escalated", "summary": "Declined; passed to the complaints team.",
          "reply_after_hours": 5, "body": "We can't refund this late request, but we've passed it to our complaints team."},
     ]
-    # Unpublished address: the baseline sends Trainline's canned redirect; here Trainline decides.
+    # Trainline decides how to handle an unpublished address.
     result = await dispatch(email("customer.services@thetrainline.com"))
     assert result.decision == "open:declined_and_escalated" and result.reply_scheduled
     prompt = sim.open_prompts[0]
@@ -138,16 +136,6 @@ async def test_phone_calls_return_the_handlers_transcript(sim):
                                     body="Ask for a refund.", interception_id="open-call"))
     assert result.kind == "transcript" and "you're through to Trainline" in result.immediate_text
     assert not load_world().pending
-
-
-async def test_personal_contacts_stay_unknown_outside_the_open_world():
-    mock = MockSim()
-    mock.profile = {"name": "Maya Robinson", "role": "personal", "reason": "A friend."}
-    install_mock_models(mock)
-    start_sample()
-    result = await dispatch(email("maya.robinson@outlook.com"))
-    assert result.decision == "no_reply_unknown_recipient" and not registered_orgs()
-    assert not mock.open_prompts
 
 
 @pytest.fixture

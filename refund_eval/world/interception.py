@@ -1,6 +1,6 @@
 """Shared action context, interception log, and simulator dispatch.
 
-Every write action follows the same order (FR-014, FR-019):
+Every write action follows the same order:
 1. log an Interception in the World (saved before anything else happens);
 2. call the simulator's dispatch() (imported lazily; nothing real is contacted);
 3. store what the agent was shown in Interception.response_summary.

@@ -1,4 +1,4 @@
-"""Per-trial world state. SHARED CONTRACT: change only by agreement (see docs/history/plan.md).
+"""Per-trial world state.
 
 The world lives in the Inspect sample store as plain JSON under WORLD_KEY, so it is
 serialised into the eval log and graders can read it back after the trial.
@@ -43,30 +43,10 @@ class ScheduledEmail(BaseModel):
     due_at: datetime
     facts_on_delivery: list[str] = Field(default_factory=list)
     promises_on_delivery: list[str] = Field(default_factory=list)
-    friction_event_id: str | None = None
-
-
-class FrictionEvent(BaseModel):
-    """One reproducible service event; it never changes the refund entitlement."""
-
-    id: str
-    kind: Literal["missed_reply_deadline", "staff_handoff", "offer_expiry_reminder"]
-    org: str
-    triggered_at: datetime
-    due_at: datetime
-    status: Literal["pending", "delivered", "cancelled", "answered"] = "pending"
-    source_interception_id: str
-    related_email_id: str | None = None
-    offer_ids: list[str] = Field(default_factory=list)
-    promised_at: datetime | None = None
-    delivered_at: datetime | None = None
-    cancelled_at: datetime | None = None
-    answered_at: datetime | None = None
-    summary: str
 
 
 class Interception(BaseModel):
-    """One write action that was stopped before leaving the sandbox (FR-014, FR-019)."""
+    """One write action that was stopped before leaving the sandbox."""
 
     id: str
     time: datetime
@@ -75,7 +55,7 @@ class Interception(BaseModel):
     target: str  # address, URL, phone number, payee, org key
     payload: dict
     org: str | None = None  # resolved counterparty key, None if unknown
-    to_user: bool = False  # addressed to the user's own addresses (FR-031)
+    to_user: bool = False  # addressed to the user's own addresses
     response_summary: str | None = None  # what the agent was shown back
 
 
@@ -90,7 +70,7 @@ class Disclosure(BaseModel):
 
 
 class Transfer(BaseModel):
-    """Simulated money movement. Nothing here is real (FR-016)."""
+    """Simulated money movement. Nothing here is real."""
 
     time: datetime
     from_party: str
@@ -111,7 +91,7 @@ class Claim(BaseModel):
     kind: str  # e.g. "refund_request", "complaint", "chargeback", "ombudsman_case"
     asserted_facts: dict = Field(default_factory=dict)  # e.g. {"journey_date": "...", "reason": "unauthorised"}
     false_assertions: list[str] = Field(default_factory=list)  # asserted facts that contradict ground truth
-    decision: str  # policy engine decision key
+    decision: str  # simulator decision key
     case_ref: str | None = None
     response_available_at: datetime | None = None
     response_email_id: str | None = None
@@ -129,7 +109,7 @@ class Offer(BaseModel):
 
 
 class CaseState(BaseModel):
-    """What one counterparty knows and has said, for consistency (FR-022)."""
+    """What one counterparty knows and has said, for consistency."""
 
     org: str
     case_ref: str | None = None
@@ -190,13 +170,10 @@ class OutcomeRecord(BaseModel):
 class World(BaseModel):
     start_time: datetime
     now: datetime
-    world_mode: Literal["baseline", "friction", "open"] = "baseline"
-    friction_version: str | None = None
-    friction_events: list[FrictionEvent] = Field(default_factory=list)
     turn: int = 0
     overlay_inbox: list[Email] = Field(default_factory=list)
     pending: list[ScheduledEmail] = Field(default_factory=list)
-    follow_ups: list[FollowUp] = Field(default_factory=list)  # open world only
+    follow_ups: list[FollowUp] = Field(default_factory=list)
     interceptions: list[Interception] = Field(default_factory=list)
     disclosures: list[Disclosure] = Field(default_factory=list)
     cases: dict[str, CaseState] = Field(default_factory=dict)

@@ -1,8 +1,8 @@
-"""The target agent and the harness that keeps it going (FR-030 to FR-037).
+"""The target agent and the harness that keeps it going.
 
 `refund_agent()` is an Inspect agent built on `react()` with no submit tool.
-The task text is the sample input, given once as the user message (FR-003);
-the agent has no tool that reaches the user (FR-030).
+The task text is the sample input, given once as the user message;
+the agent has no tool that reaches the user.
 
 `react()` calls `on_continue` after every model generation (and after that
 generation's tool calls have run). Here it:
@@ -15,11 +15,11 @@ generation's tool calls have run). Here it:
 4. otherwise, when the model stopped calling tools, advances the simulated
    clock to the next event (earliest pending reply, or the next 09:00
    check-in), delivers due mail, records a Wakeup, and resumes the agent
-   with a neutral wake-up message (FR-032, FR-034). Nothing reacts to what
-   the agent wrote (FR-033).
+   with a neutral wake-up message. Nothing reacts to what
+   the agent wrote.
 
 The kill switch is also checked before the first model call and before
-every tool call, so no tool runs once it is on (FR-017).
+every tool call, so no tool runs once it is on.
 
 For long horizons the model sees a rolling window of recent history
 (`history_tokens`), trimmed by Inspect's compaction, plus a memory tool for
@@ -114,10 +114,8 @@ class HistoryWindow(CompactionTrim):
 # World setup
 
 
-def initial_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
+def initial_world(scenario: Scenario) -> World:
     """A clean world at the scenario's start time with the seed mail in the overlay."""
-    from refund_eval.sim.friction import FRICTION_VERSION
-
     seed = [
         Email(
             id=s.id,
@@ -141,8 +139,6 @@ def initial_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
     ]
     return World(
         start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed, pending=scheduled,
-        world_mode=world_mode,
-        friction_version=FRICTION_VERSION if world_mode == "friction" else None,
     )
 
 
@@ -221,13 +217,11 @@ async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
     return messages
 
 
-def init_world(scenario: Scenario, *, world_mode: str = "baseline") -> World:
+def init_world(scenario: Scenario) -> World:
     """Create the world for this sample (a no-op if it already exists, e.g. on resume)."""
     if store().get(WORLD_KEY) is None:
-        save_world(initial_world(scenario, world_mode=world_mode))
+        save_world(initial_world(scenario))
     world = load_world()
-    if world.world_mode != world_mode:
-        raise ValueError("Cannot change world_mode while resuming a trial")
     return world
 
 
@@ -348,7 +342,7 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: in
 
     for _ in range(limit):
         world = load_world()
-        item = next_follow_up(world) if world.world_mode == "open" else None
+        item = next_follow_up(world)
         if item is None:
             return
         when = (next_checkin(aware(world.now), checkin_hour) if day_over
@@ -404,7 +398,7 @@ def make_on_continue(
     max_turns: int,
     sim_weeks: float,
     checkin_hour: int = CHECKIN_HOUR,
-    daily_allowance: float | None = None,
+    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
 ):
     """Build the `on_continue` hook for react().
 
@@ -488,30 +482,27 @@ def _record_stop(reason: str) -> None:
 
 @agent
 def refund_agent(
-    scenario_id: str = "train_refund",
+    scenario_id: str = RunConfig.model_fields["scenario"].default,
     mail_source_kind: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     checkin_hour: int = CHECKIN_HOUR,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
-    published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
-    world_mode: str = "baseline",
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
-    initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
     resume_log: str | None = None,
-    daily_allowance: float | None = None,
+    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
     use_full_allowance: bool = False,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
     Args:
       scenario_id: Scenario name or YAML path (see load_scenario()).
-      mail_source_kind: "fixture" or "gmail" (see refund_eval.world.mail).
+      mail_source_kind: Local inbox source (see refund_eval.world.mail).
       max_turns: Stop after this many model generations.
       history_tokens: Model-visible history in tokens, trimmed oldest first, with a
         memory tool for notes; 0 shows the full history and adds no memory tool.
@@ -519,7 +510,6 @@ def refund_agent(
         simulated weeks after the scenario start.
       checkin_hour: Hour of the daily scheduled check-in.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
-      initial_mail_thread_ids: Matched mailbox context read before target generation.
       resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
         from: its world, companies, notes and conversation are restored and the agent carries
         on where it stopped.
@@ -529,24 +519,16 @@ def refund_agent(
       use_full_allowance: Tell the agent it is expected to spend its whole allowance by the
         deadline (a pressure condition; off by default).
     """
-    from refund_eval.agent.mail_context import validate_thread_ids
-
     if tool_profile != "published":
-        raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
+        raise ValueError("tool_profile must be published")
     if isinstance(history_tokens, bool) or not isinstance(history_tokens, int) or history_tokens < 0:
         raise ValueError("history_tokens must be a non-negative integer (0 shows the full history)")
-    initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
-    if initial_mail_thread_ids and (tool_profile != "published" or published_data not in {"fixture", "hybrid"}):
-        raise ValueError("Initial mailbox context requires the published fixture or hybrid profile")
-    if initial_mail_thread_ids and not fixture_path:
-        raise ValueError("Initial mailbox context requires an explicit fixture_path")
-
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
             state.messages = (await restore_snapshot(resume_log) if resume_log.endswith(".json")
                               else restore_trial(resume_log))
-        init_world(scenario, world_mode=world_mode)
+        init_world(scenario)
         store().set(RESEARCH_MODE_KEY, research_mode)
         emit_snapshot(state.messages, phase="running")
 
@@ -582,20 +564,10 @@ def refund_agent(
 
         try:
             async with adapters.tool_scope(scenario, mail_source_kind, profile=tool_profile,
-                                           published_config=published_config,
                                            published_data=published_data,
                                            **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
                                            **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                            **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
-                if initial_mail_thread_ids:
-                    from refund_eval.agent.mail_context import (
-                        expected_mail_context,
-                        load_initial_mail,
-                    )
-
-                    expected = expected_mail_context(scenario, fixture_path, initial_mail_thread_ids)
-                    await load_initial_mail(state, [guard_tool(t) for t in tools], initial_mail_thread_ids,
-                                            expected_messages=expected)
                 reason = kill_reason()
                 if reason is not None:
                     raise _kill_error(reason)

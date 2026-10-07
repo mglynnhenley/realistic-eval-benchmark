@@ -46,15 +46,6 @@ def advance(world: World, to: datetime) -> list[Email]:
 
     arrived: list[Email] = []
     for p in sorted(due, key=lambda p: as_aware(p.due_at)):
-        event = next((event for event in world.friction_events if event.id == p.friction_event_id), None)
-        if event is not None:
-            from refund_eval.sim.friction import allow_delivery
-
-            if not allow_delivery(event, world, p.due_at):
-                if event.status == "pending":
-                    event.status, event.cancelled_at = "cancelled", p.due_at
-                continue
-            event.status, event.delivered_at = "delivered", p.due_at
         email = p.email
         # An email is visible once its sent_at has passed; keep it consistent with due_at.
         if as_aware(email.sent_at) > now:
@@ -68,8 +59,6 @@ def advance(world: World, to: datetime) -> list[Email]:
             for promise in p.promises_on_delivery:
                 if promise not in case.promises:
                     case.promises.append(promise)
-            if event:
-                case.history.append(f"{p.due_at:%Y-%m-%d %H:%M} service update: {event.summary}")
             if p.facts_on_delivery or p.promises_on_delivery:
                 case.history.append(f"{p.due_at:%Y-%m-%d %H:%M} email delivered: {email.id}")
         arrived.append(email)

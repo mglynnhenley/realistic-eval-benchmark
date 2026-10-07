@@ -125,34 +125,9 @@ def execution_readiness(execution: str) -> dict:
     )}
 
 
-def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
-    """Up to three matching comparison arms; ordinary dashboard runs stay serial."""
-    path = settings.get("experiment_manifest")
-    if not path or len(active) >= 3:
-        return False
-    group = Path(path).resolve().parent.parent
-    comparable = {key: value for key, value in settings.items() if key != "experiment_manifest"}
-    for other in active:
-        other_path = other.get("experiment_manifest")
-        if not other_path or Path(other_path).resolve().parent.parent != group:
-            return False
-        if Path(other_path).resolve() == Path(path).resolve():
-            return False
-        if {key: value for key, value in other.items() if key != "experiment_manifest"} != comparable:
-            return False
-    return True
-
-
 def run_presets() -> list[dict]:
     shared = RunConfig(mode="model").model_dump()
-    return [
-        {"name": "quick", "label": "Quick test", "settings": {
-            **shared, "world_mode": "baseline", "max_turns": 20, "cost_limit": 1.0, "sim_weeks": 1.0,
-        }},
-        {"name": "long", "label": "Longer stress test", "settings": {
-            **shared, "world_mode": "friction", "max_turns": 600, "cost_limit": 10.0, "sim_weeks": 12.0,
-        }},
-    ]
+    return [{"name": "default", "label": "Default configuration", "settings": shared}]
 
 
 class RunManager:
@@ -249,7 +224,7 @@ class RunManager:
                     "rubrics": read_json(directory / "rubrics.json")}
 
     def start(self, config: RunConfig) -> dict:
-        if config.models is not None and (config.execution == "local" or config.mode != "model"):
+        if config.models is not None and config.execution == "local":
             raise APIError(422, "Model selection requires a Harbor model batch on Modal or Docker.")
         targets = batch_models(config.model_dump())
         total = batch_total(config.model_dump())
@@ -258,14 +233,8 @@ class RunManager:
         if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
             raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
         if config.execution != "local":
-            if config.data_mode == "live":
-                raise APIError(422, "Live Gmail is local-only; choose fixture or hybrid data for Harbor.")
-            if config.experiment_manifest or config.all_role_cost_limit or config.experiment_budget_file:
-                raise APIError(422, "Comparison experiments are currently local only.")
             if config.concurrency > total:
                 raise APIError(422, "Concurrency cannot exceed the number of trials.")
-            if config.mode == "demo" and config.max_turns < 12:
-                raise APIError(422, "Scripted Harbor trials need at least 12 turns.")
             if config.mode == "model" and any(not name.startswith("openrouter/") for name in (
                 *targets, config.simulator_model, config.grader_model,
             )):
@@ -281,33 +250,10 @@ class RunManager:
             problems = unknown_models(roles)
             if problems:
                 raise APIError(422, " ".join(problems))
-        experiment = None
-        if config.experiment_manifest:
-            from refund_eval.experiments.protocol import experiment_settings
-
-            try:
-                experiment = experiment_settings(config.experiment_manifest, config.model_dump())
-                if config.all_role_cost_limit is None or not config.experiment_budget_file:
-                    raise ValueError("Comparison trials require an all-role budget and frozen model prices.")
-                from refund_eval.experiments.budget import configure_budget_models
-
-                frozen_budget = read_json(Path(config.experiment_budget_file))
-                if not isinstance(frozen_budget, dict):
-                    raise TypeError("Frozen model prices are missing or invalid.")
-                configure_budget_models(
-                    [config.model, config.simulator_model, config.grader_model],
-                    frozen=frozen_budget,
-                )
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                raise APIError(422, f"Experiment preflight failed: {error}") from error
-        if config.mode == "demo" and config.data_mode != "fixture":
-            raise APIError(422, "The dashboard scripted demo requires fixture data. Use the hybrid smoke CLI for scripted live-web checks.")
         inbox_sha256 = None
         if config.inbox_snapshot:
             if config.mode != "model" or config.data_mode not in {"fixture", "hybrid"}:
                 raise APIError(422, "A Gmail snapshot needs a model trial with simulated Gmail (fixture or hybrid data).")
-            if config.experiment_manifest:
-                raise APIError(422, "Comparison experiments use their own inbox.")
             from refund_eval.published.profile import validate_fixture_path
             from refund_eval.world.snapshot_store import file_sha256, snapshot_path
 
@@ -334,26 +280,13 @@ class RunManager:
             if str(original) != targets[0]:
                 raise APIError(422, f"That trial ran {original}; resume it with the same model.")
             resume_sha256 = file_sha256(Path(config.resume_log))
-        if config.data_mode in {"live", "hybrid"} and config.tool_profile != "published":
-            raise APIError(422, f"{config.data_mode.title()} data requires the published tool profile.")
-        if config.world_mode in {"friction", "open"} and (config.mode != "model" or config.data_mode == "live"):
-            world = "Realistic friction" if config.world_mode == "friction" else "The open world"
-            raise APIError(422, f"{world} requires a model trial with simulated Gmail (fixture or hybrid data).")
-        published_path = None
-        if config.tool_profile == "published" and config.execution == "local":
+        if config.execution == "local":
             from refund_eval.published.profile import (
                 fixture_readiness,
                 hybrid_readiness,
-                readiness,
             )
 
-            if config.data_mode == "fixture":
-                status = fixture_readiness()
-            elif config.data_mode == "hybrid":
-                status = hybrid_readiness()
-            else:
-                published_path = published_config_path()
-                status = readiness(published_path)
+            status = fixture_readiness() if config.data_mode == "fixture" else hybrid_readiness()
             if not status["configured"]:
                 raise APIError(422, f"Published tools are not configured. {status['reason']}")
         if config.mode == "model":
@@ -371,7 +304,7 @@ class RunManager:
         with self.lock:
             active_settings = [read_json(self.root / run_id / "config.json", {})
                                for run_id, process in self.processes.items() if process.poll() is None]
-            if active_settings and not parallel_comparison_allowed(config.model_dump(), active_settings):
+            if active_settings:
                 raise APIError(409, "A run is already active. Wait for it to finish or stop it first.")
             run_id = uuid.uuid4().hex[:12]
             rubrics = self.behaviours()
@@ -381,41 +314,25 @@ class RunManager:
             settings["browser_runtime"] = "docker" if config.execution == "local" else "subprocess"
             if config.mode == "model":
                 settings["model"] = targets[0]
-            if published_path:
-                settings["published_config"] = published_path
             if inbox_sha256:
                 settings["inbox_sha256"] = inbox_sha256
             if resume_sha256:
                 settings["resume_sha256"] = resume_sha256
             record = {
-                "id": run_id, "label": "Scripted demo · published tools" if config.mode == "demo"
-                else {"fixture": "Published tools · simulated data",
-                      "hybrid": "Simulated Gmail + live web",
-                      "live": "Published tools · live data"}[config.data_mode],
+                "id": run_id, "label": {"fixture": "Published tools · simulated data",
+                      "hybrid": "Simulated Gmail + live web"}[config.data_mode],
                 "mode": config.mode, "status": "starting", "created_at": now(), "updated_at": now(),
                 "tool_profile": config.tool_profile,
                 "data_mode": config.data_mode,
-                "world_mode": config.world_mode,
+                "scenario": config.scenario,
                 "model": targets[0],
                 "config": settings, "error": None,
                 "rubric_version": rubrics["version"],
             }
-            if config.world_mode == "friction":
-                record["label"] += " · realistic friction"
-            elif config.world_mode == "open":
-                record["label"] += " · open world"
             if config.execution != "local":
                 record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
             if config.inbox_snapshot:
                 record["label"] += f" · Gmail snapshot {config.inbox_snapshot}"
-            if experiment:
-                phase = f"Repeat {config.experiment_replicate}" if config.experiment_replicate else "Pilot"
-                record["label"] = f"{experiment['arm']} · {phase} · {experiment['label']}"
-                record["experiment"] = {
-                    "arm": experiment["arm"], "invariants": experiment["invariants"],
-                    "manifest": str(Path(config.experiment_manifest).resolve()),
-                }
-                write_json(directory / "experiment.json", experiment)
             write_json(directory / "run.json", record)
             write_json(directory / "config.json", settings)
             write_json(directory / "rubrics.json", rubrics)
@@ -554,21 +471,15 @@ class RunManager:
             self._ownership.close()
 
 
-def published_config_path() -> str:
-    from refund_eval.published.profile import DEFAULT_CONFIG
-
-    path = Path(os.environ.get("REFUND_EVAL_PUBLISHED_CONFIG", DEFAULT_CONFIG)).expanduser()
-    return str((path if path.is_absolute() else PROJECT_ROOT / path).resolve())
 
 
 def public_config() -> dict:
     from refund_eval.published.profile import (
         fixture_readiness,
         hybrid_readiness,
-        readiness,
     )
 
-    scenario = load_scenario()
+    scenario = load_scenario(RunConfig.model_fields["scenario"].default)
     fixture_status = fixture_readiness()
     hybrid_status = hybrid_readiness()
     return {
@@ -587,13 +498,15 @@ def public_config() -> dict:
                      "organisations": [{"key": org.key, "name": org.name, "kind": org.kind}
                                        for org in scenario.orgs]},
         "inbox_snapshots": list_snapshots(),
-        "modes": ["demo", "model"],
+        "modes": ["model"],
+        "scenarios": [{"name": name, "label": label} for name, label in (
+            ("train_refund_pressure", "Refund under pressure"), ("train_refund", "Train refund"),
+        )],
         "tool_profiles": [
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [
                  {"name": "hybrid", "label": "Simulated Gmail + live web", **hybrid_status},
                  {"name": "fixture", "label": "Simulated inbox and websites", **fixture_status},
-                 {"name": "live", "label": "Live Gmail and reviewed websites", **readiness(published_config_path())},
              ]},
         ],
     }
