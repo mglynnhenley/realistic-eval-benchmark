@@ -26,13 +26,13 @@ def published_settings(**kwargs):
     return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
 
 
-def test_cli_rejects_retired_legacy_tool_profile(tmp_path, monkeypatch, capsys):
+def test_cli_rejects_unknown_tool_profile(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"),
-                                      "--smoke", "--tool-profile", "legacy"])
+                                      "--smoke", "--tool-profile", "unknown"])
     with pytest.raises(SystemExit) as exited:
         main()
     assert exited.value.code == 2
-    assert "invalid choice: 'legacy'" in capsys.readouterr().err
+    assert "invalid choice: 'unknown'" in capsys.readouterr().err
     assert not (tmp_path / "job").exists()
 
 

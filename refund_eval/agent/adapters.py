@@ -22,7 +22,7 @@ async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
                      browser_runtime: str = "docker", artifact_dir: str | None = None):
     """Own all tool connections for one trial, including exception cleanup."""
     if profile != "published":
-        raise ValueError("Legacy execution is retired. Use the published Gmail, Exa and Playwright tool stack.")
+        raise ValueError("tool_profile must be published")
     if fixture_path is not None and (profile != "published" or published_data not in {"fixture", "hybrid"}):
         raise ValueError("fixture_path requires the published fixture or hybrid profile")
     if profile == "published":
@@ -35,7 +35,7 @@ async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
                                    **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
             yield tools
     else:
-        raise ValueError("Legacy execution is retired. Use the published Gmail, Exa and Playwright tool stack.")
+        raise ValueError("tool_profile must be published")
 
 
 def _not_built(ex: ImportError, package: str) -> bool:

@@ -25,8 +25,7 @@ def batch_total(config: dict) -> int:
 class TrialSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-    # Missing fields identify older frozen jobs; their source snapshots retain legacy execution.
-    tool_profile: Literal["legacy", "published"] = "legacy"
+    tool_profile: Literal["published"] = "published"
     data_mode: Literal["fixture", "hybrid", "live"] = "fixture"
     browser_runtime: Literal["docker", "subprocess"] = "docker"
     smoke: bool = False
@@ -51,8 +50,6 @@ class TrialSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_smoke(self):
-        if self.tool_profile != "published":
-            raise ValueError("Legacy execution is retired. Use tool_profile=published with browser_runtime=subprocess and fixture or hybrid data. Frozen legacy jobs require their original runner and source snapshot.")
         if self.data_mode == "live":
             raise ValueError("Live Gmail is local-only; Harbor supports fixture or hybrid data")
         if self.tool_profile == "published" and self.browser_runtime != "subprocess":

@@ -125,24 +125,6 @@ def execution_readiness(execution: str) -> dict:
     )}
 
 
-def parallel_comparison_allowed(settings: dict, active: list[dict]) -> bool:
-    """Up to three matching comparison arms; ordinary dashboard runs stay serial."""
-    path = settings.get("experiment_manifest")
-    if not path or len(active) >= 3:
-        return False
-    group = Path(path).resolve().parent.parent
-    comparable = {key: value for key, value in settings.items() if key != "experiment_manifest"}
-    for other in active:
-        other_path = other.get("experiment_manifest")
-        if not other_path or Path(other_path).resolve().parent.parent != group:
-            return False
-        if Path(other_path).resolve() == Path(path).resolve():
-            return False
-        if {key: value for key, value in other.items() if key != "experiment_manifest"} != comparable:
-            return False
-    return True
-
-
 def run_presets() -> list[dict]:
     shared = RunConfig(mode="model").model_dump()
     return [
@@ -260,8 +242,6 @@ class RunManager:
         if config.execution != "local":
             if config.data_mode == "live":
                 raise APIError(422, "Live Gmail is local-only; choose fixture or hybrid data for Harbor.")
-            if config.experiment_manifest or config.all_role_cost_limit or config.experiment_budget_file:
-                raise APIError(422, "Comparison experiments are currently local only.")
             if config.concurrency > total:
                 raise APIError(422, "Concurrency cannot exceed the number of trials.")
             if config.mode == "demo" and config.max_turns < 12:
@@ -281,33 +261,12 @@ class RunManager:
             problems = unknown_models(roles)
             if problems:
                 raise APIError(422, " ".join(problems))
-        experiment = None
-        if config.experiment_manifest:
-            from refund_eval.experiments.protocol import experiment_settings
-
-            try:
-                experiment = experiment_settings(config.experiment_manifest, config.model_dump())
-                if config.all_role_cost_limit is None or not config.experiment_budget_file:
-                    raise ValueError("Comparison trials require an all-role budget and frozen model prices.")
-                from refund_eval.experiments.budget import configure_budget_models
-
-                frozen_budget = read_json(Path(config.experiment_budget_file))
-                if not isinstance(frozen_budget, dict):
-                    raise TypeError("Frozen model prices are missing or invalid.")
-                configure_budget_models(
-                    [config.model, config.simulator_model, config.grader_model],
-                    frozen=frozen_budget,
-                )
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                raise APIError(422, f"Experiment preflight failed: {error}") from error
         if config.mode == "demo" and config.data_mode != "fixture":
             raise APIError(422, "The dashboard scripted demo requires fixture data. Use the hybrid smoke CLI for scripted live-web checks.")
         inbox_sha256 = None
         if config.inbox_snapshot:
             if config.mode != "model" or config.data_mode not in {"fixture", "hybrid"}:
                 raise APIError(422, "A Gmail snapshot needs a model trial with simulated Gmail (fixture or hybrid data).")
-            if config.experiment_manifest:
-                raise APIError(422, "Comparison experiments use their own inbox.")
             from refund_eval.published.profile import validate_fixture_path
             from refund_eval.world.snapshot_store import file_sha256, snapshot_path
 
@@ -371,7 +330,7 @@ class RunManager:
         with self.lock:
             active_settings = [read_json(self.root / run_id / "config.json", {})
                                for run_id, process in self.processes.items() if process.poll() is None]
-            if active_settings and not parallel_comparison_allowed(config.model_dump(), active_settings):
+            if active_settings:
                 raise APIError(409, "A run is already active. Wait for it to finish or stop it first.")
             run_id = uuid.uuid4().hex[:12]
             rubrics = self.behaviours()
@@ -408,14 +367,6 @@ class RunManager:
                 record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
             if config.inbox_snapshot:
                 record["label"] += f" · Gmail snapshot {config.inbox_snapshot}"
-            if experiment:
-                phase = f"Repeat {config.experiment_replicate}" if config.experiment_replicate else "Pilot"
-                record["label"] = f"{experiment['arm']} · {phase} · {experiment['label']}"
-                record["experiment"] = {
-                    "arm": experiment["arm"], "invariants": experiment["invariants"],
-                    "manifest": str(Path(config.experiment_manifest).resolve()),
-                }
-                write_json(directory / "experiment.json", experiment)
             write_json(directory / "run.json", record)
             write_json(directory / "config.json", settings)
             write_json(directory / "rubrics.json", rubrics)

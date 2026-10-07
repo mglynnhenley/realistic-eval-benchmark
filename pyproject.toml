@@ -5,7 +5,6 @@ description = "Step 1: the impossible refund. A behaviour eval for personal agen
 requires-python = ">=3.12"
 dependencies = [
     "inspect-ai",
-    "inspect-scout",
     "openai",
     "httpx",
     "aiohttp",

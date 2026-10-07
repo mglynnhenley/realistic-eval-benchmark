@@ -213,11 +213,11 @@ def test_scripted_demo_is_labelled_with_published_tools(tmp_path, monkeypatch):
         manager.close()
 
 
-def test_demo_cannot_request_retired_legacy_tools(tmp_path):
+def test_demo_requires_published_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(ValueError, match="Legacy execution is retired"):
-            manager.start(server.RunConfig(mode="demo", tool_profile="legacy"))
+        with pytest.raises(ValueError, match="published"):
+            manager.start(server.RunConfig(mode="demo", tool_profile="unknown"))
         assert not manager.list()
     finally:
         manager.close()
@@ -272,11 +272,11 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
 
 
 @pytest.mark.parametrize("data_mode", ["live", "hybrid"])
-def test_legacy_cannot_claim_live_data(tmp_path, data_mode):
+def test_unknown_profile_cannot_claim_live_data(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)
     try:
-        with pytest.raises(ValueError, match="Legacy execution is retired"):
-            manager.start(server.RunConfig(mode="model", tool_profile="legacy", data_mode=data_mode))
+        with pytest.raises(ValueError, match="published"):
+            manager.start(server.RunConfig(mode="model", tool_profile="unknown", data_mode=data_mode))
         assert not manager.list()
     finally:
         manager.close()
@@ -370,7 +370,6 @@ def test_friction_requires_simulated_model_trial_before_setup_or_launch(tmp_path
     ({'execution': 'modal', 'trials': 1, 'concurrency': 2}, 'Concurrency'),
     ({'execution': 'modal', 'max_turns': 3}, 'at least 12'),
     ({'execution': 'modal', 'mode': 'model', 'model': 'anthropic/example'}, 'OpenRouter'),
-    ({'execution': 'modal', 'experiment_manifest': 'comparison.json'}, 'local only'),
 ])
 def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, message):
     manager = server.RunManager(tmp_path)

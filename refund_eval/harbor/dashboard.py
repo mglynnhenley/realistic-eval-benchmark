@@ -104,7 +104,7 @@ class BatchProgress:
             if not ended and self.phase != "stopping" and snapshot.get("phase") in worker_stages:
                 row["stage"] = worker_stages[snapshot["phase"]]
             row.update(status=status, turns=(snapshot.get("world") or {}).get("turn", 0),
-                       tool_profile=self.config.get("tool_profile", "legacy"),
+                       tool_profile=self.config.get("tool_profile", "published"),
                        browser_runtime=self.config.get("browser_runtime", "subprocess"),
                        data_mode=self.config.get("data_mode", "fixture"))
             record = read(child / "run.json", {})
@@ -168,9 +168,7 @@ async def run_batch(directory: Path) -> int:
             # Batch configs written before the setting existed get the current default,
             # as local dashboard runs do.
             history_tokens=config.get("history_tokens", TrialSettings.model_fields["history_tokens"].default),
-            # Older frozen batches without tool_profile are legacy and fail with the migration error;
-            # they run only from their original snapshot.
-            tool_profile=config.get("tool_profile", "legacy"),
+            tool_profile=config.get("tool_profile", "published"),
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),
             cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],

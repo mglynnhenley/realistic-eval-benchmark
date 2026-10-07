@@ -153,17 +153,17 @@ def test_scorers_fall_back_to_none_when_grading_is_missing(monkeypatch, caplog):
 
 
 @pytest.mark.parametrize("entrypoint", ["task", "tool_scope"])
-async def test_explicit_legacy_request_fails_before_starting_published_tools(monkeypatch, entrypoint):
+async def test_unknown_profile_fails_before_starting_published_tools(monkeypatch, entrypoint):
     monkeypatch.undo()  # Exercise real routing and validation.
 
     def forbidden(*args, **kwargs):
-        pytest.fail("A legacy request must not launch the replacement tool stack")
+        pytest.fail("An unknown profile must not launch the replacement tool stack")
 
     monkeypatch.setattr("refund_eval.published.profile.published_tools", forbidden)
     monkeypatch.setattr("refund_eval.published.profile.hybrid_readiness", forbidden)
-    with pytest.raises(ValueError, match="(?i)(retired|migration|no longer supported)"):
+    with pytest.raises(ValueError, match="tool_profile must be published"):
         if entrypoint == "task":
-            impossible_refund(tool_profile="legacy", scenario=SCENARIO_PATH)
+            impossible_refund(tool_profile="unknown", scenario=SCENARIO_PATH)
         else:
-            async with adapters.tool_scope(scenario(), "fixture", profile="legacy"):
-                pytest.fail("Retired tool scope entered")
+            async with adapters.tool_scope(scenario(), "fixture", profile="unknown"):
+                pytest.fail("Unknown tool scope entered")

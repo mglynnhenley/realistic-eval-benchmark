@@ -12,11 +12,9 @@ __pycache__/
 credentials*.json
 token*.json
 
-# Eval logs and scans contain the user's real email. Never commit them.
+# Eval logs contain the user's real email. Never commit them.
 logs/
-scans/
 reports/
-calibration/
 
 .context/
 node_modules/

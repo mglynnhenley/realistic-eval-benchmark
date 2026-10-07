@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import os
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ def load_config(run_dir: Path) -> dict[str, Any]:
                 if RunConfig.model_fields[name].default_factory is None}
     config = {**defaults, **config}
     if config["tool_profile"] != "published":
-        raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
+        raise ValueError("tool_profile must be published.")
     # Execution records from the dashboard carry explicit data mode and runtime.
     if config["data_mode"] not in {"fixture", "hybrid", "live"}:
         raise ValueError("data_mode must be 'fixture', 'hybrid' or 'live'.")
@@ -154,14 +154,6 @@ def run_worker(run_dir: str | Path) -> int:
                 log = read_eval_log(summary["inspect_log"])
             else:
                 profile_args = {}
-                experiment = None
-                if config.get("experiment_manifest"):
-                    from refund_eval.experiments.protocol import experiment_settings
-
-                    experiment = experiment_settings(config["experiment_manifest"], config)
-                    profile_args.update(scenario=experiment["scenario_path"], fixture_path=experiment["inbox_path"])
-                    if experiment.get("startup_context", {}).get("mode") == "matched_thread_prefetch":
-                        profile_args["initial_mail_thread_ids"] = experiment["startup_context"]["thread_ids"]
                 if config.get("inbox_snapshot"):
                     from refund_eval.world.snapshot_store import (
                         file_sha256,
@@ -198,49 +190,27 @@ def run_worker(run_dir: str | Path) -> int:
                         profile_args["published_config"] = published_path
                     if not status["configured"]:
                         raise ValueError(f"Published tools are not configured. {status['reason']}")
-                model_names = [config[key] for key in ("model", "simulator_model", "grader_model")]
-                budget_scope = nullcontext()
-                budget_configuration = None
-                if config.get("all_role_cost_limit") is not None:
-                    from refund_eval.experiments.budget import (
-                        all_role_budget,
-                        configure_budget_models,
-                    )
-
-                    frozen = json.loads(Path(config["experiment_budget_file"]).read_text())
-                    budget_configuration = configure_budget_models(model_names, frozen=frozen)
-                    budget_scope = all_role_budget(
-                        config["all_role_cost_limit"], model_names, destination / "budget.json",
-                        configuration=budget_configuration,
-                    )
-                elif experiment and not all(name.startswith("mockllm/") for name in model_names):
-                    raise ValueError("Paid comparison trials require an all-role budget.")
-                with budget_scope:
-                    [log] = eval(
-                        impossible_refund,
-                        task_args={
-                            "trials": 1,
-                            "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
-                            "max_turns": config["max_turns"],
-                            "history_tokens": config["history_tokens"],
-                            "cost_limit": config["cost_limit"],
-                            "sim_weeks": config["sim_weeks"],
-                            **({"daily_allowance": config["daily_allowance"]} if config.get("daily_allowance") else {}),
-                            **({"scenario": config["scenario"]} if config.get("scenario", "train_refund") != "train_refund" else {}),
-                            **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
-                            **rubric_args,
-                            **profile_args,
-                        },
-                        model=config["model"],
-                        model_args=published_model_args(config["model"]) if config["tool_profile"] == "published" else {},
-                        model_roles={"simulator": config["simulator_model"], "grader": config["grader_model"]},
-                        log_dir=str(destination / "logs"), log_format="eval", display="none",
-                        metadata={"dashboard": True, "world_mode": config["world_mode"],
-                                  **({"experiment": experiment} if experiment else {}),
-                                  **({"all_role_budget": budget_configuration,
-                                      "all_role_cost_limit": config["all_role_cost_limit"]}
-                                     if budget_configuration else {})},
-                    )
+                [log] = eval(
+                    impossible_refund,
+                    task_args={
+                        "trials": 1,
+                        "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
+                        "max_turns": config["max_turns"],
+                        "history_tokens": config["history_tokens"],
+                        "cost_limit": config["cost_limit"],
+                        "sim_weeks": config["sim_weeks"],
+                        **({"daily_allowance": config["daily_allowance"]} if config.get("daily_allowance") else {}),
+                        **({"scenario": config["scenario"]} if config.get("scenario", "train_refund") != "train_refund" else {}),
+                        **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
+                        **rubric_args,
+                        **profile_args,
+                    },
+                    model=config["model"],
+                    model_args=published_model_args(config["model"]) if config["tool_profile"] == "published" else {},
+                    model_roles={"simulator": config["simulator_model"], "grader": config["grader_model"]},
+                    log_dir=str(destination / "logs"), log_format="eval", display="none",
+                    metadata={"dashboard": True, "world_mode": config["world_mode"]},
+                )
             snapshot = write_snapshot(destination, **final_snapshot(log, summary))
             return 1 if snapshot["phase"] == "failed" else 0
         except Exception as error:

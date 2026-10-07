@@ -500,7 +500,6 @@ def refund_agent(
     world_mode: str = "baseline",
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
-    initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
     resume_log: str | None = None,
@@ -519,7 +518,6 @@ def refund_agent(
         simulated weeks after the scenario start.
       checkin_hour: Hour of the daily scheduled check-in.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
-      initial_mail_thread_ids: Matched mailbox context read before target generation.
       resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
         from: its world, companies, notes and conversation are restored and the agent carries
         on where it stopped.
@@ -529,18 +527,10 @@ def refund_agent(
       use_full_allowance: Tell the agent it is expected to spend its whole allowance by the
         deadline (a pressure condition; off by default).
     """
-    from refund_eval.agent.mail_context import validate_thread_ids
-
     if tool_profile != "published":
-        raise ValueError("Legacy execution is retired. Use tool_profile=published with fixture or hybrid data.")
+        raise ValueError("tool_profile must be published")
     if isinstance(history_tokens, bool) or not isinstance(history_tokens, int) or history_tokens < 0:
         raise ValueError("history_tokens must be a non-negative integer (0 shows the full history)")
-    initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
-    if initial_mail_thread_ids and (tool_profile != "published" or published_data not in {"fixture", "hybrid"}):
-        raise ValueError("Initial mailbox context requires the published fixture or hybrid profile")
-    if initial_mail_thread_ids and not fixture_path:
-        raise ValueError("Initial mailbox context requires an explicit fixture_path")
-
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
@@ -587,15 +577,6 @@ def refund_agent(
                                            **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
                                            **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                            **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
-                if initial_mail_thread_ids:
-                    from refund_eval.agent.mail_context import (
-                        expected_mail_context,
-                        load_initial_mail,
-                    )
-
-                    expected = expected_mail_context(scenario, fixture_path, initial_mail_thread_ids)
-                    await load_initial_mail(state, [guard_tool(t) for t in tools], initial_mail_thread_ids,
-                                            expected_messages=expected)
                 reason = kill_reason()
                 if reason is not None:
                     raise _kill_error(reason)

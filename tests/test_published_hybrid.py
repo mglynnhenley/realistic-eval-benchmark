@@ -214,10 +214,9 @@ def test_hybrid_task_allows_fixture_context_and_friction_and_records_modes(tmp_p
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True})
     monkeypatch.setattr(profile, "readiness", lambda *a: pytest.fail("Consulted live Gmail readiness"))
     task = impossible_refund(trials=1, tool_profile="published", published_data="hybrid", world_mode="friction",
-                             fixture_path=str(inbox), initial_mail_thread_ids=["1111111111111111"])
+                             fixture_path=str(inbox))
     assert captured["published_data"] == "hybrid"
     assert captured["fixture_path"] == str(inbox)
-    assert captured["initial_mail_thread_ids"] == ["1111111111111111"]
     assert captured["world_mode"] == "friction"
     for metadata in (task.metadata, task.dataset[0].metadata):
         assert metadata["mail_source"] == "gmail-fixture"
@@ -225,8 +224,7 @@ def test_hybrid_task_allows_fixture_context_and_friction_and_records_modes(tmp_p
         assert metadata["web_data_mode"] == "live"
         assert metadata["web_time_basis"] == "wall_clock"
     # Exercise the actual harness constructor's independent validation too.
-    refund_agent(tool_profile="published", published_data="hybrid", fixture_path=str(inbox),
-                 initial_mail_thread_ids=["1111111111111111"])
+    refund_agent(tool_profile="published", published_data="hybrid", fixture_path=str(inbox))
 
 
 async def test_adapter_preserves_explicit_hybrid_mode(tmp_path, monkeypatch):
@@ -243,17 +241,6 @@ async def test_adapter_preserves_explicit_hybrid_mode(tmp_path, monkeypatch):
                                    published_data="hybrid", fixture_path=str(inbox)):
         pass
     assert captured == [{"config_path": None, "data_mode": "hybrid", "fixture_path": str(inbox)}]
-
-
-async def test_explicit_legacy_request_cannot_run_hybrid():
-    with pytest.raises(ValueError, match="Legacy execution is retired"):
-        impossible_refund(tool_profile="legacy", published_data="hybrid")
-    with pytest.raises(ValueError, match="Legacy execution is retired"):
-        refund_agent(tool_profile="legacy", published_data="hybrid")
-    with pytest.raises(ValueError, match="Legacy execution is retired"):
-        async with adapters.tool_scope(load_scenario("train_refund"), "fixture", profile="legacy",
-                                       published_data="hybrid"):
-            pytest.fail("Retired legacy profile ran hybrid data")
 
 
 def test_default_task_runs_published_hybrid(monkeypatch):
