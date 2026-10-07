@@ -1,4 +1,4 @@
-"""Inspect task: the impossible refund (spec.md; plan.md section C).
+"""Inspect task: the impossible refund.
 
     uv run inspect eval refund_eval/task.py --model openrouter/anthropic/claude-opus-5 -T trials=1
 
@@ -51,9 +51,13 @@ DEFAULT_MODEL_COSTS: dict[str, ModelCost] = {
     DEFAULT_TARGET_MODEL: ModelCost(
         input=5.0, output=25.0, input_cache_write=6.25, input_cache_read=0.50
     ),
+    # Verified 2026-10-07: Opus 5.5 simulator prices.
+    DEFAULT_ROLE_MODEL: ModelCost(
+        input=4.0, output=20.0, input_cache_write=5.0, input_cache_read=0.20
+    ),
     # Verified 2026-10-05. The catalog charges double above 272k prompt
     # tokens; the budget counts the base rate.
-    DEFAULT_ROLE_MODEL: ModelCost(
+    "openrouter/openai/gpt-6-astra": ModelCost(
         input=10.0, output=50.0, input_cache_write=12.5, input_cache_read=1.0
     ),
     # Verified 2026-10-06.
@@ -123,7 +127,9 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
     models = list(models)
     for name, cost in DEFAULT_MODEL_COSTS.items():
         info = get_model_info(get_model(name, api_key="pricing-lookup", memoize=False))
-        if info is not None and info.cost is None:
+        if info is None:
+            set_model_info(name, ModelInfo(model=name, cost=cost))
+        elif info.cost is None:
             set_model_cost(name, cost)
     for name in models:
         if _is_mock(name):
@@ -139,7 +145,7 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
 @task
 def impossible_refund(
     trials: int = RunConfig.model_fields["trials"].default,
-    scenario: str = "train_refund",
+    scenario: str = RunConfig.model_fields["scenario"].default,
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
@@ -151,15 +157,12 @@ def impossible_refund(
     working_limit: int | None = None,
     rubric_set: dict | None = None,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
-    published_config: str | None = None,
     published_data: str = RunConfig.model_fields["data_mode"].default,
-    world_mode: str = "baseline",
     research_mode: str = RunConfig.model_fields["research_mode"].default,
     fixture_path: str | None = None,
-    initial_mail_thread_ids: list[str] | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
-    llm_grading: bool = True,
+    llm_grading: bool = RunConfig.model_fields["llm_grading"].default,
     resume_log: str | None = None,
     daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
     use_full_allowance: bool = False,
@@ -169,7 +172,7 @@ def impossible_refund(
     Args:
       trials: Number of trials (Inspect epochs of the single sample).
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
-      mail_source: Bundled fixture, or fixture:path alias; real Gmail uses published_data=live.
+      mail_source: Bundled inbox, or a fixture:path alias for a saved inbox file.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
         agent gets a memory tool. 0 shows the full history. The log always keeps it all.
@@ -182,64 +185,36 @@ def impossible_refund(
       token_limit: Optional Inspect token limit.
       time_limit: Optional Inspect wall-clock limit in seconds.
       working_limit: Optional Inspect working-time limit in seconds.
-      tool_profile: Published MCP tools; legacy execution returns a migration error.
-      published_data: "fixture" for local data, "hybrid" for local mail and live public web,
-        or "live" for configured providers.
-      world_mode: "baseline", "friction" for service delays and follow-ups, or "open" where the simulator
-        model decides how every organisation and person responds (never a full refund).
+      tool_profile: Published MCP tools.
+      published_data: "fixture" for local data, or "hybrid" for local mail and live public web.
       research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
         fresh and researches otherwise, "live" always researches, "saved" never searches.
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
-      initial_mail_thread_ids: Optional threads loaded through published tools before the first generation.
     """
     if trials < 1:
         raise ValueError("trials must be at least 1")
     if browser_runtime not in {"docker", "subprocess"}:
         raise ValueError("browser_runtime must be docker or subprocess")
     if tool_profile != "published":
-        raise ValueError("Legacy execution is retired. Use tool_profile=published with published_data=fixture or hybrid. Frozen legacy jobs require their original runner and source snapshot.")
-    if published_data == "live" and browser_runtime != "docker":
-        raise ValueError("Live Gmail is local-only; use fixture or hybrid data in a sandbox.")
-    if published_data not in {"fixture", "hybrid", "live"}:
-        raise ValueError("published_data must be 'fixture', 'hybrid' or 'live'")
-    if published_data == "hybrid" and tool_profile != "published":
-        raise ValueError("Hybrid data requires tool_profile='published'")
-    if world_mode not in {"baseline", "friction", "open"}:
-        raise ValueError("world_mode must be 'baseline', 'friction' or 'open'")
+        raise ValueError("tool_profile must be published")
+    if published_data not in {"fixture", "hybrid"}:
+        raise ValueError("published_data must be 'fixture' or 'hybrid'")
     if research_mode not in {"auto", "live", "saved"}:
         raise ValueError("research_mode must be 'auto', 'live' or 'saved'")
-    if mail_source == "gmail":
-        raise ValueError("Use published_data=live and the published Gmail configuration for real Gmail.")
     if mail_source.startswith("fixture:"):
-        # Workers pass the bundled inbox alias on every run; it names an inbox only
-        # when mail is simulated. Live data reads the configured Gmail provider.
-        if published_data in {"fixture", "hybrid"} and fixture_path is None:
+        if fixture_path is None:
             fixture_path = mail_source.split(":", 1)[1]
     elif mail_source not in {"fixture", "gmail-fixture"}:
         raise ValueError(
-            f"Unknown mail_source {mail_source!r}; use 'fixture', 'fixture:<path>' "
-            "or published_data=live for real Gmail"
+            f"Unknown mail_source {mail_source!r}; use 'fixture' or 'fixture:<path>'"
         )
-    from refund_eval.agent.mail_context import validate_thread_ids
-
-    initial_mail_thread_ids = validate_thread_ids(initial_mail_thread_ids)
-    if initial_mail_thread_ids and (tool_profile != "published" or published_data not in {"fixture", "hybrid"}):
-        raise ValueError("Initial mailbox context requires the published fixture or hybrid profile")
-    if initial_mail_thread_ids and not fixture_path:
-        raise ValueError("Initial mailbox context requires an explicit fixture_path")
     if fixture_path is not None:
-        if tool_profile != "published" or published_data not in {"fixture", "hybrid"}:
-            raise ValueError("fixture_path requires tool_profile='published' and published_data='fixture' or 'hybrid'")
         from refund_eval.published.profile import validate_fixture_path
 
         path = Path(fixture_path).expanduser()
         if not path.is_absolute() and not path.exists() and (PROJECT_ROOT / path).exists():
             path = PROJECT_ROOT / path
         fixture_path = validate_fixture_path(str(path), data_mode=published_data)
-    if world_mode in {"friction", "open"} and (
-        published_data not in {"fixture", "hybrid"}
-    ):
-        raise ValueError(f"The {world_mode} world requires simulated data")
     if tool_profile == "published":
         from inspect_ai.model._model import active_model
 
@@ -254,15 +229,14 @@ def impossible_refund(
         from refund_eval.published.profile import (
             fixture_readiness,
             hybrid_readiness,
-            readiness,
         )
 
         runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
         status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
-                  hybrid_readiness(**runtime_args) if published_data == "hybrid" else readiness(published_config))
+                  hybrid_readiness(**runtime_args))
         if not status["configured"]:
             raise ValueError(status["reason"])
-        mail_source = "gmail-fixture" if published_data in {"fixture", "hybrid"} else "gmail-mcp"
+        mail_source = "gmail-fixture"
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
 
@@ -290,11 +264,9 @@ def impossible_refund(
                 metadata={"scenario": scenario, "mail_source": mail_source,
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),
-                          **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"world_mode": world_mode} if world_mode != "baseline" else {}),
                           **({"research_mode": research_mode} if research_mode != "auto" else {}),
                           **({"rubric_set": rubric_set} if rubric_set is not None else {})},
             )
@@ -306,16 +278,13 @@ def impossible_refund(
             history_tokens=history_tokens,
             sim_weeks=sim_weeks,
             tool_profile=tool_profile,
-            published_config=published_config,
             published_data=published_data,
             browser_runtime=browser_runtime,
             artifact_dir=artifact_dir,
-            world_mode=world_mode,
             research_mode=research_mode,
-            **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
-            **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
+            daily_allowance=daily_allowance,
             **({"use_full_allowance": True} if use_full_allowance else {}),
         ),
         scorer=scorers or None,
@@ -335,9 +304,7 @@ def impossible_refund(
             "history_tokens": history_tokens,
             "sim_weeks": sim_weeks,
             **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
-            **({"initial_mail_thread_ids": initial_mail_thread_ids} if initial_mail_thread_ids else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
-            **({"world_mode": world_mode} if world_mode != "baseline" else {}),
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,18 +31,6 @@ def read_snapshot(run_dir: Path) -> dict | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def start_worker(run_dir: Path) -> subprocess.Popen:
-    (run_dir / "config.json").write_text(json.dumps({
-        "mode": "demo", "max_turns": 30, "cost_limit": 5.0, "sim_weeks": 1.0,
-    }))
-    environment = os.environ.copy()
-    environment.pop("REFUND_EVAL_KILL", None)
-    environment["REFUND_EVAL_KILL_FILE"] = str(run_dir / "STOP")
-    environment["REFUND_EVAL_FIXTURE_INBOX"] = str(run_dir / "nonexistent-personal-inbox.json")
-    return subprocess.Popen(
-        [sys.executable, "-m", "refund_eval.dashboard.worker", "--run-dir", str(run_dir)],
-        env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
 
 
 def test_snapshot_preserves_messages_and_serializes_unknown_scores(tmp_path, monkeypatch):
@@ -98,63 +84,8 @@ def test_measurement_import_failure_is_isolated(monkeypatch):
     assert "unavailable" in analysis["error"]
 
 
-@pytest.mark.browser
-@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
-def test_worker_streams_demo_progress_then_saves_final_artifact(tmp_path):
-    process = start_worker(tmp_path)
-    observed_turns: set[int] = set()
-    observed_live_messages = False
-    deadline = time.monotonic() + 20
-    try:
-        while process.poll() is None and time.monotonic() < deadline:
-            snapshot = read_snapshot(tmp_path)
-            if snapshot and snapshot["phase"] == "running" and snapshot["world"]:
-                observed_turns.add(snapshot["world"]["turn"])
-                observed_live_messages |= any(message["role"] == "tool" for message in snapshot["messages"])
-            time.sleep(0.03)
-        stdout, stderr = process.communicate(timeout=3)
-        assert process.returncode == 0, stdout + stderr
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
-    snapshot = read_snapshot(tmp_path)
-    assert snapshot["phase"] == "completed" and snapshot["error"] is None
-    assert len(observed_turns) >= 3 and observed_live_messages
-    assert snapshot["summary"]["passed"] is True
-    assert Path(snapshot["inspect_log"]).is_file()
-    assert snapshot["world"]["turn"] > 0 and snapshot["world"]["cases"]["trainline"]["contacts"] == 3
-    assert snapshot["scores"]["behaviour_honesty"]["answer"] == "unknown"
-    assert snapshot["scores"]["behaviour_honesty"]["value"] is None
-    assert any(message["role"] == "tool" for message in snapshot["messages"])
 
 
-@pytest.mark.browser
-@pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1", reason="Requires pinned local Docker browser")
-def test_worker_honours_per_run_stop_file_and_preserves_transcript(tmp_path):
-    process = start_worker(tmp_path)
-    deadline = time.monotonic() + 15
-    stopped_after_turn = None
-    try:
-        while process.poll() is None and time.monotonic() < deadline:
-            snapshot = read_snapshot(tmp_path)
-            if snapshot and snapshot["world"] and snapshot["world"]["turn"] >= 1:
-                stopped_after_turn = snapshot["world"]["turn"]
-                (tmp_path / "STOP").touch()
-                break
-            time.sleep(0.03)
-        stdout, stderr = process.communicate(timeout=10)
-        assert process.returncode == 0, stdout + stderr
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
-    snapshot = read_snapshot(tmp_path)
-    assert stopped_after_turn is not None
-    assert snapshot["phase"] == "stopped"
-    assert snapshot["world"]["killed"] is True
-    assert snapshot["world"]["stop_reason"] == "kill_switch"
-    assert snapshot["messages"] and Path(snapshot["inspect_log"]).is_file()
 
 
 def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypatch):
@@ -185,75 +116,29 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
         "trials": 1, "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
         "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
         "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
+        "scenario": "train_refund_pressure", "daily_allowance": 3, "llm_grading": False, "use_full_allowance": False,
     }
     assert RUN_DIR_ENV not in os.environ
 
 
-def test_published_worker_passes_explicit_profile_and_rechecks_readiness(tmp_path, monkeypatch):
-    from refund_eval.published import profile
-
-    config_path = str(tmp_path / "published.json")
-    (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "data_mode": "live", "published_config": config_path,
-        "model": "mockllm/target", "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-    }))
-    checked = []
-    calls = []
-
-    def ready(path):
-        checked.append(path)
-        return {"configured": True, "reason": "Configured"}
-
-    def evaluate(*args, **kwargs):
-        calls.append(kwargs)
-        return [SimpleNamespace(samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
-            status="success", error=None, location=str(tmp_path / "mock.eval"))]
-
-    monkeypatch.setattr(profile, "readiness", ready)
-    monkeypatch.setattr(worker, "eval", evaluate)
-    assert worker.run_worker(tmp_path) == 0
-    assert checked == [config_path]
-    assert calls[0]["task_args"]["tool_profile"] == "published"
-    assert calls[0]["task_args"]["published_data"] == "live"
-    assert calls[0]["task_args"]["published_config"] == config_path
 
 
-def test_published_worker_fails_before_model_when_configuration_disappears(tmp_path, monkeypatch):
-    from refund_eval.published import profile
-
-    (tmp_path / "config.json").write_text(json.dumps({
-        "mode": "model", "tool_profile": "published", "data_mode": "live", "model": "mockllm/target",
-        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-    }))
-    monkeypatch.setattr(profile, "readiness", lambda path: {"configured": False, "reason": "Gmail is not connected"})
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("No model call and no legacy fallback are allowed")
-
-    monkeypatch.setattr(worker, "eval", forbidden)
-    monkeypatch.setattr(worker, "run_demo", forbidden)
-    assert worker.run_worker(tmp_path) == 1
-    snapshot = read_snapshot(tmp_path)
-    assert snapshot["phase"] == "failed"
-    assert "Gmail is not connected" in snapshot["error"]
 
 
-@pytest.mark.parametrize("world_mode,max_turns", [("baseline", 20), ("friction", 600)])
 @pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
-def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, world_mode, max_turns, data_mode):
+def test_simulated_gmail_worker_uses_selected_runtime(tmp_path, monkeypatch, data_mode):
     from refund_eval.published import profile
 
     (tmp_path / "config.json").write_text(json.dumps({
         "mode": "model", "tool_profile": "published", "data_mode": data_mode, "model": "mockllm/target",
         "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
-        "world_mode": world_mode, "max_turns": max_turns, "cost_limit": 10, "sim_weeks": 12,
+        "max_turns": 600, "cost_limit": 10, "sim_weeks": 12,
     }))
-    monkeypatch.setenv("REFUND_EVAL_PUBLISHED_CONFIG", str(tmp_path / "unavailable-gmail.json"))
     calls = []
     checks = []
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("Workers must only check the requested data mode, without fallback or live Gmail setup")
+        raise AssertionError("Workers must only check the requested data mode, without fallback")
 
     def ready():
         checks.append(data_mode)
@@ -264,7 +149,6 @@ def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, world
         return [SimpleNamespace(samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
             status="success", error=None, location=str(tmp_path / "mock.eval"))]
 
-    monkeypatch.setattr(profile, "readiness", forbidden)
     monkeypatch.setattr(profile, "fixture_readiness", forbidden)
     monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
     monkeypatch.setattr(profile, f"{data_mode}_readiness", ready)
@@ -274,11 +158,9 @@ def test_simulated_gmail_worker_uses_no_live_config(tmp_path, monkeypatch, world
     assert calls[0]["task_args"]["published_data"] == data_mode
     assert checks == [data_mode]
     assert "published_config" not in calls[0]["task_args"]
-    assert calls[0]["task_args"].get("world_mode", "baseline") == world_mode
-    assert calls[0]["task_args"]["max_turns"] == max_turns
+    assert calls[0]["task_args"]["max_turns"] == 600
     assert calls[0]["task_args"]["cost_limit"] == 10
     assert calls[0]["task_args"]["sim_weeks"] == 12
-    assert calls[0]["metadata"]["world_mode"] == world_mode
 
 
 @pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
@@ -300,7 +182,10 @@ def test_simulated_gmail_worker_rechecks_runtime_before_model(tmp_path, monkeypa
 
 
 def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
-    (tmp_path / "config.json").write_text(json.dumps({"mode": "demo"}))
+    (tmp_path / "config.json").write_text(json.dumps({
+        "mode": "model", "tool_profile": "published", "data_mode": "hybrid",
+        "model": "mockllm/target", "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+    }))
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
 
@@ -309,7 +194,7 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
                        messages=[ChatMessageAssistant(content="Contacting customer service.")])
         raise RuntimeError("The model service is unavailable")
 
-    monkeypatch.setattr(worker, "run_demo", fails)
+    monkeypatch.setattr(worker, "eval", fails)
     assert worker.run_worker(tmp_path) == 1
     snapshot = read_snapshot(tmp_path)
     assert snapshot["phase"] == "failed"
@@ -321,27 +206,17 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
 @pytest.mark.parametrize("config", [
     {"mode": "invalid"},
     {"mode": "model", "model": "mockllm/model"},
-    {"mode": "demo", "cost_limit": float("nan")},
-    {"mode": "demo", "max_turns": 0},
-    {"mode": "demo", "tool_profile": "legacy"},
-    {"mode": "demo", "tool_profile": "unknown"},
-    {"mode": "demo", "data_mode": "unknown"},
-    {"mode": "demo", "data_mode": "live"},
-    {"mode": "demo", "data_mode": "hybrid"},
-    {"mode": "model", "tool_profile": "legacy", "data_mode": "hybrid"},
-    {"mode": "demo", "world_mode": "friction"},
-    {"mode": "demo", "world_mode": "unknown"},
-    {"mode": "demo", "max_turns": 1001},
-    {"mode": "demo", "history_tokens": -1},
-    {"mode": "demo", "history_tokens": 60000.5},
-    {"mode": "demo", "history_tokens": True},
-    {"mode": "model", "tool_profile": "published", "data_mode": "live", "world_mode": "friction"},
-    # Model runs never back-fill paid role models or reinterpret older records (C4).
+    # Paid role models and data mode must always be explicit in saved jobs.
     {"mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/model"},
     {"mode": "model", "tool_profile": "published", "model": "mockllm/target",
      "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader"},
     {"mode": "model", "data_mode": "fixture", "model": "mockllm/target",
      "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader"},
+    *[{"mode": "model", "tool_profile": "published", "data_mode": "fixture", "model": "mockllm/target",
+       "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader", **invalid}
+      for invalid in ({"cost_limit": float("nan")}, {"max_turns": 0}, {"max_turns": 10001},
+                      {"tool_profile": "unknown"}, {"data_mode": "unknown"}, {"data_mode": "live"},
+                      {"history_tokens": -1}, {"history_tokens": 60000.5}, {"history_tokens": True})],
 ])
 def test_worker_records_config_errors_without_running_models(tmp_path, monkeypatch, config):
     (tmp_path / "config.json").write_text(json.dumps(config))
@@ -352,7 +227,6 @@ def test_worker_records_config_errors_without_running_models(tmp_path, monkeypat
         raise AssertionError("Invalid config must never run a model")
 
     monkeypatch.setattr(worker, "eval", forbidden)
-    monkeypatch.setattr(worker, "run_demo", forbidden)
     assert worker.run_worker(tmp_path) == 1
     snapshot = read_snapshot(tmp_path)
     assert snapshot["phase"] == "failed" and snapshot["error"]

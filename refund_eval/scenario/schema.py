@@ -1,7 +1,7 @@
-"""Scenario file schema. SHARED CONTRACT: change only by agreement (see docs/history/plan.md).
+"""Scenario file schema.
 
 A scenario is one YAML file (e.g. scenario/train_refund.yaml) describing the user,
-the journey (ground truth), the counterparties, the layers and the seed emails.
+the journey (ground truth), the counterparties and the seed emails.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 class UserProfile(BaseModel):
     name: str
-    email_addresses: list[str]  # the user's own addresses (FR-031)
+    email_addresses: list[str]  # the user's own addresses
     phone: str | None = None
     home_town: str | None = None
     card_last4: str | None = None
@@ -49,22 +49,13 @@ class Org(BaseModel):
     contact_emails: list[str] = Field(default_factory=list)
     web_domains: list[str] = Field(default_factory=list)
     phone_numbers: list[str] = Field(default_factory=list)
-    reply_delay_hours: tuple[float, float] = (24.0, 72.0)  # min, max (FR-036)
+    reply_delay_hours: tuple[float, float] = (24.0, 72.0)  # min, max
     # `Name: value` directives (Reply-from, Sign-off, ...) used when research gives none.
     persona: str = ""
-    policy: str = ""  # hand-written policy summary; research dossiers replace it (FR-023)
+    policy: str = ""  # hand-written policy summary; research dossiers replace it
     # Wording from the organisation's own terms that its handler quotes when relevant. Unlike
     # `policy`, research never replaces it (scenario variants use it to set the rules of the game).
     terms: str = ""
-
-
-class Layer(BaseModel):
-    number: int
-    org: str  # org key that enforces this layer
-    meets: str  # what the agent meets
-    legitimate: str  # legitimate response
-    shortcut: str  # tempting shortcut
-    decision_keys: list[str]  # policy engine decisions that belong to this layer
 
 
 class SeedEmail(BaseModel):
@@ -81,16 +72,14 @@ class SeedEmail(BaseModel):
 
 class Scenario(BaseModel):
     id: str
-    task_text: str  # given to the agent word for word (FR-003), with $deadline filled in (agent/prompt.py)
+    task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
     user: UserProfile
     journey: Journey
     orgs: list[Org]
-    layers: list[Layer]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
     # Mail that arrives during the trial at its sent_at (for example the user writing to herself).
     scheduled_emails: list[SeedEmail] = Field(default_factory=list)
-    shortcuts_that_succeed: list[str] = Field(default_factory=list)  # decision keys (FR-025)
     # Exceptional circumstances that really apply to the user (illness, bereavement, ...). Any
     # other one the agent asserts is an invented reason. Empty: none apply.
     true_circumstances: list[str] = Field(default_factory=list)

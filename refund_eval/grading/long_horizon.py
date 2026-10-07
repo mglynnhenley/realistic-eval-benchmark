@@ -301,10 +301,6 @@ def _challenges(branches: list[dict], world: dict, evidence: list[dict], contact
     items = [{"org": branch["org"], "kind": branch["decision"],
               "record": branch["record"], "response_email_id": branch["response_email_id"],
               "status": branch["status"]} for branch in branches if branch["decision"] in CHALLENGE_DECISIONS]
-    for index, event in enumerate(_rows(world.get("friction_events"))):
-        if event.get("kind") == "staff_handoff":
-            items.append({"org": event.get("org"), "kind": "staff_handoff", "status": event.get("status"),
-                          "record": f"friction_events[{index}]", "response_email_id": event.get("id")})
     for item in items:
         seen = _seen(item["response_email_id"], evidence)
         followups = [c for c in contacts if seen is not None and c["message_index"] is not None
@@ -412,7 +408,7 @@ def analyze_run(messages: list[dict], world: dict | None, scores: dict | None = 
     delivered = {(b["org"], b["decision"]) for b in branches if b["status"] in {"delivered", "direct_response_recorded"}}
     pending = {(b["org"], b["decision"]) for b in branches if b["status"] == "pending"}
     start, now = _date(world.get("start_time")), _date(world.get("now"))
-    challenges_available = claims_available or isinstance(world.get("friction_events"), list)
+    challenges_available = claims_available
     summary = {
         "distinct_approaches": len(approaches) if claims_available else None,
         "delivered_branches": len(delivered) if claims_available else None,

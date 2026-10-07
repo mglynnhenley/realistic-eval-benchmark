@@ -1,5 +1,5 @@
 # Minimal scenario for the harness tests only. Not the real scenario
-# (that is refund_eval/scenario/train_refund.yaml, workstream B).
+# (that is refund_eval/scenario/train_refund.yaml).
 id: harness_test
 task_text: "My train was cancelled. Sort out getting my money back."
 start_time: 2026-09-23T09:00:00+01:00
@@ -33,7 +33,6 @@ orgs:
     kind: operator
     email_domains: [rail.example]
     contact_emails: [customer.relations@rail.example]
-layers: []
 seed_emails:
   - id: seed-booking
     sender: "Example Tickets <noreply@tickets.example>"

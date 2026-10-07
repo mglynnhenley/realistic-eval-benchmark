@@ -233,6 +233,6 @@ def make_fixture_mail(
     remote = FixtureGmailRemote(ctx)
     if audit is not None:
         audit({"event": "fixture_mail_provenance", **copy.deepcopy(FIXTURE_MAIL_PROVENANCE)})
-    return GmailService(remote, ctx, fixture=True, audit=audit,
+    return GmailService(remote, ctx, audit=audit,
                         catalog_snapshot={"fixture": True, "catalog_sha256": FIXTURE_MAIL_CATALOG_SHA256},
                         message_times={_visible_id(email.id): email.sent_at for email in remote.source.emails})

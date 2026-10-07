@@ -57,13 +57,13 @@ def prepare(
         raise ValueError("trials and concurrency must be positive")
     if model is not None and models is not None:
         raise ValueError("Specify model or models, not both")
-    targets = models if models is not None else [model or "mockllm/model"]
+    targets = models if models is not None else [model] if model else []
     if not targets or len(set(targets)) != len(targets):
         raise ValueError("Choose at least one model, without duplicates")
     if environment not in {"modal", "docker"}:
         raise ValueError("environment must be modal or docker")
-    if secrets and (environment != "modal" or settings.smoke):
-        raise ValueError("Named secrets are only used for real Modal trials")
+    if secrets and environment != "modal":
+        raise ValueError("Named secrets are only used for Modal trials")
     if (inbox is None) != (settings.inbox_sha256 is None):
         raise ValueError("A Gmail snapshot needs both its file and inbox_sha256")
     if inbox is not None:
@@ -93,7 +93,7 @@ def prepare(
     # Never upload the checkout root, .env, .secrets, logs, or local node_modules.
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "refund_eval", "pyproject.toml", "uv.lock", "tests/fixtures/inbox.json"], cwd=ROOT,
+         "refund_eval", "pyproject.toml", "uv.lock"], cwd=ROOT,
     ).decode().split("\0")
     task_dir = destination / "task"
     source = task_dir / "environment/source"
@@ -119,7 +119,7 @@ def prepare(
         '[verifier]\ntimeout_sec = 60\n\n'
         '[environment]\nbuild_timeout_sec = 1800\ncpus = 2\nmemory_mb = 4096\n'
         'workdir = "/app"\n'
-        f'network_mode = "{"no-network" if settings.smoke and settings.data_mode == "fixture" else "public"}"\n',
+        'network_mode = "public"\n',
     )
     tests = task_dir / "tests"
     tests.mkdir()
@@ -135,13 +135,13 @@ def prepare(
             env_kwargs["secrets"] = secrets
     # Credential values are resolved by Harbor at execution, never serialized here.
     agent_env = {}
-    if not settings.smoke and not secrets:
+    if not secrets:
         agent_env = {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}
         # Opt-in Exa account for hybrid search; otherwise trials stay keyless.
         if settings.data_mode == "hybrid" and os.environ.get(HYBRID_EXA_KEY_ENV):
             agent_env[HYBRID_EXA_KEY_ENV] = "${" + HYBRID_EXA_KEY_ENV + "}"
     job = JobConfig.model_validate({
-        "job_name": "refund-inspect-smoke" if settings.smoke else "refund-inspect",
+        "job_name": "refund-inspect",
         "jobs_dir": str(destination / "jobs"), "n_attempts": trials,
         "n_concurrent_trials": concurrency, "retry": {"max_retries": 0},
         "environment": {"type": environment, "delete": True, "kwargs": env_kwargs},
@@ -160,46 +160,50 @@ def main() -> None:
     parser.add_argument("--environment", choices=["docker", "modal"], default="modal")
     parser.add_argument("--trials", type=int, default=4, help="Trials per selected model")
     parser.add_argument("--concurrency", type=int, default=2)
-    parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--tool-profile", choices=["published"], default="published")
-    parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default=None)
+    parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default="hybrid")
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")
     parser.add_argument("--simulator-model", help=f"Counterparty simulator; default {DEFAULT_ROLE_MODEL}")
     parser.add_argument("--grader-model", help=f"LLM graders; default {DEFAULT_GRADER_MODEL}")
-    parser.add_argument("--max-turns", type=int, default=20)
+    parser.add_argument("--max-turns", type=int, default=TrialSettings.model_fields["max_turns"].default)
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
-    parser.add_argument("--sim-weeks", type=float, default=1)
+    parser.add_argument("--sim-weeks", type=float, default=TrialSettings.model_fields["sim_weeks"].default)
     parser.add_argument("--cost-limit", type=float, default=1)
     parser.add_argument("--time-limit", type=int, default=1800)
-    parser.add_argument("--world-mode", choices=["baseline", "friction", "open"], default="baseline")
+    parser.add_argument("--scenario", choices=["train_refund", "train_refund_pressure"],
+                        default=TrialSettings.model_fields["scenario"].default)
+    parser.add_argument("--daily-allowance", type=lambda value: None if value.lower() == "none" else float(value),
+                        default=TrialSettings.model_fields["daily_allowance"].default,
+                        help="Dollars per simulated day, or none to disable the daily allowance")
+    parser.add_argument("--llm-grading", action="store_true",
+                        default=TrialSettings.model_fields["llm_grading"].default, help="Run LLM judges after the trial; default is to judge saved logs separately")
+    parser.add_argument("--use-full-allowance", action="store_true")
     parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default="auto",
                         help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")
     parser.add_argument("--rubrics", type=Path, help="Frozen dashboard rubric snapshot JSON")
     parser.add_argument("--inbox", type=Path, help="Gmail snapshot JSON from refund_eval.world.snapshot")
     args = parser.parse_args()
-    if not args.smoke and not args.model:
-        parser.error("Choose --smoke or provide --model for a paid trial")
-    args.data_mode = args.data_mode or ("fixture" if args.smoke else "hybrid")
+    if not args.model:
+        parser.error("Provide --model for a paid trial")
     from refund_eval.world.snapshot_store import file_sha256
 
-    if not args.smoke:
-        # Freeze the resolved roles in the job so its record names what ran.
-        args.simulator_model = args.simulator_model or DEFAULT_ROLE_MODEL
-        args.grader_model = args.grader_model or DEFAULT_GRADER_MODEL
+    # Freeze the resolved roles in the job so its record names what ran.
+    args.simulator_model = args.simulator_model or DEFAULT_ROLE_MODEL
+    args.grader_model = args.grader_model or DEFAULT_GRADER_MODEL
     settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields
-                                if name not in {"rubric_set", "inbox_sha256"}},
+                                if hasattr(args, name)},
                              rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None,
                              inbox_sha256=file_sha256(args.inbox) if args.inbox else None)
     config = prepare(
-        args.output, settings=settings, models=args.model or ["mockllm/model"],
+        args.output, settings=settings, models=args.model,
         environment=args.environment, trials=args.trials, concurrency=args.concurrency, secrets=args.secret,
         inbox=args.inbox,
     )
     print(json.dumps({"config": str(config), "trials_per_model": args.trials,
-                      "total_trials": args.trials * len(args.model or ["mockllm/model"]), "concurrency": args.concurrency}))
+                      "total_trials": args.trials * len(args.model), "concurrency": args.concurrency}))
     print(f"Run with: scripts/harbor harbor run -c {config}")
 
 

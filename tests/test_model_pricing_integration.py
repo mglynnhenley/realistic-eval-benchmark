@@ -67,7 +67,7 @@ def test_task_registers_selected_model_costs_before_inspect_checks_budget(
     monkeypatch.setattr(httpx, "get", catalog)
     monkeypatch.setattr(OpenRouterAPI, "generate", generate_offline)
     monkeypatch.setattr(task_module, "refund_agent", lambda **kwargs: exercise_models())
-    monkeypatch.setattr(task_module.adapters, "load_scorers", list)
+    monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *args, **kwargs: [])
 
     # The published task rejects OpenRouter targets that still use strict tool
     # generation, so build the target with the same provider args the workers use.

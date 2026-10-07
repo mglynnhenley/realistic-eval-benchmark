@@ -17,25 +17,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
-                     profile: str = RunConfig.model_fields["tool_profile"].default, published_config: str | None = None,
+                     profile: str = RunConfig.model_fields["tool_profile"].default,
                      published_data: str = RunConfig.model_fields["data_mode"].default, fixture_path: str | None = None,
                      browser_runtime: str = "docker", artifact_dir: str | None = None):
     """Own all tool connections for one trial, including exception cleanup."""
     if profile != "published":
-        raise ValueError("Legacy execution is retired. Use the published Gmail, Exa and Playwright tool stack.")
-    if fixture_path is not None and (profile != "published" or published_data not in {"fixture", "hybrid"}):
-        raise ValueError("fixture_path requires the published fixture or hybrid profile")
-    if profile == "published":
-        from refund_eval.published.profile import published_tools
+        raise ValueError("tool_profile must be published")
+    if published_data not in {"fixture", "hybrid"}:
+        raise ValueError("published_data must be 'fixture' or 'hybrid'")
+    from refund_eval.published.profile import published_tools
 
-        async with published_tools(scenario, config_path=published_config,
-                                   data_mode=published_data,
-                                   **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
-                                   **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
-                                   **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
-            yield tools
-    else:
-        raise ValueError("Legacy execution is retired. Use the published Gmail, Exa and Playwright tool stack.")
+    async with published_tools(scenario, data_mode=published_data,
+                               **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                               **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
+                               **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
+        yield tools
 
 
 def _not_built(ex: ImportError, package: str) -> bool:
@@ -52,7 +48,7 @@ def advance_clock(world: World, to: datetime) -> list[Email]:
     except ImportError as ex:
         if _not_built(ex, "refund_eval.world.clock"):
             raise RuntimeError(
-                "refund_eval.world.clock.advance (workstream A) is needed to wake the agent."
+                "refund_eval.world.clock.advance is needed to wake the agent."
             ) from ex
         raise
     return list(advance(world, to))
@@ -66,7 +62,7 @@ def load_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Score
         if _not_built(ex, "refund_eval.grading"):
             logger.warning(
                 "refund_eval.grading.scorers.all_scorers is not available yet; "
-                "running without scorers (score the logs later with `inspect score`)."
+                "running without scorers (see docs/running.md for post-run judging)."
             )
             return []
         raise

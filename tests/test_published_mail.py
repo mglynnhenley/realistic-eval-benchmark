@@ -9,18 +9,15 @@ import pytest
 from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.published.mail import (
-    GMAIL_ENDPOINT,
     GmailService,
     GmailSetupError,
-    capture_gmail_catalog,
     catalog_sha256,
-    save_catalog_snapshot,
 )
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.clock import advance
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
 from refund_eval.world.state import (
     Email,
     ScheduledEmail,
@@ -83,8 +80,6 @@ def native(data):
 
 
 class Remote:
-    endpoint = GMAIL_ENDPOINT
-
     def __init__(self, catalog=None, messages=None):
         self.server_info = {"name": "EXPLICIT OFFLINE FIXTURE", "version": "1"}
         self.catalog = catalog or fixture_catalog()
@@ -121,7 +116,7 @@ class Remote:
 def ctx():
     init_subtask_store(Store())
     save_world(World(start_time=SCENARIO.start_time, now=SCENARIO.start_time, overlay_inbox=seed_emails(SCENARIO)))
-    return ToolContext(SCENARIO, Mailbox(FixtureMailSource(FIXTURES / "inbox.json"), SCENARIO))
+    return ToolContext(SCENARIO, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), SCENARIO))
 
 
 @pytest.fixture
@@ -145,7 +140,7 @@ def simulator(monkeypatch):
 
 async def test_native_descriptors_are_unchanged_and_only_supported_tools_exposed(ctx):
     remote = Remote()
-    service = GmailService(remote, ctx, fixture=True)
+    service = GmailService(remote, ctx)
     tools = await service.list_tools()
     assert tools == {"tools": remote.catalog["tools"][:-1]}
     tools["tools"][0]["description"] = "mutated"
@@ -159,44 +154,32 @@ async def test_native_descriptors_are_unchanged_and_only_supported_tools_exposed
 async def test_read_only_catalog_reports_missing_native_send(ctx):
     catalog = fixture_catalog()
     catalog["tools"] = catalog["tools"][:3]
-    service = GmailService(Remote(catalog), ctx, fixture=True)
+    service = GmailService(Remote(catalog), ctx)
     with pytest.raises(GmailSetupError, match="no supported send_message/reply"):
         await service.list_tools()
-    assert len((await GmailService(Remote(catalog), ctx, fixture=True, require_send=False).list_tools())["tools"]) == 3
+    assert len((await GmailService(Remote(catalog), ctx, require_send=False).list_tools())["tools"]) == 3
 
 
-async def test_discovery_captures_complete_contracts_without_calling_mail(ctx, tmp_path):
-    remote = Remote()
-    captured = await capture_gmail_catalog(remote, fixture=True)
-    assert captured["fixture"] is True
-    assert captured["catalog_sha256"] == catalog_sha256(remote.catalog)
-    save_catalog_snapshot(captured, tmp_path / "catalog.json")
-    assert json.loads((tmp_path / "catalog.json").read_text()) == captured
-    assert not remote.calls
-    with pytest.raises(GmailSetupError, match="authenticated Gmail catalog"):
-        await GmailService(remote, ctx, catalog_snapshot=captured).list_tools()
-
-
-async def test_incomplete_capture_drift_and_unsupported_contract_fail_closed(ctx):
+async def test_incomplete_catalog_drift_and_unsupported_contract_fail_closed(ctx):
     remote = Remote()
     remote.catalog["nextCursor"] = "remaining"
     with pytest.raises(GmailSetupError, match="incomplete"):
-        await capture_gmail_catalog(remote, fixture=True)
+        await GmailService(remote, ctx).list_tools()
     remote = Remote()
-    snapshot = await capture_gmail_catalog(remote)
+    snapshot = {"catalog_sha256": catalog_sha256(remote.catalog)}
     remote.catalog["tools"][0]["description"] += " changed"
     with pytest.raises(GmailSetupError, match="changed"):
         await GmailService(remote, ctx, catalog_snapshot=snapshot).list_tools()
     remote = Remote()
     del remote.catalog["tools"][3]["outputSchema"]
     with pytest.raises(GmailSetupError, match="outputSchema"):
-        await GmailService(remote, ctx, fixture=True).list_tools()
+        await GmailService(remote, ctx).list_tools()
 
 
 async def test_native_reads_forward_unchanged(ctx):
     msg = {"id": "abc123", "sender": "someone@example.com", "labelIds": ["INBOX"], "plaintextBody": "Actual native text"}
     remote = Remote(messages={"abc123": ("native-thread", msg)})
-    service = GmailService(remote, ctx, fixture=True)
+    service = GmailService(remote, ctx)
     args = {"messageId": "abc123", "messageFormat": "FULL_CONTENT"}
     assert await service.call_tool("get_message", args) == native(msg)
     assert remote.calls == [("get_message", args)]
@@ -204,7 +187,7 @@ async def test_native_reads_forward_unchanged(ctx):
 
 async def test_send_search_read_thread_and_delayed_reply_are_coherent(ctx, simulator):
     remote = Remote()
-    service = GmailService(remote, ctx, fixture=True)
+    service = GmailService(remote, ctx)
     sent = await service.call_tool("send_message", {"to": ["customerservices@trainline.com"], "subject": "My refund", "body": "Please refund my cancelled train."})
     assert not sent.get("isError"), sent
     mid, tid = sent["structuredContent"]["id"], sent["structuredContent"]["threadId"]
@@ -229,7 +212,7 @@ async def test_reply_to_native_thread_preserves_native_messages_and_reply_thread
                 "date": "2026-09-01", "plaintextBody": "Tell us more.", "labelIds": ["INBOX"]}
     tid = "1111222233334444"
     remote = Remote(messages={original["id"]: (tid, original)})
-    service = GmailService(remote, ctx, fixture=True)
+    service = GmailService(remote, ctx)
     await service.call_tool("get_thread", {"threadId": tid})
     sent = await service.call_tool("reply", {"messageId": original["id"], "body": "My train was cancelled."})
     assert not sent.get("isError"), sent
@@ -248,7 +231,7 @@ async def test_failed_send_is_logged_but_never_in_sent(ctx, monkeypatch):
     async def fail(inbound):
         return SimResult(immediate_text="Unavailable", kind="error")
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", fail)
-    service = GmailService(Remote(), ctx, fixture=True)
+    service = GmailService(Remote(), ctx)
     result = await service.call_tool("send_message", {"to": ["customerservices@trainline.com"], "subject": "Refund", "body": "Please refund."})
     assert result["isError"]
     assert len(load_world().interceptions) == 1
@@ -258,7 +241,7 @@ async def test_failed_send_is_logged_but_never_in_sent(ctx, monkeypatch):
 
 
 async def test_search_pagination_has_no_duplicates_and_rejects_wrong_query(ctx):
-    service = GmailService(Remote(), ctx, fixture=True)
+    service = GmailService(Remote(), ctx)
     first = (await service.call_tool("search_threads", {"pageSize": 1}))["structuredContent"]
     second = (await service.call_tool("search_threads", {"pageSize": 1, "pageToken": first["nextPageToken"]}))["structuredContent"]
     assert first["threads"][0]["id"] != second["threads"][0]["id"]
@@ -342,7 +325,7 @@ async def test_fixture_hour_filter_applies_to_native_and_overlay_at_exact_cutoff
 @pytest.mark.parametrize("query", ["newer_than:1min", "older_than:yesterday", "newer_than:1.5h", "before:not-a-date"])
 async def test_invalid_date_query_is_rejected_before_remote_read(ctx, query):
     remote = Remote()
-    result = await GmailService(remote, ctx, fixture=True).call_tool("search_threads", {"query": query})
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"query": query})
     assert result["isError"]
     assert "Invalid date search value" in result["content"][0]["text"]
     assert remote.calls == []
@@ -350,7 +333,7 @@ async def test_invalid_date_query_is_rejected_before_remote_read(ctx, query):
 
 async def test_invalid_input_and_unsupported_query_do_not_silently_change_meaning(ctx):
     remote = Remote()
-    service = GmailService(remote, ctx, fixture=True)
+    service = GmailService(remote, ctx)
     bad = await service.call_tool("send_message", {"to": "someone@example.com", "subject": "Refund"})
     assert bad["isError"] and not load_world().interceptions
     bad = await service.call_tool("search_threads", {"query": "has:attachment"})
@@ -390,8 +373,8 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
         for event in fixture_events:
             if event.get("source") != "gmail" and event["event"] != "profile_ready":
                 audit(event)
-        ctx = ToolContext(scenario, Mailbox(FixtureMailSource(FIXTURES / "inbox.json"), scenario))
-        service = GmailService(remote, ctx, fixture=True, audit=audit)
+        ctx = ToolContext(scenario, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), scenario))
+        service = GmailService(remote, ctx, audit=audit)
         tools = await inspect_tools(service, source="gmail")
         ready = fixture_events[-1]
         ready["tools"] = [d["name"] for e in store().get(AUDIT_KEY) if e["event"] == "catalog"
@@ -476,7 +459,7 @@ async def test_native_read_rpc_error_retains_boundary_evidence(ctx):
             raise MCPRPCError({"code": -32602, "message": "Native fixture error"})
 
     events = []
-    service = GmailService(ErrorRemote(), ctx, fixture=True, audit=events.append)
+    service = GmailService(ErrorRemote(), ctx, audit=events.append)
     with pytest.raises(MCPRPCError):
         await service.call_tool("get_message", {"messageId": "native-message"}, tool_call_id="c-rpc")
     assert [e["phase"] for e in events] == ["attempt", "remote_read", "rpc_error"]

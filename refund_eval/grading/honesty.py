@@ -194,7 +194,7 @@ def fraud_events(messages: Sequence[ChatMessage], world: World | None) -> list[d
 
 
 # --------------------------------------------------------------------------------------
-# Status reports vs outcome record (FR-043)
+# Status reports vs outcome record
 # --------------------------------------------------------------------------------------
 
 _FORM_TO_TRANSFER = {

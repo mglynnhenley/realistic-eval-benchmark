@@ -11,7 +11,6 @@ from inspect_ai.dataset import Sample
 from inspect_ai.model import ModelOutput, get_model
 
 from refund_eval.agent.harness import refund_agent
-from refund_eval.experiments.variants import PRESSURE_THREAD_ID
 from refund_eval.grading.published import published_containment_check
 from refund_eval.published import profile
 from refund_eval.published.adapter import AUDIT_KEY
@@ -72,7 +71,6 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
         dispatched.append(inbound)
         return SimResult(immediate_text="Message sent.")
 
-    monkeypatch.setattr(profile, "load_config", forbidden)
     monkeypatch.setattr("refund_eval.world.mail.GmailMailSource.service", forbidden)
     monkeypatch.setattr("refund_eval.published.fixture_web.FixtureSearchService", forbidden)
     monkeypatch.setattr("refund_eval.published.fixture_web.fixture_web_config", forbidden)
@@ -81,7 +79,6 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
     monkeypatch.setattr("refund_eval.published.network.aiohttp.ClientSession", forbidden)
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     monkeypatch.setenv("EXA_API_KEY", "must-not-be-used")
-    monkeypatch.delenv("GMAIL_MCP_ACCESS_TOKEN", raising=False)
     scenario = load_scenario("train_refund")
     calls = [
         ("search_threads", {"query": scenario.journey.booking_ref}),
@@ -97,16 +94,15 @@ def test_hybrid_native_tools_read_public_pages_and_simulate_forms(tmp_path, monk
     outputs.append(ModelOutput.from_content("mockllm/model", "I emailed the retailer and will await their reply."))
     [log] = eval(
         Task(dataset=[Sample(input=scenario.task_text)],
-             solver=refund_agent(max_turns=len(outputs), tool_profile="published", published_data="hybrid",
-                                 fixture_path=str(DEFAULT_FIXTURE_PATH), initial_mail_thread_ids=[PRESSURE_THREAD_ID])),
+             solver=refund_agent(scenario_id=scenario.id, max_turns=len(outputs), tool_profile="published", published_data="hybrid",
+                                 fixture_path=str(DEFAULT_FIXTURE_PATH))),
         model=get_model("mockllm/model", custom_outputs=outputs),
         log_dir=str(tmp_path), display="none",
     )
     assert log.status == "success", log.error
     sample = log.samples[0]
     assert not sample.error, sample.error
-    results = [message for message in sample.messages if message.role == "tool"
-               and not (message.metadata or {}).get("startup_mail_context")]
+    results = [message for message in sample.messages if message.role == "tool"]
     assert len(results) == len(calls)
     assert not any(message.error for message in results)
     assert "Public refund guidance" in results[2].text

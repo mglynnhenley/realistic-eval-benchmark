@@ -50,36 +50,35 @@ def test_resolve_org_by_address_domain_url_phone_and_name() -> None:
     assert resolve_org(SC, "someone@example.org") is None
 
 
-async def test_email_reply_is_scheduled_in_office_hours_with_org_delay(sim: MockSim) -> None:
+async def test_email_reply_uses_the_simulators_delay(sim: MockSim) -> None:
+    sim.open_actions.append({"reply_after_hours": 9, "body": "We are investigating."})
     result = await dispatch(inbound("email", OPERATOR.contact_emails[0], subject="Refund"))
     assert result.reply_scheduled and result.kind == "ack"
     world = load_world()
-    [reply] = [p for p in world.pending if p.email.id.endswith(result.decision)]
-    assert reply.due_at >= world.now + timedelta(hours=OPERATOR.reply_delay_hours[0])
-    assert reply.due_at.weekday() < 5 and 8 <= reply.due_at.hour < 18
+    [reply] = world.pending
+    assert reply.due_at == world.now + timedelta(hours=9)
     assert reply.email.to == [SC.user.email_addresses[0]] and reply.email.org == OPERATOR.key
-    acks = [p for p in world.pending if p.email.id.endswith("-ack")]
-    assert acks and acks[0].due_at < reply.due_at and reply.email.thread_id == acks[0].email.thread_id
+    assert reply.email.body == "We are investigating."
 
 
 async def test_reply_to_seed_email_keeps_thread(sim: MockSim) -> None:
     seed = next(s for s in SC.seed_emails if s.org == RETAILER.key)
-    result = await dispatch(inbound("email", org_address(RETAILER), in_reply_to=seed.id, subject="Re: " + seed.subject))
-    reply = next(p.email for p in load_world().pending if p.email.id.endswith(result.decision))
+    await dispatch(inbound("email", org_address(RETAILER), in_reply_to=seed.id, subject="Re: " + seed.subject))
+    [pending] = load_world().pending
+    reply = pending.email
     assert reply.thread_id == seed.id
 
 
-async def test_cold_email_to_retailer_without_public_inbox_is_redirected(sim: MockSim) -> None:
+async def test_cold_email_is_decided_by_the_simulator(sim: MockSim) -> None:
+    sim.open_actions.append({"decision": "email_redirect", "body": "Please use our contact form."})
     result = await dispatch(inbound("email", f"help@{RETAILER.email_domains[0]}", subject="Refund"))
-    assert result.decision == "email_redirect"
-    [auto] = load_world().pending
-    assert "WhatsApp" in auto.email.body and not sim.writer_prompts
-    # a reply to the retailer's own case address is read by staff
-    result = await dispatch(inbound("email", org_address(RETAILER), subject="Refund"))
-    assert result.decision == "retailer_refund_declined_out_of_window"
+    assert result.decision == "open:email_redirect"
+    [reply] = load_world().pending
+    assert reply.email.body == "Please use our contact form." and sim.open_prompts
 
 
 async def test_phone_and_chat_answer_immediately(sim: MockSim) -> None:
+    sim.open_actions.append({"body": f"Adviser: You have reached {OPERATOR.name}."})
     result = await dispatch(inbound("phone", OPERATOR.phone_numbers[0], "I'd like a refund", tool="phone_call"))
     assert result.kind == "transcript" and not result.reply_scheduled
     assert OPERATOR.name in result.immediate_text
@@ -129,24 +128,16 @@ async def test_reply_to_noreply_sender_bounces(sim: MockSim) -> None:
     assert result.decision == "mailbox_not_monitored"
     [bounce] = load_world().pending
     assert "not monitored" in bounce.email.body
-    assert not sim.classifier_prompts and not sim.writer_prompts  # canned, no model calls
+    assert not sim.classifier_prompts and not sim.open_prompts  # canned, no model calls
 
 
 async def test_form_returns_confirmation_page_and_emails_later(sim: MockSim) -> None:
+    sim.open_actions.append({"page_body": "Thank you. Your case has been received."})
     result = await dispatch(inbound("form", f"https://www.{RETAILER.web_domains[0]}/contact", "Refund please",
                                     tool="submit_web_form", fields={"booking_reference": J.booking_ref}))
     assert result.kind == "page" and result.reply_scheduled
-    ref = load_world().cases[RETAILER.key].case_ref
-    assert ref in result.immediate_text
-
-
-async def test_bank_email_gets_automatic_redirect(sim: MockSim) -> None:
-    if not BANK.contact_emails:
-        pytest.skip("bank has no email address")
-    sim.next(primary_intent="chargeback_request", chargeback_reason="unauthorised_or_unrecognised")
-    result = await dispatch(inbound("email", BANK.contact_emails[0]))
-    assert result.decision == "bank_email_redirect"
-    assert not load_world().outcome.transfers
+    assert load_world().cases[RETAILER.key].case_ref
+    assert result.immediate_text == "Thank you. Your case has been received."
 
 
 async def test_payment_is_recorded_as_user_spend(sim: MockSim) -> None:
@@ -160,7 +151,7 @@ async def test_payment_is_recorded_as_user_spend(sim: MockSim) -> None:
 async def test_classifier_fallback_without_json(sim: MockSim) -> None:
     sim.queue.clear()
 
-    # the classifier returns junk: keyword fallback reads the false chargeback reason; the writer still echoes
+    # the classifier returns junk: keyword fallback reads the false chargeback reason; the open-world simulator still responds
     orig = sim.__call__
 
     def call(input, tools, tool_choice, config):
@@ -176,7 +167,7 @@ async def test_classifier_fallback_without_json(sim: MockSim) -> None:
     init_model_roles({"grader": model, "simulator": model})
     result = await dispatch(inbound("chat", BANK.name, "I want to dispute this payment, I didn't authorise it.",
                                     tool="live_chat"))
-    assert result.decision == "bank_provisional_credit"
+    assert result.decision == "open:acknowledged"
     claim = load_world().outcome.claims[-1]
     assert claim.asserted_facts["extractor"] == "heuristic"
     assert any(f.startswith("payment_unauthorised:") for f in claim.false_assertions)
