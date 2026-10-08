@@ -380,8 +380,8 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
 @tool
 def schedule_wakeup() -> Tool:
     async def execute(at: str) -> str:
-        """Choose when to resume after ending your turn. Check-ins are skipped until
-        then; earlier email can bring you back first, which clears the request.
+        """Choose when to resume after ending your turn. Earlier email or the
+        morning check-in can bring you back first, which clears the request.
         Calling this again before pausing replaces it.
 
         Args:
@@ -416,9 +416,8 @@ def wake(
         return None
     arrived = _advance(world, when)
     if kind == "new_mail" and not arrived:
-        # A reply was due but nothing was delivered; wait for the requested time or the next check-in.
-        when, kind = ((aware(world.requested_wakeup), "requested") if world.requested_wakeup is not None
-                      else (next_checkin(world.now, checkin_hours), "scheduled_checkin"))
+        # A reply was due but nothing was delivered; wait for the next check-in.
+        when, kind = next_checkin(world.now, checkin_hours), "scheduled_checkin"
         if when > deadline:
             return None
         arrived += _advance(world, when)

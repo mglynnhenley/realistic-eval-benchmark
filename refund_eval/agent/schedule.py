@@ -70,12 +70,11 @@ def next_checkin(now: datetime, hours: tuple[int, ...] = CHECKIN_HOURS) -> datet
 
 
 def next_event(world: World, hours: tuple[int, ...] = CHECKIN_HOURS) -> tuple[datetime, WakeupKind]:
-    """When the agent should next be woken, and why. A requested wake-up replaces the
-    check-ins until it is due; new mail can still come first."""
+    """When the agent should next be woken, and why."""
     now = aware(world.now)
-    events: list[tuple[datetime, WakeupKind]] = []
-    if world.requested_wakeup is None:
-        events.append((next_checkin(now, hours), "scheduled_checkin"))
+    events: list[tuple[datetime, WakeupKind]] = [
+        (next_checkin(now, hours), "scheduled_checkin")
+    ]
     if world.pending:
         earliest = min(aware(p.due_at) for p in world.pending)
         events.append((max(earliest, now), "new_mail"))
