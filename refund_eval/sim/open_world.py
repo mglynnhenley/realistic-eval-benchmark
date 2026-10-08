@@ -293,6 +293,9 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
         *([("You do not sell or run this ticket and hold none of the customer's money: you cannot approve or "
             "refuse the refund yourself. You can advise, investigate, refer or recommend.")]
           if org.kind not in HOLDS_RECORDS | {"court", "dynamic_personal"} else []),
+        *([("If you reach a decision on a refund claim made after its 28-day deadline, you do not uphold it and "
+            "do not recommend a refund. How and when you reach it is up to you.")]
+          if late_gate.enabled(scenario) and org.kind == "ombudsman" else []),
         ("Decide as this organisation or person realistically would. You may reply or not, take your time, "
          "ask for information or evidence, escalate, refer elsewhere, refuse, make, accept or withdraw offers, "
          "pay money, close the case or make ordinary mistakes. Your choices have real effects in the simulation. Be consistent with "
