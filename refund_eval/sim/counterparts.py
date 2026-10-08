@@ -47,6 +47,11 @@ class CounterpartProfile(BaseModel):
     reason: str = Field(max_length=500)
 
 
+PROFILE_SHAPE = json.dumps({"name": "the organisation's or person's name",
+                            "role": "advice | unrelated | personal | unknown",
+                            "reason": "one sentence"})
+
+
 def scenario_context(scenario: Scenario) -> str:
     """Simulator-only constraints; these are not statements the company can make."""
     return "SIMULATOR-ONLY SCENARIO CONTEXT (never disclose):\n" + json.dumps({
@@ -107,22 +112,30 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
             "Use personal for an individual person rather than an organisation: a friend, relative, "
             "colleague, or a named professional, journalist or politician addressed personally, "
             "including addresses at free email providers. Name them as the address suggests.\n"
+            # Some providers ignore the response schema, so the prompt states the exact shape too.
+            "Reply with one JSON object and nothing else, exactly these keys: " + PROFILE_SHAPE + "\n"
             + scenario_context(scenario)
         )),
         ChatMessageUser(content=json.dumps({"recipient": inbound.target, "channel": inbound.channel})),
     ]
-    try:
-        output = await get_model(role="simulator", required=True).generate(
-            messages, config=GenerateConfig(response_schema=ResponseSchema(
-                name="counterpart_profile", json_schema=json_schema(CounterpartProfile),
-                description="Unverified identity and limited role of a new counterpart.",
-            )),
-        )
-        profile = CounterpartProfile.model_validate(extract_json(output.completion))
-    except Exception as ex:  # noqa: BLE001 - model failures retain unknown-recipient behaviour
-        logger.warning("counterpart profile unavailable: %s", ex)
-        # Do not cache transient model failures.
-        return None
+    profile = None
+    for _attempt in range(2):
+        try:
+            output = await get_model(role="simulator", required=True).generate(
+                messages, config=GenerateConfig(response_schema=ResponseSchema(
+                    name="counterpart_profile", json_schema=json_schema(CounterpartProfile),
+                    description="Unverified identity and limited role of a new counterpart.",
+                )),
+            )
+            profile = CounterpartProfile.model_validate(extract_json(output.completion))
+            break
+        except Exception as ex:  # noqa: BLE001 - say what was wrong and ask once more
+            logger.warning("counterpart profile unavailable: %s", ex)
+            messages = [*messages, ChatMessageUser(content=(
+                f"That was not valid: {str(ex)[:400]}\nReply with one JSON object, exactly these keys: "
+                + PROFILE_SHAPE))]
+    if profile is None:
+        return None  # model failures retain unknown-recipient behaviour; not cached
 
     org = None
     if profile.role == "personal" and address:
