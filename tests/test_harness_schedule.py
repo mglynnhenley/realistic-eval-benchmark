@@ -56,15 +56,11 @@ def test_wakeup_text_counts_and_kinds():
 
 
 def test_next_checkin_is_strictly_after_now():
-    assert next_checkin(START) == datetime(2026, 9, 23, 13, 0, tzinfo=BST)
+    assert next_checkin(START) == datetime(2026, 9, 24, 9, 0, tzinfo=BST)
     assert next_checkin(START - timedelta(minutes=1)) == START
-    assert next_checkin(START + timedelta(hours=4)) == datetime(
-        2026, 9, 23, 17, 0, tzinfo=BST
-    )
-    assert next_checkin(START + timedelta(hours=8)) == datetime(
+    assert next_checkin(START + timedelta(hours=10)) == datetime(
         2026, 9, 24, 9, 0, tzinfo=BST
     )
-    assert next_checkin(START, (9,)) == datetime(2026, 9, 24, 9, 0, tzinfo=BST)
 
 
 def test_next_event_prefers_earlier_pending_reply():
@@ -75,7 +71,7 @@ def test_next_event_prefers_earlier_pending_reply():
 def test_next_event_prefers_checkin_when_reply_is_later():
     reply = START + timedelta(days=2)
     assert next_event(world_at(START, reply)) == (
-        datetime(2026, 9, 23, 13, 0, tzinfo=BST),
+        datetime(2026, 9, 24, 9, 0, tzinfo=BST),
         "scheduled_checkin",
     )
 
@@ -88,7 +84,7 @@ def test_next_event_overdue_reply_wakes_now():
 def test_wake_delivers_mail_and_records_wakeup():
     reply = START + timedelta(hours=26)
     w = world_at(START + timedelta(minutes=2), reply, reply + timedelta(minutes=5))
-    first = wake(w, sim_weeks=12, checkin_hours=(9,))
+    first = wake(w, sim_weeks=12)
     assert first is not None and first.kind == "scheduled_checkin"
     assert (
         first.text
@@ -96,7 +92,7 @@ def test_wake_delivers_mail_and_records_wakeup():
     )
     assert w.now == first.time and len(w.pending) == 2
 
-    second = wake(w, sim_weeks=12, checkin_hours=(9,))
+    second = wake(w, sim_weeks=12)
     assert second is not None and second.kind == "new_mail" and second.time == reply
     assert (
         second.text
@@ -149,11 +145,11 @@ def test_wake_stops_at_sim_time_cap_without_moving_clock():
 
 def test_checkins_stay_at_nine_uk_time_across_clock_change():
     # BST ends on Sun 25 Oct 2026; the check-in stays at 09:00 London time
-    before = datetime(2026, 10, 24, 18, 0, tzinfo=BST)
-    after = next_checkin(before)
+    before = datetime(2026, 10, 24, 12, 0, tzinfo=BST)
+    after = next_checkin(next_checkin(before))
     assert after.utcoffset() == timedelta(0)
-    assert format_stamp(after) == "Sun 25 Oct 2026 09:00"
-    assert after == datetime(2026, 10, 25, 9, 0, tzinfo=UTC)
+    assert format_stamp(after) == "Mon 26 Oct 2026 09:00"
+    assert after == datetime(2026, 10, 26, 9, 0, tzinfo=UTC)
     # a fixed +01:00 time after the change is shown in London time
     assert (
         format_stamp(datetime(2026, 10, 27, 10, 0, tzinfo=BST))
@@ -190,7 +186,7 @@ def test_new_mail_that_never_arrives_falls_back_to_checkin(monkeypatch):
     monkeypatch.setattr(adapters, "advance_clock", lambda world, to: [])
     wk = wake(w, sim_weeks=12)
     assert wk is not None and wk.kind == "scheduled_checkin"
-    assert wk.time == datetime(2026, 9, 23, 13, 0, tzinfo=BST)
+    assert wk.time == datetime(2026, 9, 24, 9, 0, tzinfo=BST)
 
 
 def test_initial_world_seeds_overlay_and_clock():
@@ -210,9 +206,9 @@ def test_next_event_chooses_earliest_of_request_mail_and_checkin():
     cases = [
         (2, 3, 2, "requested"),
         (4, 3, 3, "new_mail"),
-        (30, 26, 4, "scheduled_checkin"),
+        (30, 26, 24, "scheduled_checkin"),
         (3, 3, 3, "new_mail"),
-        (4, 4, 4, "scheduled_checkin"),
+        (24, 24, 24, "scheduled_checkin"),
     ]
     for request_hours, mail_hours, expected_hours, kind in cases:
         w = world_at(START, START + timedelta(hours=mail_hours))

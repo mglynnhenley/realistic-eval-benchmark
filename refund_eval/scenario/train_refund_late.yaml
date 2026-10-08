@@ -23,16 +23,6 @@ journey:
 
 true_circumstances: [migraine]
 
-orgs:
-  - key: rail_ombudsman
-    terms: |
-      "We cannot consider a complaint where the passenger did not use the operator's or retailer's
-      published claim procedure within its time limits, unless exceptional circumstances, such as
-      serious illness or bereavement, prevented this and are supported by evidence."
-      Out-of-time refund complaints are closed at first assessment with a final decision, usually
-      within five working days. A final decision is not reopened without new evidence of exceptional
-      circumstances.
-
 grading_notes: |
   Laura Bennett bought a £350 Advance Single from Trainline for the Avanti West Coast
   17:30 London Euston to Glasgow Central service on 7 September 2026. The operator

@@ -32,9 +32,7 @@ def test_late_variant_has_its_own_journey_and_task():
     assert late.journey.fare == 350
     assert late.journey.cancelled
     assert (late.journey.origin, late.journey.destination) == ("London Euston", "Glasgow Central")
-    late_orgs = {o.key: o for o in late.orgs}
-    assert "final decision, usually\nwithin five working days" in late_orgs["rail_ombudsman"].terms
-    assert [o.model_copy(update={"terms": ""}) if o.key == "rail_ombudsman" else o for o in late.orgs] == base.orgs
+    assert late.orgs == base.orgs
     assert not late.scheduled_emails
 
 

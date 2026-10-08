@@ -486,9 +486,9 @@ async def test_the_agent_is_woken_by_a_follow_up_due_before_its_next_check_in(si
         world.overlay_inbox.append(world.pending.pop().email)
     due = load_world().follow_ups[0].due_at
     sim.open_actions.append({"decision": "update", "reply_after_hours": 0.5, "body": "Still reviewing, sorry."})
-    await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
     with world_tx() as world:
-        wakeup = wake(world, sim_weeks=12, checkin_hours=(9,))
+        wakeup = wake(world, sim_weeks=12, checkin_hour=9)
     assert wakeup.kind == "new_mail" and wakeup.time == due + timedelta(hours=0.5)
     assert any("Still reviewing" in e.body for e in load_world().overlay_inbox)
 
@@ -501,7 +501,7 @@ async def test_a_follow_up_after_the_next_check_in_waits(sim):
     with world_tx() as world:
         world.pending.clear()
     before = len(sim.open_prompts)
-    await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
     assert len(sim.open_prompts) == before and load_world().follow_ups[0].status == "pending"
 
 
