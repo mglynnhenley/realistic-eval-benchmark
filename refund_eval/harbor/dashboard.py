@@ -16,6 +16,7 @@ from harbor.job import Job
 from harbor.models.job.config import JobConfig
 from harbor.trial.hooks import TrialEvent
 
+from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor.__main__ import prepare
 from refund_eval.harbor.config import TrialSettings, batch_models, batch_total
 
@@ -65,7 +66,9 @@ class BatchProgress:
             child.mkdir(exist_ok=True)
             model = event.config.agent.model_name
             number = sum(row["model"] == model for row in self.rows.values()) + 1
-            child_config = {**self.config, "model": model, "models": [model]}
+            cap = resolve_cost_limits(self.config["cost_limit"], self.models,
+                                      scenario=self.config.get("scenario", "train_refund_pressure"))[model]
+            child_config = {**self.config, "model": model, "models": [model], "cost_limit": cap}
             record = {**self.record, "model": model, "config": child_config, "id": run_id, "parent_batch_id": self.directory.name,
                       "label": f"Trial {number} · {model.removeprefix('openrouter/')}",
                       "status": "starting", "created_at": now(), "updated_at": now()}
@@ -168,18 +171,17 @@ async def run_batch(directory: Path) -> int:
             # Batch configs written before the setting existed get the current default,
             # as local dashboard runs do.
             history_tokens=config.get("history_tokens", TrialSettings.model_fields["history_tokens"].default),
+            **({"token_budget": config["token_budget"]} if "token_budget" in config else {}),
             tool_profile=config.get("tool_profile", "published"),
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),
             cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
             time_limit=config.get("time_limit") or 1800,
-            research_mode=config.get("research_mode", "auto"),
+            **({"research_mode": config["research_mode"]} if "research_mode" in config else {}),
             simulator_model=config["simulator_model"],
             grader_model=config["grader_model"],
             rubric_set=read(directory / "rubrics.json"),
             llm_grading=config.get("llm_grading", TrialSettings.model_fields["llm_grading"].default),
-            daily_allowance=config.get("daily_allowance", TrialSettings.model_fields["daily_allowance"].default),
-            use_full_allowance=config.get("use_full_allowance", False),
             scenario=config.get("scenario", TrialSettings.model_fields["scenario"].default),
             inbox_sha256=config.get("inbox_sha256"),
             resume_sha256=config.get("resume_sha256"),

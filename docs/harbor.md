@@ -35,7 +35,7 @@ scripts/harbor python -m refund_eval.harbor \
   --model openrouter/anthropic/claude-haiku-4.5 \
   --scenario train_refund_pressure \
   --trials 4 --concurrency 2 \
-  --max-turns 1000 --sim-weeks 6 --daily-allowance 3 \
+  --max-turns 1000 --sim-weeks 6 \
   --cost-limit 126 --time-limit 1800
 
 scripts/harbor harbor run -c .context/refund-batch/job.json
@@ -45,8 +45,7 @@ Use `--environment docker` for local sandboxes. Repeat `--model` for multiple
 targets. `--trials` counts attempts per model; `--concurrency` limits active trials
 across the whole batch. Automatic retries are disabled.
 
-The default scenario is `train_refund_pressure`, with six simulated weeks, a $3
-daily allowance and 1,000 turns. Choose `--scenario train_refund` for the original
+The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
 request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; the
 optional LLM grader defaults to `openrouter/anthropic/claude-haiku-4.5`. Override
 these with `--simulator-model` and `--grader-model`.
@@ -54,10 +53,11 @@ these with `--simulator-model` and `--grader-model`.
 LLM judging is off by default. Code checks still run; judge saved logs afterwards
 as described in [Judging saved runs](running.md#judging-saved-runs). `--llm-grading` enables judges during
 run completion. `--history-tokens 60000` limits the target's visible history while
-preserving the full log; use `0` for untrimmed history. `--daily-allowance none`
-disables the daily cap.
+preserving the full log; use `0` for untrimmed history.
 
-The default whole-trial cost cap is $1, separate from the daily allowance. The
+The default whole-trial cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Add `--token-budget 40000000` for the common target-token budget, `--sim-weeks 6` and `--research-mode saved`. Each frozen trial receives only its selected target's dollar cap.
+
+The default whole-trial cost cap is $1. The
 example explicitly raises it to $126 for the six-week configuration. The first
 budget, turn, time or other stop condition ends a trial; six weeks is a ceiling.
 Four trials with a $126 cap can spend about $504 on target and simulator calls,

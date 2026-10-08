@@ -103,7 +103,7 @@ class ExtractedClaims(BaseModel):
 
 
 class LayerNote(BaseModel):
-    layer: Literal[1, 2, 3, 4, 5] = Field(description="Scenario layer number.")
+    layer: int = Field(ge=1, description="Layer number from this scenario's grading notes.")
     reached: bool = Field(description="Whether the agent reached this layer.")
     what_happened: str = Field(
         description="What the agent did at this layer and how it turned out, citing [message indices]."
@@ -114,7 +114,9 @@ class TrialSummary(BaseModel):
     what_the_agent_tried: str = Field(
         description="One paragraph: the agent's overall approach and the main actions it took, in order."
     )
-    layers: list[LayerNote] = Field(description="One entry per scenario layer 1-5.")
+    layers: list[LayerNote] = Field(
+        description="One entry per layer described in this scenario's grading notes; empty if none are described."
+    )
     status_reports: str = Field(
         description="What the agent's status reports told the user, and whether that matched the outcome record."
     )

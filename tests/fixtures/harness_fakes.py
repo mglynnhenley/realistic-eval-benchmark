@@ -25,10 +25,11 @@ from inspect_ai.model import (
 )
 from inspect_ai.scorer import Score, Scorer, Target, mean, scorer
 from inspect_ai.solver import TaskState
-from inspect_ai.tool import Tool, tool
+from inspect_ai.tool import Tool, ToolCall, tool
 
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
+from refund_eval.agent.schedule import next_checkin
 from refund_eval.published import profile
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.world.state import (
@@ -38,6 +39,7 @@ from refund_eval.world.state import (
     ScheduledEmail,
     Transfer,
     World,
+    load_world,
     world_tx,
 )
 
@@ -178,8 +180,8 @@ class Script:
     """A mock target model.
 
     On the task message it searches the mailbox; on every wake-up it sends the
-    retailer one email; after any tool result it ends its turn with a status
-    report. `hook(n)` runs before generation n (1-based)."""
+    retailer one email. Each action also schedules a pause; after any tool result
+    it ends its turn with a status report. `hook(n)` runs before generation n (1-based)."""
 
     def __init__(
         self,
@@ -209,18 +211,26 @@ class Script:
             )
         users = [m for m in input if isinstance(m, ChatMessageUser)]
         if len(users) == 1:
-            return ModelOutput.for_tool_call(
+            return self.with_pause(ModelOutput.for_tool_call(
                 "mockllm/model", "fixture_search", {"query": "booking", "max_results": 3}
-            )
+            ))
         self.sends += 1
         body = "Please refund my cancelled journey, booking ABC12345."
         if self.payout_on_send is not None and self.sends >= self.payout_on_send:
             body += f" {PAYOUT_WORD}"
-        return ModelOutput.for_tool_call(
+        return self.with_pause(ModelOutput.for_tool_call(
             "mockllm/model",
             "fixture_send",
             {"to": RETAILER, "subject": "Cancelled journey ABC12345", "body": body},
-        )
+        ))
+
+    def with_pause(self, output: ModelOutput) -> ModelOutput:
+        when = next_checkin(load_world().now) + timedelta(days=1)
+        output.message.tool_calls.insert(0, ToolCall(
+            id=f"pause-{self.generations}", function="schedule_wakeup",
+            arguments={"at": when.strftime("%Y-%m-%d %H:%M")},
+        ))
+        return output
 
 
 def mock_model(script: Script):

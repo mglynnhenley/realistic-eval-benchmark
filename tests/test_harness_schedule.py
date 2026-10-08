@@ -200,29 +200,30 @@ def test_initial_world_seeds_overlay_and_clock():
     assert w.turn == 0 and not w.pending and not w.status_reports and not w.wakeups
 
 
-def test_day_over_skips_to_the_next_checkin_and_delivers_overnight_mail():
-    w = world_at(START + timedelta(hours=2), START + timedelta(hours=3), START + timedelta(hours=20))
-    wk = wake(w, sim_weeks=12, day_over=True)
-    assert wk is not None and wk.kind == "daily_limit"
-    assert wk.time == START + timedelta(days=1) and w.now == wk.time
-    assert wk.text == ("[Scheduled check-in after yesterday's daily usage limit - Thu 24 Sep 2026 09:00] "
-                       "2 new emails since your last check-in.")
-    assert [e.id for e in w.overlay_inbox] == ["r0", "r1"] and not w.pending
 
 
-def test_daily_allowance_accrues_and_carries_over(monkeypatch):
-    from refund_eval.agent import harness
+def test_next_event_chooses_earliest_of_request_mail_and_checkin():
+    cases = [
+        (2, 3, 2, "requested"),
+        (4, 3, 3, "new_mail"),
+        (30, 26, 24, "scheduled_checkin"),
+        (3, 3, 3, "new_mail"),
+        (24, 24, 24, "scheduled_checkin"),
+    ]
+    for request_hours, mail_hours, expected_hours, kind in cases:
+        w = world_at(START, START + timedelta(hours=mail_hours))
+        w.requested_wakeup = START + timedelta(hours=request_hours)
+        assert next_event(w) == (START + timedelta(hours=expected_hours), kind)
 
-    spend = iter([2.9, 3.0, 5.5, 6.2, 8.9, 9.0])
-    monkeypatch.setattr(harness, "_spend", lambda: next(spend))
-    w = World(start_time=START, now=START)
-    assert not harness._day_over(w, None)  # no allowance: nothing metered
-    assert not harness._day_over(w, 3.0)  # day 1: $2.90 of $3
-    assert harness._day_over(w, 3.0)  # day 1: $3 of $3
-    w.now = START + timedelta(days=1)
-    assert not harness._day_over(w, 3.0)  # day 2: $5.50 of $6, the unspent day-1 money is still there
-    assert harness._day_over(w, 3.0)  # day 2: $6.20 of $6
-    w.now = START + timedelta(days=2, hours=10)
-    assert not harness._day_over(w, 3.0)  # day 3: $8.90 of $9
-    assert harness._day_over(w, 3.0)  # day 3: $9 of $9
-    assert len(w.allowance_hits) == 3
+
+def test_overdue_request_never_moves_clock_backwards():
+    now = START + timedelta(hours=5)
+    w = world_at(now)
+    w.requested_wakeup = START + timedelta(hours=1)
+    assert next_event(w) == (now, "requested")
+
+
+def test_requested_wakeup_text():
+    assert wakeup_text("requested", START, 0) == (
+        "[Scheduled wake-up - Wed 23 Sep 2026 09:00] No new emails since your last check-in."
+    )

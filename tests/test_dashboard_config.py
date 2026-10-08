@@ -61,6 +61,75 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
     assert all(set(org) == {"key", "name", "kind"} for org in organisations)
 
 
+def test_each_scenario_choice_carries_its_own_fare():
+    fares = {item["name"]: item["fare"] for item in server.public_config()["scenarios"]}
+    assert fares["train_refund_late"] == 350.0
+    assert fares["train_refund_pressure"] != fares["train_refund_late"]
+
+
+def test_scenario_picker_loads_api_choices_before_presets_and_preserves_selection():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to exercise dashboard scenario selection")
+    picker = re.search(r'<select[^>]*id="scenario"[^>]*>(.*?)</select>', (STATIC / "index.html").read_text()).group(1)
+    assert "<option" not in picker
+    config = server.public_config()
+    config["scenarios"].append({"name": "foo", "label": "New <refund> & complaint"})
+    result = subprocess.run(
+        [node, "-e", """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const config = JSON.parse(fs.readFileSync(0, 'utf8'));
+class Select {
+  options = [];
+  selected = '';
+  get value() { return this.selected; }
+  set value(value) { this.selected = this.options.some((item) => item.value === value) ? value : ''; }
+  replaceChildren(...options) { this.options = options; this.selected = options[0]?.value || ''; }
+  add(option) { this.options.push(option); }
+}
+const elements = new Map([['scenario', new Select()], ['inbox-snapshot', new Select()]]);
+const $ = (id) => {
+  if (!elements.has(id)) elements.set(id, {value: ''});
+  return elements.get(id);
+};
+$('run-preset').value = 'default';
+const context = {
+  state: {}, $, request: async () => config,
+  Option: function(text, value) { this.text = text; this.value = value; },
+  money: String, runScenario: () => ({}), updateProfileStatus() {}, renderWorldSummary() {}, updatePresetHelp() {},
+  window: {setTimeout() { throw Error('Configuration loading failed'); }},
+};
+const source = fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8');
+// Execute the actual config and preset functions with select elements that reject missing options.
+const load = source.slice(source.indexOf('  async function loadConfig() {'), source.indexOf('  function updateBehaviourControls() {'));
+const preset = source.slice(source.indexOf('  function applyRunPreset() {'), source.indexOf('  const selectedModels ='));
+vm.runInNewContext(load + preset, context);
+(async () => {
+  await context.loadConfig();
+  const initial = {value: $('scenario').value, options: [...$('scenario').options]};
+  $('scenario').value = 'foo';
+  config.scenarios.find((item) => item.name === 'foo').label = 'Updated label';
+  await context.loadConfig();
+  const refreshed = {value: $('scenario').value, options: [...$('scenario').options]};
+  config.scenarios = config.scenarios.filter((item) => item.name !== 'foo');
+  await context.loadConfig();
+  process.stdout.write(JSON.stringify({initial, refreshed, removed: $('scenario').value}));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""],
+        input=json.dumps(config), capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
+    )
+    output = json.loads(result.stdout)
+    default = next(item for item in config["run_presets"] if item["name"] == "default")["settings"]["scenario"]
+    assert output["initial"]["value"] == default
+    assert output["initial"]["options"] == [
+        {"text": item["label"], "value": item["name"]} for item in config["scenarios"]
+    ]
+    assert output["refreshed"]["value"] == "foo"
+    assert {"text": "Updated label", "value": "foo"} in output["refreshed"]["options"]
+    assert output["removed"] == config["model_defaults"]["scenario"]
+
+
 def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
@@ -265,7 +334,9 @@ def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, 
     preset = server.RunConfig.model_validate(presets["default"])
     assert (preset.max_turns, preset.cost_limit, preset.sim_weeks) == (1000, 1, 6)
     assert preset.scenario == "train_refund_pressure"
-    assert preset.daily_allowance == 3 and not preset.llm_grading
+    assert not preset.llm_grading
+    assert "daily_allowance" not in preset.model_dump()
+    assert "use_full_allowance" not in preset.model_dump()
     assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
     assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
     assert preset.model == model

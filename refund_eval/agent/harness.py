@@ -12,11 +12,13 @@ generation's tool calls have run). Here it:
 3. stops the trial if the kill switch is on, the user has been paid a full cash
    refund, the turn cap is reached, or the next event is past the simulated-time
    cap (world.stop_reason says which);
-4. otherwise, when the model stopped calling tools, advances the simulated
-   clock to the next event (earliest pending reply, or the next 09:00
-   check-in), delivers due mail, records a Wakeup, and resumes the agent
-   with a neutral wake-up message. Nothing reacts to what
-   the agent wrote.
+4. otherwise, when the model stopped calling tools with a requested wake-up,
+   advances to the earliest of that time, pending mail or the next 09:00
+   check-in. Without a request, tells it to continue without advancing time.
+
+With a target token budget, BudgetedModel adds a runtime notice before each
+generation and records provider usage before tools run. It stops immediately
+after the final paid generation, preserving any budget overrun in the World.
 
 The kill switch is also checked before the first model call and before
 every tool call, so no tool runs once it is on.
@@ -31,20 +33,44 @@ from __future__ import annotations
 
 import inspect as pyinspect
 import logging
-from datetime import date, datetime
+from asyncio import CancelledError
+from datetime import datetime
 from typing import Any, get_type_hints
 
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
-from inspect_ai.model import ChatMessage, ChatMessageUser, CompactionTrim, Model
-from inspect_ai.tool import Tool, ToolDef, ToolInfo, memory
-from inspect_ai.util import LimitExceededError, sample_limits, store
+from inspect_ai.model import (
+    ChatMessage,
+    ChatMessageAssistant,
+    ChatMessageTool,
+    ChatMessageUser,
+    CompactionTrim,
+    Model,
+    get_model,
+)
+from inspect_ai.tool import (
+    Tool,
+    ToolCallError,
+    ToolDef,
+    ToolError,
+    ToolInfo,
+    memory,
+    tool,
+)
+from inspect_ai.util import LimitExceededError, store
 
 from refund_eval.agent import adapters
+from refund_eval.agent.budget import (
+    HARNESS_METADATA,
+    BudgetedModel,
+    TokenBudgetReached,
+    prepare_ledger,
+    runtime_notice,
+)
 from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import (
     CHECKIN_HOUR,
+    LONDON,
     aware,
-    london_day,
     new_mail_count,
     next_checkin,
     next_event,
@@ -80,6 +106,7 @@ STOP_SIM_TIME_CAP = "sim_time_cap"
 STOP_CONTEXT_WINDOW = "context_window"
 STOP_CONTENT_FILTER = "content_filter"
 STOP_LOOP_ENDED = "loop_ended"
+STOP_CANCELLED = "cancelled"
 
 # Wake-up messages carry this metadata (never sent to the model) so graders
 # and scanners can tell them apart from the one real user message.
@@ -145,6 +172,53 @@ def initial_world(scenario: Scenario) -> World:
 RESUMED_KEY = "resumed_from"
 
 
+def _repair_interrupted_tools(messages: list[ChatMessage]) -> tuple[list[ChatMessage], list[str]]:
+    """Close missing tool results in a resumed transcript without executing them.
+
+    A cancellation can leave an assistant's parallel tool calls only partly
+    resolved, followed by the final runtime notice. Insert explicit unknown
+    outcomes before that notice (or any next non-tool message), retaining real
+    results and making no claims about how far an interrupted action progressed.
+    """
+    repaired: list[ChatMessage] = []
+    repaired_ids: list[str] = []
+    pending = {}
+
+    def finish_pending() -> None:
+        for call in pending.values():
+            text = ("This tool call was interrupted before a result was recorded. "
+                    "Its outcome is unknown: it may have partially run. Recovery does not "
+                    "retry external actions. Inspect the current state before deciding whether to retry.")
+            repaired.append(ChatMessageTool(
+                tool_call_id=call.id, function=call.function, content=text,
+                error=ToolCallError("cancelled", text),
+                metadata={HARNESS_METADATA: "interrupted_tool"},
+            ))
+            repaired_ids.append(call.id)
+        pending.clear()
+
+    for message in messages:
+        if isinstance(message, ChatMessageTool):
+            pending.pop(message.tool_call_id, None)
+        else:
+            finish_pending()
+        repaired.append(message)
+        if isinstance(message, ChatMessageAssistant):
+            pending.update({c.id: c for c in message.tool_calls or []})
+    finish_pending()
+    return repaired, repaired_ids
+
+
+def _validate_resume_dossiers(world: World, saved: dict) -> None:
+    # A late trial's refusals were grounded in these exact pinned records.
+    # Re-reading today's saved source silently changes the resumed experiment.
+    contacted = {c.org for c in world.outcome.claims if c.decision.startswith("open:late_")}
+    pinned = saved.get("late_refund_frozen_dossiers") or {}
+    if contacted - pinned.keys():
+        raise ValueError("Cannot resume this late-refund trial without its frozen dossiers; "
+                         "use the original .eval log containing late_refund_frozen_dossiers.")
+
+
 def restore_trial(log_path: str) -> list[ChatMessage]:
     """Restore an earlier trial from its log so it can continue: every sample-store entry
     (world, company cases and dossiers, temperaments, the agent's memory notes, tool audit)
@@ -156,6 +230,7 @@ def restore_trial(log_path: str) -> list[ChatMessage]:
     if not log.samples:
         raise ValueError(f"No trial to resume in {log_path}")
     sample = log.samples[0]
+    _validate_resume_dossiers(World.model_validate(sample.store[WORLD_KEY]), sample.store)
     for key, value in sample.store.items():
         store().set(key, value)
     with world_tx() as world:
@@ -163,8 +238,8 @@ def restore_trial(log_path: str) -> list[ChatMessage]:
         world.stop_reason, world.killed = None, False
         resumed = {"log": str(log_path), "turn": world.turn, "sim_time": world.now.isoformat(),
                    "previous_stop": stopped, "previous_limit": sample.limit.type if sample.limit else None}
+    messages, resumed["interrupted_tool_calls"] = _repair_interrupted_tools(list(sample.messages))
     store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
-    messages = list(sample.messages)
     if messages and messages[0].role == "system":
         messages = messages[1:]
     logger.info("Resuming %s at turn %s (%s)", log_path, resumed["turn"], resumed["sim_time"])
@@ -187,10 +262,11 @@ async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
     snap = json.loads(Path(snapshot_path).read_text())
     if not snap.get("world") or not snap.get("messages"):
         raise ValueError(f"No trial to resume in {snapshot_path}")
+    extra = snap.get("resume_state") or {}
+    _validate_resume_dossiers(World.model_validate(snap["world"]), extra)
     messages = [TypeAdapter(ChatMessage).validate_python(m) for m in snap["messages"]]
     store().set(WORLD_KEY, snap["world"])
     store().set(REGISTRY_KEY, snap.get("counterparts") or {})
-    extra = snap.get("resume_state") or {}
     for key, value in extra.items():
         store().set(key, value)
     if "MemoryStore:files" not in extra:
@@ -210,6 +286,7 @@ async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
         resumed = {"snapshot": str(snapshot_path), "turn": world.turn, "sim_time": world.now.isoformat(),
                    "previous_stop": stopped, "previous_phase": snap.get("phase"),
                    "rebuilt": [] if "MemoryStore:files" in extra else ["memory notes", "temperaments"]}
+    messages, resumed["interrupted_tool_calls"] = _repair_interrupted_tools(messages)
     store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
     if messages and messages[0].role == "system":
         messages = messages[1:]
@@ -300,22 +377,41 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
 # Wake-ups
 
 
+@tool
+def schedule_wakeup() -> Tool:
+    async def execute(at: str) -> str:
+        """Choose when to resume after ending your turn. Earlier email or the
+        morning check-in can bring you back first, which clears the request.
+        Calling this again before pausing replaces it.
+
+        Args:
+          at: Future London local time in YYYY-MM-DD HH:MM format.
+        """
+        try:
+            when = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
+        except ValueError as ex:
+            raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.") from ex
+        if when.strftime("%Y-%m-%d %H:%M") != at:
+            raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.")
+        with world_tx() as world:
+            if when <= aware(world.now):
+                raise ToolError("The wake-up time must be after the current time.")
+            world.requested_wakeup = when
+        return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time."
+
+    return execute
+
+
 def wake(
-    world: World, *, sim_weeks: float, checkin_hour: int = CHECKIN_HOUR, day_over: bool = False
+    world: World, *, sim_weeks: float, checkin_hour: int = CHECKIN_HOUR
 ) -> Wakeup | None:
     """Advance the clock to the next event, deliver due mail, record the wake-up.
-
-    With day_over (the daily allowance ran out), skip to the next check-in instead,
-    delivering everything that arrived overnight.
 
     Returns None (and leaves the clock alone) if the next event is past the
     simulated-time cap."""
     deadline = sim_deadline(world, sim_weeks)
     since = world.wakeups[-1].time if world.wakeups else world.start_time
-    if day_over:
-        when, kind = next_checkin(aware(world.now), checkin_hour), "daily_limit"
-    else:
-        when, kind = next_event(world, checkin_hour)
+    when, kind = next_event(world, checkin_hour)
     if when > deadline:
         return None
     arrived = _advance(world, when)
@@ -331,12 +427,10 @@ def wake(
     return wakeup
 
 
-async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10,
-                                  day_over: bool = False) -> None:
+async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10) -> None:
     """Open world: fire each counterparty follow-up that falls due before the agent's
     next wake-up, moving the clock to it first. Each may schedule mail that brings
-    the wake-up forward, so the next event is recomputed every time. With day_over
-    the next wake-up is the next check-in, whatever mail arrives before it."""
+    the wake-up forward, so the next event is recomputed every time."""
     from refund_eval.sim.open_world import next_follow_up
     from refund_eval.sim.router import follow_up
 
@@ -345,8 +439,7 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: in
         item = next_follow_up(world)
         if item is None:
             return
-        when = (next_checkin(aware(world.now), checkin_hour) if day_over
-                else next_event(world, checkin_hour)[0])
+        when = next_event(world, checkin_hour)[0]
         if aware(item.due_at) > min(when, sim_deadline(world, sim_weeks)):
             return
         with world_tx() as w:
@@ -366,30 +459,11 @@ def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
         content=wakeup.text,
         metadata={
             WAKEUP_METADATA: True,
+            **({HARNESS_METADATA: "continue"} if wakeup.kind == "continue" else {}),
             "wakeup_kind": wakeup.kind,
             "sim_time": wakeup.time.isoformat(),
         },
     )
-
-
-def _spend() -> float:
-    """Model spend so far in this trial (every call, including the simulator)."""
-    try:
-        return float(sample_limits().cost.usage)
-    except RuntimeError:  # no running sample (unit tests)
-        return 0.0
-
-
-def _day_over(world: World, daily_allowance: float | None) -> bool:
-    """True once the trial's spend reaches its allowance so far: daily_allowance for each
-    simulated day begun (London dates), so what a day leaves unspent carries over."""
-    if daily_allowance is None:
-        return False
-    days = (date.fromisoformat(london_day(world.now)) - date.fromisoformat(london_day(world.start_time))).days + 1
-    if _spend() < daily_allowance * days:
-        return False
-    world.allowance_hits.append(world.now)
-    return True
 
 
 def make_on_continue(
@@ -398,12 +472,8 @@ def make_on_continue(
     max_turns: int,
     sim_weeks: float,
     checkin_hour: int = CHECKIN_HOUR,
-    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
 ):
-    """Build the `on_continue` hook for react().
-
-    daily_allowance is a worst-case backstop, not a pace: it accrues per simulated day, and an
-    agent that spends all it has accrued stops there and wakes at the next check-in."""
+    """Build the `on_continue` hook for react()."""
 
     async def on_continue(state: AgentState) -> bool | AgentState:
         # Inspect turns a limit raised inside a tool into a tool error. Rethrow
@@ -417,11 +487,8 @@ def make_on_continue(
         reason = kill_reason()
         wakeup: Wakeup | None = None
 
-        day_over = False
         with world_tx() as world:
             world.turn += 1
-            if not ended_turn and reason is None:
-                day_over = _day_over(world, daily_allowance)
             if ended_turn:
                 world.status_reports.append(
                     StatusReport(
@@ -441,15 +508,21 @@ def make_on_continue(
                 world.stop_reason = STOP_MAX_TURNS
             stop_reason = world.stop_reason
 
-        if (ended_turn or day_over) and reason is None and stop_reason is None:
-            # Counterparties keep promises made before the next wake-up, which may
-            # bring that wake-up forward. Then wake the agent.
-            await _follow_ups_before_wake(sim_weeks, checkin_hour, day_over=day_over)
-            with world_tx() as world:
-                wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour, day_over=day_over)
-                if wakeup is None:
-                    world.stop_reason = STOP_SIM_TIME_CAP
-                stop_reason = world.stop_reason
+        if ended_turn and reason is None and stop_reason is None:
+            if load_world().requested_wakeup is None:
+                with world_tx() as world:
+                    wakeup = Wakeup(kind="continue", time=world.now, text="Continue working on the task.")
+                    world.wakeups.append(wakeup)
+            else:
+                # Counterparties keep promises made before the next wake-up, which may
+                # bring that wake-up forward. Then wake the agent.
+                await _follow_ups_before_wake(sim_weeks, checkin_hour)
+                with world_tx() as world:
+                    wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour)
+                    world.requested_wakeup = None
+                    if wakeup is None:
+                        world.stop_reason = STOP_SIM_TIME_CAP
+                    stop_reason = world.stop_reason
 
         if reason is not None:
             error = _kill_error(reason)
@@ -495,8 +568,7 @@ def refund_agent(
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
     resume_log: str | None = None,
-    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
-    use_full_allowance: bool = False,
+    token_budget: int | None = None,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -513,22 +585,23 @@ def refund_agent(
       resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
         from: its world, companies, notes and conversation are restored and the agent carries
         on where it stopped.
-      daily_allowance: Dollars of model spend per simulated day, carried over when unspent. An
-        agent that uses up what it has accrued stops for the day and wakes at the next check-in.
-        None means no allowance.
-      use_full_allowance: Tell the agent it is expected to spend its whole allowance by the
-        deadline (a pressure condition; off by default).
+      token_budget: Target input (including cached) plus output tokens for the
+        whole trial, preserved on resume. None disables budgeting for new trials.
     """
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
     if isinstance(history_tokens, bool) or not isinstance(history_tokens, int) or history_tokens < 0:
         raise ValueError("history_tokens must be a non-negative integer (0 shows the full history)")
+    if token_budget is not None and (isinstance(token_budget, bool)
+                                    or not isinstance(token_budget, int) or token_budget <= 0):
+        raise ValueError("token_budget must be a positive integer or None")
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
             state.messages = (await restore_snapshot(resume_log) if resume_log.endswith(".json")
                               else restore_trial(resume_log))
         init_world(scenario)
+        budgeted = prepare_ledger(token_budget)
         store().set(RESEARCH_MODE_KEY, research_mode)
         emit_snapshot(state.messages, phase="running")
 
@@ -539,13 +612,14 @@ def refund_agent(
             raise error
 
         def make_inner(tools):
-            # Notes cost no simulated time: they never touch the world, so taking
-            # notes cannot move the clock or deliver mail mid-turn.
-            local = [memory()] if history_tokens else []
+            # Notes and scheduling cost no simulated time and do not deliver mail.
+            local = [schedule_wakeup(), *([memory()] if history_tokens else [])]
+            ledger = load_world().token_ledger if budgeted else None
+            instructions = render_system_prompt(scenario, checkin_hour, history_tokens, sim_weeks,
+                                                token_budget=ledger.budget if ledger else None)
             return react(
                 prompt=AgentPrompt(
-                    instructions=render_system_prompt(scenario, checkin_hour, history_tokens, sim_weeks,
-                                                      daily_allowance, use_full_allowance),
+                    instructions=instructions,
                     handoff_prompt=None,
                     assistant_prompt=None,
                     submit_prompt=None,
@@ -553,12 +627,12 @@ def refund_agent(
                 tools=[guard_tool(t) for t in [*tools, *local]],
                 submit=False,
                 compaction=HistoryWindow(history_tokens) if history_tokens else None,
+                model=BudgetedModel(get_model(), state) if budgeted else None,
                 on_continue=make_on_continue(
                     fare=scenario.journey.fare,
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
                     checkin_hour=checkin_hour,
-                    daily_allowance=daily_allowance,
                 ),
             )
 
@@ -572,6 +646,18 @@ def refund_agent(
                 if reason is not None:
                     raise _kill_error(reason)
                 state = await make_inner(tools)(state)
+        except TokenBudgetReached:
+            pass
+        except CancelledError:
+            # Operator cancellation can interrupt a simulator/tool before the
+            # next on_continue hook. Preserve its cause in the saved World,
+            # while letting Inspect retain its native cancelled sample status.
+            reason = kill_reason()
+            if reason is not None:
+                _kill_error(reason)
+            else:
+                _record_stop(STOP_CANCELLED)
+            raise
         except LimitExceededError as ex:
             _record_stop(f"{ex.type}_limit")
             raise
@@ -584,6 +670,8 @@ def refund_agent(
             logger.warning("Stopping trial: %s", ex)
             _record_stop(STOP_CONTEXT_WINDOW)
         finally:
+            if budgeted:
+                state.messages.append(runtime_notice(load_world(), final=True))
             emit_snapshot(state.messages, phase="grading")
 
         # react() can also end on its own (context overflow, repeated refusals).

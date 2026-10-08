@@ -13,6 +13,7 @@ from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     HYBRID_EXA_KEY_ENV,
+    resolve_cost_limits,
 )
 from refund_eval.harbor.config import (
     RESUME_IN_IMAGE,
@@ -20,7 +21,7 @@ from refund_eval.harbor.config import (
     SNAPSHOT_IN_IMAGE,
     TrialSettings,
 )
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import load_scenario, scenario_names
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = """FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS browser-node
@@ -83,8 +84,10 @@ def prepare(
     from refund_eval.harbor.config import TrialRequest
 
     instruction = load_scenario(settings.scenario).task_text
+    caps = resolve_cost_limits(settings.cost_limit, targets, scenario=settings.scenario)
+    target_settings = {target: settings.model_copy(update={"cost_limit": caps[target]}) for target in targets}
     for target_model in targets:
-        TrialRequest(instruction=instruction, model=target_model, settings=settings, trial_id="validation")
+        TrialRequest(instruction=instruction, model=target_model, settings=target_settings[target_model], trial_id="validation")
     destination = destination.expanduser().resolve()
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite a frozen job: {destination}")
@@ -146,7 +149,7 @@ def prepare(
         "n_concurrent_trials": concurrency, "retry": {"max_retries": 0},
         "environment": {"type": environment, "delete": True, "kwargs": env_kwargs},
         "agents": [{"import_path": "refund_eval.harbor.agent:RefundInspectAgent", "model_name": target_model,
-                    "kwargs": settings.model_dump(mode="json"), "env": agent_env} for target_model in targets],
+                    "kwargs": target_settings[target_model].model_dump(mode="json"), "env": agent_env} for target_model in targets],
         "tasks": [{"path": str(task_dir)}],
     })
     config = destination / "job.json"
@@ -170,22 +173,26 @@ def main() -> None:
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
     parser.add_argument("--sim-weeks", type=float, default=TrialSettings.model_fields["sim_weeks"].default)
-    parser.add_argument("--cost-limit", type=float, default=1)
+    parser.add_argument("--token-budget", type=int, default=argparse.SUPPRESS,
+                        help="Target tokens including cached input; late-refund defaults to 40000000")
+    parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
+                        help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
     parser.add_argument("--time-limit", type=int, default=1800)
-    parser.add_argument("--scenario", choices=["train_refund", "train_refund_pressure"],
+    parser.add_argument("--scenario", choices=scenario_names(),
                         default=TrialSettings.model_fields["scenario"].default)
-    parser.add_argument("--daily-allowance", type=lambda value: None if value.lower() == "none" else float(value),
-                        default=TrialSettings.model_fields["daily_allowance"].default,
-                        help="Dollars per simulated day, or none to disable the daily allowance")
     parser.add_argument("--llm-grading", action="store_true",
                         default=TrialSettings.model_fields["llm_grading"].default, help="Run LLM judges after the trial; default is to judge saved logs separately")
-    parser.add_argument("--use-full-allowance", action="store_true")
-    parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default="auto",
+    parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default=argparse.SUPPRESS,
                         help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")
     parser.add_argument("--rubrics", type=Path, help="Frozen dashboard rubric snapshot JSON")
     parser.add_argument("--inbox", type=Path, help="Gmail snapshot JSON from refund_eval.world.snapshot")
     args = parser.parse_args()
+    if hasattr(args, "cost_limit"):
+        try:
+            args.cost_limit = json.loads(args.cost_limit)
+        except ValueError:
+            parser.error("--cost-limit must be a positive USD number or JSON model-to-cap mapping")
     if not args.model:
         parser.error("Provide --model for a paid trial")
     from refund_eval.world.snapshot_store import file_sha256

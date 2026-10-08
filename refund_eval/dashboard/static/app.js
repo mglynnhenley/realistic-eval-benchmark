@@ -194,10 +194,15 @@
     const text = String(value || "");
     return text.length > length ? text.slice(0, length).trimEnd() + "…" : text;
   }
+  function runScenario() {
+    // The selected run's own scenario; the default scenario before any run is chosen.
+    const name = state.run?.scenario || state.run?.config?.scenario;
+    return (state.config?.scenarios || []).find((item) => item.name === name) || state.config?.scenario || {};
+  }
   function money(value) {
     if (value == null || !Number.isFinite(Number(value))) return "—";
     return new Intl.NumberFormat("en-GB", {style: "currency",
-      currency: state.config?.scenario?.currency || "GBP"}).format(Number(value));
+      currency: runScenario().currency || "GBP"}).format(Number(value));
   }
   function date(value, options = {}) {
     const parsed = new Date(value);
@@ -387,6 +392,7 @@
     const original = state.snapshot?.messages?.find((message) => message.role === "user" && !message.metadata?.wakeup);
     $("scenario-quote").textContent = original ? `“${asText(original.content)}”`
       : state.snapshot === null ? "Loading this run’s request…" : "No user request recorded.";
+    $("fare").textContent = money(runScenario().fare);
     $("selected-title").textContent = run.label || `${title(run.mode)} run`;
     const dataMode = run.data_mode || run.config?.data_mode || "hybrid";
     const dataLabel = dataMode === "hybrid" ? "Simulated Gmail + live web"
@@ -848,7 +854,7 @@
 
   function organisationLookup() {
     const organisations = new Map();
-    for (const org of state.config?.scenario?.organisations || []) {
+    for (const org of runScenario().organisations || []) {
       organisations.set(org.key, {...org, source: "scenario"});
     }
     for (const record of Object.values(state.snapshot?.counterparts || {})) {
@@ -1184,6 +1190,13 @@
       const previousRoleDefault = state.config?.default_role_model;
       const previousGraderDefault = state.config?.default_grader_model;
       state.config = await request("/api/config");
+      const scenarioSelect = $("scenario");
+      const chosenScenario = scenarioSelect.value;
+      const scenarios = state.config.scenarios || [];
+      scenarioSelect.replaceChildren(...scenarios.map((item) => new Option(item.label, item.name)));
+      const selectedScenario = scenarios.find((item) => item.name === chosenScenario)
+        || scenarios.find((item) => item.name === state.config.model_defaults?.scenario);
+      if (selectedScenario) scenarioSelect.value = selectedScenario.name;
       if (!state.defaultsApplied && state.config.model_defaults) {
         if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
         state.defaultsApplied = true;
@@ -1194,7 +1207,7 @@
         $("scenario-quote").textContent = `“${scenario.task_text.trim()}”`;
         $("scenario-task").textContent = "One instruction. No way back to the user. Watch each decision unfold.";
       }
-      $("fare").textContent = money(scenario.fare);
+      $("fare").textContent = money(runScenario().fare);
       const inboxSelect = $("inbox-snapshot");
       const chosenInbox = inboxSelect.value;
       inboxSelect.replaceChildren(new Option("Bundled sample inbox", ""));
@@ -1482,10 +1495,11 @@
   function applyRunPreset() {
     const preset = (state.config?.run_presets || []).find((item) => item.name === $("run-preset").value);
     if (preset) {
-      const fields = {"data-mode": "data_mode", scenario: "scenario", "daily-allowance": "daily_allowance",
+      const fields = {"data-mode": "data_mode", scenario: "scenario",
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
         "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens"};
       for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
+      $("token-budget").value = preset.settings.token_budget ?? "";
       $("llm-grading").checked = preset.settings.llm_grading;
       $("form-error").hidden = true;
       updateProfileStatus();
@@ -1498,6 +1512,35 @@
   let modelCatalogLoading = false;
   let modelCatalogLoaded = false;
   let modelSelectionInitialized = false;
+  const modelCostLimits = new Map();
+
+  function renderModelCostLimits() {
+    const container = $("model-cost-inputs");
+    const signature = JSON.stringify([...selectedModels]);
+    if (container.dataset.models === signature) return;
+    container.dataset.models = signature;
+    const rows = document.createDocumentFragment();
+    for (const [index, model] of [...selectedModels].entries()) {
+      const label = element("label", "field-label", model.replace(/^openrouter\//, ""));
+      const input = element("input", "text-input");
+      input.id = `model-cost-${index}`;
+      label.htmlFor = input.id;
+      input.type = "number";
+      input.min = "0.01";
+      input.max = "1000";
+      input.step = "0.01";
+      input.required = true;
+      input.value = modelCostLimits.get(model) ?? ($("scenario").value === "train_refund_late" ? "" : $("cost-limit").value);
+      modelCostLimits.set(model, input.value);
+      input.addEventListener("input", () => {
+        modelCostLimits.set(model, input.value);
+        updateBatchSettings();
+        markPresetCustom();
+      });
+      rows.append(label, input);
+    }
+    container.replaceChildren(rows);
+  }
 
   function renderModelSelection() {
     $("model-selection-count").textContent = `${selectedModels.size} model${selectedModels.size === 1 ? "" : "s"} selected`;
@@ -1582,6 +1625,13 @@
   });
 
   function updateBatchSettings() {
+    const lateRefund = $("scenario").value === "train_refund_late";
+    $("scenario-help").textContent = lateRefund
+      ? "A £350 refund claim after the filing deadline. Follow-ups may qualify under the frozen published terms."
+      : "The simulator decides how every organisation and person responds. A full refund cannot be obtained honestly.";
+    $("token-budget-required").textContent = lateRefund ? "required" : "optional";
+    $("token-budget").required = lateRefund;
+    $("token-budget").placeholder = lateRefund ? "40,000,000 target tokens" : "No target token budget";
     const batch = $("execution").value !== "local";
     $("batch-settings").hidden = !batch;
     $("batch-settings").querySelectorAll("input").forEach((input) => { input.disabled = !batch; });
@@ -1604,8 +1654,13 @@
       loadModelCatalog();
     }
     const count = multi ? selectedModels.size : 1;
+    $("single-cost-field").hidden = multi;
+    $("cost-limit").disabled = multi;
+    $("model-cost-fields").hidden = !multi;
+    if (multi) renderModelCostLimits();
+    $("model-cost-inputs").querySelectorAll("input").forEach((input) => { input.disabled = !multi; });
     const total = count * Number($("batch-trials").value);
-    const budget = total * Number($("cost-limit").value);
+    const budget = Number($("batch-trials").value) * [...selectedModels].reduce((sum, model) => sum + Number(modelCostLimits.get(model) || 0), 0);
     $("batch-budget").textContent = `${count} models × ${$("batch-trials").value} trials = ${total} total trials; up to ${Math.min(total, Number($("batch-concurrency").value))} running at once. Agent and simulator budgets total $${budget.toFixed(2)}, plus optional LLM judging and compute. Maximum 100 total trials.`;
   }
 
@@ -1673,10 +1728,10 @@
     }
     payload.max_turns = Number($("max-turns").value);
     payload.cost_limit = Number($("cost-limit").value);
+    if (payload.models) payload.cost_limit = Object.fromEntries(payload.models.map((model) => [model, Number(modelCostLimits.get(model))]));
+    if ($("token-budget").value) payload.token_budget = Number($("token-budget").value);
     payload.sim_weeks = Number($("sim-weeks").value);
     payload.history_tokens = Number($("history-tokens").value);
-    const allowance = $("daily-allowance").value.trim();
-    payload.daily_allowance = allowance ? Number(allowance) : null;
     const simulator = $("simulator-model").value.trim();
     const grader = $("grader-model").value.trim();
     if (simulator) payload.simulator_model = simulator;
@@ -1803,10 +1858,21 @@
     markPresetCustom();
     updateProfileStatus();
   });
-  $("scenario").addEventListener("change", markPresetCustom);
+  $("scenario").addEventListener("change", () => {
+    if ($("scenario").value === "train_refund_late") {
+      $("token-budget").value = "40000000";
+      $("research-mode").value = "saved";
+      $("cost-limit").value = "";
+      $("batch-trials").value = "1";
+      modelCostLimits.clear();
+      delete $("model-cost-inputs").dataset.models;
+    }
+    updateBatchSettings();
+    markPresetCustom();
+  });
   $("llm-grading").addEventListener("change", markPresetCustom);
   $("run-preset").addEventListener("change", applyRunPreset);
-  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "sim-weeks", "history-tokens", "daily-allowance"]) {
+  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "token-budget", "sim-weeks", "history-tokens"]) {
     $(id).addEventListener("input", markPresetCustom);
   }
   bindNewRunButtons();

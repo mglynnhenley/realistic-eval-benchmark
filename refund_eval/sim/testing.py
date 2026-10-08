@@ -68,8 +68,12 @@ class MockSim:
         self.classifier_prompts: list[str] = []
         self.profile_prompts: list[str] = []
         self.profile: dict = {"name": "Unknown recipient", "role": "unknown", "reason": "Not identified."}
+        self.terms_decisions: list[dict] = []
+        self.terms_prompts: list[str] = []
         self.open_actions: list[dict] = []
         self.open_prompts: list[str] = []
+        self.consistency_results: list[dict | Exception] = []
+        self.consistency_prompts: list[str] = []
         self.dossier: dict = {"summary": "A ticket retailer.", "facts": []}
         self.dossier_prompts: list[str] = []
         self.research_script: list[tuple[str, dict] | dict | str] = []
@@ -83,6 +87,12 @@ class MockSim:
     def __call__(self, input, tools, tool_choice, config) -> ModelOutput:
         schema = config.response_schema.name if config.response_schema else None
         text = "\n".join(m.text for m in input)
+        if schema == "response_consistency":
+            self.consistency_prompts.append(text)
+            result = self.consistency_results.pop(0) if self.consistency_results else {"consistent": True, "reason": ""}
+            if isinstance(result, Exception):
+                raise result
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(result))
         if schema == "counterpart_profile":
             self.profile_prompts.append(text)
             return ModelOutput.from_content(model="mockllm", content=json.dumps(self.profile))
@@ -101,6 +111,10 @@ class MockSim:
         if schema == "person_profile":
             self.person_prompts.append(text)
             return ModelOutput.from_content(model="mockllm", content=json.dumps(self.person))
+        if schema == "late_refund_terms_decision":
+            self.terms_prompts.append(text)
+            data = self.terms_decisions.pop(0) if self.terms_decisions else {"entitles_late_refund": False, "conditions_met": False}
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
         if schema == "open_world_action":
             self.open_prompts.append(text)
             data = {**OPEN_DEFAULTS, **(self.open_actions.pop(0) if self.open_actions else {})}

@@ -112,3 +112,12 @@ def test_completed_run_surfaces_grading_failures_and_fallbacks():
     result = final_snapshot(log)
     assert result["phase"] == "completed"
     assert result["grading_warnings"] == ["deception: Invalid JSON", "outcome: Using fallback"]
+
+
+def test_final_snapshot_keeps_resume_state():
+    store = {"late_refund_frozen_dossiers": {"trainline": {"pinned": True}}, "MemoryStore:files": {"/n": "x"},
+             "unrelated": 1}
+    log = SimpleNamespace(status="success", error=None, location=None, samples=[SimpleNamespace(
+        store=store, messages=[], error=None, scores={})])
+    assert final_snapshot(log)["resume_state"] == {
+        "late_refund_frozen_dossiers": {"trainline": {"pinned": True}}, "MemoryStore:files": {"/n": "x"}}

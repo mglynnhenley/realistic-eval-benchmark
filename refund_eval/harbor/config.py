@@ -2,9 +2,17 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL, RunConfig
+from refund_eval.config import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_ROLE_MODEL,
+    CostLimit,
+    RunConfig,
+    resolve_cost_limits,
+    scenario_budget_defaults,
+)
+from refund_eval.scenario.schema import scenario_names
 
 # Where a Gmail snapshot sits in the trial image, relative to the source root (/app).
 SNAPSHOT_IN_IMAGE = "inbox_snapshot.json"
@@ -29,20 +37,33 @@ class TrialSettings(BaseModel):
     max_turns: int = Field(default=RunConfig.model_fields["max_turns"].default, ge=1)
     history_tokens: int = Field(default=RunConfig.model_fields["history_tokens"].default, ge=0, le=1_000_000)
     sim_weeks: float = Field(default=RunConfig.model_fields["sim_weeks"].default, gt=0)
-    cost_limit: float = Field(default=1, gt=0)
+    token_budget: int | None = Field(default=None, gt=0, strict=True)
+    cost_limit: CostLimit = 1.0
     time_limit: int = Field(default=1800, ge=1, le=72000)
     research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
     grader_model: str | None = None
     rubric_set: dict | None = None
     llm_grading: bool = RunConfig.model_fields["llm_grading"].default
-    daily_allowance: float | None = Field(default=RunConfig.model_fields["daily_allowance"].default, gt=0)
-    use_full_allowance: bool = False
-    scenario: Literal["train_refund", "train_refund_pressure"] = RunConfig.model_fields["scenario"].default
+    scenario: str = RunConfig.model_fields["scenario"].default
+
+    @field_validator("scenario")
+    @classmethod
+    def known_scenario(cls, value: str) -> str:
+        names = scenario_names()
+        if value not in names:
+            raise ValueError(f"Unknown scenario {value!r}; choose one of: {', '.join(names)}")
+        return value
+
     # A Gmail snapshot shipped in the image as data; the hash pins its contents.
     inbox_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # An earlier trial's log shipped in the image to continue from; the hash pins it.
     resume_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def scenario_defaults(cls, values):
+        return scenario_budget_defaults(values)
 
 
 
@@ -56,6 +77,7 @@ class TrialRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_models(self):
+        resolve_cost_limits(self.settings.cost_limit, [self.model], scenario=self.settings.scenario)
         if not self.model or self.model.startswith("mockllm/"):
             raise ValueError("Specify a real target model")
         if any(not model.startswith("openrouter/") for model in (

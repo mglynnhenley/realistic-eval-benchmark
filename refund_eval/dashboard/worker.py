@@ -14,8 +14,8 @@ from typing import Any
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
-from refund_eval.config import RunConfig
-from refund_eval.dashboard.telemetry import EMPTY_SNAPSHOT, RUN_DIR_ENV, write_snapshot
+from refund_eval.config import RunConfig, resolve_cost_limits
+from refund_eval.dashboard.telemetry import EMPTY_SNAPSHOT, RESUME_STORE_KEYS, RUN_DIR_ENV, write_snapshot
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
 from refund_eval.sim.counterparts import REGISTRY_KEY
@@ -38,7 +38,9 @@ def load_config(run_dir: Path) -> dict[str, Any]:
         if missing:
             raise ValueError(f"{', '.join(missing)} must be specified for a model run.")
     # Merge only fixed defaults; default_factory fields (the role models) stay explicit.
-    defaults = {name: value for name, value in RunConfig(mode=config["mode"]).model_dump().items()
+    validated = RunConfig.model_validate({name: value for name, value in config.items()
+                                          if name in RunConfig.model_fields})
+    defaults = {name: value for name, value in validated.model_dump().items()
                 if RunConfig.model_fields[name].default_factory is None}
     config = {**defaults, **config}
     if config["tool_profile"] != "published":
@@ -52,7 +54,7 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     window = config["history_tokens"]
     if isinstance(window, bool) or not isinstance(window, int) or not 0 <= window <= 1_000_000:
         raise ValueError("history_tokens must be an integer between 0 and 1000000.")
-    for name in ("cost_limit", "sim_weeks"):
+    for name in ("sim_weeks",):
         value = config[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be a positive finite number.")
@@ -60,6 +62,9 @@ def load_config(run_dir: Path) -> dict[str, Any]:
         for name in ("model", "simulator_model", "grader_model"):
             if not isinstance(config.get(name), str) or not config[name].strip():
                 raise ValueError(f"{name} must be specified for a model run.")
+    targets = config.get("models") or [config["model"]]
+    caps = resolve_cost_limits(config["cost_limit"], targets, scenario=config["scenario"])
+    config["cost_limit"] = caps[config["model"]]
     return config
 
 
@@ -83,10 +88,11 @@ def final_snapshot(log: Any) -> dict[str, Any]:
     sample = log.samples[0] if log.samples else None
     sample_store = sample.store if sample is not None else {}
     world = sample_store.get(WORLD_KEY)
-    stopped = bool(world and (world.get("killed") or world.get("stop_reason") == "kill_switch"))
+    stopped = bool(world and (world.get("killed") or world.get("stop_reason") in {"kill_switch", "cancelled"}))
     error = getattr(sample, "error", None) or log.error
     if stopped or log.status == "cancelled":
         phase = "stopped"
+        error = None
     elif log.status != "success" or sample is None or error:
         phase = "failed"
         error = error or f"Inspect run ended with status {log.status}."
@@ -97,6 +103,8 @@ def final_snapshot(log: Any) -> dict[str, Any]:
         "error": str(error) if error else None,
         "inspect_log": str(Path(log.location).resolve()) if log.location else None,
     }
+    if phase == "stopped":
+        result["cancellation_reason"] = (world or {}).get("stop_reason") or "Inspect evaluation was cancelled."
     if sample is not None:
         result.update(
             messages=sample.messages,
@@ -104,6 +112,8 @@ def final_snapshot(log: Any) -> dict[str, Any]:
             counterparts=sample_store.get(REGISTRY_KEY, {}),
             published_tool_profile=sample_store.get("published_tool_profile"),
             scores=sample.scores or {},
+            # Harbor's final snapshot replaces the live one; keep it resumable.
+            resume_state={k: sample_store[k] for k in RESUME_STORE_KEYS if sample_store.get(k) is not None},
         )
     result["grading_warnings"] = [
         f"{name}: {metadata.get('grader_error') or metadata.get('extraction_error')}"
@@ -111,6 +121,29 @@ def final_snapshot(log: Any) -> dict[str, Any]:
         if (metadata := score.metadata or {}).get("grader_error") or metadata.get("extraction_error")
     ] if sample is not None else []
     return result
+
+
+def recover_snapshot(destination: Path) -> dict[str, Any]:
+    """Recover Inspect's artifact, falling back to the last live snapshot."""
+    recovered: dict[str, Any] = {}
+    try:
+        recovered.update(json.loads((destination / "snapshot.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        logger.warning("Could not recover the live snapshot", exc_info=True)
+    logs = sorted(destination.rglob("*.eval"), key=lambda path: path.stat().st_mtime)
+    if logs:
+        recovered["inspect_log"] = str(logs[-1])
+        try:
+            saved = final_snapshot(read_eval_log(str(logs[-1])))
+            # A cancellation during startup can save an empty sample after the
+            # harness already published useful state. Keep that state as fallback.
+            for name in ("world", "messages"):
+                if not saved.get(name):
+                    saved.pop(name, None)
+            recovered.update(saved)
+        except Exception:
+            logger.warning("Could not recover the Inspect log", exc_info=True)
+    return recovered
 
 
 def run_worker(run_dir: str | Path) -> int:
@@ -149,7 +182,7 @@ def run_worker(run_dir: str | Path) -> int:
             status = fixture_readiness() if config["data_mode"] == "fixture" else hybrid_readiness()
             if not status["configured"]:
                 raise ValueError(f"Published tools are not configured. {status['reason']}")
-            [log] = eval(
+            logs = eval(
                 impossible_refund,
                 task_args={
                     "trials": 1,
@@ -157,11 +190,10 @@ def run_worker(run_dir: str | Path) -> int:
                     "max_turns": config["max_turns"],
                     "history_tokens": config["history_tokens"],
                     "cost_limit": config["cost_limit"],
+                    **({"token_budget": config["token_budget"]} if config["token_budget"] is not None else {}),
                     "sim_weeks": config["sim_weeks"],
-                    "daily_allowance": config["daily_allowance"],
                     "scenario": config["scenario"],
                     "llm_grading": config["llm_grading"],
-                    "use_full_allowance": config["use_full_allowance"],
                     **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),
                     **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
                     **rubric_args,
@@ -173,19 +205,24 @@ def run_worker(run_dir: str | Path) -> int:
                 log_dir=str(destination / "logs"), log_format="eval", display="none",
                 metadata={"dashboard": True},
             )
+            if not logs:
+                recovered = recover_snapshot(destination)
+                world = recovered.get("world") or {}
+                if (kill_requested() or recovered.get("phase") == "stopped" or world.get("killed")
+                        or world.get("stop_reason") in {"kill_switch", "cancelled"}):
+                    recovered.update(phase="stopped", error=None)
+                    recovered.setdefault("cancellation_reason", world.get("stop_reason") or
+                                         "Stop requested before Inspect returned a result.")
+                    write_snapshot(destination, **recovered)
+                    return 0
+                raise RuntimeError("Inspect returned no evaluation result without a recorded cancellation.")
+            [log] = logs
             snapshot = write_snapshot(destination, **final_snapshot(log))
             return 1 if snapshot["phase"] == "failed" else 0
         except Exception as error:
             logger.exception("Dashboard run failed")
             # Recover any final artifact even when task creation or eval raised.
-            logs = sorted(destination.rglob("*.eval"), key=lambda path: path.stat().st_mtime)
-            recovered: dict[str, Any] = {}
-            if logs:
-                recovered["inspect_log"] = str(logs[-1])
-                try:
-                    recovered.update(final_snapshot(read_eval_log(str(logs[-1]))))
-                except Exception:
-                    logger.warning("Could not recover the Inspect log", exc_info=True)
+            recovered = recover_snapshot(destination)
             recovered.update(phase="stopped" if kill_requested() else "failed", error=str(error))
             write_snapshot(destination, **recovered)
             return 0 if recovered["phase"] == "stopped" else 1

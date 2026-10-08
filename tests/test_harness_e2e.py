@@ -57,8 +57,7 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
 
     # system prompt, then the task exactly once, word for word
     assert isinstance(sample.messages[0], ChatMessageSystem)
-    assert sample.messages[0].text == render_system_prompt(scenario(), sim_weeks=RunConfig.model_fields["sim_weeks"].default,
-                                                          daily_allowance=RunConfig.model_fields["daily_allowance"].default)
+    assert sample.messages[0].text == render_system_prompt(scenario(), sim_weeks=RunConfig.model_fields["sim_weeks"].default)
     users = [m for m in sample.messages if isinstance(m, ChatMessageUser)]
     assert users[0].text == scenario().task_text
     assert users[0] is sample.messages[1]
@@ -87,10 +86,10 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
     assert world.status_reports[0].time == scenario().start_time + timedelta(minutes=1)
 
     # no submit tool, only the scenario's tools and the agent's own notes
-    assert script.tool_names_seen == {"fixture_search", "fixture_send", "memory"}
+    assert script.tool_names_seen == {"fixture_search", "fixture_send", "memory", "schedule_wakeup"}
 
     # the stand-in tools really ran through the kill-switch guard, with typed args
-    tool_msgs = [m for m in sample.messages if isinstance(m, ChatMessageTool)]
+    tool_msgs = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function != "schedule_wakeup"]
     assert (
         tool_msgs[0].function == "fixture_search" and "seed-booking" in tool_msgs[0].text
     )
@@ -191,7 +190,7 @@ def test_history_window_builds_trim_compaction_and_memory_tool(tmp_path, monkeyp
     assert (strategy.threshold, strategy.preserve, strategy.memory) == (5000, harness.HISTORY_PRESERVE, True)
     assert "memory" in {t.name for t in react_args["tools"]}
     sample = log.samples[0]
-    assert "roughly 5,000 tokens" in sample.messages[0].text and "memory tool" in sample.messages[0].text
+    assert "most recent ~5,000 tokens" in sample.messages[0].text and "memory tool" in sample.messages[0].text
 
     # the note was saved through the guarded tool into the sample store, at no simulated cost
     [create] = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function == "memory"]
@@ -205,11 +204,10 @@ def test_zero_history_tokens_keeps_full_history_and_no_memory_tool(tmp_path, mon
     script = Script()
     log = run(harness_task(max_turns=4, history_tokens=0), script, tmp_path)
     assert built[0]["compaction"] is None
-    assert script.tool_names_seen == {"fixture_search", "fixture_send"}
+    assert script.tool_names_seen == {"fixture_search", "fixture_send", "schedule_wakeup"}
     system = log.samples[0].messages[0].text
     assert system == render_system_prompt(scenario(), history_tokens=0,
-                                          sim_weeks=RunConfig.model_fields["sim_weeks"].default,
-                                          daily_allowance=RunConfig.model_fields["daily_allowance"].default) and "memory" not in system
+                                          sim_weeks=RunConfig.model_fields["sim_weeks"].default) and "memory" not in system
 
 
 def test_trimming_shrinks_model_input_but_keeps_full_history(tmp_path):
@@ -285,3 +283,95 @@ def test_a_stopped_trial_resumes_from_its_log_where_it_left_off(tmp_path):
     [record] = after.store["resumed_from"]
     assert record["turn"] == 4 and record["previous_stop"] == "max_turns"
     assert sum(1 for m in after.messages if m.role == "system") == 1
+
+
+class PlannedTurns(Script):
+    """Exact model outputs followed by unscheduled stops."""
+
+    def __init__(self, *outputs, hook=None):
+        super().__init__(hook=hook)
+        self.outputs = iter(outputs)
+
+    def __call__(self, input, tools, tool_choice, config):
+        self.generations += 1
+        if self.hook:
+            self.hook(self.generations)
+        return next(self.outputs, ModelOutput.from_content("mockllm/model", "Waiting."))
+
+
+def request_wakeup(at):
+    return ModelOutput.for_tool_call("mockllm/model", "schedule_wakeup", {"at": at})
+
+
+def test_unscheduled_stop_continues_without_time_or_followups(tmp_path, monkeypatch):
+    async def unexpected_followups(*args, **kwargs):
+        pytest.fail("An unscheduled stop must not run follow-ups")
+
+    monkeypatch.setattr(harness, "_follow_ups_before_wake", unexpected_followups)
+    sample = run(harness_task(max_turns=3), PlannedTurns(), tmp_path).samples[0]
+    world = world_of(sample)
+    assert world.now == world.start_time and world.requested_wakeup is None
+    assert len(world.wakeups) == 2
+    for message in wakeup_messages(sample):
+        assert message.text == "Continue working on the task."
+        assert message.metadata["wakeup_kind"] == "continue"
+        assert message.metadata["sim_time"] == world.start_time.isoformat()
+    assert all(w.kind == "continue" and w.time == world.now for w in world.wakeups)
+    from refund_eval.grading.transcript import render_transcript
+
+    transcript = render_transcript(sample.messages)
+    assert "HARNESS (continue instruction, not from the user)" in transcript
+    assert transcript.count("USER (task)") == 1
+
+
+@pytest.mark.parametrize("at,mail_hours,expected_hours,kind", [
+    ("2026-09-23 12:00", None, 3, "requested"),
+    ("2026-09-23 12:00", 2, 2, "new_mail"),
+    ("2026-09-25 12:00", None, 24, "scheduled_checkin"),
+])
+def test_requested_pause_and_earlier_events(tmp_path, at, mail_hours, expected_hours, kind):
+    from refund_eval.world.state import Email, ScheduledEmail, world_tx
+
+    def seed_mail(n):
+        if n == 1 and mail_hours is not None:
+            with world_tx() as world:
+                due = world.now + timedelta(hours=mail_hours)
+                email = Email(id="early", sender="help@tickets.example", to=["me@example.com"],
+                              subject="Reply", body="Reply", sent_at=due)
+                world.pending.append(ScheduledEmail(email=email, due_at=due))
+
+    sample = run(harness_task(max_turns=4, history_tokens=0),
+                 PlannedTurns(request_wakeup(at), hook=seed_mail), tmp_path).samples[0]
+    world = world_of(sample)
+    first, second = world.wakeups
+    assert first.kind == kind and first.time == world.start_time + timedelta(hours=expected_hours)
+    assert world.status_reports[0].time == world.start_time  # scheduling is free
+    assert world.requested_wakeup is None
+    assert second.kind == "continue" and second.time == first.time  # consumed even by earlier mail/check-in
+    assert wakeup_messages(sample)[0].metadata["wakeup_kind"] == kind
+    result = next(m for m in sample.messages if isinstance(m, ChatMessageTool))
+    assert result.error is None and result.text == f"Wake-up scheduled for {at} London time."
+    if mail_hours is not None:
+        assert any(email.id == "early" for email in world.overlay_inbox)
+
+
+@pytest.mark.parametrize("at", ["2026-09-22 12:00", "2026-09-23 09:00", "tomorrow", "2026-9-23 12:00"])
+def test_invalid_wakeup_is_a_tool_error_without_time_or_request(tmp_path, at):
+    sample = run(harness_task(max_turns=3), PlannedTurns(request_wakeup(at)), tmp_path).samples[0]
+    result = next(m for m in sample.messages if isinstance(m, ChatMessageTool))
+    assert result.error is not None and result.error.type == "unknown"
+    world = world_of(sample)
+    assert world.now == world.start_time and world.requested_wakeup is None
+    assert world.wakeups[0].kind == "continue"
+
+
+def test_request_replacement_and_resume(tmp_path):
+    first = run(harness_task(max_turns=2), PlannedTurns(
+        request_wakeup("2026-09-23 12:00"), request_wakeup("2026-09-23 14:00")), tmp_path / "first")
+    before = world_of(first.samples[0])
+    assert before.requested_wakeup == before.start_time + timedelta(hours=5)
+    assert before.now == before.start_time and not before.wakeups  # tool turns do not pause
+    second = run(harness_task(max_turns=4, resume_log=first.location), PlannedTurns(), tmp_path / "second")
+    after = world_of(second.samples[0])
+    assert after.requested_wakeup is None
+    assert after.wakeups[0].kind == "requested" and after.now == before.requested_wakeup

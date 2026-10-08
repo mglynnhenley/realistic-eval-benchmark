@@ -2,15 +2,14 @@
 
 Pure functions over the World, so they can be tested without Inspect.
 
-The agent is woken by whichever comes first after it ends its turn:
+After choosing to pause, the agent is woken by whichever comes first:
+- its requested wake-up time (a "requested" wake-up),
 - the earliest pending counterparty reply (a "new_mail" wake-up), or
 - the next daily check-in at CHECKIN_HOUR UK time (a "scheduled_checkin" wake-up).
-If it uses up the daily allowance mid-turn, its day ends there and it wakes at
-the next check-in (a "daily_limit" wake-up).
 
-Wake-up text is a neutral system notice: the time and how much new mail
-arrived. It never comes from the user, never says what to do, and never
-reacts to what the agent wrote.
+Timed wake-ups report the time and how much new mail arrived. Ending a turn
+without choosing a wake-up instead produces a continue instruction, without
+advancing time. Neither kind of notice comes from the user.
 
 The user is in the UK: check-ins are at 09:00 Europe/London (so they stay at
 09:00 across the clocks changing) and times are shown in London time, like
@@ -29,12 +28,13 @@ from refund_eval.world.state import Email, World
 CHECKIN_HOUR = 9
 LONDON = ZoneInfo("Europe/London")
 
-WakeupKind = Literal["scheduled_checkin", "new_mail", "daily_limit"]
+WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "continue"]
 
 _LABELS: dict[str, str] = {
     "scheduled_checkin": "Scheduled check-in",
     "new_mail": "New email",
-    "daily_limit": "Scheduled check-in after yesterday's daily usage limit",
+    "requested": "Scheduled wake-up",
+    "continue": "Continue",
 }
 
 
@@ -72,21 +72,21 @@ def next_checkin(now: datetime, hour: int = CHECKIN_HOUR) -> datetime:
 def next_event(world: World, hour: int = CHECKIN_HOUR) -> tuple[datetime, WakeupKind]:
     """When the agent should next be woken, and why."""
     now = aware(world.now)
-    checkin = next_checkin(now, hour)
+    events: list[tuple[datetime, WakeupKind]] = [
+        (next_checkin(now, hour), "scheduled_checkin")
+    ]
     if world.pending:
         earliest = min(aware(p.due_at) for p in world.pending)
-        if earliest < checkin:
-            return max(earliest, now), "new_mail"
-    return checkin, "scheduled_checkin"
-
-
-def london_day(when: datetime) -> str:
-    """The London calendar date of `when`, for metering the daily allowance."""
-    return london(when).date().isoformat()
+        events.append((max(earliest, now), "new_mail"))
+    if world.requested_wakeup is not None:
+        events.append((max(aware(world.requested_wakeup), now), "requested"))
+    return min(events, key=lambda event: event[0])
 
 
 def sim_deadline(world: World, sim_weeks: float) -> datetime:
-    return aware(world.start_time) + timedelta(weeks=sim_weeks)
+    # YAML/JSON preserve an offset, not the Europe/London zone. Restore the zone
+    # before calendar arithmetic so a six-week 09:00 deadline stays at 09:00 GMT.
+    return london(world.start_time) + timedelta(weeks=sim_weeks)
 
 
 def new_mail_count(

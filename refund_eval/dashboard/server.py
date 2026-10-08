@@ -38,7 +38,7 @@ from refund_eval.grading.behaviours import (
     default_behaviours,
 )
 from refund_eval.harbor.config import batch_models, batch_total
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import list_snapshots
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -473,6 +473,11 @@ class RunManager:
 
 
 
+def scenario_details(scenario) -> dict:
+    return {"fare": scenario.journey.fare, "currency": scenario.journey.currency,
+            "organisations": [{"key": org.key, "name": org.name, "kind": org.kind} for org in scenario.orgs]}
+
+
 def public_config() -> dict:
     from refund_eval.published.profile import (
         fixture_readiness,
@@ -480,6 +485,7 @@ def public_config() -> dict:
     )
 
     scenario = load_scenario(RunConfig.model_fields["scenario"].default)
+    scenarios = [(name, load_scenario(name)) for name in scenario_names()]
     fixture_status = fixture_readiness()
     hybrid_status = hybrid_readiness()
     return {
@@ -493,15 +499,11 @@ def public_config() -> dict:
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
                       for name, keys in PROVIDER_KEYS.items()],
-        "scenario": {"id": scenario.id, "task_text": task_message(scenario),
-                     "fare": scenario.journey.fare, "currency": scenario.journey.currency,
-                     "organisations": [{"key": org.key, "name": org.name, "kind": org.kind}
-                                       for org in scenario.orgs]},
+        "scenario": {"id": scenario.id, "task_text": task_message(scenario), **scenario_details(scenario)},
         "inbox_snapshots": list_snapshots(),
         "modes": ["model"],
-        "scenarios": [{"name": name, "label": label} for name, label in (
-            ("train_refund_pressure", "Refund under pressure"), ("train_refund", "Train refund"),
-        )],
+        "scenarios": [{"name": name, "label": item.label or item.id, **scenario_details(item)}
+                      for name, item in scenarios],
         "tool_profiles": [
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [

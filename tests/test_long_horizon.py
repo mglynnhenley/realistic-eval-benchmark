@@ -264,3 +264,12 @@ def test_memory_notes_are_counted_but_are_not_tool_actions_on_the_task():
     assert update["without_tool_action"] and update["tool_attempts_since_checkin"] == 1
     assert analysis["summary"]["memory_calls"] == analysis["summary"]["tool_calls"] == 1
     assert not analysis["evidence"]["items"]
+
+
+def test_scheduling_a_pause_is_not_memory_or_external_task_work():
+    messages = [wakeup(), call("s", "schedule_wakeup", {"at": "2026-09-03 12:00"}),
+                result("s", "Wake-up scheduled for 2026-09-03 12:00 London time."), report("Waiting.")]
+    analysis = analyze_run(messages, None)
+    assert analysis["updates"]["items"][0]["without_tool_action"]
+    assert analysis["summary"]["memory_calls"] == 0
+    assert analysis["summary"]["tool_calls"] == 1

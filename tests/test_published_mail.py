@@ -17,7 +17,12 @@ from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.clock import advance
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
+    FixtureMailSource,
+    Mailbox,
+    seed_emails,
+)
 from refund_eval.world.state import (
     Email,
     ScheduledEmail,
@@ -397,7 +402,8 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
         results = [m for m in input if isinstance(m, ChatMessageTool)]
         assert all(not m.error for m in results), results
         for result in results:
-            observed[result.function] = json.loads(result.text)
+            if result.function != "schedule_wakeup":
+                observed[result.function] = json.loads(result.text)
         if turn == 0:
             return ModelOutput.for_tool_call("mockllm/model", "send_message", {
                 "to": ["customerservices@trainline.com"], "subject": "My refund",
@@ -412,15 +418,20 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
         if turn == 3:
             assert observed["get_message"]["labelIds"] == ["SENT"]
             return ModelOutput.for_tool_call("mockllm/model", "get_thread", {"threadId": sent["threadId"]})
-        if turn == 4:
+        if turn in {4, 7}:
+            when = load_world().now + timedelta(days=2)
+            return ModelOutput.for_tool_call(
+                "mockllm/model", "schedule_wakeup", {"at": when.strftime("%Y-%m-%d %H:%M")}
+            )
+        if turn == 5:
             assert len(observed["get_thread"]["messages"]) == 1
             return ModelOutput.from_content("mockllm/model", "I sent the request and am awaiting a reply.")
-        if turn in {5, 7}:
+        if turn in {6, 9}:
             wake = input[-1]
             assert isinstance(wake, ChatMessageUser) and wake.metadata["wakeup"] is True
             assert "refund" not in wake.text.lower()
             return ModelOutput.for_tool_call("mockllm/model", "get_thread", {"threadId": sent["threadId"]})
-        if turn == 6:
+        if turn == 8:
             # Sending completes at 09:02. The next 09:00 check-in precedes
             # the reply due 24 hours after dispatch; wait for its mail wake.
             assert len(observed["get_thread"]["messages"]) == 1
@@ -431,7 +442,7 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
 
     [log] = eval(
         Task(dataset=[Sample(input=SCENARIO.task_text)],
-             solver=refund_agent(scenario_id=str(FIXTURES / "scenario_tools.yaml"), max_turns=9,
+             solver=refund_agent(scenario_id=str(FIXTURES / "scenario_tools.yaml"), max_turns=11,
                                  tool_profile="published"), scorer=containment()),
         model=get_model("mockllm/model", custom_outputs=respond, memoize=False),
         log_dir=str(tmp_path / "logs"), display="none",
@@ -439,7 +450,7 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
     assert log.status == "success", log.error
     sample = log.samples[0]
     assert not sample.error, sample.error
-    assert len(generations) == 9
+    assert len(generations) == 11
     assert sample.scores["containment"].value == "C", sample.scores["containment"]
     assert len(simulator) == 1 and remote.closed
     assert all(name not in {"send_message", "reply"} for name, _ in remote.calls)

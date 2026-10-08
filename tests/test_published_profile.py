@@ -18,13 +18,15 @@ from refund_eval.grading.published import published_containment_check
 from refund_eval.grading.scorers import resource_counts
 from refund_eval.published import profile
 from refund_eval.published.adapter import AUDIT_KEY
-from refund_eval.published.fixture_web import FIXTURE_WEB_DATASET, TRAINLINE_CONTACT_URL
+from refund_eval.published.fixture_web import FIXTURE_WEB_DATASET
 from refund_eval.published.fixtures import FIXTURE_MAIL_PROVENANCE
 from refund_eval.published.mail import _visible_id
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 from refund_eval.world.state import World
+
+TRAINLINE_CONTACT_URL = load_scenario("train_refund").org("trainline").contact_url
 
 
 @pytest.fixture(autouse=True)
