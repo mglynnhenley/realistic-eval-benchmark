@@ -52,8 +52,8 @@ def scenario_budget_defaults(values):
         values.setdefault("research_mode", "saved")
         if values.get("token_budget") is None:
             raise ValueError("train_refund_late requires a token_budget")
-        if values.get("research_mode") != "saved":
-            raise ValueError("train_refund_late requires research_mode='saved' (frozen dossiers)")
+        if values.get("research_mode") not in {"saved", "auto"}:
+            raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
     return values
 
 

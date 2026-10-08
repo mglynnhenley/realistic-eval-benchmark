@@ -22,7 +22,8 @@ def test_late_refund_requires_explicit_cap_and_defaults_to_frozen_40m(config_typ
     assert config_type().cost_limit == 1
     assert config_type().token_budget is None
     assert config_type().research_mode == "auto"
-    with pytest.raises(ValidationError, match="frozen dossiers"):
+    assert config_type(scenario="train_refund_late", cost_limit=5, research_mode="auto").research_mode == "auto"
+    with pytest.raises(ValidationError, match="saved dossiers"):
         config_type(scenario="train_refund_late", cost_limit=5, research_mode="live")
 
 
