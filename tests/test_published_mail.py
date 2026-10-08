@@ -419,7 +419,8 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
             assert observed["get_message"]["labelIds"] == ["SENT"]
             return ModelOutput.for_tool_call("mockllm/model", "get_thread", {"threadId": sent["threadId"]})
         if turn in {4, 7}:
-            when = load_world().now + timedelta(days=2)
+            # First a pause that ends before the reply is due, then one that outlasts it.
+            when = load_world().now + (timedelta(hours=12) if turn == 4 else timedelta(days=2))
             return ModelOutput.for_tool_call(
                 "mockllm/model", "schedule_wakeup", {"at": when.strftime("%Y-%m-%d %H:%M")}
             )
@@ -432,8 +433,8 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
             assert "refund" not in wake.text.lower()
             return ModelOutput.for_tool_call("mockllm/model", "get_thread", {"threadId": sent["threadId"]})
         if turn == 8:
-            # Sending completes at 09:02. The next 09:00 check-in precedes
-            # the reply due 24 hours after dispatch; wait for its mail wake.
+            # The 12-hour wake-up came before the reply due 24 hours after
+            # dispatch; the next pause is ended by that mail.
             assert len(observed["get_thread"]["messages"]) == 1
             return ModelOutput.from_content("mockllm/model", "The reply has not arrived yet.")
         assert len(observed["get_thread"]["messages"]) == 2

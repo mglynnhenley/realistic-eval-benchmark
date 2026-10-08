@@ -210,9 +210,9 @@ def test_next_event_chooses_earliest_of_request_mail_and_checkin():
     cases = [
         (2, 3, 2, "requested"),
         (4, 3, 3, "new_mail"),
-        (30, 26, 8, "scheduled_checkin"),
+        (30, 26, 26, "new_mail"),  # a request replaces the 17:00 check-in
         (3, 3, 3, "new_mail"),
-        (8, 8, 8, "scheduled_checkin"),
+        (30, 40, 30, "requested"),
     ]
     for request_hours, mail_hours, expected_hours, kind in cases:
         w = world_at(START, START + timedelta(hours=mail_hours))

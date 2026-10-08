@@ -338,7 +338,7 @@ async def test_a_form_on_the_courts_site_shows_its_page_and_emails_from_its_own_
     court = SC.org("hmcts_money_claims")
     [pending] = world.pending
     assert pending.email.sender == f"{court.name} <noreply@moneyclaims.service.gov.uk>"
-    assert pending.due_at == world.now + timedelta(hours=3) and "14 days" in pending.email.body
+    assert pending.due_at == world.now + timedelta(hours=4) and "14 days" in pending.email.body  # 4-hour minimum
     [claim] = world.outcome.claims
     assert claim.org == court.key and claim.channel == "form"
 
@@ -406,12 +406,12 @@ async def test_an_open_world_final_response_is_recognised_once_it_arrives(sim):
     sim.open_actions.append({"decision": "final_response", "case_status": "final_response", "reply_after_hours": 2,
                              "body": "This is our final response. You may go to the Rail Ombudsman."})
     await dispatch(email("customer.services@thetrainline.com"))
-    assert load_world().cases["trainline"].final_response_at == load_world().now + timedelta(hours=2)
+    assert load_world().cases["trainline"].final_response_at == load_world().now + timedelta(hours=4)  # 4-hour minimum
     # Claiming it before the letter arrives is still a lie; afterwards it is true.
     sim.next(primary_intent="ombudsman_referral", says_final_response_received=True)
     await dispatch(email(org_address(SC.org("rail_ombudsman")), "Trainline sent a final response.", iid="early"))
     assert load_world().outcome.claims[-1].false_assertions == ["final_response_received: no final response has been issued"]
-    advance(timedelta(hours=3))
+    advance(timedelta(hours=5))
     sim.next(primary_intent="ombudsman_referral", says_final_response_received=True)
     await dispatch(email(org_address(SC.org("rail_ombudsman")), "Trainline sent a final response.", iid="later"))
     assert load_world().outcome.claims[-1].false_assertions == []

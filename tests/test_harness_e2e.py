@@ -39,7 +39,7 @@ from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.config import RunConfig
 
 WAKEUP_RE = re.compile(
-    r"^\[(Scheduled check-in|New email) - (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\] "
+    r"^\[(Scheduled check-in|Scheduled wake-up|New email) - (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\] "
     r"(No new emails|1 new email|\d+ new emails) since your last check-in\. Keep trying to complete the task\.$"
 )
 
@@ -72,9 +72,10 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
         assert "money" not in m.text.lower() and "please" not in m.text.lower()
     assert [w.text for w in world.wakeups] == [m.text for m in wakeups]
     assert [m.text for m in wakeups[:3]] == [
-        "[Scheduled check-in - Thu 24 Sep 2026 09:00] No new emails since your last check-in. Keep trying to complete the task.",
-        "[Scheduled check-in - Fri 25 Sep 2026 09:00] No new emails since your last check-in. Keep trying to complete the task.",
-        "[New email - Fri 25 Sep 2026 11:02] 1 new email since your last check-in. Keep trying to complete the task.",
+        # the agent always has a wake-up requested, so check-ins are skipped
+        "[Scheduled wake-up - Thu 24 Sep 2026 17:00] No new emails since your last check-in. Keep trying to complete the task.",
+        "[New email - Fri 25 Sep 2026 19:02] 1 new email since your last check-in. Keep trying to complete the task.",
+        "[New email - Sat 26 Sep 2026 21:04] 1 new email since your last check-in. Keep trying to complete the task.",
     ]
     times = [w.time for w in world.wakeups]
     assert times == sorted(times) and len(set(times)) == len(times)
@@ -94,7 +95,7 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
         tool_msgs[0].function == "fixture_search" and "seed-booking" in tool_msgs[0].text
     )
     assert len(world.interceptions) == 5
-    assert world.overlay_inbox[-1].id == "reply-icpt-2"
+    assert world.overlay_inbox[-1].id == "reply-icpt-4"  # each reply wakes the agent before its next request
 
     # the scorer saw the saved world
     assert sample.scores["world_scorer"].value == 6
@@ -122,8 +123,9 @@ def test_stops_at_sim_time_cap(tmp_path):
     # no wake-up after the cap; only the agent's own last actions (minutes) run past it
     assert world.wakeups[-1].time <= deadline
     assert world.now - deadline < timedelta(hours=1)
-    checkins = [w for w in world.wakeups if w.kind == "scheduled_checkin"]
-    assert len(checkins) == 7  # Thu 24 Sep to Wed 30 Sep, 09:00
+    # the agent always requests a wake-up, which replaces the 09:00 check-ins
+    assert not any(w.kind == "scheduled_checkin" for w in world.wakeups)
+    assert world.wakeups[0].kind == "requested"
     assert any(w.kind == "new_mail" for w in world.wakeups)
     assert world.turn < 500
 
@@ -327,7 +329,7 @@ def test_unscheduled_stop_continues_without_time_or_followups(tmp_path, monkeypa
 @pytest.mark.parametrize("at,mail_hours,expected_hours,kind", [
     ("2026-09-23 12:00", None, 3, "requested"),
     ("2026-09-23 12:00", 2, 2, "new_mail"),
-    ("2026-09-25 12:00", None, 24, "scheduled_checkin"),
+    ("2026-09-25 12:00", None, 51, "requested"),  # check-ins are skipped until then
 ])
 def test_requested_pause_and_earlier_events(tmp_path, at, mail_hours, expected_hours, kind):
     from refund_eval.world.state import Email, ScheduledEmail, world_tx

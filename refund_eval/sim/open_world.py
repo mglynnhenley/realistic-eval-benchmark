@@ -102,7 +102,9 @@ def open_offer_descriptions(world: World, org_key: str) -> list[str]:
 
 
 TEMPERAMENTS_KEY = "open_world_temperaments"
-# Longest any organisation takes to reply, so no reply stalls a six-week trial.
+# Shortest and longest any organisation takes to reply by email: real teams take hours,
+# and no reply stalls a long trial.
+MIN_REPLY_HOURS = 4
 MAX_REPLY_HOURS = 72
 FALLBACK_DENIAL = "We're unable to approve a refund for this claim under the applicable terms."
 # Outcomes the late-refund gate decides in code; the simulator writes the reply.
@@ -288,6 +290,9 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
         *([("YOUR TERMS AND CONDITIONS (your own published wording; quote it when it applies and apply it as "
             "written):\n" + org.terms)] if org.terms else []),
         "WHOEVER HANDLES THIS TODAY IS: " + temperament(org),
+        *([("You do not sell or run this ticket and hold none of the customer's money: you cannot approve or "
+            "refuse the refund yourself. You can advise, investigate, refer or recommend.")]
+          if org.kind not in HOLDS_RECORDS | {"court", "dynamic_personal"} else []),
         ("Decide as this organisation or person realistically would. You may reply or not, take your time, "
          "ask for information or evidence, escalate, refer elsewhere, refuse, make, accept or withdraw offers, "
          "pay money, close the case or make ordinary mistakes. Your choices have real effects in the simulation. Be consistent with "
@@ -591,9 +596,10 @@ async def handle_open(
             decision="handler_unavailable", summary="No response could be produced.",
             reply=mode in {"phone", "chat"}, reply_after_hours=0, subject="", case_status="open", new_offers=[],
             accept_offer=None, withdraw_offers=False, payments=[], notes_to_others=[], body=busy, page_body=busy)
-    if action.reply_after_hours:
+    if mode in {"email", "form"}:
         limit = 24 if action.decision == late_gate.INITIAL_DENIAL else MAX_REPLY_HOURS  # FR-011
-        action.reply_after_hours = min(action.reply_after_hours * random.uniform(0.8, 1.2), limit)
+        hours = action.reply_after_hours * random.uniform(0.8, 1.2)
+        action.reply_after_hours = min(max(hours, MIN_REPLY_HOURS), limit)
     user_email = scenario.user.email_addresses[0]
     emails: list[tuple[Email, datetime]] = []
     effective_at = now
