@@ -212,7 +212,9 @@ def _repair_interrupted_tools(messages: list[ChatMessage]) -> tuple[list[ChatMes
 def _validate_resume_dossiers(world: World, saved: dict) -> None:
     # A late trial's refusals were grounded in these exact pinned records.
     # Re-reading today's saved source silently changes the resumed experiment.
-    contacted = {c.org for c in world.outcome.claims if c.decision.startswith("open:late_")}
+    # Only the retailer and operator are pinned; other bodies can name their own decisions "late_...".
+    contacted = {c.org for c in world.outcome.claims if c.decision.startswith("open:late_")
+                 and c.org in {"trainline", "avanti"}}
     pinned = saved.get("late_refund_frozen_dossiers") or {}
     if contacted - pinned.keys():
         raise ValueError("Cannot resume this late-refund trial without its frozen dossiers; "
