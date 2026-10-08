@@ -215,6 +215,8 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         if created is not None:
             scenario = scenario.model_copy(update={"orgs": [*scenario.orgs, created]})
             org_key = created.key
+    if org_key is None and ch == "email":
+        return _bounce(scenario, world, inbound)
     if org_key is None or ch == "web_action":
         return _unknown(inbound, now, known=org_key is not None)
     org = scenario.org(org_key)
@@ -287,6 +289,23 @@ def _canned_reply(
         ))
         w.pending.append(ScheduledEmail(email=email, due_at=due))
     return SimResult(immediate_text="Email sent.", decision=key, reply_scheduled=True, kind="ack")
+
+
+def _bounce(scenario: Scenario, world: World, inbound: Inbound) -> SimResult:
+    """Email to an address no organisation or person answers bounces, as real mail would."""
+    due = world.now + timedelta(minutes=1)
+    thread_id, subject = _thread(world, inbound)
+    email = _email(eid=f"{inbound.interception_id}-bounce", thread_id=thread_id,
+                   sender="Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+                   to=[scenario.user.email_addresses[0]], subject="Delivery Status Notification (Failure)",
+                   body=(f"Address not found\n\nYour message wasn't delivered to {inbound.target} because the "
+                         "address couldn't be found, or is unable to receive mail."
+                         + (f"\n\nOriginal subject: {subject}" if subject else "")),
+                   sent_at=due, org=None)
+    with world_tx() as w:
+        w.pending.append(ScheduledEmail(email=email, due_at=due))
+    return SimResult(immediate_text="Email sent.", decision="bounced_unknown_recipient", reply_scheduled=True,
+                     kind="ack")
 
 
 def _unknown(inbound: Inbound, now: datetime, known: bool = False) -> SimResult:
