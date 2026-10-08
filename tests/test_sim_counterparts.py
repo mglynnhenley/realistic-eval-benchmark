@@ -203,16 +203,18 @@ async def test_dynamic_form_returns_advice_on_page_then_reuses_observed_email(si
     sim.open_actions.append({"page_body": "We can provide general guidance."})
     result = await dispatch(contact("https://advice.example/contact", "form"))
     assert result.kind == "page" and result.decision == "open:acknowledged"
-    assert not result.reply_scheduled and not load_world().pending
-    assert "general guidance" in result.immediate_text
     [org] = registered_orgs()
+    # A form-created organisation with no address still replies, from noreply@ on its own domain.
+    assert result.reply_scheduled
+    assert [m.email.sender for m in load_world().pending] == [f"{org.name} <noreply@advice.example>"]
+    assert "general guidance" in result.immediate_text
     case_ref = load_world().cases[org.key].case_ref
     assert case_ref is None
     assert not org.contact_emails
 
     result = await dispatch(contact(TARGET, iid="email-after-form"))
     assert result.reply_scheduled and len(sim.profile_prompts) == 1
-    [pending] = load_world().pending
+    pending = load_world().pending[-1]
     assert pending.email.sender == f"{org.name} <{TARGET}>"
     assert load_world().cases[org.key].case_ref == case_ref
     assert load_world().cases[org.key].contacts == 2

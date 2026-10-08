@@ -235,7 +235,8 @@ def _identity(org: Org) -> str:
         return ("A real individual the customer has written to, not an organisation. Reply as yourself, in your "
                 "own voice, as a busy person would: possibly briefly, late or not at all.")
     if org.kind.startswith("dynamic_"):
-        return "An organisation the customer has contacted. You have no booking or bank records for this customer."
+        return ("An organisation the customer has contacted. You have no booking or bank records for this "
+                "customer. You reply to every contact.")
     records = ("You hold this customer's booking or payment records." if org.kind in HOLDS_RECORDS
                else "You hold no booking or bank records; you know only what the customer and other bodies tell you.")
     return f"A {org.kind}. {records}"
@@ -394,6 +395,9 @@ async def choose_action(scenario: Scenario, world: World, org: Org, incoming: st
             # Individuals act on the claim through notes to organisations, not by paying it.
             action.payments, action.new_offers, action.accept_offer = [], [], None
         problem = money_problem(action, world, org, scenario.journey.fare, lied=bool(lies))
+        if (problem is None and org.kind.startswith("dynamic_") and org.kind != "dynamic_personal"
+                and mode in {"email", "form"} and not (action.reply and action.body.strip())):
+            problem = "you reply to every contact; set reply true and write the email"
         if problem is None and action.notes_to_others and org.kind != "dynamic_personal":
             problem = "companies cannot contact other organisations; remove notes and claims of such contact"
         if problem is None:
@@ -434,17 +438,20 @@ def _sender(org: Org, action: OpenAction | None = None, record: dict | None = No
             inbound_target: str | None = None) -> str | None:
     """Who the organisation's email comes from: the address it chose on its own
     domain, else its researched reply address, else its usual one. A form-created
-    counterpart has no address of its own, so without a valid from_address it
-    sends nothing."""
+    organisation with no address replies from noreply@ on its website's domain."""
     chosen = own_address(org, action.from_address) if action else None
     if chosen:
         return f"{org.name} <{chosen}>"
     if org.kind.startswith("dynamic_"):
         address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
+        if not address and org.kind != "dynamic_personal" and org.web_domains:
+            address = f"noreply@{org.web_domains[0]}"
         return f"{org.name} <{address}>" if address else None
     return _directive(record, org, "Reply-from") or reply_from(org)
     if org.kind.startswith("dynamic_"):
         address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
+        if not address and org.kind != "dynamic_personal" and org.web_domains:
+            address = f"noreply@{org.web_domains[0]}"
         return f"{org.name} <{address}>" if address else None
     return _directive(record, org, "Reply-from") or reply_from(org)
 

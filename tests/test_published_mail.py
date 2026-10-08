@@ -443,7 +443,7 @@ def test_inspect_harness_native_mail_send_sent_thread_and_wakeup(tmp_path, monke
     [log] = eval(
         Task(dataset=[Sample(input=SCENARIO.task_text)],
              solver=refund_agent(scenario_id=str(FIXTURES / "scenario_tools.yaml"), max_turns=11,
-                                 tool_profile="published"), scorer=containment()),
+                                 tool_profile="published", checkin_hours=(9,)), scorer=containment()),
         model=get_model("mockllm/model", custom_outputs=respond, memoize=False),
         log_dir=str(tmp_path / "logs"), display="none",
     )

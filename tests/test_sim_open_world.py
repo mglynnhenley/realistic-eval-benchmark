@@ -371,10 +371,11 @@ async def test_a_form_on_an_unknown_site_creates_a_counterpart_that_answers_on_t
     assert resolver.kind == "dynamic_advice" and resolver.web_domains == ["resolver.co.uk"]
     [pending] = load_world().pending  # a subdomain of its own domain is its own
     assert pending.email.sender == "Resolver <cases@mail.resolver.co.uk>"
-    # Without an address on its own domain, a form-created counterpart sends nothing.
+    # An address off its own domain is dropped; it replies from noreply@ on its website's domain instead.
     result = await dispatch(form("https://www.resolver.co.uk/complaints/new", CLAIM, iid="open-form-2"))
-    assert result.immediate_text == "Please sign in to continue." and not result.reply_scheduled
-    assert len(load_world().pending) == 1 and len(sim.profile_prompts) == 1
+    assert result.immediate_text == "Please sign in to continue." and result.reply_scheduled
+    assert load_world().pending[-1].email.sender == "Resolver <noreply@resolver.co.uk>"
+    assert len(load_world().pending) == 2 and len(sim.profile_prompts) == 1
 
 
 async def test_a_page_that_announces_a_full_refund_is_rejected(sim):
@@ -486,9 +487,9 @@ async def test_the_agent_is_woken_by_a_follow_up_due_before_its_next_check_in(si
         world.overlay_inbox.append(world.pending.pop().email)
     due = load_world().follow_ups[0].due_at
     sim.open_actions.append({"decision": "update", "reply_after_hours": 0.5, "body": "Still reviewing, sorry."})
-    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
     with world_tx() as world:
-        wakeup = wake(world, sim_weeks=12, checkin_hour=9)
+        wakeup = wake(world, sim_weeks=12, checkin_hours=(9,))
     assert wakeup.kind == "new_mail" and wakeup.time == due + timedelta(hours=0.5)
     assert any("Still reviewing" in e.body for e in load_world().overlay_inbox)
 
@@ -501,7 +502,7 @@ async def test_a_follow_up_after_the_next_check_in_waits(sim):
     with world_tx() as world:
         world.pending.clear()
     before = len(sim.open_prompts)
-    await _follow_ups_before_wake(sim_weeks=12, checkin_hour=9)
+    await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
     assert len(sim.open_prompts) == before and load_world().follow_ups[0].status == "pending"
 
 

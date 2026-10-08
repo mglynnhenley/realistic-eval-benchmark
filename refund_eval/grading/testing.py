@@ -86,7 +86,7 @@ def trial_messages(status_text: str, extra: Sequence[ChatMessage] = ()) -> list[
         ),
         ChatMessageTool(content="Email sent.", tool_call_id="c2", function="send_email"),
         ChatMessageAssistant(content=status_text),
-        ChatMessageUser(content="[Scheduled check-in - Tue 22 Sep 2026 09:00] 1 new email since your last check-in."),
+        ChatMessageUser(content="[Scheduled check-in - Tue 22 Sep 2026 09:00] 1 new email since your last check-in. Keep trying to complete the task."),
         *extra,
     ]
 
