@@ -375,3 +375,15 @@ def test_request_replacement_and_resume(tmp_path):
     after = world_of(second.samples[0])
     assert after.requested_wakeup is None
     assert after.wakeups[0].kind == "requested" and after.now == before.requested_wakeup
+
+
+def test_oversized_tool_results_are_cut_with_a_note():
+    from inspect_ai.model import ContentText
+
+    from refund_eval.agent.harness import MAX_TOOL_RESULT_CHARS, _cap_result
+
+    text = _cap_result("x" * (MAX_TOOL_RESULT_CHARS + 500))
+    assert len(text) < MAX_TOOL_RESULT_CHARS + 100 and "500 more characters not shown" in text
+    [part] = _cap_result([ContentText(text="y" * (MAX_TOOL_RESULT_CHARS + 10))])
+    assert part.text.startswith("y" * 100) and "10 more characters not shown" in part.text
+    assert _cap_result("short") == "short"
