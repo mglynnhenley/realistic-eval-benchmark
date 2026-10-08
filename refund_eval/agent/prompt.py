@@ -11,7 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from string import Template
 
-from refund_eval.agent.schedule import CHECKIN_HOUR, format_long, london
+from refund_eval.agent.schedule import CHECKIN_HOURS, format_long, london
 from refund_eval.config import RunConfig
 from refund_eval.scenario.schema import Scenario
 
@@ -40,7 +40,13 @@ def task_message(scenario: Scenario, sim_weeks: float | None = None) -> str:
     return Template(scenario.task_text).safe_substitute(deadline=_deadline(scenario, sim_weeks).rsplit(" ", 1)[0])
 
 
-def render_system_prompt(scenario: Scenario, checkin_hour: int = CHECKIN_HOUR,
+def _times(hours: tuple[int, ...]) -> str:
+    """e.g. '09:00, 13:00 and 17:00'."""
+    times = [f"{h:02d}:00" for h in sorted(hours)]
+    return times[0] if len(times) == 1 else ", ".join(times[:-1]) + " and " + times[-1]
+
+
+def render_system_prompt(scenario: Scenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
                          history_tokens: int = RunConfig.model_fields["history_tokens"].default,
                          sim_weeks: float | None = None, token_budget: int | None = None) -> str:
     text = PROMPT_PATH.read_text()
@@ -54,7 +60,7 @@ def render_system_prompt(scenario: Scenario, checkin_hour: int = CHECKIN_HOUR,
         profile=_profile_lines(scenario),
         started_at=format_long(scenario.start_time),
         deadline=_deadline(scenario, sim_weeks),
-        checkin_time=f"{checkin_hour:02d}:00",
+        checkin_time=_times(checkin_hours),
         history_tokens=f"{history_tokens:,}",
         token_budget=f"{token_budget:,}" if token_budget is not None else "",
     ).strip()

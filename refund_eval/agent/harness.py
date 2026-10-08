@@ -68,7 +68,7 @@ from refund_eval.agent.budget import (
 )
 from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import (
-    CHECKIN_HOUR,
+    CHECKIN_HOURS,
     LONDON,
     aware,
     new_mail_count,
@@ -403,7 +403,7 @@ def schedule_wakeup() -> Tool:
 
 
 def wake(
-    world: World, *, sim_weeks: float, checkin_hour: int = CHECKIN_HOUR
+    world: World, *, sim_weeks: float, checkin_hours: tuple[int, ...] = CHECKIN_HOURS
 ) -> Wakeup | None:
     """Advance the clock to the next event, deliver due mail, record the wake-up.
 
@@ -411,13 +411,13 @@ def wake(
     simulated-time cap."""
     deadline = sim_deadline(world, sim_weeks)
     since = world.wakeups[-1].time if world.wakeups else world.start_time
-    when, kind = next_event(world, checkin_hour)
+    when, kind = next_event(world, checkin_hours)
     if when > deadline:
         return None
     arrived = _advance(world, when)
     if kind == "new_mail" and not arrived:
         # A reply was due but nothing was delivered; wait for the next check-in.
-        when, kind = next_checkin(world.now, checkin_hour), "scheduled_checkin"
+        when, kind = next_checkin(world.now, checkin_hours), "scheduled_checkin"
         if when > deadline:
             return None
         arrived += _advance(world, when)
@@ -427,7 +427,7 @@ def wake(
     return wakeup
 
 
-async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: int = 10) -> None:
+async def _follow_ups_before_wake(sim_weeks: float, checkin_hours: tuple[int, ...], limit: int = 10) -> None:
     """Open world: fire each counterparty follow-up that falls due before the agent's
     next wake-up, moving the clock to it first. Each may schedule mail that brings
     the wake-up forward, so the next event is recomputed every time."""
@@ -439,7 +439,7 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hour: int, limit: in
         item = next_follow_up(world)
         if item is None:
             return
-        when = next_event(world, checkin_hour)[0]
+        when = next_event(world, checkin_hours)[0]
         if aware(item.due_at) > min(when, sim_deadline(world, sim_weeks)):
             return
         with world_tx() as w:
@@ -471,7 +471,7 @@ def make_on_continue(
     fare: float,
     max_turns: int,
     sim_weeks: float,
-    checkin_hour: int = CHECKIN_HOUR,
+    checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
 ):
     """Build the `on_continue` hook for react()."""
 
@@ -516,9 +516,9 @@ def make_on_continue(
             else:
                 # Counterparties keep promises made before the next wake-up, which may
                 # bring that wake-up forward. Then wake the agent.
-                await _follow_ups_before_wake(sim_weeks, checkin_hour)
+                await _follow_ups_before_wake(sim_weeks, checkin_hours)
                 with world_tx() as world:
-                    wakeup = wake(world, sim_weeks=sim_weeks, checkin_hour=checkin_hour)
+                    wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
                     world.requested_wakeup = None
                     if wakeup is None:
                         world.stop_reason = STOP_SIM_TIME_CAP
@@ -560,7 +560,7 @@ def refund_agent(
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
-    checkin_hour: int = CHECKIN_HOUR,
+    checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str = RunConfig.model_fields["research_mode"].default,
@@ -580,7 +580,7 @@ def refund_agent(
         memory tool for notes; 0 shows the full history and adds no memory tool.
       sim_weeks: Stop when the next wake-up would be more than this many
         simulated weeks after the scenario start.
-      checkin_hour: Hour of the daily scheduled check-in.
+      checkin_hours: London hours of the daily scheduled check-ins.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
       resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
         from: its world, companies, notes and conversation are restored and the agent carries
@@ -615,7 +615,7 @@ def refund_agent(
             # Notes and scheduling cost no simulated time and do not deliver mail.
             local = [schedule_wakeup(), *([memory()] if history_tokens else [])]
             ledger = load_world().token_ledger if budgeted else None
-            instructions = render_system_prompt(scenario, checkin_hour, history_tokens, sim_weeks,
+            instructions = render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
                                                 token_budget=ledger.budget if ledger else None)
             return react(
                 prompt=AgentPrompt(
@@ -632,7 +632,7 @@ def refund_agent(
                     fare=scenario.journey.fare,
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
-                    checkin_hour=checkin_hour,
+                    checkin_hours=checkin_hours,
                 ),
             )
 

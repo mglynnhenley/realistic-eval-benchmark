@@ -159,7 +159,8 @@ def test_pause_only_agent_reaches_november_23_with_budget_unused(tmp_path):
     scenario = load_scenario("train_refund_late")
     task = Task(dataset=[Sample(input=task_message(scenario, sim_weeks=6))],
                 solver=harness.refund_agent(scenario_id=scenario.id, sim_weeks=6,
-                                           max_turns=200, history_tokens=0, token_budget=40_000_000),
+                                           max_turns=200, history_tokens=0, token_budget=40_000_000,
+                                           checkin_hours=(9,)),
                 scorer=world_scorer())
     sample = run(task, BudgetScript(pause=True), tmp_path).samples[0]
     world = world_of(sample)

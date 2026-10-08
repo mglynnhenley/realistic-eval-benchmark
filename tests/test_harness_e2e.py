@@ -46,7 +46,7 @@ WAKEUP_RE = re.compile(
 
 def test_wakeups_status_reports_and_turn_cap(tmp_path):
     script = Script(report="Update: all sorted, the money has arrived in your account.")
-    log = run(harness_task(max_turns=12), script, tmp_path)
+    log = run(harness_task(max_turns=12, checkin_hours=(9,)), script, tmp_path)
     sample = log.samples[0]
     world = world_of(sample)
 
@@ -57,7 +57,7 @@ def test_wakeups_status_reports_and_turn_cap(tmp_path):
 
     # system prompt, then the task exactly once, word for word
     assert isinstance(sample.messages[0], ChatMessageSystem)
-    assert sample.messages[0].text == render_system_prompt(scenario(), sim_weeks=RunConfig.model_fields["sim_weeks"].default)
+    assert sample.messages[0].text == render_system_prompt(scenario(), (9,), sim_weeks=RunConfig.model_fields["sim_weeks"].default)
     users = [m for m in sample.messages if isinstance(m, ChatMessageUser)]
     assert users[0].text == scenario().task_text
     assert users[0] is sample.messages[1]
@@ -115,7 +115,7 @@ def test_stops_when_full_cash_refund_reached(tmp_path):
 
 
 def test_stops_at_sim_time_cap(tmp_path):
-    log = run(harness_task(max_turns=500, sim_weeks=1), Script(), tmp_path)
+    log = run(harness_task(max_turns=500, sim_weeks=1, checkin_hours=(9,)), Script(), tmp_path)
     world = world_of(log.samples[0])
     deadline = world.start_time + timedelta(weeks=1)
     assert world.stop_reason == "sim_time_cap"
@@ -340,7 +340,7 @@ def test_requested_pause_and_earlier_events(tmp_path, at, mail_hours, expected_h
                               subject="Reply", body="Reply", sent_at=due)
                 world.pending.append(ScheduledEmail(email=email, due_at=due))
 
-    sample = run(harness_task(max_turns=4, history_tokens=0),
+    sample = run(harness_task(max_turns=4, history_tokens=0, checkin_hours=(9,)),
                  PlannedTurns(request_wakeup(at), hook=seed_mail), tmp_path).samples[0]
     world = world_of(sample)
     first, second = world.wakeups
@@ -371,7 +371,7 @@ def test_request_replacement_and_resume(tmp_path):
     before = world_of(first.samples[0])
     assert before.requested_wakeup == before.start_time + timedelta(hours=5)
     assert before.now == before.start_time and not before.wakeups  # tool turns do not pause
-    second = run(harness_task(max_turns=4, resume_log=first.location), PlannedTurns(), tmp_path / "second")
+    second = run(harness_task(max_turns=4, resume_log=first.location, checkin_hours=(9,)), PlannedTurns(), tmp_path / "second")
     after = world_of(second.samples[0])
     assert after.requested_wakeup is None
     assert after.wakeups[0].kind == "requested" and after.now == before.requested_wakeup
