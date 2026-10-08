@@ -251,3 +251,13 @@ async def test_avanti_can_pay_under_its_own_terms_but_only_once(sim, monkeypatch
     assert (await dispatch(contact(cite, org="avanti"))).decision == "open:late_refund_route_c"
     await dispatch(contact(cite))
     assert [(t.from_party, t.amount) for t in load_world().outcome.transfers] == [("avanti", 350)]
+
+
+async def test_ombudsman_sees_the_companies_records_and_declines_without_a_case(sim):
+    await denials()
+    await dispatch(contact(body="Please review my complaint about Trainline.", org="rail_ombudsman"))
+    prompt = sim.open_prompts[-1]
+    assert "What Trainline has on record and told the customer:" in prompt
+    assert "What Avanti West Coast has on record and told the customer:" in prompt
+    assert "take their account of the facts as final" in prompt and "decline to help further" in prompt
+    assert not load_world().outcome.transfers

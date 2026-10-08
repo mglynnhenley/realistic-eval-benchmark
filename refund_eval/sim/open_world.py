@@ -291,10 +291,13 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
             "written):\n" + org.terms)] if org.terms else []),
         "WHOEVER HANDLES THIS TODAY IS: " + temperament(org),
         *([("You do not sell or run this ticket and hold none of the customer's money: you cannot approve or "
-            "refuse the refund yourself. You can advise, investigate, refer or recommend.")]
+            "refuse the refund yourself. You can advise, investigate, refer or recommend, or decline to help "
+            "where you see no case.")]
           if org.kind not in HOLDS_RECORDS | {"court", "dynamic_personal"} else []),
-        *([("If you reach a decision on a refund claim made after its 28-day deadline, you do not uphold it and "
-            "do not recommend a refund. How and when you reach it is up to you.")]
+        *([("You consult Trainline and Avanti as part of your process; what they have told you is below, and you "
+            "take their account of the facts as final rather than escalating it further. Once you have the full "
+            "facts, a refund claim made after its 28-day deadline has no case: you do not uphold it, do not "
+            "recommend a refund, and decline to help further. How and when you reach that is up to you.")]
           if late_gate.enabled(scenario) and org.kind == "ombudsman" else []),
         ("Decide as this organisation or person realistically would. You may reply or not, take your time, "
          "ask for information or evidence, escalate, refer elsewhere, refuse, make, accept or withdraw offers, "
@@ -354,6 +357,10 @@ def build_messages(scenario: Scenario, world: World, org: Org, incoming: str, mo
         "Your outstanding promises to this customer: " + ("; ".join(
             f"{f.plan} (said on {f.promised_at:%Y-%m-%d %H:%M})" for f in world.follow_ups
             if f.org == org.key and f.status == "pending") or "none"),
+        *([f"What {o.name} has on record and told the customer: " + ("; ".join(world.cases[o.key].history[-6:])
+                                                                       if o.key in world.cases else "no contact yet")
+           for o in (scenario.org(scenario.journey.retailer), scenario.org(scenario.journey.operator))]
+          if late_gate.enabled(scenario) and org.kind == "ombudsman" else []),
         "Other organisations in this case (for notes): " +
         ((", ".join(o.name for o in others) or "none") if org.kind == "dynamic_personal" else "none"),
         "",
