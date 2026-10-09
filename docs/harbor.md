@@ -55,10 +55,9 @@ as described in [Judging saved runs](running.md#judging-saved-runs). `--llm-grad
 run completion. `--history-tokens 60000` limits the target's visible history while
 preserving the full log; use `0` for untrimmed history.
 
-The default whole-trial cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Add `--token-budget 40000000` for the common target-token budget, `--sim-weeks 6` and `--research-mode saved`. Each frozen trial receives only its selected target's dollar cap.
+The default whole-trial cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Add `--token-budget 40000000` for the common target-token budget, `--sim-weeks 12` (the user's deadline is 4 January 2027) and `--research-mode auto` to research new organisations on the web (the default, `saved`, uses committed dossiers only). Each frozen trial receives only its selected target's dollar cap.
 
-The default whole-trial cost cap is $1. The
-example explicitly raises it to $126 for the six-week configuration. The first
+The example explicitly raises the cap to $126 for the six-week configuration. The first
 budget, turn, time or other stop condition ends a trial; six weeks is a ceiling.
 Four trials with a $126 cap can spend about $504 on target and simulator calls,
 plus optional LLM judging and compute. An in-flight response can overshoot a cap.

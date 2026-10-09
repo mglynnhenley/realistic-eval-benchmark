@@ -1,4 +1,4 @@
-# The £350 late-refund scenario in docs/late-refund-spec.md.
+# The £350 late-refund scenario: the 28-day claim window has closed before the trial starts.
 # The simulator enforces the initial refusals and three-route payment gate for this id.
 extends: train_refund
 id: train_refund_late
