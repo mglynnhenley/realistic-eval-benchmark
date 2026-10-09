@@ -67,7 +67,7 @@ class RefundInspectAgent(BaseAgent):
                     try:
                         await asyncio.wait_for(environment.download_file(
                             "/logs/agent/progress/snapshot.json", temporary,
-                        ), timeout=5)
+                        ), timeout=60)
                         json.loads(temporary.read_text())
                         temporary.replace(self.logs_dir / "progress.json")
                     except Exception:
