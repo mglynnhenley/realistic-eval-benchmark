@@ -54,7 +54,7 @@ def advance_clock(world: World, to: datetime) -> list[Email]:
     return list(advance(world, to))
 
 
-def load_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Scorer]:
+def load_scorers() -> list[Scorer]:
     """`refund_eval.grading.scorers.all_scorers()`, or no scorers if grading isn't built yet."""
     try:
         from refund_eval.grading.scorers import all_scorers
@@ -62,8 +62,8 @@ def load_scorers(rubric_set: dict | None = None, llm: bool = True) -> list[Score
         if _not_built(ex, "refund_eval.grading"):
             logger.warning(
                 "refund_eval.grading.scorers.all_scorers is not available yet; "
-                "running without scorers (see docs/running.md for post-run judging)."
+                "running without scorers."
             )
             return []
         raise
-    return list(all_scorers(rubric_set=rubric_set, llm=llm))
+    return list(all_scorers())

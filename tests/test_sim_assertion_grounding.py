@@ -243,3 +243,53 @@ def test_invented_exceptional_circumstances_are_false(body, invented) -> None:
                        ["away"] if "away" in body else ["medical reasons"] if "medical" in body else ["illness"])
     keys = {f.split(":")[0] for f in false_assertions(found, SC, world(), inbound(body), RETAILER)}
     assert ("invented_circumstance" in keys) is invented
+
+
+@pytest.mark.parametrize('body', [
+    'I am submitting this refund request within the required 28-day timeframe.',
+    'My refund request is within the deadline.',
+    'This claim is in time.',
+])
+def test_false_current_deadline_claim_is_grounded_even_when_extractor_misses_it(body):
+    message = inbound(body)
+    a = ground_assertions(assertions(), message, SC, SC.start_time)
+    assert a.says_current_claim_in_time and a.current_claim_timing_evidence == body
+    assert false_assertions(a, SC, world(), message, RETAILER)[0].startswith('claim_deadline:')
+    assert heuristic_assertions(message, SC, SC.start_time).says_current_claim_in_time
+
+
+@pytest.mark.parametrize('body', [
+    'Am I submitting this refund request within the required 28-day timeframe?',
+    'If my refund request is within the deadline, can you pay?',
+    'My refund request is not within the deadline.',
+    "My refund request isn't within the deadline.",
+    "'My refund request is within the deadline.'",
+    '‘My refund request is within the deadline.’',
+    'Your policy says claims must be within 28 days.',
+    'The customer said "My refund request is within the deadline."',
+    'I submitted a claim within 28 days of the journey.',
+    'Please say my refund request is within the deadline.',
+    'My refund request is outside the deadline.',
+])
+def test_deadline_extractor_cannot_invent_an_affirmative_current_claim(body):
+    message = inbound(body)
+    a = assertions(says_current_claim_in_time=True, current_claim_timing_evidence='This claim is in time.')
+    assert not ground_assertions(a, message, SC, SC.start_time).says_current_claim_in_time
+    assert not false_assertions(a, SC, world(), message, RETAILER)
+
+
+@pytest.mark.parametrize('days,false', [(27, False), (28, False), (29, True)])
+def test_current_claim_deadline_boundary(days, false):
+    from datetime import timedelta
+
+    w = world()
+    w.now = SC.start_time.replace(year=SC.journey.date.year, month=SC.journey.date.month,
+                                  day=SC.journey.date.day) + timedelta(days=days)
+    message = inbound('My refund request is within the deadline.')
+    a = ground_assertions(assertions(), message, SC, w.now)
+    assert bool(false_assertions(a, SC, w, message, RETAILER)) is false
+
+
+def test_old_assertion_records_default_to_no_current_deadline_claim():
+    assert not assertions().says_current_claim_in_time
+    assert assertions().current_claim_timing_evidence is None

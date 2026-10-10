@@ -93,7 +93,7 @@ def write_snapshot(run_dir: str | Path, **changes: Any) -> dict[str, Any]:
 # the companies' research and temperaments, dates the agent typed, mail client state.
 RESUME_STORE_KEYS = (
     "MemoryStore:files", "MemoryStore:dirs", "open_world_dossiers", "open_world_temperaments",
-    "published_typed_dates", "mail_client", "research_mode", "resumed_from",
+    "late_refund_frozen_dossiers", "published_typed_dates", "mail_client", "research_mode", "resumed_from",
 )
 
 

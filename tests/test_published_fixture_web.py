@@ -12,10 +12,7 @@ from inspect_ai.util._store import Store, init_subtask_store
 from refund_eval.agent.harness import initial_world
 from refund_eval.published.adapter import AUDIT_KEY
 from refund_eval.published.fixture_web import (
-    AVANTI_CONTACT_URL,
     FIXTURE_WEB_DATASET,
-    TRAINLINE_CONTACT_URL,
-    TRAINLINE_POLICY_URL,
     FixtureSearchService,
     fixture_pages,
     fixture_web_config,
@@ -28,6 +25,13 @@ from refund_eval.sim.interface import SimResult
 from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import Mailbox, make_mail_source
 from refund_eval.world.state import load_world, save_world
+
+TRAINLINE_POLICY_URL = (
+    "https://support.thetrainline.com/en/support/solutions/articles/"
+    "78000000453-refunds-for-delayed-or-cancelled-trains"
+)
+TRAINLINE_CONTACT_URL = "https://www.thetrainline.com/about-us/contact-us"
+AVANTI_CONTACT_URL = "https://www.railhelp.co.uk/avantiwestcoast"
 
 
 @pytest.fixture
@@ -45,6 +49,22 @@ def req(url, method="GET", fields=None):
         "body_base64": base64.b64encode(urlencode(fields or {}).encode()).decode(),
         "headers": {"content-type": "application/x-www-form-urlencoded"},
     }
+
+
+def test_late_form_has_empty_date_and_unchecked_accuracy_terms(ctx):
+    from refund_eval.published.fixture_web import _page_html
+
+    scenario = load_scenario("train_refund_late")
+    late_ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
+    page = next(p for p in fixture_pages(late_ctx) if p.org == "trainline" and p.form_action)
+    form = BeautifulSoup(_page_html(page), "html.parser")
+    date = form.select_one('input[name="earlier_claim_date"]')
+    confirm = form.select_one('input[name="accuracy_terms_confirmation"]')
+    assert date["type"] == "date" and not date.get("value")
+    assert confirm["type"] == "checkbox" and not confirm.has_attr("checked")
+    assert "information is accurate and accept the terms" in form.get_text()
+    for p in fixture_pages(ctx):
+        assert "earlier_claim_date" not in _page_html(p)
 
 
 async def test_search_native_contract_useful_result_and_explicit_provenance(ctx):
@@ -131,6 +151,36 @@ async def test_fixture_form_flows_to_simulator_and_reloads_acknowledgement(ctx, 
     assert (await boundary(req("https://unreviewed.example/refund")))["status"] == 403
 
 
+@pytest.mark.parametrize("public_read_policy", ["reviewed_urls", "public_web"])
+async def test_late_intercepted_form_renders_neutral_fields_without_fetch(ctx, monkeypatch, public_read_policy):
+    scenario = load_scenario("train_refund_late")
+    late_ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
+    calls = []
+
+    async def dispatch(inbound):
+        calls.append(inbound)
+        return SimResult(immediate_text="Your request has been received. <script>untrusted()</script>",
+                         decision="open:late_initial_denial", reply_scheduled=True, kind="page")
+
+    async def forbidden_fetch(request):
+        pytest.fail("Intercepted form must not leave the simulator")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    boundary = BrowserBoundary(late_ctx, fetch=forbidden_fetch, public_read_urls=[], public_read_policy=public_read_policy)
+    sent = await boundary(req(TRAINLINE_CONTACT_URL, "POST", {"message": "Please refund my cancelled train."}))
+    page = BeautifulSoup(base64.b64decode(sent["body_base64"]).decode(), "html.parser")
+    form = page.find("form")
+    assert form["action"] == TRAINLINE_CONTACT_URL and form["method"] == "post"
+    assert not form.select_one('[name="earlier_claim_date"]').get("value")
+    assert not form.select_one('[name="accuracy_terms_confirmation"]').has_attr("checked")
+    assert not page.find("script")  # simulator prose stays escaped
+    assert await boundary(req(TRAINLINE_CONTACT_URL)) == sent
+    await boundary(req(form["action"], "POST", {"message": "I submitted an earlier refund request.",
+                                               "earlier_claim_date": "2026-09-20",
+                                               "accuracy_terms_confirmation": "true"}))
+    assert len(calls) == 2 and calls[-1].fields["accuracy_terms_confirmation"] == "true"
+
+
 def test_fixture_pages_have_no_network_subresources_or_hidden_scenario_state(ctx):
     config = fixture_web_config(ctx)
     for result in config["fixtures"].values():
@@ -147,9 +197,13 @@ def test_fixture_pages_have_no_network_subresources_or_hidden_scenario_state(ctx
 
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
                    reason="Requires the locally built pinned browser container")
-async def test_real_browser_submits_fixture_contact_form(ctx, tmp_path, monkeypatch):
+@pytest.mark.parametrize("scenario_id", ["train_refund", "train_refund_late"])
+async def test_real_browser_submits_fixture_contact_form(ctx, tmp_path, monkeypatch, scenario_id):
     from refund_eval.published.browser import PublishedBrowserService
 
+    scenario = load_scenario(scenario_id)
+    save_world(initial_world(scenario))
+    ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
     calls = []
 
     async def dispatch(inbound):
@@ -172,6 +226,12 @@ async def test_real_browser_submits_fixture_contact_form(ctx, tmp_path, monkeypa
         assert not result.get("isError")
         snapshot = await browser.call_tool("browser_snapshot", {}, tool_call_id="observe")
         assert "Your enquiry has been received" in json.dumps(snapshot)
+        if scenario_id == "train_refund_late":
+            assert "Date of an earlier refund request" in json.dumps(snapshot)
+            assert "information is accurate" in json.dumps(snapshot)
+            rendered = BeautifulSoup(base64.b64decode(next(iter(boundary.pages.values()))["body_base64"]).decode(), "html.parser")
+            assert not rendered.select_one('[name="earlier_claim_date"]').get("value")
+            assert not rendered.select_one('[name="accuracy_terms_confirmation"]').has_attr("checked")
         assert len(calls) == 1 and calls[0].org == "trainline"
         assert calls[0].fields["email"] == ctx.user_email
         assert load_world().interceptions[0].payload["tool_call_id"] == "submit"

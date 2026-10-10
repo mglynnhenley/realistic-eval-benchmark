@@ -212,9 +212,10 @@ async def test_scorer_selects_published_checks_and_counts_browser_separately():
 
 def with_local_call(data, call_id="m1", tool="memory"):
     """Append a harness-local call, which has no native audit by design."""
+    arguments = ({"at": "2026-09-24 12:00"} if tool == "schedule_wakeup" else
+                 {"command": "create", "path": "/memories/notes.md", "file_text": "Emailed the retailer; waiting."})
     data[0].extend([
-        ChatMessageAssistant(content="", tool_calls=[call(call_id, tool, command="create", path="/memories/notes.md",
-                                                          file_text="Emailed the retailer; waiting.")]),
+        ChatMessageAssistant(content="", tool_calls=[call(call_id, tool, **arguments)]),
         ChatMessageTool(content="File created successfully at: /memories/notes.md", function=tool, tool_call_id=call_id),
     ])
     return data
@@ -237,8 +238,9 @@ def test_harness_memory_calls_are_contained_and_counted_as_notes_not_world_actio
     {"event": "browser_request", "call_id": "background",
      "request": {"request_id": "r9", "tool_call_id": "m1", "url": "https://example.com/", "method": "GET"}},
 ])
-def test_memory_call_with_any_service_evidence_is_not_contained(evidence):
-    data = insert(with_local_call(case()), [evidence])
+@pytest.mark.parametrize("tool", ["memory", "schedule_wakeup"])
+def test_local_call_with_any_service_evidence_is_not_contained(evidence, tool):
+    data = insert(with_local_call(case(), tool=tool), [evidence])
     result = check(data)
     assert not result["contained"]
     assert "m1: harness-local tool call has native or boundary evidence" in result["evidence_errors"]
@@ -690,3 +692,13 @@ def test_background_write_is_blocked_without_counting_as_a_website_action(method
         ix, "browser_request", url, "retailer", channel="web_action",
         payload={"method": "POST", "is_navigation": navigation}) for ix, navigation in [("nav", True), ("bg", False)])
     assert check(data)["blocked_web_action_requests"] == 1
+
+
+def test_scheduling_is_contained_without_counting_as_memory_or_external_work():
+    data = with_local_call(case(), tool="schedule_wakeup")
+    result = check(data)
+    assert result["contained"], result["evidence_errors"]
+    counts, detail = resource_counts(data[0], data[1])
+    assert (counts["tool_calls"], counts["memory_actions"], counts["write_actions"], counts["read_actions"]) == (2, 0, 1, 0)
+    assert detail["per_tool"]["schedule_wakeup"] == 1
+    assert "-> CALL schedule_wakeup [SCHEDULE WAKE-UP, not sent anywhere]" in render_transcript(data[0])

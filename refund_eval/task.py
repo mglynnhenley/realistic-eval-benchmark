@@ -30,13 +30,17 @@ from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     DEFAULT_TARGET_MODEL,
+    LATE_REFUND_SCENARIO,
+    LATE_REFUND_TOKEN_BUDGET,
+    CostLimit,
     RunConfig,
+    resolve_cost_limits,
 )
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.scenario.schema import load_scenario
 
 # The target is the eval model (--model). These roles are used by the
-# counterparty simulator and the graders (--model-role simulator=... etc).
+# counterparty simulator and its claim extraction (--model-role simulator=... etc).
 MODEL_ROLES = ("simulator", "grader")
 # With a mockllm target (dry run) the roles default to mockllm too, so a dry
 # run never calls a real API unless you ask it to with --model-role.
@@ -149,23 +153,20 @@ def impossible_refund(
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
-    cost_limit: float | None = RunConfig.model_fields["cost_limit"].default,
+    cost_limit: float | dict[str, float] | str | None = "default",
+    token_budget: int | None = None,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     message_limit: int | None = None,
     token_limit: int | None = None,
     time_limit: int | None = RunConfig.model_fields["time_limit"].default,
     working_limit: int | None = None,
-    rubric_set: dict | None = None,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
-    research_mode: str = RunConfig.model_fields["research_mode"].default,
+    research_mode: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
-    llm_grading: bool = RunConfig.model_fields["llm_grading"].default,
     resume_log: str | None = None,
-    daily_allowance: float | None = RunConfig.model_fields["daily_allowance"].default,
-    use_full_allowance: bool = False,
 ) -> Task:
     """The impossible refund.
 
@@ -177,10 +178,12 @@ def impossible_refund(
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
         agent gets a memory tool. 0 shows the full history. The log always keeps it all.
       cost_limit: Per-trial model spend cap in dollars (Inspect cost_limit;
-        counts every model call in the trial, including the simulator).
+        counts every model call in the trial, including the simulator). A mapping
+        resolves the selected target's cap. Late-refund requires an explicit cap;
+        other scenarios default to $1 and accept None to disable the dollar cap.
+      token_budget: Target-only token budget including cached input. Late-refund
+        defaults to 40 million; other scenarios have no target token budget.
       sim_weeks: Per-trial cap on simulated time.
-      daily_allowance: Worst-case dollars of model spend per simulated day (same calls as
-        cost_limit). An agent that uses it up stops for the day and wakes at the next check-in.
       message_limit: Optional Inspect message limit.
       token_limit: Optional Inspect token limit.
       time_limit: Optional Inspect wall-clock limit in seconds.
@@ -191,6 +194,31 @@ def impossible_refund(
         fresh and researches otherwise, "live" always researches, "saved" never searches.
       fixture_path: Optional per-run inbox JSON for published tools with fixture data.
     """
+    scenario = resolve_scenario_arg(scenario)
+    sc = load_scenario(scenario)
+    late_refund = sc.id == LATE_REFUND_SCENARIO
+    if research_mode is None:
+        research_mode = "saved" if late_refund else "auto"
+    if late_refund:
+        if cost_limit is None or cost_limit == "default":
+            raise ValueError("train_refund_late requires an explicit cost_limit")
+        if research_mode not in {"saved", "auto"}:
+            raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
+        if token_budget is None:
+            token_budget = LATE_REFUND_TOKEN_BUDGET
+    if token_budget is not None and (type(token_budget) is not int or token_budget <= 0):
+        raise ValueError("token_budget must be a positive integer")
+    if cost_limit == "default":
+        cost_limit = 1.0
+    if cost_limit is not None:
+        from pydantic import TypeAdapter
+
+        cost_limit = TypeAdapter(CostLimit).validate_python(cost_limit)
+        if isinstance(cost_limit, dict):
+            target = _eval_model_name()
+            if target is None:
+                raise ValueError("A cost_limit mapping requires an active target model")
+            cost_limit = resolve_cost_limits(cost_limit, [target], scenario=sc.id)[target]
     if trials < 1:
         raise ValueError("trials must be at least 1")
     if browser_runtime not in {"docker", "subprocess"}:
@@ -237,24 +265,14 @@ def impossible_refund(
         if not status["configured"]:
             raise ValueError(status["reason"])
         mail_source = "gmail-fixture"
-    scenario = resolve_scenario_arg(scenario)
-    sc = load_scenario(scenario)
-
     eval_model = _eval_model_name()
     roles = default_model_roles(eval_model)
     register_default_costs(
         [m for m in [eval_model, *roles.values(), *_given_role_models()] if m],
-        fetch_openrouter=cost_limit is not None or daily_allowance is not None,
+        fetch_openrouter=cost_limit is not None,
     )
 
-    if rubric_set is not None:
-        from refund_eval.grading.behaviours import BehaviourSnapshot
-
-        rubric_set = BehaviourSnapshot.model_validate(rubric_set).model_dump(mode="json")
-    if not llm_grading:
-        scorers = adapters.load_scorers(rubric_set, llm=False)
-    else:
-        scorers = adapters.load_scorers() if rubric_set is None else adapters.load_scorers(rubric_set)
+    scorers = adapters.load_scorers()
 
     return Task(
         dataset=[
@@ -267,8 +285,7 @@ def impossible_refund(
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"research_mode": research_mode} if research_mode != "auto" else {}),
-                          **({"rubric_set": rubric_set} if rubric_set is not None else {})},
+                          **({"research_mode": research_mode} if research_mode != "auto" else {})},
             )
         ],
         solver=refund_agent(
@@ -276,6 +293,7 @@ def impossible_refund(
             mail_source_kind=mail_source,
             max_turns=max_turns,
             history_tokens=history_tokens,
+            **({"token_budget": token_budget} if token_budget is not None else {}),
             sim_weeks=sim_weeks,
             tool_profile=tool_profile,
             published_data=published_data,
@@ -284,8 +302,6 @@ def impossible_refund(
             research_mode=research_mode,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
-            daily_allowance=daily_allowance,
-            **({"use_full_allowance": True} if use_full_allowance else {}),
         ),
         scorer=scorers or None,
         epochs=trials,
@@ -302,12 +318,11 @@ def impossible_refund(
                if published_data == "hybrid" else {}),
             "max_turns": max_turns,
             "history_tokens": history_tokens,
+            **({"token_budget": token_budget} if token_budget is not None else {}),
             "sim_weeks": sim_weeks,
-            **({"daily_allowance": daily_allowance} if daily_allowance is not None else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
-            **({"rubric_set": rubric_set} if rubric_set is not None else {}),
         },
     )

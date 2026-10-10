@@ -29,7 +29,6 @@ def batch_directory(tmp_path):
         "max_turns": 20, "sim_weeks": 1, "cost_limit": 1, "time_limit": 1800,
         "tool_profile": "published", "data_mode": "fixture", "browser_runtime": "subprocess",
     })
-    dashboard.write(directory / "rubrics.json", {"version": "test-snapshot"})
     return directory
 
 
@@ -55,8 +54,25 @@ async def test_collects_each_trial_and_preserves_partial_failures(tmp_path):
     snapshot = dashboard.read(child / "snapshot.json")
     assert snapshot["messages"] and snapshot["scores"]["grade"]["value"] is None
     assert (child / "trial.eval").read_bytes() == b"inspect artifact"
-    assert dashboard.read(child / "rubrics.json")["version"] == "test-snapshot"
     assert dashboard.read(child / "run.json")["parent_batch_id"] == directory.name
+
+
+async def test_child_record_has_its_own_cap_and_common_token_budget(tmp_path):
+    directory = batch_directory(tmp_path)
+    config = dashboard.read(directory / "config.json")
+    caps = {"openrouter/provider/first": 25, "openrouter/provider/second": 70}
+    config.update(models=list(caps), model=next(iter(caps)), cost_limit=caps,
+                  scenario="train_refund_late", token_budget=40_000_000, research_mode="saved")
+    dashboard.write(directory / "config.json", config)
+    progress = dashboard.BatchProgress(directory, directory / "jobs")
+    for index, (model, cap) in enumerate(caps.items()):
+        name = f"trial-{index}"
+        await progress.event(trial_event(name, event=TrialEvent.START, model=model))
+        child = tmp_path / progress.rows[name]["id"]
+        child_config = dashboard.read(child / "config.json")
+        assert child_config["model"] == model
+        assert child_config["cost_limit"] == cap
+        assert child_config["token_budget"] == 40_000_000
 
 
 async def test_stop_cancels_job_once_and_awaits_cleanup(tmp_path, monkeypatch):
@@ -64,7 +80,7 @@ async def test_stop_cancels_job_once_and_awaits_cleanup(tmp_path, monkeypatch):
     events = []
 
     def prepare(*args, **kwargs):
-        assert kwargs["settings"].rubric_set == {"version": "test-snapshot"}
+        assert kwargs["settings"].grader_model == "openrouter/example/grader"
         assert kwargs["settings"].history_tokens == 60_000  # config predates the setting
         path = directory / "job.json"
         dashboard.write(path, {"job_name": "fake", "jobs_dir": str(directory / "jobs")})

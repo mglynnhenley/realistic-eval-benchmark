@@ -9,7 +9,7 @@ from pathlib import Path
 from inspect_ai import eval
 
 from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
-from refund_eval.harbor.artifacts import finite_json, grading_errors
+from refund_eval.harbor.artifacts import finite_json
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
 from refund_eval.published.provider import published_model_args
 from refund_eval.scenario.schema import load_scenario
@@ -44,7 +44,6 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
         raise ValueError("Trial output directory must be empty; use a separate directory per attempt")
     write_json(output / "request.json", request.model_dump(mode="json"))
     settings = request.settings
-    rubric_args = {"rubric_set": settings.rubric_set} if settings.rubric_set is not None else {}
     inbox = DEFAULT_FIXTURE_PATH
     if settings.inbox_sha256:
         from refund_eval.world.snapshot_store import file_sha256
@@ -59,15 +58,12 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             "max_turns": settings.max_turns, "history_tokens": settings.history_tokens,
             "sim_weeks": settings.sim_weeks,
             "cost_limit": settings.cost_limit, "time_limit": settings.time_limit,
+            "token_budget": settings.token_budget,
             "research_mode": settings.research_mode,
             "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
             "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),
-            "llm_grading": settings.llm_grading,
-            "daily_allowance": settings.daily_allowance,
-            "use_full_allowance": settings.use_full_allowance,
             "scenario": settings.scenario,
             **_resume_args(settings),
-            **rubric_args,
         },
         model=request.model,
         model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
@@ -91,18 +87,17 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     scores = {
         name: score.model_dump(mode="json") for name, score in (sample.scores or {}).items()
     }
-    warnings = grading_errors(scores)
     write_json(output / "scores.json", scores)
     write_json(output / "transcript.json", [m.model_dump(mode="json") for m in sample.messages])
     usage = {
         "models": {k: v.model_dump(mode="json") for k, v in sample.model_usage.items()},
         "roles": {k: v.model_dump(mode="json") for k, v in sample.role_usage.items()},
-        "note": "Model totals include grading. Role usage separates simulator and grader calls; "
-                "the trial cost limit covers target and simulator, not final grading.",
+        "note": "Role usage separates simulator calls from grader calls (the simulator's claim extractor); "
+                "the trial cost limit covers every model call in the trial.",
     }
     write_json(output / "usage.json", usage)
     result = {
-        "schema_version": 3, "trial_id": request.trial_id,
+        "schema_version": 4, "trial_id": request.trial_id,
         "tool_profile": settings.tool_profile, "data_mode": settings.data_mode,
         "browser_runtime": settings.browser_runtime,
         "browser_boundary": sample.store.get("published_tool_profile", {}).get("browser_boundary"),
@@ -110,10 +105,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
         "inspect_log": Path(log.location).name,
         "stop_reason": world["stop_reason"], "turns": world["turn"],
         "scores_present": bool(sample.scores),
-        "grading_status": "failed" if warnings or not sample.scores else "success",
-        "grading_warnings": warnings,
-        "passed": bool(sample.scores) and world["stop_reason"] != "kill_switch"
-                  and not warnings,
+        "passed": bool(sample.scores) and world["stop_reason"] != "kill_switch",
     }
     # The completion marker is only published after every artifact is written.
     write_json(output / "result.tmp", result)

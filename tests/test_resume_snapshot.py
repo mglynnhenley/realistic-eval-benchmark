@@ -47,12 +47,14 @@ def _snapshot(tmp_path, *, resume_state=None):
 async def test_old_snapshot_rebuilds_notes_from_memory_calls(tmp_path):
     init_subtask_store(Store())
     messages = await restore_snapshot(str(_snapshot(tmp_path)))
-    assert [m.role for m in messages] == ["user", "assistant", "tool"]
+    assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "tool", "tool"]
+    assert all(m.error.type == "cancelled" for m in messages[-3:])
     assert store().get("MemoryStore:files") == {"/memories/notes.md": "Avanti refused twice.\n"}
     world = load_world()
     assert world.turn == 12 and world.stop_reason is None and not world.killed
     [resumed] = store().get(RESUMED_KEY)
     assert resumed["previous_stop"] == "cost_limit" and resumed["rebuilt"] == ["memory notes", "temperaments"]
+    assert resumed["interrupted_tool_calls"] == ["c2", "c3", "c4"]
 
 
 async def test_new_snapshot_restores_the_saved_store(tmp_path):

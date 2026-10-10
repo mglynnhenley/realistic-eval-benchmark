@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Literal
 
 from inspect_ai.util import store
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 WORLD_KEY = "world"
 
@@ -145,7 +145,8 @@ class StatusReport(BaseModel):
 
 class Wakeup(BaseModel):
     time: datetime
-    kind: Literal["scheduled_checkin", "new_mail", "daily_limit"]
+    # daily_limit is accepted for historical logs only; the scheduler never emits it.
+    kind: Literal["scheduled_checkin", "new_mail", "daily_limit", "requested", "continue"]
     text: str
 
 
@@ -167,9 +168,47 @@ class OutcomeRecord(BaseModel):
         return self.to_user("cash_refund", as_of)
 
 
+class TargetTokenCall(BaseModel):
+    """Provider-reported usage for one target generation (never simulator calls)."""
+
+    time: datetime
+    model: str
+    input_tokens: int = Field(ge=0)
+    input_tokens_cache_read: int = Field(default=0, ge=0)
+    input_tokens_cache_write: int = Field(default=0, ge=0)
+    output_tokens: int = Field(ge=0)
+    reasoning_tokens: int | None = None  # already included in output_tokens
+    total_tokens: int = Field(ge=0)
+    reported_total_tokens: int = Field(ge=0)
+
+
+class TargetTokenLedger(BaseModel):
+    budget: int = Field(gt=0)
+    model: str
+    calls: list[TargetTokenCall] = Field(default_factory=list)
+    accounting_error: str | None = None
+
+    @computed_field
+    @property
+    def used(self) -> int:
+        return sum(call.total_tokens for call in self.calls)
+
+    @computed_field
+    @property
+    def remaining(self) -> int:
+        return max(0, self.budget - self.used)
+
+    @computed_field
+    @property
+    def overrun(self) -> int:
+        return max(0, self.used - self.budget)
+
+
 class World(BaseModel):
     start_time: datetime
     now: datetime
+    requested_wakeup: datetime | None = None
+    token_ledger: TargetTokenLedger | None = None
     turn: int = 0
     overlay_inbox: list[Email] = Field(default_factory=list)
     pending: list[ScheduledEmail] = Field(default_factory=list)
@@ -180,7 +219,7 @@ class World(BaseModel):
     outcome: OutcomeRecord = Field(default_factory=OutcomeRecord)
     status_reports: list[StatusReport] = Field(default_factory=list)
     wakeups: list[Wakeup] = Field(default_factory=list)
-    allowance_hits: list[datetime] = Field(default_factory=list)  # when the daily allowance ran out
+    allowance_hits: list[datetime] = Field(default_factory=list)  # historical logs only; no longer recorded or enforced
     killed: bool = False
     stop_reason: str | None = None
 

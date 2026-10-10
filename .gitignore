@@ -19,6 +19,11 @@ token*.json
 # Eval logs contain the user's real email. Never commit them.
 logs/
 reports/
+# Run transcripts contain confidential information. Never commit them.
+*.eval
+transcripts/
+scans*/
 
 .context/
 node_modules/
+.DS_Store
