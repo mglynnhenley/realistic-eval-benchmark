@@ -102,7 +102,7 @@ const context = {
 };
 const source = fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8');
 // Execute the actual config and preset functions with select elements that reject missing options.
-const load = source.slice(source.indexOf('  async function loadConfig() {'), source.indexOf('  function updateBehaviourControls() {'));
+const load = source.slice(source.indexOf('  async function loadConfig() {'), source.indexOf('  function openRunDialog() {'));
 const preset = source.slice(source.indexOf('  function applyRunPreset() {'), source.indexOf('  const selectedModels ='));
 vm.runInNewContext(load + preset, context);
 (async () => {
@@ -334,7 +334,7 @@ def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, 
     preset = server.RunConfig.model_validate(presets["default"])
     assert (preset.max_turns, preset.cost_limit, preset.sim_weeks) == (1000, 1, 6)
     assert preset.scenario == "train_refund_pressure"
-    assert not preset.llm_grading
+    assert "llm_grading" not in preset.model_dump()
     assert "daily_allowance" not in preset.model_dump()
     assert "use_full_allowance" not in preset.model_dump()
     assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
@@ -373,7 +373,7 @@ def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, mess
         manager.close()
 
 
-def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_path, monkeypatch):
+def test_modal_launch_dispatches_isolated_controller(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     commands = []
     monkeypatch.setattr(server.subprocess, 'Popen', lambda command, **kwargs: (
@@ -386,7 +386,7 @@ def test_modal_launch_dispatches_isolated_controller_with_frozen_rubrics(tmp_pat
         directory = manager.directory(record['id'])
         assert commands[0][0].endswith('/scripts/harbor')
         assert commands[0][3] == 'refund_eval.harbor.dashboard'
-        assert json.loads((directory / 'rubrics.json').read_text()) == manager.behaviours()
+        assert not (directory / 'rubrics.json').exists() and 'rubric_version' not in record
         assert record['config']['trials'] == 4 and record['config']['concurrency'] == 2
     finally:
         manager.close()

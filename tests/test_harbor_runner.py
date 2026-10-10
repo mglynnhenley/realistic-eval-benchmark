@@ -66,12 +66,11 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
     assert published_settings().history_tokens == 60_000
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
                                       "--model", "openrouter/example/model", "--history-tokens", "0",
-                                      "--scenario", "train_refund", "--llm-grading"])
+                                      "--scenario", "train_refund"])
     main()
     job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
     assert job.agents[0].kwargs["history_tokens"] == 0
     assert job.agents[0].kwargs["scenario"] == "train_refund"
-    assert job.agents[0].kwargs["llm_grading"]
     assert "daily_allowance" not in job.agents[0].kwargs
     assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund").task_text.strip()
     with pytest.raises(ValueError):
@@ -224,7 +223,7 @@ def test_cli_freezes_default_role_models(tmp_path, monkeypatch, capsys):
     assert agent.kwargs["grader_model"] == DEFAULT_GRADER_MODEL
     assert agent.kwargs["scenario"] == "train_refund_pressure"
     assert agent.kwargs["sim_weeks"] == 6
-    assert agent.kwargs["max_turns"] >= 100 and not agent.kwargs["llm_grading"]
+    assert agent.kwargs["max_turns"] >= 100
 
 
 def test_late_cli_freezes_each_models_own_cap_and_common_token_budget(tmp_path, monkeypatch):

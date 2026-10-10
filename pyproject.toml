@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml",
     "google-api-python-client",
     "google-auth-oauthlib",
+    "inspect-scout>=0.5.3",
 ]
 
 [project.optional-dependencies]

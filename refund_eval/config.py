@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from refund_eval.scenario.schema import scenario_names
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
-# Role defaults; the target is chosen per run. Grading is ~15 judge calls per trial over
-# the full transcript, so the grader defaults to a much cheaper model than the simulator.
+# Role defaults; the target is chosen per run. The grader role runs the simulator's claim
+# extraction and consistency checks, so it defaults to a much cheaper model than the simulator.
 DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5.5"
 DEFAULT_GRADER_MODEL = "openrouter/anthropic/claude-haiku-4.5"
 DEFAULT_TARGET_MODEL = "openrouter/anthropic/claude-opus-5"
@@ -105,8 +105,6 @@ class RunConfig(BaseModel):
     trials: int = Field(default=1, ge=1, le=100, strict=True)
     concurrency: int = Field(default=1, ge=1, le=16, strict=True)
     time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
-    # False skips the LLM judges during the run (code checks still run); see docs/running.md for post-run judging.
-    llm_grading: bool = False
     # Scenario YAML bundled with the source, discovered when the run is configured.
     scenario: str = "train_refund_pressure"
 

@@ -43,8 +43,6 @@ class TrialSettings(BaseModel):
     research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
     grader_model: str | None = None
-    rubric_set: dict | None = None
-    llm_grading: bool = RunConfig.model_fields["llm_grading"].default
     scenario: str = RunConfig.model_fields["scenario"].default
 
     @field_validator("scenario")

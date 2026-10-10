@@ -74,7 +74,6 @@ class BatchProgress:
                       "status": "starting", "created_at": now(), "updated_at": now()}
             write(child / "run.json", record)
             write(child / "config.json", child_config)
-            shutil.copyfile(self.directory / "rubrics.json", child / "rubrics.json")
             self.rows[name] = {"id": run_id, "name": name, "label": record["label"], "model": model, "status": "starting"}
         self.rows[name]["stage"] = stages[event.event]
         if event.event == TrialEvent.END:
@@ -113,9 +112,8 @@ class BatchProgress:
             record = read(child / "run.json", {})
             record.update(status=status, updated_at=now())
             if status == "failed":
-                record["error"] = (error or {}).get("exception_message") or "; ".join(
-                    outcome.get("grading_warnings", [])
-                ) or self.error or "Trial ended without verified results. See the batch console."
+                record["error"] = ((error or {}).get("exception_message") or self.error
+                                   or "Trial ended without verified results. See the batch console.")
             write(child / "run.json", record)
             logs = sorted(artifacts.glob("*.eval")) if ended else []
             snapshot["inspect_log"] = None
@@ -180,8 +178,6 @@ async def run_batch(directory: Path) -> int:
             **({"research_mode": config["research_mode"]} if "research_mode" in config else {}),
             simulator_model=config["simulator_model"],
             grader_model=config["grader_model"],
-            rubric_set=read(directory / "rubrics.json"),
-            llm_grading=config.get("llm_grading", TrialSettings.model_fields["llm_grading"].default),
             scenario=config.get("scenario", TrialSettings.model_fields["scenario"].default),
             inbox_sha256=config.get("inbox_sha256"),
             resume_sha256=config.get("resume_sha256"),

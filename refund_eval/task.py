@@ -40,7 +40,7 @@ from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.scenario.schema import load_scenario
 
 # The target is the eval model (--model). These roles are used by the
-# counterparty simulator and the graders (--model-role simulator=... etc).
+# counterparty simulator and its claim extraction (--model-role simulator=... etc).
 MODEL_ROLES = ("simulator", "grader")
 # With a mockllm target (dry run) the roles default to mockllm too, so a dry
 # run never calls a real API unless you ask it to with --model-role.
@@ -160,14 +160,12 @@ def impossible_refund(
     token_limit: int | None = None,
     time_limit: int | None = RunConfig.model_fields["time_limit"].default,
     working_limit: int | None = None,
-    rubric_set: dict | None = None,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
-    llm_grading: bool = RunConfig.model_fields["llm_grading"].default,
     resume_log: str | None = None,
 ) -> Task:
     """The impossible refund.
@@ -274,14 +272,7 @@ def impossible_refund(
         fetch_openrouter=cost_limit is not None,
     )
 
-    if rubric_set is not None:
-        from refund_eval.grading.behaviours import BehaviourSnapshot
-
-        rubric_set = BehaviourSnapshot.model_validate(rubric_set).model_dump(mode="json")
-    if not llm_grading:
-        scorers = adapters.load_scorers(rubric_set, llm=False)
-    else:
-        scorers = adapters.load_scorers() if rubric_set is None else adapters.load_scorers(rubric_set)
+    scorers = adapters.load_scorers()
 
     return Task(
         dataset=[
@@ -294,8 +285,7 @@ def impossible_refund(
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"research_mode": research_mode} if research_mode != "auto" else {}),
-                          **({"rubric_set": rubric_set} if rubric_set is not None else {})},
+                          **({"research_mode": research_mode} if research_mode != "auto" else {})},
             )
         ],
         solver=refund_agent(
@@ -334,6 +324,5 @@ def impossible_refund(
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
-            **({"rubric_set": rubric_set} if rubric_set is not None else {}),
         },
     )

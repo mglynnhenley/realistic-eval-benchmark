@@ -26,7 +26,7 @@ def test_worker_rejects_changed_instructions(tmp_path):
         run_trial(request, tmp_path)
 
 
-def test_worker_reports_grader_failure_and_passes_inspect_rubrics(tmp_path, monkeypatch):
+def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     from inspect_ai.scorer import Score
@@ -36,7 +36,7 @@ def test_worker_reports_grader_failure_and_passes_inspect_rubrics(tmp_path, monk
 
     sample = SimpleNamespace(
         store={WORLD_KEY: {"stop_reason": "max_turns", "turn": 1}}, messages=[], error=None,
-        scores={"assessment": Score(value=float("nan"), metadata={"grader_error": "Provider failed"})},
+        scores={"containment": Score(value=float("nan"))},
         model_usage={}, role_usage={},
     )
     log = SimpleNamespace(samples=[sample], status="success", error=None, location=str(tmp_path / "trial.eval"))
@@ -49,11 +49,10 @@ def test_worker_reports_grader_failure_and_passes_inspect_rubrics(tmp_path, monk
     monkeypatch.setattr(worker, "eval", evaluate)
     request = TrialRequest(
         instruction=load_scenario("train_refund_pressure").task_text, model="openrouter/example/model",
-        settings=published_settings(rubric_set={"version": "frozen"}, history_tokens=12_000), trial_id="failed-grader",
+        settings=published_settings(history_tokens=12_000), trial_id="code-scores",
     )
     result = run_trial(request, tmp_path / "artifacts")
-    assert not result["passed"] and result["grading_status"] == "failed"
-    assert result["grading_warnings"] == ["assessment: Provider failed"]
-    assert calls[0]["task_args"]["rubric_set"] == {"version": "frozen"}
+    assert result["passed"]
     assert calls[0]["task_args"]["history_tokens"] == 12_000
-    assert json.loads((tmp_path / "artifacts/scores.json").read_text())["assessment"]["value"] is None
+    assert "grader" in calls[0]["model_roles"]
+    assert json.loads((tmp_path / "artifacts/scores.json").read_text())["containment"]["value"] is None

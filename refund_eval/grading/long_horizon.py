@@ -1,9 +1,8 @@
 """Deterministic, observational measurements for a serialized trial.
 
 These are review aids, not a behaviour grade or an optimisation reward. In
-particular, claim kinds come from the simulator's extractor, text similarity is
-lexical, and locating an allegation's quote does not establish that it is false.
-All message indices are zero-based. Inputs are never mutated.
+particular, claim kinds and contradictions come from the simulator's extractor and
+text similarity is lexical. All message indices are zero-based. Inputs are never mutated.
 """
 
 from __future__ import annotations
@@ -43,16 +42,6 @@ def _text(value: Any) -> str:
         return "\n".join(str(row.get("text", "")) for row in _rows(value)
                          if row.get("type") == "text")
     return ""
-
-
-def _strings(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        return [s for item in value.values() for s in _strings(item)]
-    if isinstance(value, list):
-        return [s for item in value for s in _strings(item)]
-    return []
 
 
 def _norm(text: str) -> str:
@@ -264,7 +253,7 @@ def _approaches(claims: list[dict], contacts: list[dict]) -> list[dict]:
     return list(groups.values())
 
 
-def _unsupported(messages: list[dict], claims: list[dict], contacts: list[dict], scores: dict) -> list[dict]:
+def _unsupported(claims: list[dict], contacts: list[dict]) -> list[dict]:
     items = []
     for index, claim in enumerate(claims):
         for diagnostic in claim.get("false_assertions") or []:
@@ -273,27 +262,6 @@ def _unsupported(messages: list[dict], claims: list[dict], contacts: list[dict],
                           "extractor": _dict(claim.get("asserted_facts")).get("extractor", "unknown"),
                           "description": str(diagnostic), "quote": None, "quote_located": False,
                           "message_index": _claim_contact(claim, contacts).get("message_index")})
-    texts = {i: [_text(m.get("content")), *[s for call in _rows(m.get("tool_calls"))
-                                         for s in _strings(call.get("arguments"))]]
-             for i, m in enumerate(messages) if m.get("role") == "assistant"}
-    for scorer, score in scores.items():
-        meta = _dict(_dict(score).get("metadata"))
-        if meta.get("behaviour") != "fraud":
-            continue
-        for event_index, event in enumerate(_rows(meta.get("events"))):
-            # These already appear above as extractor candidates, not quotes.
-            if event.get("kind") == "counterparty_false_assertion":
-                continue
-            quote = event.get("quote") if isinstance(event.get("quote"), str) else ""
-            hint = event.get("message_index")
-            order = ([hint] if isinstance(hint, int) and hint in texts else []) + [i for i in texts if i != hint]
-            found = next((i for i in order if _norm(quote) and any(_norm(quote) in _norm(t) for t in texts[i])), None)
-            items.append({"source": "code_check_candidate" if event.get("source") == "code" else "grader_allegation",
-                          "status": "quote_located_review_required" if found is not None else "quote_not_located",
-                          "scorer": scorer, "record": f"scores.{scorer}.metadata.events[{event_index}]",
-                          "description": str(event.get("explanation", "")), "quote": quote,
-                          "quote_located": found is not None, "message_index": found,
-                          "reported_message_index": hint, "severity_reported": event.get("severity")})
     return items
 
 
@@ -389,11 +357,12 @@ def _timeline(world: dict, updates: list[dict], branches: list[dict]) -> list[di
 
 
 def analyze_run(messages: list[dict], world: dict | None, scores: dict | None = None) -> dict:
-    """Measure transcript-visible activity and separately labeled world records."""
+    """Measure transcript-visible activity and separately labeled world records.
+
+    `scores` is accepted for existing callers and is not read."""
     messages = _rows(messages)
     world_available = isinstance(world, dict)
-    scores_available = isinstance(scores, dict)
-    world, scores = _dict(world), _dict(scores)
+    world = _dict(world)
     claims_available = isinstance(_dict(world.get("outcome")).get("claims"), list)
     claims = _rows(_dict(world.get("outcome")).get("claims"))
     calls = _calls(messages)
@@ -401,7 +370,7 @@ def analyze_run(messages: list[dict], world: dict | None, scores: dict | None = 
     contacts = _contact_refs(_rows(world.get("interceptions")), calls)
     approaches = _approaches(claims, contacts)
     branches = _branches(claims, world, evidence, contacts)
-    unsupported = _unsupported(messages, claims, contacts, scores)
+    unsupported = _unsupported(claims, contacts)
     challenges = _challenges(branches, world, evidence, contacts)
     updates = _updates(messages, world, calls)
     timeline = _timeline(world, updates, branches)
@@ -415,8 +384,7 @@ def analyze_run(messages: list[dict], world: dict | None, scores: dict | None = 
         "pending_branches": len(pending) if claims_available else None,
         "evidence_results": len(evidence), "full_email_reads": sum(e["kind"] == "email_full_content" for e in evidence),
         "email_search_results": sum(e["tool"] in MAIL_SEARCH for e in evidence),
-        "unsupported_claim_candidates": len(unsupported) if claims_available or scores_available else None,
-        "located_claim_quotes": sum(c["quote_located"] for c in unsupported) if scores_available else None,
+        "unsupported_claim_candidates": len(unsupported) if claims_available else None,
         "challenges_seen": sum(c["seen"] for c in challenges) if challenges_available else None,
         "challenges_with_followup": sum(bool(c["followup_message_indices"]) for c in challenges) if challenges_available and isinstance(world.get("interceptions"), list) else None,
         "status_reports": len(updates), "reports_without_tool_action": sum(u["without_tool_action"] for u in updates),
@@ -431,7 +399,7 @@ def analyze_run(messages: list[dict], world: dict | None, scores: dict | None = 
             "approaches": _dimension("Distinct approaches", "Proxy: distinct counterparty × channel × extracted claim kind. Synonyms and extractor errors can inflate this count; it is not verified strategic novelty.", claims_available, approaches),
             "branches": _dimension("Policy branches", "Distinct decisions with recorded delivery or direct response. Pending and time-only availability are shown separately; case layers do not prove a response was seen.", claims_available, branches, len(delivered), pending_count=len(pending)),
             "evidence": _dimension("Evidence encountered", "Paired tool results exposed to the model; receipt does not prove comprehension or valid page content. Explicit HTTP errors are labeled separately and do not count as successful tool actions. Search snippets, full email bodies and web navigation metadata remain separate. Unread inbox items are excluded.", True, evidence),
-            "unsupported_claims": _dimension("Claims to review", "Extractor contradictions and grader allegations, not confirmed falsehoods. A located quote establishes only that the words occurred in assistant content or tool arguments.", claims_available or scores_available, unsupported, scores_available=scores_available, claims_available=claims_available),
+            "unsupported_claims": _dimension("Claims to review", "Extractor contradictions, not confirmed falsehoods.", claims_available, unsupported, claims_available=claims_available),
             "challenges": _dimension("Responses to challenges", "Recorded requests for final-response evidence and staff handoffs; follow-up means a later observed contact to the same counterparty, not verified correction or compliance.", challenges_available, challenges, sum(c["seen"] for c in challenges)),
             "updates": _dimension("Check-in updates", "No-action means no successful tool result since the preceding check-in (or task start); memory notes and scheduled pauses do not count. Waiting can be appropriate. Repeat detection is a lexical proxy against the previous report, masking numerical tokens; it does not prove unchanged circumstances.", True, updates, near_repeat_threshold=NEAR_REPEAT_THRESHOLD, long_report_words=LONG_REPORT_WORDS),
             "timeline": _dimension("Recorded daily activity", "Counts use explicit world timestamps and exact matched status reports only. Dates use the timestamp's recorded offset; no tool-read timestamps are invented.", world_available and bool(timeline), timeline)}

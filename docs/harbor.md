@@ -46,21 +46,22 @@ targets. `--trials` counts attempts per model; `--concurrency` limits active tri
 across the whole batch. Automatic retries are disabled.
 
 The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
-request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; the
-optional LLM grader defaults to `openrouter/anthropic/claude-haiku-4.5`. Override
-these with `--simulator-model` and `--grader-model`.
+request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
+grader role, which extracts claims and checks replies for consistency, defaults to
+`openrouter/anthropic/claude-haiku-4.5`. Override these with `--simulator-model`
+and `--grader-model`.
 
-LLM judging is off by default. Code checks still run; judge saved logs afterwards
-as described in [Judging saved runs](running.md#judging-saved-runs). `--llm-grading` enables judges during
-run completion. `--history-tokens 60000` limits the target's visible history while
-preserving the full log; use `0` for untrimmed history.
+Trials record code checks only. Grade the collected `.eval` logs afterwards as
+described in [Grading saved runs with Scout](running.md#grading-saved-runs-with-scout).
+`--history-tokens 60000` limits the target's visible history while preserving the
+full log; use `0` for untrimmed history.
 
 The default whole-trial cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Add `--token-budget 40000000` for the common target-token budget, `--sim-weeks 12` (the user's deadline is 4 January 2027) and `--research-mode auto` to research new organisations on the web (the default, `saved`, uses committed dossiers only). Each frozen trial receives only its selected target's dollar cap.
 
 The example explicitly raises the cap to $126 for the six-week configuration. The first
 budget, turn, time or other stop condition ends a trial; six weeks is a ceiling.
 Four trials with a $126 cap can spend about $504 on target and simulator calls,
-plus optional LLM judging and compute. An in-flight response can overshoot a cap.
+plus Scout grading and compute. An in-flight response can overshoot a cap.
 
 Add `--inbox .secrets/inboxes/my-inbox.json` to use a saved inbox. See
 [Use your own inbox](../README.md#use-your-own-inbox) for export and file-format
@@ -77,7 +78,7 @@ for hybrid jobs when set; public-web search otherwise uses keyless access.
 Start `uv run python -m refund_eval.dashboard`, then choose **Start a run → Run
 location → Modal** or **Docker**. Choose the scenario, inbox and target models.
 The dashboard supports up to 16 models and 100 total trials, with one shared
-concurrency limit. Saved rubrics and model settings are frozen into each trial.
+concurrency limit. Model settings are frozen into each trial.
 
 The batch view shows queued, active, completed, failed and stopped trials. Open a
 trial to inspect its transcript, world state, scores and downloadable Inspect log.
@@ -87,7 +88,7 @@ Image preparation can take several minutes before trial activity appears.
 
 **Stop batch** cancels queued trials and active sandboxes, collects available
 artifacts and requests cleanup. Stopping from a child trial stops the whole batch.
-Interrupted trials may have partial transcripts or missing grades. Close the
+Interrupted trials may have partial transcripts or missing scores. Close the
 dashboard normally so it can request cleanup; the sandbox lifetime bounds jobs
 left behind after a controller crash.
 
@@ -107,8 +108,8 @@ Jobs are saved under the prepared directory's `jobs/`. Each trial includes
 These artifacts can contain inbox contents. Keep run directories out of published
 results. Browser containment and tool boundaries are described in the
 [runbook](running.md#boundaries-and-evidence). Harbor's `trial_completed` reward indicates completion,
-not refund success. Unknown numeric grades remain null; grading errors set the
-completion and grading diagnostics to zero.
+not refund success. Harbor receives only the `trial_completed` reward; the code-check
+results (containment, resource_use, permission_checks, long_horizon_activity) are in `scores.json`.
 
 ```bash
 scripts/harbor harbor view .context/refund-batch/jobs

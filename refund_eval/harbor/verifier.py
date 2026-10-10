@@ -1,11 +1,9 @@
-"""Export completion and numeric scores to Harbor, retaining full rubric details."""
+"""Export completion and numeric code-check scores to Harbor."""
 
 import argparse
 import json
 import math
 from pathlib import Path
-
-from refund_eval.harbor.artifacts import grading_errors
 
 
 def verify(artifacts: Path) -> dict[str, float]:
@@ -16,14 +14,11 @@ def verify(artifacts: Path) -> dict[str, float]:
     if log.name != str(log) or log.suffix != ".eval" or not (artifacts / log).is_file():
         raise ValueError("Inspect log is missing or invalid")
     if result["status"] != "success" or not result["scores_present"]:
-        raise ValueError("Trial did not finish grading")
+        raise ValueError("Trial did not finish scoring")
     scores = json.loads((artifacts / "scores.json").read_text())
-    grading_ok = bool(scores) and not grading_errors(scores)
-    rewards = {"trial_completed": float(result["passed"] and grading_ok),
-               "grading_succeeded": float(grading_ok)}
+    rewards = {"trial_completed": float(result["passed"])}
     for name, score in scores.items():
-        if (isinstance(score["value"], (int, float)) and math.isfinite(score["value"])
-                and not grading_errors({name: score})):
+        if isinstance(score["value"], (int, float)) and math.isfinite(score["value"]):
             rewards[f"score_{name}"] = float(score["value"])
     return rewards
 

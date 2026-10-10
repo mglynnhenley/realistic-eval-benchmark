@@ -125,22 +125,6 @@ def reasoning_text(message: ChatMessage) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def message_full_text(message: ChatMessage) -> str:
-    """All text in a message (content, reasoning, tool call arguments), for quote checks."""
-    parts = [message.text]
-    reasoning = reasoning_text(message)
-    if reasoning:
-        parts.append(reasoning)
-    if isinstance(message, ChatMessageAssistant) and message.tool_calls:
-        for call in message.tool_calls:
-            parts.append(call.function)
-            parts.append(json.dumps(call.arguments, ensure_ascii=False, default=str))
-            parts.extend(str(v) for v in call.arguments.values())
-    if isinstance(message, ChatMessageTool) and message.error:
-        parts.append(message.error.message)
-    return "\n".join(p for p in parts if p)
-
-
 def is_status_report(message: ChatMessage) -> bool:
     """An assistant message that ends the turn (no tool calls) is a status report."""
     return (
@@ -258,23 +242,6 @@ def status_reports(messages: Sequence[ChatMessage], world: World | None) -> list
     return refs
 
 
-def find_quote(messages: Sequence[ChatMessage], quote: str, hint: int | None) -> int | None:
-    """Index of the message containing `quote`, preferring `hint` and its neighbours."""
-    q = _norm(quote).strip(" .\"'…")
-    if not q:
-        return None
-    order: list[int] = []
-    if hint is not None and 0 <= hint < len(messages):
-        order.append(hint)
-        for d in range(1, 4):
-            order.extend(k for k in (hint - d, hint + d) if 0 <= k < len(messages))
-    order.extend(k for k in range(len(messages)) if k not in order)
-    for k in order:
-        if q in _norm(message_full_text(messages[k])):
-            return k
-    return None
-
-
 # --------------------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------------------
@@ -304,7 +271,7 @@ CAP_LEVELS: tuple[Caps, ...] = (
     Caps(text=1500, args=800, tool_result=120, reasoning=0, system=2000),
 )
 
-DEFAULT_TRANSCRIPT_CHARS = 400_000  # keeps a 12-week trial plus findings under a 200k-token judge window
+DEFAULT_TRANSCRIPT_CHARS = 400_000
 
 
 def _role_label(i: int, m: ChatMessage, task_index: int | None) -> str:
@@ -393,26 +360,6 @@ def render_transcript(
         "status reports and intercepted writes are still listed in the world record ...]"
     )
     return "\n\n".join([*head, marker, *tail])
-
-
-def render_excerpt(
-    messages: Sequence[ChatMessage],
-    index: int,
-    before: int = 2,
-    after: int = 1,
-    caps: Caps = CAP_LEVELS[1],
-) -> str:
-    """A few messages around `index`, for human review and the write-up."""
-    task_index = first_user_index(messages)
-    lo = max(0, index - before)
-    hi = min(len(messages), index + after + 1)
-    out: list[str] = []
-    for k in range(lo, hi):
-        text = render_message(k, messages[k], caps, task_index)
-        if k == index:
-            text = f">>> {text}"
-        out.append(text)
-    return "\n\n".join(out)
 
 
 def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any] | None:
@@ -506,10 +453,3 @@ def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any
             x["response_summary"] = clip(x["response_summary"], 120)
         data["wakeups"] = data["wakeups"][-20:]
     return data
-
-
-def render_world(world: World | None, max_chars: int = 80_000) -> str:
-    summary = world_summary(world, max_chars)
-    if summary is None:
-        return "(world record not available for this trial)"
-    return json.dumps(summary, ensure_ascii=False, indent=1, default=str)

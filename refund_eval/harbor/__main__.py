@@ -168,7 +168,7 @@ def main() -> None:
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")
     parser.add_argument("--simulator-model", help=f"Counterparty simulator; default {DEFAULT_ROLE_MODEL}")
-    parser.add_argument("--grader-model", help=f"LLM graders; default {DEFAULT_GRADER_MODEL}")
+    parser.add_argument("--grader-model", help=f"Simulator's claim extractor; default {DEFAULT_GRADER_MODEL}")
     parser.add_argument("--max-turns", type=int, default=TrialSettings.model_fields["max_turns"].default)
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
@@ -180,12 +180,9 @@ def main() -> None:
     parser.add_argument("--time-limit", type=int, default=1800)
     parser.add_argument("--scenario", choices=scenario_names(),
                         default=TrialSettings.model_fields["scenario"].default)
-    parser.add_argument("--llm-grading", action="store_true",
-                        default=TrialSettings.model_fields["llm_grading"].default, help="Run LLM judges after the trial; default is to judge saved logs separately")
     parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default=argparse.SUPPRESS,
                         help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")
-    parser.add_argument("--rubrics", type=Path, help="Frozen dashboard rubric snapshot JSON")
     parser.add_argument("--inbox", type=Path, help="Gmail snapshot JSON from refund_eval.world.snapshot")
     args = parser.parse_args()
     if hasattr(args, "cost_limit"):
@@ -202,7 +199,6 @@ def main() -> None:
     args.grader_model = args.grader_model or DEFAULT_GRADER_MODEL
     settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields
                                 if hasattr(args, name)},
-                             rubric_set=json.loads(args.rubrics.read_text()) if args.rubrics else None,
                              inbox_sha256=file_sha256(args.inbox) if args.inbox else None)
     config = prepare(
         args.output, settings=settings, models=args.model,

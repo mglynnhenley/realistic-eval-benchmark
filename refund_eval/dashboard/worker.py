@@ -15,7 +15,12 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
 from refund_eval.config import RunConfig, resolve_cost_limits
-from refund_eval.dashboard.telemetry import EMPTY_SNAPSHOT, RESUME_STORE_KEYS, RUN_DIR_ENV, write_snapshot
+from refund_eval.dashboard.telemetry import (
+    EMPTY_SNAPSHOT,
+    RESUME_STORE_KEYS,
+    RUN_DIR_ENV,
+    write_snapshot,
+)
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
 from refund_eval.sim.counterparts import REGISTRY_KEY
@@ -115,11 +120,6 @@ def final_snapshot(log: Any) -> dict[str, Any]:
             # Harbor's final snapshot replaces the live one; keep it resumable.
             resume_state={k: sample_store[k] for k in RESUME_STORE_KEYS if sample_store.get(k) is not None},
         )
-    result["grading_warnings"] = [
-        f"{name}: {metadata.get('grader_error') or metadata.get('extraction_error')}"
-        for name, score in (sample.scores or {}).items()
-        if (metadata := score.metadata or {}).get("grader_error") or metadata.get("extraction_error")
-    ] if sample is not None else []
     return result
 
 
@@ -153,12 +153,6 @@ def run_worker(run_dir: str | Path) -> int:
     with worker_environment(destination):
         try:
             config = load_config(destination)
-            rubric_path = destination / "rubrics.json"
-            rubric_args = {}
-            if rubric_path.exists():
-                from refund_eval.grading.behaviours import BehaviourSnapshot
-
-                rubric_args["rubric_set"] = BehaviourSnapshot.model_validate_json(rubric_path.read_text()).model_dump(mode="json")
             profile_args = {}
             if config.get("inbox_snapshot"):
                 from refund_eval.world.snapshot_store import (
@@ -193,10 +187,8 @@ def run_worker(run_dir: str | Path) -> int:
                     **({"token_budget": config["token_budget"]} if config["token_budget"] is not None else {}),
                     "sim_weeks": config["sim_weeks"],
                     "scenario": config["scenario"],
-                    "llm_grading": config["llm_grading"],
                     **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),
                     **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
-                    **rubric_args,
                     **profile_args,
                 },
                 model=config["model"],
