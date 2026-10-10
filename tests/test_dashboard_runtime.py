@@ -116,7 +116,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
         "trials": 1, "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
         "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
         "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
-        "scenario": "train_refund_pressure", "daily_allowance": 3, "llm_grading": False, "use_full_allowance": False,
+        "scenario": "train_refund_pressure",
     }
     assert RUN_DIR_ENV not in os.environ
 
@@ -201,6 +201,66 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     assert snapshot["error"] == "The model service is unavailable"
     assert snapshot["world"]["turn"] == 2
     assert snapshot["messages"][0]["content"] == "Contacting customer service."
+
+
+@pytest.mark.parametrize("saved_log, kill_file", [(True, True), (True, False), (False, True)])
+def test_cancelled_empty_result_recovers_state_without_spurious_error(tmp_path, monkeypatch, saved_log, kill_file):
+    from refund_eval.world.state import WORLD_KEY
+
+    (tmp_path / "config.json").write_text(worker.RunConfig(model="mockllm/target").model_dump_json())
+    monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
+    monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
+    artifact = tmp_path / "cancelled.eval"
+    saved_world = {"turn": 3, "stop_reason": None, "token_ledger": {"used": 12_000}}
+    log = SimpleNamespace(
+        samples=[SimpleNamespace(store={WORLD_KEY: saved_world}, scores={},
+                                 messages=[ChatMessageAssistant(content="Saved transcript.")],
+                                 error=SimpleNamespace(message="CancelledError"))],
+        status="cancelled", error=None, location=str(artifact),
+    )
+
+    def cancel(*args, **kwargs):
+        write_snapshot(tmp_path, phase="running", world={"turn": 2, "stop_reason": None},
+                       messages=[ChatMessageAssistant(content="Last live transcript.")])
+        if kill_file:
+            (tmp_path / "STOP").touch()
+        if saved_log:
+            artifact.write_bytes(b"Original cancelled evaluation artifact")
+        return []
+
+    monkeypatch.setattr(worker, "eval", cancel)
+    monkeypatch.setattr(worker, "read_eval_log", lambda path: log)
+    assert worker.run_worker(tmp_path) == 0
+    snapshot = read_snapshot(tmp_path)
+    assert snapshot["phase"] == "stopped" and snapshot["error"] is None
+    assert snapshot["cancellation_reason"]
+    assert snapshot["messages"][0]["content"] == ("Saved transcript." if saved_log else "Last live transcript.")
+    assert snapshot["world"]["turn"] == (3 if saved_log else 2)
+    if saved_log:
+        assert snapshot["inspect_log"] == str(artifact)
+        assert snapshot["world"]["token_ledger"]["used"] == 12_000
+        assert artifact.read_bytes() == b"Original cancelled evaluation artifact"
+        assert log.samples[0].error.message == "CancelledError"
+        assert saved_world["stop_reason"] is None  # no invented change to the Inspect artifact
+
+
+def test_empty_result_without_cancellation_is_still_a_failure(tmp_path, monkeypatch):
+    (tmp_path / "config.json").write_text(worker.RunConfig(model="mockllm/target").model_dump_json())
+    monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
+    monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
+
+    def empty(*args, **kwargs):
+        write_snapshot(tmp_path, phase="running", world={"turn": 2},
+                       messages=[ChatMessageAssistant(content="Preserve the last report.")])
+        return []
+
+    monkeypatch.setattr(worker, "eval", empty)
+    assert worker.run_worker(tmp_path) == 1
+    snapshot = read_snapshot(tmp_path)
+    assert snapshot["phase"] == "failed"
+    assert snapshot["error"] == "Inspect returned no evaluation result without a recorded cancellation."
+    assert snapshot["messages"][0]["content"] == "Preserve the last report."
+    assert snapshot["world"]["turn"] == 2
 
 
 @pytest.mark.parametrize("config", [

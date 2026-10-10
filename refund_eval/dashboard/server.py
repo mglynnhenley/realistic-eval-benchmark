@@ -31,14 +31,8 @@ from refund_eval.config import (
     dashboard_default_model,
 )
 from refund_eval.dashboard.telemetry import activity_measurements
-from refund_eval.grading.behaviours import (
-    BehaviourEdit,
-    BehaviourSet,
-    BehaviourSnapshot,
-    default_behaviours,
-)
 from refund_eval.harbor.config import batch_models, batch_total
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import list_snapshots
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -161,24 +155,6 @@ class RunManager:
             raise APIError(404, "Run not found.")
         return directory
 
-    def behaviours(self) -> dict:
-        with self.lock:
-            path = self.root / "behaviours.json"
-            if not path.exists():
-                return default_behaviours().snapshot()
-            try:
-                return BehaviourSnapshot.model_validate(json.loads(path.read_text())).model_dump(mode="json")
-            except (ValueError, OSError) as ex:
-                raise APIError(500, "Saved behaviours could not be loaded.") from ex
-
-    def save_behaviours(self, edit: BehaviourEdit) -> dict:
-        with self.lock:
-            if edit.version != self.behaviours()["version"]:
-                raise APIError(409, "Behaviours changed in another window. Reload saved settings before saving.")
-            snapshot = BehaviourSet(behaviours=edit.behaviours).snapshot()
-            write_json(self.root / "behaviours.json", snapshot)
-            return snapshot
-
     def describe(self, run_id: str) -> dict:
         directory = self.directory(run_id)
         record = read_json(directory / "run.json", {})
@@ -220,8 +196,7 @@ class RunManager:
                     console = file.read().decode("utf-8", errors="replace")
             except OSError:
                 console = ""
-            return {"run": self.describe(run_id), "snapshot": snapshot, "console": console,
-                    "rubrics": read_json(directory / "rubrics.json")}
+            return {"run": self.describe(run_id), "snapshot": snapshot, "console": console}
 
     def start(self, config: RunConfig) -> dict:
         if config.models is not None and config.execution == "local":
@@ -307,7 +282,6 @@ class RunManager:
             if active_settings:
                 raise APIError(409, "A run is already active. Wait for it to finish or stop it first.")
             run_id = uuid.uuid4().hex[:12]
-            rubrics = self.behaviours()
             directory = self.root / run_id
             directory.mkdir()
             settings = config.model_dump()
@@ -327,7 +301,6 @@ class RunManager:
                 "scenario": config.scenario,
                 "model": targets[0],
                 "config": settings, "error": None,
-                "rubric_version": rubrics["version"],
             }
             if config.execution != "local":
                 record["label"] = f"{config.execution.title()} batch · {len(targets)} models · {total} Inspect trials"
@@ -335,7 +308,6 @@ class RunManager:
                 record["label"] += f" · Gmail snapshot {config.inbox_snapshot}"
             write_json(directory / "run.json", record)
             write_json(directory / "config.json", settings)
-            write_json(directory / "rubrics.json", rubrics)
             if config.execution != "local":
                 write_json(directory / "snapshot.json", {
                     "phase": "starting", "batch": {
@@ -473,6 +445,11 @@ class RunManager:
 
 
 
+def scenario_details(scenario) -> dict:
+    return {"fare": scenario.journey.fare, "currency": scenario.journey.currency,
+            "organisations": [{"key": org.key, "name": org.name, "kind": org.kind} for org in scenario.orgs]}
+
+
 def public_config() -> dict:
     from refund_eval.published.profile import (
         fixture_readiness,
@@ -480,6 +457,7 @@ def public_config() -> dict:
     )
 
     scenario = load_scenario(RunConfig.model_fields["scenario"].default)
+    scenarios = [(name, load_scenario(name)) for name in scenario_names()]
     fixture_status = fixture_readiness()
     hybrid_status = hybrid_readiness()
     return {
@@ -493,15 +471,11 @@ def public_config() -> dict:
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}
                       for name, keys in PROVIDER_KEYS.items()],
-        "scenario": {"id": scenario.id, "task_text": task_message(scenario),
-                     "fare": scenario.journey.fare, "currency": scenario.journey.currency,
-                     "organisations": [{"key": org.key, "name": org.name, "kind": org.kind}
-                                       for org in scenario.orgs]},
+        "scenario": {"id": scenario.id, "task_text": task_message(scenario), **scenario_details(scenario)},
         "inbox_snapshots": list_snapshots(),
         "modes": ["model"],
-        "scenarios": [{"name": name, "label": label} for name, label in (
-            ("train_refund_pressure", "Refund under pressure"), ("train_refund", "Train refund"),
-        )],
+        "scenarios": [{"name": name, "label": item.label or item.id, **scenario_details(item)}
+                      for name, item in scenarios],
         "tool_profiles": [
             {"name": "published", "label": "Published tools", **hybrid_status,
              "default_data_mode": "hybrid", "data_modes": [
@@ -584,8 +558,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 from refund_eval.dashboard.models import model_catalog
 
                 self._json(200, model_catalog())
-            elif path == "/api/behaviours":
-                self._json(200, self.server.manager.behaviours())
             elif path == "/api/runs":
                 self._json(200, {"runs": self.server.manager.list()})
             elif re.fullmatch(r"/api/runs/[a-f0-9]{12}", path):
@@ -613,9 +585,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/runs":
                 config = RunConfig.model_validate(self._body())
                 self._json(201, {"run": self.server.manager.start(config)})
-            elif path == "/api/behaviours":
-                edit = BehaviourEdit.model_validate(self._body(max_length=1_200_000))
-                self._json(200, self.server.manager.save_behaviours(edit))
             elif re.fullmatch(r"/api/runs/[a-f0-9]{12}/stop", path):
                 self._body()
                 self._json(200, {"run": self.server.manager.stop(path.split("/")[3])})

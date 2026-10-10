@@ -12,3 +12,9 @@ def _offline_launch_model_check(monkeypatch):
     original = models.unknown_models
     monkeypatch.setattr(models, "unknown_models", lambda roles, catalog=None: original(
         roles, catalog if catalog is not None else {"models": [], "all_ids": []}))
+
+
+@pytest.fixture(autouse=True)
+def _no_reply_jitter(monkeypatch):
+    """Exact reply times in tests; the jitter itself is tested on its own."""
+    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: 1.0)

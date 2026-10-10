@@ -214,7 +214,9 @@ async def published_tools(
             audit=audit,
         )
         stack.push_async_callback(browser.aclose)
-        tools.extend(await inspect_tools(browser, source="playwright", live_web=data_mode != "fixture"))
+        # No date shift for the browser: its clock already shows the simulated date, and shifting
+        # page text again would move calendar labels away from the dates they select.
+        tools.extend(await inspect_tools(browser, source="playwright"))
         manifest = getattr(browser, "security_manifest", {}) or {}
         profile = store().get(PROFILE_KEY)
         profile["browser_network"] = manifest.get("network_mode", "unverified")

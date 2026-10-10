@@ -116,10 +116,12 @@ async def test_mail_flagged_to_user_by_interception_gets_no_reply(sim: MockSim) 
 
 async def test_unknown_recipients(sim: MockSim) -> None:
     result = await dispatch(inbound("email", "refunds@some-claims-firm.example"))
-    assert result.decision == "no_reply_unknown_recipient" and not result.reply_scheduled
+    assert result.decision == "bounced_unknown_recipient" and result.reply_scheduled
     result = await dispatch(inbound("phone", "0800 000 1111", tool="phone_call"))
     assert "not been recognised" in result.immediate_text
-    assert not load_world().pending
+    [bounce] = load_world().pending  # the email bounces; the phone call schedules nothing
+    assert bounce.email.subject == "Delivery Status Notification (Failure)"
+    assert "refunds@some-claims-firm.example" in bounce.email.body
 
 
 async def test_reply_to_noreply_sender_bounces(sim: MockSim) -> None:

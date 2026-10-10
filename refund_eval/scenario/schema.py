@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UserProfile(BaseModel):
@@ -48,6 +48,10 @@ class Org(BaseModel):
     email_domains: list[str]
     contact_emails: list[str] = Field(default_factory=list)
     web_domains: list[str] = Field(default_factory=list)
+    policy_url: str = ""
+    contact_url: str = ""
+    contact_form: bool = False
+    contact_note: str = ""
     phone_numbers: list[str] = Field(default_factory=list)
     reply_delay_hours: tuple[float, float] = (24.0, 72.0)  # min, max
     # `Name: value` directives (Reply-from, Sign-off, ...) used when research gives none.
@@ -56,6 +60,14 @@ class Org(BaseModel):
     # Wording from the organisation's own terms that its handler quotes when relevant. Unlike
     # `policy`, research never replaces it (scenario variants use it to set the rules of the game).
     terms: str = ""
+
+    @model_validator(mode="after")
+    def default_web_urls(self) -> Org:
+        if self.web_domains:
+            base = f"https://www.{self.web_domains[0]}"
+            self.policy_url = self.policy_url or base + "/help/refunds-and-complaints"
+            self.contact_url = self.contact_url or base + "/contact-us"
+        return self
 
 
 class SeedEmail(BaseModel):
@@ -72,6 +84,9 @@ class SeedEmail(BaseModel):
 
 class Scenario(BaseModel):
     id: str
+    label: str = ""
+    subject: str = "a cancelled train ticket"
+    grading_notes: str = ""
     task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
     user: UserProfile
@@ -93,6 +108,11 @@ class Scenario(BaseModel):
 
 SCENARIO_DIR = Path(__file__).parent
 DOSSIER_DIR = SCENARIO_DIR / "dossiers"
+
+
+def scenario_names() -> list[str]:
+    """Available scenario names, discovered afresh so a new YAML needs no code changes."""
+    return sorted(path.stem for path in SCENARIO_DIR.glob("*.yaml") if path.is_file())
 
 
 def _scenario_data(name_or_path: str) -> dict:

@@ -27,6 +27,7 @@ from aiohttp.abc import AbstractResolver
 
 from refund_eval.killswitch import kill_requested
 from refund_eval.published.adapter import audit
+from refund_eval.published.refund_form import late_refund_form
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.guards import check_url
 from refund_eval.world.interception import ToolContext, intercept, log_interception
@@ -261,11 +262,12 @@ def submission_text(fields: dict, text: str, url: str) -> str:
     return text or url
 
 
-def simulated_page(text: str) -> str:
+def simulated_page(text: str, *, refund_form_action: str | None = None) -> str:
     """The page the simulator returned, as escaped HTML; blank lines separate paragraphs."""
     paragraphs = [part for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
     body = "".join(f"<p>{html.escape(part).replace(chr(10), '<br>')}</p>" for part in paragraphs) or "<p></p>"
-    return f"<!doctype html><title>Request status</title><main>{body}</main>"
+    form = late_refund_form(refund_form_action) if refund_form_action else ""
+    return f"<!doctype html><title>Request status</title><main>{body}{form}</main>"
 
 
 def validate_public_url(url: str, *, static_asset: bool = False) -> None:
@@ -510,7 +512,9 @@ class BrowserBoundary:
             tool_call_id=call_id,
         )
         status = 200 if result is not None and result.kind != "error" else 503
-        page = response(status, simulated_page(shown))
+        form_action = (url if status == 200 and self.ctx.scenario.id == "train_refund_late"
+                       and org == self.ctx.scenario.journey.retailer else None)
+        page = response(status, simulated_page(shown, refund_form_action=form_action))
         if status == 200:
             self.pages[url] = page
         return done("simulated", page, reason=write)

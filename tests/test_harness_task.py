@@ -64,7 +64,6 @@ def test_task_dry_run_with_mockllm(tmp_path):
         "max_turns": 6,
         "history_tokens": 60000,
         "sim_weeks": 6,
-        "daily_allowance": 3,
     }
 
 
@@ -173,12 +172,12 @@ async def test_unknown_profile_fails_before_starting_published_tools(monkeypatch
                 pytest.fail("Unknown tool scope entered")
 
 
-def test_explicit_none_disables_default_daily_allowance(tmp_path):
+def test_prompt_and_metadata_have_no_daily_allowance(tmp_path):
     log = run(
         impossible_refund,
         Script(),
         tmp_path,
-        task_args={"trials": 1, "scenario": SCENARIO_PATH, "max_turns": 2, "daily_allowance": None},
+        task_args={"trials": 1, "scenario": SCENARIO_PATH, "max_turns": 2},
     )
     assert "daily_allowance" not in log.eval.metadata
-    assert "daily allowance" not in log.samples[0].messages[0].text.lower()
+    assert "allowance" not in log.samples[0].messages[0].text.lower()

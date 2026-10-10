@@ -57,9 +57,9 @@ BROWSER_TOOLS = frozenset({
 })
 
 # Harness-local tools, added by the harness rather than a published service: the
-# memory tool keeps the agent's notes in the Inspect sample store. No network, no
-# world effect and no audit record; not reads or writes of the world.
-LOCAL_TOOLS = frozenset({"memory"})
+# memory and wake-up tools keep notes and a requested time in the sample store.
+# No network or native audit record; not external reads or writes.
+LOCAL_TOOLS = frozenset({"memory", "schedule_wakeup"})
 
 TOOL_CHANNEL: dict[str, str] = {
     "send_message": "email",
@@ -125,22 +125,6 @@ def reasoning_text(message: ChatMessage) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def message_full_text(message: ChatMessage) -> str:
-    """All text in a message (content, reasoning, tool call arguments), for quote checks."""
-    parts = [message.text]
-    reasoning = reasoning_text(message)
-    if reasoning:
-        parts.append(reasoning)
-    if isinstance(message, ChatMessageAssistant) and message.tool_calls:
-        for call in message.tool_calls:
-            parts.append(call.function)
-            parts.append(json.dumps(call.arguments, ensure_ascii=False, default=str))
-            parts.extend(str(v) for v in call.arguments.values())
-    if isinstance(message, ChatMessageTool) and message.error:
-        parts.append(message.error.message)
-    return "\n".join(p for p in parts if p)
-
-
 def is_status_report(message: ChatMessage) -> bool:
     """An assistant message that ends the turn (no tool calls) is a status report."""
     return (
@@ -152,7 +136,9 @@ def is_status_report(message: ChatMessage) -> bool:
 
 def first_user_index(messages: Sequence[ChatMessage]) -> int | None:
     for i, m in enumerate(messages):
-        if isinstance(m, ChatMessageUser):
+        if isinstance(m, ChatMessageUser) and not any(
+            (m.metadata or {}).get(key) for key in ("harness", "wakeup")
+        ):
             return i
     return None
 
@@ -167,6 +153,7 @@ class ToolCallRecord:
     error_type: str | None = None
     error_message: str | None = None
     result_text: str | None = None
+    interrupted: bool = False  # synthetic resume result; actual completion unknown
 
     @property
     def kind(self) -> str:
@@ -175,12 +162,13 @@ class ToolCallRecord:
     @property
     def executed(self) -> bool:
         """True if the tool body ran (a result exists and it is not a parse/approval error)."""
-        return self.result_index is not None and self.error_type not in NOT_EXECUTED_ERRORS
+        return (self.result_index is not None and self.error_type not in NOT_EXECUTED_ERRORS
+                and not self.interrupted)
 
     @property
     def unresolved(self) -> bool:
         """No tool result (e.g. the trial stopped mid-call)."""
-        return self.result_index is None
+        return self.result_index is None or self.interrupted
 
 
 def tool_calls(messages: Sequence[ChatMessage]) -> list[ToolCallRecord]:
@@ -204,6 +192,7 @@ def tool_calls(messages: Sequence[ChatMessage]) -> list[ToolCallRecord]:
             rec = by_id[m.tool_call_id]
             rec.result_index = i
             rec.result_text = m.text
+            rec.interrupted = (m.metadata or {}).get("harness") == "interrupted_tool"
             if m.error is not None:
                 rec.error_type = m.error.type
                 rec.error_message = m.error.message
@@ -253,23 +242,6 @@ def status_reports(messages: Sequence[ChatMessage], world: World | None) -> list
     return refs
 
 
-def find_quote(messages: Sequence[ChatMessage], quote: str, hint: int | None) -> int | None:
-    """Index of the message containing `quote`, preferring `hint` and its neighbours."""
-    q = _norm(quote).strip(" .\"'…")
-    if not q:
-        return None
-    order: list[int] = []
-    if hint is not None and 0 <= hint < len(messages):
-        order.append(hint)
-        for d in range(1, 4):
-            order.extend(k for k in (hint - d, hint + d) if 0 <= k < len(messages))
-    order.extend(k for k in range(len(messages)) if k not in order)
-    for k in order:
-        if q in _norm(message_full_text(messages[k])):
-            return k
-    return None
-
-
 # --------------------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------------------
@@ -299,17 +271,25 @@ CAP_LEVELS: tuple[Caps, ...] = (
     Caps(text=1500, args=800, tool_result=120, reasoning=0, system=2000),
 )
 
-DEFAULT_TRANSCRIPT_CHARS = 400_000  # keeps a 12-week trial plus findings under a 200k-token judge window
+DEFAULT_TRANSCRIPT_CHARS = 400_000
 
 
 def _role_label(i: int, m: ChatMessage, task_index: int | None) -> str:
     if isinstance(m, ChatMessageSystem):
         return "SYSTEM PROMPT"
     if isinstance(m, ChatMessageUser):
+        if (m.metadata or {}).get("harness") == "runtime_notice":
+            return "HARNESS (runtime notice, not from the user)"
+        if (m.metadata or {}).get("wakeup_kind") == "continue":
+            return "HARNESS (continue instruction, not from the user)"
+        if (m.metadata or {}).get("harness"):
+            return "HARNESS (automated, not from the user)"
         return "USER (task)" if i == task_index else "WAKE-UP (automated, not from the user)"
     if isinstance(m, ChatMessageAssistant):
         return "ASSISTANT (status report)" if is_status_report(m) else "ASSISTANT"
     if isinstance(m, ChatMessageTool):
+        if (m.metadata or {}).get("harness") == "interrupted_tool":
+            return f"HARNESS (interrupted tool {m.function or ''}; outcome unknown)"
         return f"TOOL RESULT {m.function or ''}".rstrip()
     return m.role.upper()
 
@@ -337,6 +317,8 @@ def render_message(
                 kind = tool_kind(call.function)
                 tag = {"write": " [WRITE]", "read": "", "mediated": " [BROWSER, network mediated]",
                        "local": " [OWN NOTES, not sent anywhere]", "unknown": " [UNCLASSIFIED TOOL]"}[kind]
+                if call.function == "schedule_wakeup":
+                    tag = " [SCHEDULE WAKE-UP, not sent anywhere]"
                 if call.function in LEGACY_WRITE_TOOLS:
                     tag = " [WRITE, intercepted]"
                 args = json.dumps(call.arguments, ensure_ascii=False, default=str)
@@ -380,26 +362,6 @@ def render_transcript(
     return "\n\n".join([*head, marker, *tail])
 
 
-def render_excerpt(
-    messages: Sequence[ChatMessage],
-    index: int,
-    before: int = 2,
-    after: int = 1,
-    caps: Caps = CAP_LEVELS[1],
-) -> str:
-    """A few messages around `index`, for human review and the write-up."""
-    task_index = first_user_index(messages)
-    lo = max(0, index - before)
-    hi = min(len(messages), index + after + 1)
-    out: list[str] = []
-    for k in range(lo, hi):
-        text = render_message(k, messages[k], caps, task_index)
-        if k == index:
-            text = f">>> {text}"
-        out.append(text)
-    return "\n\n".join(out)
-
-
 def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any] | None:
     """A compact, JSON-safe view of the world for graders."""
     if world is None:
@@ -426,6 +388,14 @@ def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any
         "turn": world.turn,
         "killed": world.killed,
         "stop_reason": world.stop_reason,
+        "target_tokens": ({"budget": world.token_ledger.budget,
+                           "used": world.token_ledger.used,
+                           "remaining": (None if world.token_ledger.accounting_error
+                                         else world.token_ledger.remaining),
+                           "overrun": world.token_ledger.overrun,
+                           "calls": len(world.token_ledger.calls),
+                           "accounting_error": world.token_ledger.accounting_error}
+                          if world.token_ledger is not None else None),
         "outcome": {
             "cash_refunded_to_user": world.outcome.cash_refunded(),
             **world.outcome.model_dump(mode="json"),
@@ -483,10 +453,3 @@ def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any
             x["response_summary"] = clip(x["response_summary"], 120)
         data["wakeups"] = data["wakeups"][-20:]
     return data
-
-
-def render_world(world: World | None, max_chars: int = 80_000) -> str:
-    summary = world_summary(world, max_chars)
-    if summary is None:
-        return "(world record not available for this trial)"
-    return json.dumps(summary, ensure_ascii=False, indent=1, default=str)

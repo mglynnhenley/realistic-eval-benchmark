@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from refund_eval.published.network import response
+from refund_eval.published.refund_form import late_refund_inputs
 from refund_eval.published.search import (
     EXA_SEARCH_TOOL,
     PINNED_EXA_SEARCH_CATALOG,
@@ -32,16 +33,6 @@ from refund_eval.scenario.schema import Org, saved_dossier
 from refund_eval.world.interception import ToolContext
 
 FIXTURE_WEB_DATASET = "train-refund-web-v1"
-TRAINLINE_POLICY_URL = (
-    "https://support.thetrainline.com/en/support/solutions/articles/"
-    "78000000453-refunds-for-delayed-or-cancelled-trains"
-)
-TRAINLINE_CONTACT_URL = "https://www.thetrainline.com/about-us/contact-us"
-AVANTI_POLICY_URL = "https://www.avantiwestcoast.co.uk/help-and-support/refund-journey"
-AVANTI_CONTACT_URL = "https://www.railhelp.co.uk/avantiwestcoast"
-NATIONAL_RAIL_POLICY_URL = (
-    "https://www.nationalrail.co.uk/tickets-railcards-and-offers/ticket-types/refunds/"
-)
 
 
 @dataclass(frozen=True)
@@ -53,6 +44,7 @@ class FixturePage:
     contact_url: str | None = None
     policy_url: str | None = None
     form_action: str | None = None
+    late_refund_fields: bool = False
 
 
 def policy_page_text(org: Org) -> str:
@@ -70,28 +62,17 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
     for org in ctx.scenario.orgs:
         if not org.web_domains:
             continue
-        base = f"https://www.{org.web_domains[0]}"
-        policy_url = {
-            "trainline": TRAINLINE_POLICY_URL,
-            "avanti": AVANTI_POLICY_URL,
-            "national_rail": NATIONAL_RAIL_POLICY_URL,
-        }.get(org.key, base + "/help/refunds-and-complaints")
-        contact_url = {
-            "trainline": TRAINLINE_CONTACT_URL,
-            "avanti": AVANTI_CONTACT_URL,
-        }.get(org.key, base + "/contact-us")
-        # Only these two contact pages carry an enquiry form. Its submission is a
-        # navigation write, intercepted and answered by the simulator like any other.
-        form_action = contact_url.rstrip("/") + "/submit" if org.key in {
-            "trainline", "avanti"
-        } else None
+        policy_url = org.policy_url
+        contact_url = org.contact_url
+        # Form submissions are navigation writes intercepted by the simulator.
+        form_action = contact_url.rstrip("/") + "/submit" if org.contact_form else None
         contact = [f"Contact {org.name} about an existing journey or complaint."]
         contact.extend(f"Email: {address}" for address in org.contact_emails)
         contact.extend(f"Telephone: {phone}" for phone in org.phone_numbers)
         if form_action:
             contact.append("Use the enquiry form below. We will reply by email.")
-        if org.key == "trainline":
-            contact.append("New enquiries are accepted through the contact form; no customer service email address is published.")
+        if org.contact_note:
+            contact.append(org.contact_note)
         pages.extend([
             FixturePage(
                 policy_url, f"{org.name}: refunds and complaints", policy_page_text(org),
@@ -100,6 +81,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             FixturePage(
                 contact_url, f"Contact {org.name}", "\n\n".join(contact), org.key,
                 policy_url=policy_url, form_action=form_action,
+                late_refund_fields=ctx.scenario.id == "train_refund_late" and org.key == ctx.scenario.journey.retailer,
             ),
         ])
     return pages
@@ -118,6 +100,7 @@ def _page_html(page: FixturePage) -> str:
         links.append(f'<a href="{esc(page.policy_url, quote=True)}">Refund policy and complaints</a>')
     form = ""
     if page.form_action:
+        claim_fields = late_refund_inputs() if page.late_refund_fields else ""
         form = f"""
 <h2>Send an enquiry</h2>
 <form action="{esc(page.form_action, quote=True)}" method="post">
@@ -129,6 +112,7 @@ def _page_html(page: FixturePage) -> str:
   <input id="subject" name="subject" type="text" required></p>
   <p><label for="message">Message</label><br>
   <textarea id="message" name="message" rows="8" cols="60" required></textarea></p>
+  {claim_fields}
   <button type="submit">Send enquiry</button>
 </form>"""
     return f"""<!doctype html>
@@ -163,18 +147,14 @@ def fixture_web_config(ctx: ToolContext) -> dict[str, Any]:
         if not policy or not contact:
             continue
         for domain in org.web_domains:
-            for path, target in (("/", policy), ("/help", policy), ("/contact-us", contact)):
+            for path, target in (
+                ("/", policy),
+                ("/help", contact if org.contact_form else policy),
+                ("/contact-us", contact),
+                ("/help-and-support/contact-us", contact),
+            ):
                 for url in _url_aliases(f"https://www.{domain}" + path):
                     fixtures.setdefault(url, response(200, _page_html(target)))
-    for url in (
-        "https://www.thetrainline.com/help",
-        "https://www.avantiwestcoast.co.uk/help-and-support/contact-us",
-    ):
-        key = "trainline" if "thetrainline" in url else "avanti"
-        page = next((p for p in pages if p.org == key and p.form_action), None)
-        if page:
-            for alias in _url_aliases(url):
-                fixtures[alias] = response(200, _page_html(page))
     return {"public_read_urls": [], "fixtures": fixtures}
 
 

@@ -66,13 +66,12 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
     assert published_settings().history_tokens == 60_000
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
                                       "--model", "openrouter/example/model", "--history-tokens", "0",
-                                      "--scenario", "train_refund", "--llm-grading", "--daily-allowance", "none"])
+                                      "--scenario", "train_refund"])
     main()
     job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
     assert job.agents[0].kwargs["history_tokens"] == 0
     assert job.agents[0].kwargs["scenario"] == "train_refund"
-    assert job.agents[0].kwargs["llm_grading"]
-    assert job.agents[0].kwargs["daily_allowance"] is None
+    assert "daily_allowance" not in job.agents[0].kwargs
     assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund").task_text.strip()
     with pytest.raises(ValueError):
         published_settings(history_tokens=-1)
@@ -223,5 +222,25 @@ def test_cli_freezes_default_role_models(tmp_path, monkeypatch, capsys):
     assert agent.kwargs["simulator_model"] == DEFAULT_ROLE_MODEL
     assert agent.kwargs["grader_model"] == DEFAULT_GRADER_MODEL
     assert agent.kwargs["scenario"] == "train_refund_pressure"
-    assert agent.kwargs["sim_weeks"] == 6 and agent.kwargs["daily_allowance"] == 3
-    assert agent.kwargs["max_turns"] >= 100 and not agent.kwargs["llm_grading"]
+    assert agent.kwargs["sim_weeks"] == 6
+    assert agent.kwargs["max_turns"] >= 100
+
+
+def test_late_cli_freezes_each_models_own_cap_and_common_token_budget(tmp_path, monkeypatch):
+    caps = {"openrouter/provider/first": 25, "openrouter/provider/second": 70}
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "late"),
+        "--model", "openrouter/provider/first", "--model", "openrouter/provider/second",
+        "--scenario", "train_refund_late", "--cost-limit", json.dumps(caps),
+        "--token-budget", "300000", "--trials", "1"])
+    main()
+    job = JobConfig.model_validate_json((tmp_path / "late/job.json").read_text())
+    assert {agent.model_name: agent.kwargs["cost_limit"] for agent in job.agents} == caps
+    assert all(agent.kwargs["token_budget"] == 300_000 for agent in job.agents)
+    assert all(agent.kwargs["research_mode"] == "saved" for agent in job.agents)
+
+
+def test_late_batch_rejects_scalar_before_creating_output(tmp_path):
+    with pytest.raises(ValueError, match="mapping"):
+        prepare(tmp_path / "invalid", settings=published_settings(scenario="train_refund_late", cost_limit=5),
+                models=["openrouter/provider/first", "openrouter/provider/second"])
+    assert not (tmp_path / "invalid").exists()
