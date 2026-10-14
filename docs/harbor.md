@@ -27,17 +27,22 @@ does not load the project's `.env`; export `OPENROUTER_API_KEY` in your shell.
 
 ## Prepare and run a batch
 
-Preparing a job launches nothing. Choose a new output directory for each job:
+Preparing a job launches nothing. Choose a new ignored output directory for each job. This example freezes a late-refund configuration with one trial and an explicit $150 model-cost ceiling:
 
 ```bash
 scripts/harbor python -m refund_eval.harbor \
   --output .context/refund-batch --environment modal \
-  --model openrouter/anthropic/claude-haiku-4.5 \
-  --scenario train_refund_pressure \
-  --trials 4 --concurrency 2 \
-  --max-turns 1000 --sim-weeks 6 \
-  --cost-limit 126 --time-limit 1800
+  --model openrouter/anthropic/claude-opus-5.5 \
+  --scenario train_refund_late --research-mode auto \
+  --trials 1 --concurrency 1 \
+  --max-turns 10000 --sim-weeks 12 \
+  --token-budget 40000000 --history-tokens 60000 \
+  --cost-limit 150 --time-limit 36000
+```
 
+The separate command below starts paid model execution and sandbox compute:
+
+```bash
 scripts/harbor harbor run -c .context/refund-batch/job.json
 ```
 
@@ -56,17 +61,14 @@ described in [Grading saved runs with Scout](running.md#grading-saved-runs-with-
 `--history-tokens 60000` limits the target's visible history while preserving the
 full log; use `0` for untrimmed history.
 
-The default whole-trial cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Add `--token-budget 40000000` for the common target-token budget, `--sim-weeks 12` (the user's deadline is 4 January 2027) and `--research-mode auto` to research new organisations on the web (the default, `saved`, uses committed dossiers only). Each frozen trial receives only its selected target's dollar cap.
+The default whole-trial model-cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Each frozen trial receives only its selected target's dollar cap. For a complete single-model Muse example, use [the preparation script](running.md#prepare-the-muse-configuration).
 
-The example explicitly raises the cap to $126 for the six-week configuration. The first
-budget, turn, time or other stop condition ends a trial; six weeks is a ceiling.
-Four trials with a $126 cap can spend about $504 on target and simulator calls,
-plus Scout grading and compute. An in-flight response can overshoot a cap.
+A cap is a ceiling, not an estimated bill. The first budget, turn, time or other stop condition ends a trial; twelve weeks is a ceiling. Multiply the cap by the number of attempts to budget a batch, and account separately for Scout grading and sandbox compute. In-flight calls can overshoot a cap. Tool results remain uncapped.
 
 Add `--inbox .secrets/inboxes/my-inbox.json` to use a saved inbox. See
-[Use your own inbox](../README.md#use-your-own-inbox) for export and file-format
+[Inbox snapshots](running.md#inbox-snapshots) for export and file-format
 instructions. The frozen job includes the inbox file and pins its hash; credentials
-are excluded. Frozen jobs contain source and mail data, so keep them private.
+are excluded. Frozen jobs contain source and mail data, so keep them private. Preparation resolves the output path, including symlinks, and rejects destinations inside Git checkouts unless they are ignored and contain no tracked output files. A location outside Git is also supported. The frozen package includes its README and licence alongside the code and dependency lock.
 
 For an existing Modal secret containing `OPENROUTER_API_KEY`, add `--secret NAME`.
 Only the secret name is saved. Otherwise the job stores an environment-variable

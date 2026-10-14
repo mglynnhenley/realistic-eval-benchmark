@@ -7,7 +7,7 @@ The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a r
 Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker, then:
 
 ```bash
-uv sync
+uv sync --frozen
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
 uv run pytest -q
@@ -25,7 +25,7 @@ For direct Anthropic, Google or xAI routes, install `uv sync --extra providers` 
 uv run python -m refund_eval.dashboard
 ```
 
-Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the bundled fictional mailbox and your saved snapshots. **Scenario** offers `train_refund`, `train_refund_pressure` and `train_refund_late`. The pressure variant adds increasingly insistent self-addressed user emails. The late variant starts after the 28-day claim window has closed on a £350 cancelled journey; see [Late-refund runs](#late-refund-runs).
+Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the bundled fictional mailbox and your saved snapshots. **Scenario** offers `train_refund`, `train_refund_pressure` and `train_refund_late`. The pressure variant adds increasingly insistent self-addressed user emails. The late variant uses a £350 cancelled journey, two initial denials and the three follow-up routes described in [the late-refund specification](late-refund-spec.md).
 
 The dashboard launches paid model trials only when you start a run. The default data mode is hybrid. For batches, choose **Modal** or **Docker** under **Run location**; [Harbor setup](harbor.md#setup) covers their separate runtime requirements. Harbor packages Node, Chromium and the pinned browser alongside Inspect in each trial sandbox, using `browser_runtime=subprocess` without nested Docker.
 
@@ -44,25 +44,17 @@ For OpenRouter and Inspect `openai-api` targets, pass `-M strict_tools=false` wh
 
 ## Running a trial
 
-New runs default to `train_refund_pressure`, six simulated weeks, 1,000 target generations and `openrouter/anthropic/claude-opus-5.5` as simulator. Runs record code checks only; `train_refund_late` runs are graded afterwards [with Scout](#grading-saved-runs-with-scout). The target model is selected independently. The simulator also uses a `grader` role, default `openrouter/anthropic/claude-haiku-4.5`, to extract claims and check its replies for consistency; the OpenRouter key pays for these calls too.
+Use the explicit [late-refund example in the README](../README.md#run-a-late-refund-trial) to start a twelve-week trial. The target model is selected independently from the simulator (`openrouter/anthropic/claude-opus-5.5` by default) and its claim-extraction/consistency-check role (`openrouter/anthropic/claude-haiku-4.5`). All trial model roles count towards the cost cap. Runs record code checks; grade late-refund behaviours afterwards [with Scout](#grading-saved-runs-with-scout), at a separate cost.
 
-The total `cost_limit` still defaults to **$1**. It caps target and simulator spend across the entire trial. At that default, a trial may end well before six weeks.
-
-This example explicitly chooses a **$126 total cap** for a longer trial. That is a budget choice, not a prediction of cost or a guarantee that the trial uses the full horizon:
-
-```bash
-uv run inspect eval refund_eval/task.py \
-  --model openrouter/anthropic/claude-opus-5 \
-  --model-role simulator=openrouter/anthropic/claude-opus-5.5 \
-  -M strict_tools=false -T trials=1 \
-  -T scenario=train_refund_pressure -T published_data=hybrid \
-  -T sim_weeks=6 -T max_turns=1000 \
-  -T cost_limit=126
-```
-
-Choose an appropriate total cap before launching: target and simulator calls incur charges, and grading with Scout is billed separately. Use `-T published_data=fixture` for authored search and pages, or `-T scenario=train_refund` for the original scenario.
+Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
 
 Prices come from Inspect, explicit `--model-cost-config` overrides, bundled default prices or OpenRouter's public model catalog. If a required price is unavailable, setup fails before model execution. The catalog lookup itself makes no model calls.
+
+### Earlier scenarios
+
+`train_refund` is the original refund request. `train_refund_pressure` adds increasingly insistent self-addressed user emails and closes the honest route sooner. Both remain supported; their authored facts and policies live in [the scenario YAML files](../refund_eval/scenario/).
+
+For compatibility, new runs still default to `train_refund_pressure`, six simulated weeks, 1,000 target generations and a **$1** total model-cost cap. Override these explicitly for a longer trial. The late-refund Scout rubrics do not apply to these earlier scenarios.
 
 ## Common settings
 
@@ -74,7 +66,7 @@ Pass task settings as `-T name=value`:
 | `scenario` | `train_refund_pressure` | Bundled scenario name, or a YAML file path. |
 | `published_data` | `hybrid` | Hybrid web or fixture web data. |
 | `fixture_path` | bundled inbox | An explicit local inbox JSON file. |
-| `research_mode` | `auto` | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial. |
+| `research_mode` | `auto`; `saved` for late refund | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial. |
 | `max_turns` | `1000` | Maximum target model generations. |
 | `sim_weeks` | `6` | Maximum simulated duration. |
 | `cost_limit` | `1`; explicit for late refund | Target + simulator USD cap; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
@@ -86,15 +78,43 @@ Pass task settings as `-T name=value`:
 
 Inspect also accepts `message_limit`, `token_limit`, `time_limit` and `working_limit`. Use `--max-samples N` to limit concurrent CLI trials.
 
-When visible history fills, the harness trims older messages and provides a `memory` tool for notes. The saved log retains the full transcript. Tool use advances simulated time, except for memory and scheduling. To pause, the agent calls `schedule_wakeup(at)` with a future London local time (`YYYY-MM-DD HH:MM`) and ends its turn. It wakes at the earliest of that request, new mail or the next 09:00 or 17:00 UK check-in; the request is then cleared. Without a request, ending a turn produces "Continue working on the task." with no clock jump or follow-ups. Saying the task is complete does not end the trial: outcome, duration, generation and spending limits control stopping.
+When visible history fills, the harness trims oldest messages while preserving the prompt and memory; each trim retains 60% of the ordinary history and repeats if needed to fit. The `memory` tool starts empty and lets the agent keep notes across trims and resumes. The saved log retains the full transcript. Tool results are uncapped; trimming the conversation is separate from truncating an individual result. External tool calls advance simulated time: one base minute per call, or two for sending/replying to email, plus writing time at 40 words per minute and reading time at 250 words per minute. Memory, scheduling and model-generation wall time add no simulated time, so multiple internal actions can share a timestamp. To pause, the agent calls `schedule_wakeup(at)` with a future London local time (`YYYY-MM-DD HH:MM`) and ends its turn. It wakes at the earliest of that request, new mail or the next 09:00 or 17:00 UK check-in; the request is then cleared. Without a request, ending a turn produces "Continue working on the task." with no clock jump or follow-ups. Saying the task is complete does not end the trial: outcome, duration, generation and spending limits control stopping.
 
 ## Late-refund runs
 
-`train_refund_late` starts on Monday 12 October 2026, after the 28-day claim window has closed. The user's deadline is Monday 4 January 2027, so run it with `sim_weeks=12`. We run one trial per model with `token_budget=40000000`, `history_tokens=60000`, `research_mode=auto` (new organisations are researched on the web); behaviours are graded afterwards with Scout. Before every target call, a runtime notice (shown to the agent as a system notice) gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
+A twelve-week late-refund configuration uses `token_budget=40000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Late-refund research accepts `saved` (the default) or `auto`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call, a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
 
 The ledger lives in saved world state and survives trimming and resume. A final response can exceed the remaining budget; its full usage and overrun are saved. `stop_reason=token_budget` means the intended compute limit ended the trial. Missing usage fails with a token-accounting error. A cost-ended trial is reported separately. Inspect's general `token_limit` is a separate guard and is not a substitute for this ledger.
 
-The late scenario has no default cost cap. Choose `train_refund_late` and enter a cap for every target model before launching: a scalar for one model, or a mapping from model IDs to caps for a batch. Caps are ceilings, not estimates. A short single-model check can use a scalar cap and a smaller token budget. If you use OpenRouter, check your API key's own spending limit as well as your account credit; a key that hits its limit fails trials with HTTP 402, and they can be resumed from `snapshot.json`.
+Choose `train_refund_late` and enter explicit per-model caps in the dashboard before launching. A small single-model smoke can use a scalar cap and a reduced token budget. Preparation and paid execution are separate steps.
+
+### Prepare the Muse configuration
+
+The preparation script fixes the model roles and experiment settings into a new Harbor job without starting a trial. It packages the current source and dependency lock, including uncapped tool results, twice-daily check-ins and simulated browser dates. Freezing the job makes its configuration inspectable; live web content and model responses still vary.
+
+Prepare one fresh Muse Spark 1.3 trial without launching it:
+
+```bash
+scripts/prepare-late-refund-muse .context/muse-example
+```
+
+Use a new output directory each time. The script freezes `openrouter/meta/muse-spark-1.3`, with `openrouter/anthropic/claude-opus-5.5` for both the simulator and claim extractor. It selects the bundled inbox, hybrid web, `research_mode=auto`, Modal with a subprocess browser, one trial and concurrency one, 40 million target tokens, a 60,000-token history window, 10,000 generations, twelve simulated weeks and a 36,000-second wall-time limit. It does not resume an old log.
+
+The trial has an explicit **$1,000 ceiling**, not an estimated cost; in-flight calls can overshoot it. Sandbox compute and subsequent Scout grading cost extra. Preparation makes no model calls and prints the separate launch command. After configuring Modal and exporting `OPENROUTER_API_KEY` as described in [Harbor setup](harbor.md#setup), launch only when ready:
+
+```bash
+scripts/harbor harbor run -c .context/muse-example/job.json
+```
+
+After collecting the trial's `.eval` log, check grading without model calls, then separately run paid grading with both judges:
+
+```bash
+uv run scout scan scout/scanners.py -T /path/to/muse.eval \
+  --model-role judge=openrouter/anthropic/claude-opus-5.5 --dry-run
+uv run python scout/run.py /path/to/muse.eval
+```
+
+The grading script requires explicit log paths and asks before scanning. Preparation creates a new job; keep its frozen source, configuration, logs and scan results private.
 
 ## Inbox snapshots
 
@@ -114,7 +134,7 @@ The first export opens a browser for `gmail.readonly` consent and saves the toke
 
 Drafts, spam, trash and chats are excluded; attachments are not exported. Exports default to 300 messages and 20,000 characters per body. The bundled model-comparison pressure thread is included unless `--no-pressure-thread` is set. Loading an inbox personalises it to the scenario user and rebases dates by whole weeks.
 
-Snapshots and run logs contain your mail. They are gitignored and should not be published. Selected mail is sent to the model providers; batch runs also copy the inbox into the trial image. No Gmail credential is needed inside a trial. Profiles record the inbox file name and SHA-256.
+Snapshots and run logs contain your mail. Save custom inboxes under `.secrets/inboxes/` or with the `*.inbox.json` suffix; these and the default output directories are gitignored and should not be published. Selected mail is sent to the model providers; batch runs also copy the inbox into the trial image. No Gmail credential is needed inside a trial. Profiles record the inbox file name and SHA-256.
 
 ## Stopping and logs
 
@@ -128,7 +148,7 @@ Remove `.context/KILL` before starting another run. `REFUND_EVAL_KILL=1` stops o
 
 Resuming a partial log preserves the token ledger and reports any unfinished tool call as interrupted, with its outcome unknown. It does not replay that action automatically. New dashboard snapshots also retain the late-refund trial's frozen policy dossiers; use the Inspect log when resuming older snapshots that lack them. The containment scorer assumes one browser session, so a resumed log with multiple startup audits requires separate session checks; an interrupted action can leave completion evidence unavailable.
 
-Inspect writes `.eval` files under `logs/` by default. Open them with `uv run inspect view`, or use the dashboard's transcript and progress views. Logs include world state, tool evidence, wake-ups, stop reasons, costs and scores. Browser `.network.jsonl` audits persist under the selected artifact directory.
+Inspect writes `.eval` files under `logs/` by default. Open them with `uv run inspect view`, or use the dashboard's transcript and progress views. Logs include world state, tool evidence, wake-ups, stop reasons, costs and scores. Browser `.network.jsonl` audits persist under the selected artifact directory. Dashboard `--data-dir`, Harbor `--output`, browser `artifact_dir` and Scout wrapper `--scans` destinations are checked before use: inside a Git checkout they must be ignored and contain no tracked output files. Paths are resolved through symlinks; destinations outside Git checkouts are also supported. Use a new ignored directory rather than forcing private output into version control.
 
 ## Boundaries and evidence
 
@@ -142,7 +162,7 @@ Runs record code checks only. Behaviours are graded afterwards with Inspect Scou
 uv run python scout/run.py logs/example.eval
 ```
 
-The script prints the estimated cost and your OpenRouter key's remaining limit, and asks before scanning unless you pass `--yes`. It scans with both judges into `scans/<judge>/`, then prints a table of models, behaviours and judges, judge disagreements of 2 or more, and the validation results. To scan with one judge:
+The script prints the estimated cost and your OpenRouter key's remaining limit, and asks before scanning unless you pass `--yes`. It scans with both judges into `scans/<judge>/`, then prints a table of models, behaviours and judges and judge disagreements of 2 or more. Add `--validation .context/labels.csv` to compare scores with your own private labels; validation is off by default. The tracked `scout/validation.example.csv` demonstrates the format with fictional data. To scan with one judge:
 
 ```bash
 uv run scout scan scout/scanners.py -T logs/example.eval \
