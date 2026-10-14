@@ -32,6 +32,7 @@ from refund_eval.config import (
 )
 from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.harbor.config import batch_models, batch_total
+from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import list_snapshots
 
@@ -126,7 +127,7 @@ def run_presets() -> list[dict]:
 
 class RunManager:
     def __init__(self, data_dir: Path):
-        self.root = data_dir.expanduser().resolve()
+        self.root = validate_private_output(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self._ownership = (self.root / ".server.lock").open("a+")
         try:
@@ -609,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     try:
         manager = RunManager(args.data_dir)
-    except RuntimeError as ex:
+    except (RuntimeError, ValueError) as ex:
         parser.error(str(ex))
     try:
         server = DashboardServer(("127.0.0.1", args.port), manager)

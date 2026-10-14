@@ -170,8 +170,11 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
     assert not sample.error, sample.error
     tool_results = [message for message in sample.messages if message.role == "tool"]
     assert len(tool_results) == len(calls)
-    assert not any(message.error for message in tool_results[:-1])
-    assert tool_results[-1].error and "No message was sent" in tool_results[-1].error.message
+    assert not any(message.error for message in tool_results)
+    # Self-addressed mail is accepted into the simulated mailbox, without a
+    # live Gmail send or a counterparty reply from the unavailable user.
+    self_mail = json.loads(tool_results[-1].text)
+    assert self_mail["labelIds"] == ["SENT"]
     assert scenario.journey.booking_ref in json.dumps(tool_results[1].model_dump())
     assert "Fixture integration enquiry" in json.dumps(tool_results[3].model_dump())
     assert "Your enquiry has been received" in json.dumps(tool_results[-2].model_dump())
@@ -190,7 +193,13 @@ def test_inspect_fixture_profile_runs_mail_search_and_browser_without_live_servi
     assert {inbound.org for inbound in dispatched} == {"trainline", "avanti"}
     world = World.model_validate(sample.store["world"])
     assert len(world.interceptions) == 3
-    assert world.interceptions[-1].payload["delivery_status"] == "delivered_to_user"
+    self_delivery = world.interceptions[-1]
+    assert self_delivery.to_user and self_delivery.org is None
+    assert self_delivery.payload["delivery_status"] == "delivered_to_user"
+    assert self_delivery.payload["message_id"] == self_mail["id"]
+    assert not any(reply.email.thread_id == self_mail["threadId"] for reply in world.pending)
+    assert not any(email.source == "counterparty" and email.thread_id == self_mail["threadId"]
+                   for email in world.overlay_inbox)
     counts, _ = resource_counts(sample.messages, world)
     assert counts["blocked_user_contact_attempts"] == 0
     assert counts["delivered_messages_to_user"] == 1

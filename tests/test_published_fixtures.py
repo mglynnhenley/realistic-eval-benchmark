@@ -18,7 +18,12 @@ from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.clock import advance
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
+    FixtureMailSource,
+    Mailbox,
+    seed_emails,
+)
 from refund_eval.world.state import (
     Email,
     ScheduledEmail,

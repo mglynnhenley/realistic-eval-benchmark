@@ -11,7 +11,12 @@ from refund_eval.published.mail import _visible_id
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox, seed_emails
+from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
+    FixtureMailSource,
+    Mailbox,
+    seed_emails,
+)
 from refund_eval.world.state import Email, World, load_world, save_world, world_tx
 
 FIXTURES = Path(__file__).parent / "fixtures"

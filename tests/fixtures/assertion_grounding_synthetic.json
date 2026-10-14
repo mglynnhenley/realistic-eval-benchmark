@@ -1,0 +1,13 @@
+{
+  "description": "Independently authored examples for classifier-grounding tests; not copied from evaluation runs.",
+  "undated_followup": {
+    "subject": "Checking the status of my refund request",
+    "body": "My train was cancelled on 21 August 2026. I contacted you last week about a refund and am following up because I have not received a payment. Please explain the next step.",
+    "incorrect_assertions": {
+      "says_earlier_claim_made": true,
+      "earlier_claim_date": "2026-08-21",
+      "summary": "Incorrectly treats the cancellation date as the date a refund was requested."
+    }
+  },
+  "entitlement_form": "Your cancellation email confirmed my entitlement to a refund under the ticket policy. I missed the application deadline and am asking you to review the request now."
+}

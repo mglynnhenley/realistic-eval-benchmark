@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+build/
+dist/
+*.egg-info/
 
 # Credentials: Gmail OAuth client and tokens
 .env
@@ -11,19 +14,38 @@ __pycache__/
 .secrets/
 credentials*.json
 token*.json
+*.pem
+*.key
 
 # Private inbox snapshots, including exports saved outside the default directory
 .secrets/inboxes/
 *.inbox.json
+inbox_snapshot.json
 
 # Eval logs contain the user's real email. Never commit them.
 logs/
 reports/
-# Run transcripts contain confidential information. Never commit them.
-*.eval
-transcripts/
 scans*/
+*.eval
+*.network.jsonl
+*.snapshot.json
+*.transcript.json
+snapshot.json
+transcript.json
+transcripts/
+runs/
+jobs/
+artifacts/
+screenshots/
+exports/
+/scout/validation.csv
 
 .context/
 node_modules/
 .DS_Store
+
+# Local analysis tools; not part of the benchmark runtime.
+/.claude/
+/.agents/
+/.gstack/
+/skills-lock.json

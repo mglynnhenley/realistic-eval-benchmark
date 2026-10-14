@@ -1,11 +1,11 @@
 """Grade saved runs with the Scout scanners, once per judge, and compare the judges.
 
-    uv run python scout/run.py LOG [LOG ...] [--judges J ...] [--scans DIR] [--scanners S ...] [--limit N] [--yes]
+    uv run python scout/run.py LOG [LOG ...] [--judges J ...] [--scans DIR] [--validation CSV] [--yes]
 
 Before scanning it prints the estimated input cost and the OpenRouter key's remaining
 limit, and asks to confirm unless --yes. Each judge's results go to <scans>/<judge>/.
 Afterwards it prints a models x behaviours x judges table, the cells where the judges
-differ by 2 or more, and the checks in scout/validation.csv. See scout/README.md.
+differ by 2 or more, and any checks supplied with --validation. See scout/README.md.
 """
 
 import argparse
@@ -28,12 +28,14 @@ from inspect_scout import (
     transcripts_from,
 )
 
+from refund_eval.output_paths import validate_private_output
+
 ROOT = Path(__file__).resolve().parents[1]
 JUDGES = ["openrouter/anthropic/claude-opus-5.5", "openrouter/openai/gpt-6.1-sol"]
 SCANNERS = [*scout_scanners.BEHAVIOURS, "observations"]
-VALIDATION = Path(__file__).parent / "validation.csv"
 OPENROUTER = "https://openrouter.ai/api/v1"
-# Approximate planning constants; provider tokenizers and billing may differ.
+# Approximate characters per input token, configurable here by provider.
+# Estimates are for planning only; billing depends on the provider's tokenizer.
 CHARS_PER_TOKEN = {"anthropic": 2.3}
 DEFAULT_CHARS_PER_TOKEN = 3.6
 
@@ -131,7 +133,33 @@ def results(locations: dict[str, str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def report(df: pd.DataFrame) -> None:
+def load_validation(path: Path) -> list[dict[str, str]]:
+    """Read and validate optional private labels before any scanning takes place."""
+    required = {"log", "behaviour", "op", "value", "note"}
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if len(reader.fieldnames or []) != len(required) or set(reader.fieldnames or []) != required:
+            raise ValueError(f"{path}: validation columns must be {', '.join(sorted(required))}")
+        cases = []
+        for line, case in enumerate(reader, start=2):
+            if None in case or any(value is None for value in case.values()):
+                raise ValueError(f"{path}:{line}: validation row must have five columns")
+            case = {key: value.strip() for key, value in case.items()}
+            if not case["log"] or not case["note"]:
+                raise ValueError(f"{path}:{line}: log and note must not be empty")
+            if case["behaviour"] not in scout_scanners.BEHAVIOURS:
+                raise ValueError(f"{path}:{line}: unknown graded behaviour {case['behaviour']!r}")
+            if case["op"] not in {"eq", "gte"}:
+                raise ValueError(f"{path}:{line}: validation op must be eq or gte")
+            if case["value"] not in {"0", "1", "2", "3"}:
+                raise ValueError(f"{path}:{line}: validation value must be 0, 1, 2 or 3")
+            cases.append(case)
+        if not cases:
+            raise ValueError(f"{path}: validation must contain at least one case")
+        return cases
+
+
+def report(df: pd.DataFrame, validation: list[dict[str, str]] | None = None) -> None:
     table = df.pivot_table(index=["model", "transcript"], columns=["scanner", "judge"], values="value", aggfunc="first")
     table = table[sorted(table.columns, key=lambda c: (SCANNERS.index(c[0]), c[1]))]
     print("\nResults (observations = number of items flagged):")
@@ -147,27 +175,34 @@ def report(df: pd.DataFrame) -> None:
     if wide.empty:
         print("  none")
 
-    print(f"\nValidation ({VALIDATION.name}):")
-    if not VALIDATION.exists():
-        return
-    with VALIDATION.open() as f:
-        for case in csv.DictReader(f):
+    if validation is not None:
+        print("\nValidation:")
+        for case in validation:
             cells = df[(df["log"] == case["log"]) & (df["scanner"] == case["behaviour"])]
+            if cells.empty:
+                print(f"  SKIP  {case['note']}: no matching result for {case['log']} / {case['behaviour']}")
             for judge, value in zip(cells["judge"], cells["value"]):
                 target = int(case["value"])
                 ok = value.isdigit() and (int(value) >= target if case["op"] == "gte" else int(value) == target)
                 print(f"  {'PASS' if ok else 'FAIL'}  {case['note']}: {case['behaviour']} {case['op']} {target}, {judge}={value}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Grade saved .eval logs with the Scout scanners, once per judge.")
-    parser.add_argument("logs", nargs="+", help="Inspect .eval logs")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Grade saved .eval logs with the Scout scanners and both judges.")
+    parser.add_argument("logs", nargs="+", help="Inspect .eval logs to grade")
     parser.add_argument("--judges", nargs="+", default=JUDGES, help="Judge models, one scan each")
     parser.add_argument("--scans", default="scans", help="Results directory (default: scans/)")
+    parser.add_argument("--validation", type=Path, help="Optional private validation CSV (log,behaviour,op,value,note)")
     parser.add_argument("--scanners", nargs="+", default=SCANNERS, choices=SCANNERS, help="Scanners to run (default: all six)")
     parser.add_argument("--limit", type=int, help="Scan only the first N transcripts")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    try:
+        scans = validate_private_output(args.scans)
+        scan_dirs = {judge: validate_private_output(scans / short(judge)) for judge in args.judges}
+        validation = load_validation(args.validation) if args.validation else None
+    except (OSError, UnicodeError, ValueError, csv.Error) as exc:
+        parser.error(str(exc))
     load_dotenv(ROOT / ".env")
 
     estimate(args.logs, args.judges, args.scanners, args.limit)
@@ -185,7 +220,7 @@ def main() -> None:
         status = scan(
             scanners={name: getattr(scout_scanners, name)() for name in args.scanners},
             transcripts=transcripts_from(args.logs),
-            scans=str(Path(args.scans) / short(judge)),
+            scans=str(scan_dirs[judge]),
             model_roles={"judge": judge},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
             model_config=GenerateConfig(cache_prompt=False),
@@ -194,7 +229,7 @@ def main() -> None:
         locations[judge] = status.location
         if not status.complete:
             print(f"Scan incomplete ({len(status.errors)} errors). Retry the errors with: uv run scout scan resume {status.location}")
-    report(results(locations))
+    report(results(locations), validation)
 
 
 if __name__ == "__main__":

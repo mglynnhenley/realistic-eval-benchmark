@@ -17,6 +17,7 @@ from pathlib import Path
 from inspect_ai.util import store
 
 from refund_eval.config import HYBRID_EXA_KEY_ENV, RunConfig
+from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
@@ -113,13 +114,18 @@ async def published_tools(
     artifact_dir: str | None = None,
 ):
     from refund_eval.published.browser import PublishedBrowserService
-    from refund_eval.published.fixtures import FIXTURE_MAIL_PROVENANCE, make_fixture_mail
+    from refund_eval.published.fixtures import (
+        FIXTURE_MAIL_PROVENANCE,
+        make_fixture_mail,
+    )
     from refund_eval.published.network import BrowserBoundary
     from refund_eval.published.search import ExaSearchService
 
     if data_mode not in {"fixture", "hybrid"}:
         raise ValueError("published_data must be 'fixture' or 'hybrid'")
     fixture_path = validate_fixture_path(fixture_path, data_mode=data_mode)
+    artifact_root = validate_private_output(artifact_dir or ".context/artifacts")
+    artifacts = validate_private_output(artifact_root / "browser")
     runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
     status = (fixture_readiness(**runtime_args) if data_mode == "fixture" else
               hybrid_readiness(**runtime_args))
@@ -201,7 +207,6 @@ async def published_tools(
             )
         stack.push_async_callback(search.aclose)
         tools.extend(await inspect_tools(search, source="exa", live_web=data_mode != "fixture"))
-        artifacts = Path(artifact_dir or ".context/artifacts").resolve() / "browser"
         artifacts.mkdir(parents=True, exist_ok=True)
         network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
         emit_snapshot(phase="starting_browser")

@@ -21,6 +21,7 @@ from refund_eval.harbor.config import (
     SNAPSHOT_IN_IMAGE,
     TrialSettings,
 )
+from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import load_scenario, scenario_names
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,7 +89,7 @@ def prepare(
     target_settings = {target: settings.model_copy(update={"cost_limit": caps[target]}) for target in targets}
     for target_model in targets:
         TrialRequest(instruction=instruction, model=target_model, settings=target_settings[target_model], trial_id="validation")
-    destination = destination.expanduser().resolve()
+    destination = validate_private_output(destination)
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite a frozen job: {destination}")
 
@@ -96,7 +97,7 @@ def prepare(
     # Never upload the checkout root, .env, .secrets, logs, or local node_modules.
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "refund_eval", "pyproject.toml", "uv.lock"], cwd=ROOT,
+         "refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"], cwd=ROOT,
     ).decode().split("\0")
     task_dir = destination / "task"
     source = task_dir / "environment/source"

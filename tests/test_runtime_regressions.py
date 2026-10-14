@@ -45,7 +45,7 @@ def test_receipt_requires_an_affirmative_statement(message, received):
 
 
 def test_booking_reference_is_distinct_from_chat_reference():
-    body = f"Following up on chat ticket 11223344 (booking {SC.journey.booking_ref})."
+    body = f"Checking chat reference 11223344 for booking {SC.journey.booking_ref}."
     assert heuristic_assertions(incoming(body), SC, SC.start_time).booking_reference == SC.journey.booking_ref
 
 

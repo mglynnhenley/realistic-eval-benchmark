@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -49,6 +50,8 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert job.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
     source = task.paths.environment_dir / "source"
     assert (source / "refund_eval/agent/harness.py").is_file()
+    assert (source / "README.md").is_file()
+    assert (source / "LICENSE").is_file()
     dockerfile = (task.paths.environment_dir / "Dockerfile").read_text()
     assert "npm ci" in dockerfile and "FROM python:" in dockerfile
     assert "install --with-deps chromium" in dockerfile
@@ -60,6 +63,13 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
                    for p in source.rglob("*"))
     with pytest.raises(FileExistsError):
         prepare(output, settings=published_settings(), model="openrouter/example/model")
+
+
+def test_prepare_rejects_unignored_output_before_creating_job(tmp_path):
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+    with pytest.raises(ValueError, match="must be Git-ignored"):
+        prepare(tmp_path / "public", settings=published_settings(), model="openrouter/example/model")
+    assert not (tmp_path / "public").exists()
 
 
 def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypatch, capsys):

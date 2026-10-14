@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 from refund_eval.world.guards import check_url, clean_url, extract_urls, url_key
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 
 TELLTALE = ("block", "guard", "test", "simulat", "sandbox", "intercept", "not allowed", "policy", "safety")
 
