@@ -92,10 +92,11 @@ async def test_partial_tool_resume_inserts_unknown_result_before_notice(tmp_path
     assert store().get(RESUMED_KEY)[-1]["interrupted_tool_calls"] == []
 
 
-async def test_late_snapshot_with_missing_pinned_dossier_is_not_resumed(tmp_path):
+@pytest.mark.parametrize("org", ["trainline", "avanti"])
+async def test_late_snapshot_with_missing_pinned_dossier_is_not_resumed(tmp_path, org):
     init_subtask_store(Store())
     world = initial_world(load_scenario("train_refund_late"))
-    world.outcome.claims.append(Claim(time=world.now, org="trainline", channel="email",
+    world.outcome.claims.append(Claim(time=world.now, org=org, channel="email",
                                       kind="refund_request", decision="open:late_initial_denial"))
     path = tmp_path / "snapshot.json"
     path.write_text(json.dumps({"world": json_safe(world), "messages": [
@@ -104,3 +105,20 @@ async def test_late_snapshot_with_missing_pinned_dossier_is_not_resumed(tmp_path
     with pytest.raises(ValueError, match="without its frozen dossiers"):
         await restore_snapshot(str(path))
     assert store().get("world") is None  # failure does not partially restore state
+
+
+async def test_late_snapshot_resumes_other_bodies_late_decisions_without_pinned_dossiers(tmp_path):
+    init_subtask_store(Store())
+    world = initial_world(load_scenario("train_refund_late"))
+    for org in ("trainline", "avanti", "rail_ombudsman", "dynamic_advice"):
+        world.outcome.claims.append(Claim(time=world.now, org=org, channel="email",
+                                          kind="refund_request", decision="open:late_claim_denied"))
+    pinned = {org: {"pinned": True} for org in ("trainline", "avanti")}
+    path = tmp_path / "snapshot.json"
+    path.write_text(json.dumps({"world": json_safe(world), "messages": [
+        json_safe(ChatMessageUser(content="Task")),
+    ], "resume_state": {"late_refund_frozen_dossiers": pinned}}))
+    restored = await restore_snapshot(str(path))
+    assert restored[0].text == "Task"
+    assert len(load_world().outcome.claims) == 4
+    assert store().get("late_refund_frozen_dossiers") == pinned

@@ -324,27 +324,6 @@ def _kill_error(reason: str) -> LimitExceededError:
     )
 
 
-# Longest tool result the agent sees. A raw script or data URL can return hundreds of
-# thousands of characters, more than the whole history window can hold.
-MAX_TOOL_RESULT_CHARS = 40_000
-
-
-def _cap_result(result: Any) -> Any:
-    """Cut an oversized tool result, saying so, so one call cannot overflow the context."""
-    def cut(text: str) -> str:
-        if len(text) <= MAX_TOOL_RESULT_CHARS:
-            return text
-        return (text[:MAX_TOOL_RESULT_CHARS]
-                + f"\n\n[Output truncated: {len(text) - MAX_TOOL_RESULT_CHARS:,} more characters not shown.]")
-    if isinstance(result, str):
-        return cut(result)
-    if isinstance(result, list):
-        for part in result:
-            if isinstance(getattr(part, "text", None), str):
-                part.text = cut(part.text)
-    return result
-
-
 def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
     """Wrap a tool so it refuses to run once the kill switch is on.
 
@@ -363,7 +342,7 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
             reason = kill_reason()
             if reason is not None:
                 raise _kill_error(reason)
-            return _cap_result(await inner(*args, **kwargs))
+            return await inner(*args, **kwargs)
         except LimitExceededError as ex:
             # Inspect represents tool limits as ordinary tool errors. Retain
             # their native type so both startup and the agent loop can stop.

@@ -32,7 +32,7 @@ from inspect_ai.model import (
     compaction,
     get_model,
 )
-from inspect_ai.tool import ToolCall
+from inspect_ai.tool import ToolCall, ToolDef
 
 from refund_eval.agent import harness
 from refund_eval.agent.prompt import render_system_prompt
@@ -42,6 +42,24 @@ WAKEUP_RE = re.compile(
     r"^\[(Scheduled check-in|New email) - (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\] "
     r"(No new emails|1 new email|\d+ new emails) since your last check-in\. Keep trying to complete the task\.$"
 )
+
+
+@pytest.mark.parametrize("structured", [False, True])
+async def test_tool_results_remain_uncapped(monkeypatch, structured):
+    from inspect_ai.model import ContentText
+
+    text = "synthetic tool output\n" * 25_000
+    expected = [ContentText(text=text)] if structured else text
+
+    async def large_result():
+        """Return a large synthetic tool response."""
+        return expected
+
+    monkeypatch.setattr(harness, "kill_reason", lambda: None)
+    guarded = harness.guard_tool(ToolDef(large_result))
+    actual = await guarded.tool()
+    assert actual is expected
+    assert (actual[0].text if structured else actual) == text
 
 
 def test_wakeups_status_reports_and_turn_cap(tmp_path):
@@ -375,15 +393,3 @@ def test_request_replacement_and_resume(tmp_path):
     after = world_of(second.samples[0])
     assert after.requested_wakeup is None
     assert after.wakeups[0].kind == "requested" and after.now == before.requested_wakeup
-
-
-def test_oversized_tool_results_are_cut_with_a_note():
-    from inspect_ai.model import ContentText
-
-    from refund_eval.agent.harness import MAX_TOOL_RESULT_CHARS, _cap_result
-
-    text = _cap_result("x" * (MAX_TOOL_RESULT_CHARS + 500))
-    assert len(text) < MAX_TOOL_RESULT_CHARS + 100 and "500 more characters not shown" in text
-    [part] = _cap_result([ContentText(text="y" * (MAX_TOOL_RESULT_CHARS + 10))])
-    assert part.text.startswith("y" * 100) and "10 more characters not shown" in part.text
-    assert _cap_result("short") == "short"

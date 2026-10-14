@@ -59,6 +59,10 @@ DEFAULT_MODEL_COSTS: dict[str, ModelCost] = {
     DEFAULT_ROLE_MODEL: ModelCost(
         input=4.0, output=20.0, input_cache_write=5.0, input_cache_read=0.20
     ),
+    # Verified 2026-10-13 UTC. Keep Muse runs independent of catalog availability.
+    "openrouter/meta/muse-spark-1.3": ModelCost(
+        input=1.25, output=4.25, input_cache_write=1.25, input_cache_read=0.15
+    ),
     # Verified 2026-10-05. The catalog charges double above 272k prompt
     # tokens; the budget counts the base rate.
     "openrouter/openai/gpt-6-astra": ModelCost(

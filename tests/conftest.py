@@ -15,6 +15,9 @@ def _offline_launch_model_check(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_reply_jitter(monkeypatch):
+def _no_reply_jitter(monkeypatch, request):
     """Exact reply times in tests; the jitter itself is tested on its own."""
+    # Harbor controller tests run without Inspect in their separate environment.
+    if request.node.get_closest_marker("harbor"):
+        return
     monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: 1.0)

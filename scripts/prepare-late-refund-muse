@@ -1,0 +1,20 @@
+#!/bin/sh
+# Freeze the historical Muse configuration without launching a trial.
+set -eu
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 OUTPUT_DIRECTORY" >&2
+    exit 2
+fi
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$repo_dir/scripts/harbor" python -m refund_eval.harbor \
+    --output "$1" \
+    --environment modal --browser-runtime subprocess \
+    --model openrouter/meta/muse-spark-1.3 \
+    --simulator-model openrouter/anthropic/claude-opus-5.5 \
+    --grader-model openrouter/anthropic/claude-opus-5.5 \
+    --scenario train_refund_late --tool-profile published \
+    --data-mode hybrid --research-mode auto \
+    --trials 1 --concurrency 1 \
+    --token-budget 40000000 --history-tokens 60000 \
+    --max-turns 10000 --sim-weeks 12 \
+    --time-limit 36000 --cost-limit 1000

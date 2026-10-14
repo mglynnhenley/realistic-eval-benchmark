@@ -75,7 +75,8 @@ def test_harbor_request_rejects_another_models_cap():
                      settings=TrialSettings(cost_limit={TARGETS[1]: 70}))
 
 
-def test_task_applies_late_budget_before_constructing_harness(monkeypatch):
+@pytest.mark.parametrize("research_mode", [None, "saved", "auto"])
+def test_task_applies_late_budget_before_constructing_harness(monkeypatch, research_mode):
     import importlib
 
     task_module = importlib.import_module("refund_eval.task")
@@ -92,10 +93,13 @@ def test_task_applies_late_budget_before_constructing_harness(monkeypatch):
         return original(**kwargs)
 
     monkeypatch.setattr(task_module, "refund_agent", capture)
-    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5)
+    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5,
+                                           research_mode=research_mode)
     assert captured["token_budget"] == 40_000_000
-    assert captured["research_mode"] == "saved"
+    assert captured["research_mode"] == (research_mode or "saved")
     assert result.metadata["token_budget"] == 40_000_000
     assert result.cost_limit == 5
     with pytest.raises(ValueError, match="explicit cost_limit"):
         task_module.impossible_refund(scenario="train_refund_late")
+    with pytest.raises(ValueError, match="saved dossiers"):
+        task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, research_mode="live")

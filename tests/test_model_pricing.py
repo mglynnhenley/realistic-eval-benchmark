@@ -17,6 +17,7 @@ from refund_eval.task import register_default_costs
 
 FABLE = "openrouter/anthropic/claude-fable-5"
 NEW = "openrouter/example/new-model"
+MUSE = "openrouter/meta/muse-spark-1.3"
 FABLE_ENTRY = {
     "id": "anthropic/claude-fable-5",
     "pricing": {
@@ -84,7 +85,18 @@ def test_explicit_prices_and_offline_models_need_no_network(monkeypatch):
     assert get_model_info("mockllm/target").cost.input == 0
 
 
-@pytest.mark.parametrize("name", [FABLE, DEFAULT_TARGET_MODEL, DEFAULT_ROLE_MODEL])
+def test_muse_and_simulator_can_start_without_catalog_network(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("Bundled Muse and simulator prices must not fetch the catalog")
+
+    monkeypatch.setattr(pricing.httpx, "get", unexpected)
+    register_default_costs([MUSE, DEFAULT_ROLE_MODEL])
+    assert get_model_info(get_model(MUSE, api_key="offline-test-key")).cost == ModelCost(
+        input=1.25, output=4.25, input_cache_write=1.25, input_cache_read=0.15
+    )
+
+
+@pytest.mark.parametrize("name", [FABLE, DEFAULT_TARGET_MODEL, DEFAULT_ROLE_MODEL, MUSE])
 def test_canonical_price_override_is_preserved(monkeypatch, name):
     custom = ModelCost(input=9, output=19, input_cache_read=1, input_cache_write=11)
     set_model_info(name.removeprefix("openrouter/"), ModelInfo(cost=custom))
