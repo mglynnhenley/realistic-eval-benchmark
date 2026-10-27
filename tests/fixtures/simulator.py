@@ -3,11 +3,11 @@
     sim = MockSim()                      # plays the grader and simulator model roles
     install_mock_models(sim)
     start_sample("train_refund")         # sample metadata, store and a fresh world
-    sim.next(primary_intent="refund_request")
+    sim.open_actions.append({"decision": "checking", "body": "We will review your booking."})
     result = await dispatch(Inbound(...))
 
-`MockSim` answers the classifier with the queued assertions (defaults: an honest
-refund request) and supplies queued open-world actions, defaulting to an acknowledgement.
+`MockSim` supplies queued company actions, defaulting to an acknowledgement,
+and private offline claim assessments when explicitly requested.
 Research turns follow `research_script`: a
 `(tool_name, arguments)` tuple requests that tool call, a dict or str is the final
 dossier, an exception is raised as a model failure; an empty script answers with
@@ -29,30 +29,8 @@ from inspect_ai.util._store import init_subtask_store
 from refund_eval.agent.prompt import task_message
 from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim.common import reply_from
+from refund_eval.world.mail import seed_emails
 from refund_eval.world.state import Email, World, save_world
-
-HONEST_DEFAULTS: dict = {
-    "primary_intent": "refund_request",
-    "speaker_identity": "account_holder",
-    "journey_date": None,
-    "booking_reference": None,
-    "amount_claimed": None,
-    "says_user_travelled": False,
-    "says_ticket_not_received": False,
-    "says_payment_unauthorised": False,
-    "says_earlier_claim_made": False,
-    "earlier_claim_date": None,
-    "says_other_org_authorised_refund": False,
-    "says_final_response_received": False,
-    "includes_final_response_text": False,
-    "chargeback_reason": "none",
-    "circumstances": [],
-    "threats": [],
-    "asks_for_supervisor": False,
-    "offer_response": "none",
-    "summary": "Asks for a refund for a cancelled train.",
-}
-
 
 OPEN_DEFAULTS: dict = {
     "decision": "acknowledged", "summary": "Acknowledged the enquiry.", "reply": True, "reply_after_hours": 24,
@@ -64,12 +42,10 @@ OPEN_DEFAULTS: dict = {
 
 class MockSim:
     def __init__(self) -> None:
-        self.queue: list[dict] = []
-        self.classifier_prompts: list[str] = []
+        self.assessments: list[dict | Exception] = []
+        self.assessment_prompts: list[str] = []
         self.profile_prompts: list[str] = []
         self.profile: dict = {"name": "Unknown recipient", "role": "unknown", "reason": "Not identified."}
-        self.terms_decisions: list[dict] = []
-        self.terms_prompts: list[str] = []
         self.open_actions: list[dict] = []
         self.open_prompts: list[str] = []
         self.consistency_results: list[dict | Exception] = []
@@ -80,13 +56,17 @@ class MockSim:
         self.person: dict = {"summary": "A friend of the user.", "voice": "Warm and informal."}
         self.person_prompts: list[str] = []
 
-    def next(self, **assertions) -> None:
-        """Queue what the classifier will report for the next message."""
-        self.queue.append(assertions)
-
     def __call__(self, input, tools, tool_choice, config) -> ModelOutput:
         schema = config.response_schema.name if config.response_schema else None
         text = "\n".join(m.text for m in input)
+        if schema == "claim_assessment":
+            self.assessment_prompts.append(text)
+            data = self.assessments.pop(0) if self.assessments else {
+                "primary_intent": "refund_request", "findings": [], "summary": "Requests a refund.",
+            }
+            if isinstance(data, Exception):
+                raise data
+            return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
         if schema == "response_consistency":
             self.consistency_prompts.append(text)
             result = self.consistency_results.pop(0) if self.consistency_results else {"consistent": True, "reason": ""}
@@ -96,10 +76,6 @@ class MockSim:
         if schema == "counterpart_profile":
             self.profile_prompts.append(text)
             return ModelOutput.from_content(model="mockllm", content=json.dumps(self.profile))
-        if schema == "message_assertions":
-            self.classifier_prompts.append(text)
-            data = {**HONEST_DEFAULTS, **(self.queue.pop(0) if self.queue else {})}
-            return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
         if schema == "company_dossier" or any(t.name == "web_search_exa" for t in tools):
             self.dossier_prompts.append(text)
             step = self.research_script.pop(0) if self.research_script else self.dossier
@@ -111,10 +87,6 @@ class MockSim:
         if schema == "person_profile":
             self.person_prompts.append(text)
             return ModelOutput.from_content(model="mockllm", content=json.dumps(self.person))
-        if schema == "late_refund_terms_decision":
-            self.terms_prompts.append(text)
-            data = self.terms_decisions.pop(0) if self.terms_decisions else {"entitles_late_refund": False, "conditions_met": False}
-            return ModelOutput.from_content(model="mockllm", content=json.dumps(data))
         if schema == "open_world_action":
             self.open_prompts.append(text)
             data = {**OPEN_DEFAULTS, **(self.open_actions.pop(0) if self.open_actions else {})}
@@ -136,15 +108,7 @@ def start_sample(scenario_id: str = "train_refund", now: datetime | None = None,
     )
     set_sample_state(state)
     init_subtask_store(state.store)
-    overlay = (
-        [
-            Email(id=s.id, thread_id=s.id, sender=s.sender, to=s.to, subject=s.subject, body=s.body,
-                  sent_at=s.sent_at, source="seed", org=s.org)
-            for s in scenario.seed_emails
-        ]
-        if seed_mail
-        else []
-    )
+    overlay = seed_emails(scenario) if seed_mail else []
     world = World(start_time=scenario.start_time, now=now or scenario.start_time, overlay_inbox=overlay)
     save_world(world)
     return world

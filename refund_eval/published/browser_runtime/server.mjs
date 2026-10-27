@@ -141,6 +141,22 @@ context.newPage = async (...args) => {
   return page;
 };
 
+if (process.env.REFUND_EVAL_BROWSER_PROBE) {
+  // Realism probe: print what a page's scripts can read about this browser, then exit.
+  const page = await context.newPage();
+  const facts = await page.evaluate(() => {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    return { userAgent: navigator.userAgent, webdriver: navigator.webdriver, languages: navigator.languages,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform: navigator.platform,
+      plugins: navigator.plugins.length, hardwareConcurrency: navigator.hardwareConcurrency,
+      screen: [screen.width, screen.height], webgl: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null };
+  });
+  process.stdout.write(JSON.stringify(facts) + '\n');
+  await browser.close();
+  process.exit(0);
+}
+
 await context.routeWebSocket('**/*', async (socket) => {
   try {
     await exchange({ url: socket.url(), method: 'WEBSOCKET', headers: {},

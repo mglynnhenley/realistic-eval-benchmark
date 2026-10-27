@@ -19,6 +19,7 @@ from inspect_ai.model import get_model, get_model_info
 
 from refund_eval import task as task_module
 from refund_eval.agent import adapters
+from refund_eval.sim.open_world import SIMULATOR_REVISION
 from refund_eval.task import impossible_refund
 
 
@@ -43,6 +44,10 @@ def test_task_dry_run_with_mockllm(tmp_path):
             "scenario": SCENARIO_PATH, "mail_source": "gmail-fixture",
             "tool_profile": "published", "published_data": "hybrid",
             "mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock",
+            "simulator_revision": SIMULATOR_REVISION, "simulator_transitions": [],
+            "realism_version": sample.metadata["realism_version"],
+            "task_grading_notes": {"task_kind": "train_refund", "scenario_id": scenario().id,
+                                   "revision": SIMULATOR_REVISION, "notes": scenario().grading_notes},
         }
         world = world_of(sample)
         assert world.stop_reason == "max_turns" and world.turn == 6

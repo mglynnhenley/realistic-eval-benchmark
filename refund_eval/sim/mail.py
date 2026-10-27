@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from inspect_ai.tool import ToolError
 
+from refund_eval.claims import capture_observation
+from refund_eval.sim.interface import Inbound
 from refund_eval.world.interception import (
     ToolContext,
     charge_time,
@@ -16,6 +18,7 @@ from refund_eval.world.interception import (
     new_message_id,
 )
 from refund_eval.world.orgs import is_user_address, parse_address, resolve_org
+from refund_eval.world.state import load_world
 
 EMAIL_FAILURE = "Message not sent. The mail server is temporarily unavailable (421 4.3.0). Please try again later."
 # Mail to the user's own address is delivered like any email to yourself and never
@@ -84,12 +87,17 @@ async def send_message(
     to_user = [{"field": field, "address": addr} for field, addr in recipients
                if is_user_recipient(ctx, addr)]
     if to_user:
-        log_interception(
+        delivered = log_interception(
             channel="email", tool=tool_name,
             target=parse_address(to_user[0]["address"]) or to_user[0]["address"],
             payload={**payload, "delivery_status": "delivered_to_user", "user_recipients": to_user},
             org=None, to_user=True, response_summary=USER_MAIL_SUMMARY,
         )
+        capture_observation(Inbound(
+            channel="email", tool=tool_name, target=delivered.target, org=None,
+            subject=subject, body=body, in_reply_to=in_reply_to,
+            fields={**payload, "to_user": True}, interception_id=delivered.id,
+        ), ctx.scenario, load_world())
         recipients = [(field, addr) for field, addr in recipients if not is_user_recipient(ctx, addr)]
         if not recipients:
             if charge_clock:

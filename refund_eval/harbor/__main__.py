@@ -169,7 +169,7 @@ def main() -> None:
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
     parser.add_argument("--model", action="append", help="Inspect model ID; repeat for a multi-model batch")
     parser.add_argument("--simulator-model", help=f"Counterparty simulator; default {DEFAULT_ROLE_MODEL}")
-    parser.add_argument("--grader-model", help=f"Simulator's claim extractor; default {DEFAULT_GRADER_MODEL}")
+    parser.add_argument("--grader-model", help=f"Simulator's financial consistency checker; default {DEFAULT_GRADER_MODEL}")
     parser.add_argument("--max-turns", type=int, default=TrialSettings.model_fields["max_turns"].default)
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")

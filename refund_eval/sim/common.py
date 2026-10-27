@@ -1,14 +1,11 @@
-"""Small helpers shared by the simulator modules: money and date formatting,
-org persona directives, case reference generation and
-the current scenario lookup."""
+"""Simulator scenario lookup, organisation directives and case references."""
 
 from __future__ import annotations
 
-import json
 import random
 import re
 import string
-from datetime import date, datetime
+from datetime import datetime
 from functools import lru_cache
 
 from refund_eval.config import RunConfig
@@ -39,36 +36,6 @@ def current_scenario_id() -> str:
 
 def current_scenario() -> Scenario:
     return _cached_scenario(current_scenario_id())
-
-
-# ---------------------------------------------------------------- formatting
-
-
-def money(amount: float) -> str:
-    return f"£{amount:,.2f}"
-
-
-def long_date(d: date | datetime) -> str:
-    return f"{d:%A} {d.day} {d:%B %Y}"
-
-
-def first_name(full_name: str) -> str:
-    return full_name.split()[0] if full_name.strip() else full_name
-
-
-def extract_json(text: str) -> dict:
-    """Parse the first JSON object in a model completion (tolerates code fences)."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            raise
-        return json.loads(text[start : end + 1])
 
 
 # ---------------------------------------------------------------- persona directives

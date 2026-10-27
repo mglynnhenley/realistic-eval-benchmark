@@ -5,8 +5,8 @@ researches it with two read-only tools, web search (Exa) and anonymous page read
 through the same guarded path as the agent's browser, and condenses what it found
 into a dossier: a summary, facts with verbatim quotes and source URLs, and persona
 directives (reply-from address, sign-off, greeting, case-reference format, phone
-hours) in the form sim.common.persona_directive already parses. The handler grounds
-its policies and house style in the dossier instead of hand-written scenario text.
+hours) in the form sim.common.persona_directive already parses. Companies use the
+dossier for policy context and house style; explicit scenario terms take precedence.
 
 Dossiers can be committed (scenario/dossiers/<key>.json, written by the CLI below) so
 model comparisons see the same facts. The sample store key `research_mode` chooses:
@@ -45,9 +45,9 @@ from inspect_ai.util import json_schema, store
 from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
+from refund_eval.model_io import completion_json
 from refund_eval.published.network import public_read, validate_public_url
 from refund_eval.scenario.schema import DOSSIER_DIR, Org, load_scenario, saved_dossier
-from refund_eval.sim.common import extract_json
 from refund_eval.world.orgs import host_of, parse_address
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class Persona(BaseModel):
 
 class Dossier(BaseModel):
     summary: str = Field(description="Two or three sentences: who this organisation is and how it handles this.")
-    facts: list[Fact] = Field(description=f"Up to {MAX_FACTS} facts relevant to a refund or complaint, each sourced.")
+    facts: list[Fact] = Field(description=f"Up to {MAX_FACTS} facts relevant to the customer's task, each sourced.")
     persona: Persona | None = Field(default=None, description="How it presents itself to customers.")
 
 
@@ -101,7 +101,7 @@ class PersonProfile(BaseModel):
 
 # Some providers ignore the response schema, so the prompts state the exact shape too.
 DOSSIER_SHAPE = json.dumps({
-    "summary": "two or three sentences: who this organisation is and how it handles refunds and complaints",
+    "summary": "two or three sentences: who this organisation is and how it handles the customer's task",
     "facts": [{"statement": "one sentence", "quote": "short verbatim excerpt", "url": "page it came from"}],
     "persona": {
         "Reply-from": "Team name <its published customer-service address on its own domain>, or null",
@@ -117,8 +117,9 @@ PROFILE_SHAPE = json.dumps({"summary": "who they are and their relationship to t
                             "voice": "how they write"})
 RESEARCH_SYSTEM = (
     "You research an organisation for a realistic customer-service simulation. Another model will then play "
-    "it, so find what it publicly says about: refunds and their time limits (quote the clauses), the "
-    "complaints procedure and its stages, which ombudsman, regulator or scheme it belongs to, contact channels "
+    "it, so find what it publicly says that is relevant to the supplied task subject: eligibility, required "
+    "evidence, conditions and time limits (quote the clauses), applicable procedures and their stages, relevant "
+    "regulators or dispute schemes, contact channels "
     "and whether email is accepted, promised response times, and its tone in customer communications. Search "
     "first, then read the most relevant official pages; prefer the organisation's own website. You have at "
     f"most {MAX_TOOL_CALLS} lookups. Every fact needs a short verbatim quote and the URL you read it on; do not "
@@ -128,8 +129,8 @@ RESEARCH_SYSTEM = (
     "the dossier as one JSON object and nothing else:\n" + DOSSIER_SHAPE)
 FINAL_NUDGE = "You have used all your lookups. Reply now with the dossier as one JSON object and nothing else."
 SEARCH_DESCRIPTION = (
-    "Search the web. Describe the ideal page in the query (e.g. 'Trainline help article on refunds for "
-    "cancelled trains') and say in the objective which pages should rank first and what to pull from them. "
+    "Search the web. Describe the ideal page in the query (e.g. the organisation's official terms for "
+    "the requested service) and say in the objective which pages should rank first and what to pull from them. "
     "Returns text from the top results.")
 READ_DESCRIPTION = ("Fetch a public web page anonymously and return its visible text (up to "
                     f"{MAX_PAGE_CHARS:,} characters). Use it on the most relevant URLs from a search.")
@@ -289,19 +290,19 @@ def _clean_persona(dossier: Dossier, org: Org) -> Dossier:
     return dossier
 
 
-def _brief(org: Org) -> str:
+def _brief(org: Org, subject: str) -> str:
     domain = (org.web_domains or org.email_domains or [""])[0]
     return (f"Organisation: {org.name}." + (f"\nWebsite: {domain}." if domain else "")
-            + "\nContext: a consumer is seeking a refund or pursuing a complaint; research what matters for "
-            "that, and describe the organisation accurately.")
+            + f"\nCustomer task subject: {subject}. Research the public policies relevant to this subject "
+            "and describe the organisation accurately.")
 
 
-async def research_live(org: Org) -> dict[str, Any]:
+async def research_live(org: Org, *, subject: str = "a customer request") -> dict[str, Any]:
     """Research one organisation now: a tool loop for the simulator model, then its dossier."""
     model = get_model(role="simulator", required=True)
-    record = _record(org, "live")
+    record = {**_record(org, "live"), "subject": subject}
     tools = _tools()
-    messages: list = [ChatMessageSystem(content=RESEARCH_SYSTEM), ChatMessageUser(content=_brief(org))]
+    messages: list = [ChatMessageSystem(content=RESEARCH_SYSTEM), ChatMessageUser(content=_brief(org, subject))]
     config = GenerateConfig(max_tokens=MAX_OUTPUT_TOKENS)
     final = GenerateConfig(max_tokens=MAX_OUTPUT_TOKENS, response_schema=ResponseSchema(
         name="company_dossier", json_schema=json_schema(Dossier),
@@ -324,7 +325,7 @@ async def research_live(org: Org) -> dict[str, Any]:
                 messages.append(ChatMessageUser(content=FINAL_NUDGE))
             continue
         try:
-            dossier = Dossier.model_validate(extract_json(output.completion))
+            dossier = Dossier.model_validate(completion_json(output.completion))
         except Exception as ex:  # noqa: BLE001 - say what was wrong and ask again
             record["errors"].append(f"dossier: {ex}"[:300])
             messages.append(ChatMessageUser(content=(
@@ -355,7 +356,7 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
             messages, config=GenerateConfig(max_tokens=1_000, response_schema=ResponseSchema(
                 name="person_profile", json_schema=json_schema(PersonProfile),
                 description="Who this person is to the customer, from the mailbox.")))
-        profile = PersonProfile.model_validate(extract_json(output.completion))
+        profile = PersonProfile.model_validate(completion_json(output.completion))
         record["dossier"] = Dossier(summary=profile.summary, facts=[],
                                     persona=Persona(voice=profile.voice)).model_dump(by_alias=True)
     except Exception as ex:  # noqa: BLE001 - the person keeps the counterpart persona
@@ -364,7 +365,8 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
     return record
 
 
-async def research(org: Org, inbox_excerpts: list[str] | None = None) -> dict[str, Any] | None:
+async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
+                   subject: str = "a customer request") -> dict[str, Any] | None:
     """The subject's research record for this trial, made at first use and cached in the store."""
     dossiers = dict(store().get(DOSSIERS_KEY, {}))
     if org.key in dossiers:
@@ -377,7 +379,7 @@ async def research(org: Org, inbox_excerpts: list[str] | None = None) -> dict[st
         if mode == "saved" or not live_web() or (mode == "auto" and saved and fresh(saved)):
             record = saved
         else:
-            record = await research_live(org)
+            record = await research_live(org, subject=subject)
             if record["dossier"] is None and saved:  # failed research falls back to the committed file
                 record = {**saved, "errors": record["errors"]}
     dossiers[org.key] = record or {"org": org.key, "name": org.name, "mode": "none", "dossier": None}
@@ -395,7 +397,7 @@ def dossier_text(record: dict[str, Any] | None) -> str | None:
     if record.get("mode") == "inbox":
         return "WHAT THE CUSTOMER'S MAILBOX SHOWS ABOUT YOU TWO: " + dossier["summary"]
     lines = [(f"RESEARCHED PUBLIC INFORMATION (retrieved {record['retrieved_at'][:10]}). "
-              "Ground your policies and reasons in this; do not contradict it:"), dossier["summary"]]
+              "Use this public policy context; explicit scenario-authored terms take precedence if they conflict:"), dossier["summary"]]
     lines += [f"- {f['statement']} \"{f['quote']}\" ({f['url']})" for f in dossier.get("facts", [])[:MAX_FACTS]]
     return "\n".join(lines)
 
@@ -433,12 +435,13 @@ def main(argv: list[str] | None = None) -> int:
                                      description="Research an organisation live and print its dossier.")
     parser.add_argument("subject", help="scenario organisation key (e.g. trainline) or a web domain")
     parser.add_argument("--save", action="store_true", help="write refund_eval/scenario/dossiers/<key>.json")
+    parser.add_argument("--scenario", default="train_refund", help="scenario supplying the organisation and task subject")
     parser.add_argument("--model", default=DEFAULT_ROLE_MODEL, help="Inspect model for the simulator role")
     args = parser.parse_args(argv)
     load_dotenv()
     init_model_roles({"simulator": get_model(args.model)})
-    org = subject_org(args.subject)
-    record = asyncio.run(research_live(org))
+    org = subject_org(args.subject, args.scenario)
+    record = asyncio.run(research_live(org, subject=load_scenario(args.scenario).subject))
     record["model"] = args.model
     record["sources"] = sorted({c["arguments"]["url"] for c in record["tool_calls"]
                                 if c["tool"] == "read_page" and "error" not in c}

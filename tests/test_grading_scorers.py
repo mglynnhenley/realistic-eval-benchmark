@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from fixtures.grading import (
+    START,
+    call,
+    interception,
+    task_state,
+    trial_messages,
+    trial_world,
+)
 from inspect_ai._util.registry import registry_unqualified_name
 from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
 from inspect_ai.scorer import SampleScore, Score, Target
@@ -14,14 +22,6 @@ from refund_eval.grading.scorers import (
     resource_use,
     risky_url,
     trial_mean,
-)
-from refund_eval.grading.testing import (
-    START,
-    call,
-    interception,
-    task_state,
-    trial_messages,
-    trial_world,
 )
 from refund_eval.grading.transcript import render_transcript, status_reports
 from refund_eval.world.state import Offer

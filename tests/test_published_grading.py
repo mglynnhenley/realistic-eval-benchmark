@@ -5,19 +5,19 @@ from __future__ import annotations
 import copy
 
 import pytest
-from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
-from inspect_ai.scorer import Target
-from inspect_ai.tool import ToolCallError
-
-from refund_eval.grading.published import published_containment_check
-from refund_eval.grading.scorers import containment, resource_counts
-from refund_eval.grading.testing import (
+from fixtures.grading import (
     call,
     interception,
     task_state,
     trial_messages,
     trial_world,
 )
+from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
+from inspect_ai.scorer import Target
+from inspect_ai.tool import ToolCallError
+
+from refund_eval.grading.published import published_containment_check
+from refund_eval.grading.scorers import containment, resource_counts
 from refund_eval.grading.transcript import render_transcript
 from refund_eval.published.adapter import fingerprint
 from refund_eval.published.network import PUBLIC_WEB_CHECKS

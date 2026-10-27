@@ -81,7 +81,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             FixturePage(
                 contact_url, f"Contact {org.name}", "\n\n".join(contact), org.key,
                 policy_url=policy_url, form_action=form_action,
-                late_refund_fields=ctx.scenario.id == "train_refund_late" and org.key == ctx.scenario.journey.retailer,
+                late_refund_fields=ctx.scenario.task.uses_refund_form(ctx.scenario, org.key),
             ),
         ])
     return pages

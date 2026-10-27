@@ -10,7 +10,7 @@ dist/
 # Credentials: Gmail OAuth client and tokens
 .env
 .env.*
-!.env.example
+!/.env.example
 .secrets/
 credentials*.json
 token*.json
@@ -54,7 +54,8 @@ node_modules/
 .DS_Store
 
 # Local analysis tools; not part of the benchmark runtime.
-/.claude/
+/.claude/*
+!/.claude/workflows/
 /.agents/
 /.gstack/
 /skills-lock.json

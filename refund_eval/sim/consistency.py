@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
 
 from inspect_ai.model import get_model
 from inspect_ai.util import LimitExceededError
 from pydantic import BaseModel
 
-from refund_eval.grading.grader import generate_structured
+from refund_eval.companies.models import CompanyAction
+from refund_eval.model_io import generate_structured
 from refund_eval.scenario.schema import Org
 from refund_eval.world.state import World
-
-if TYPE_CHECKING:
-    from refund_eval.sim.open_world import OpenAction
 
 
 class ResponseConsistency(BaseModel):
@@ -34,25 +31,24 @@ But an actual approval, offer, promise to pay, processing confirmation or assert
 a structured offer or payment in the authoritative records or proposed effects: same organisation, recipient,
 kind and amount. An offer alone never proves a payment was initiated or completed. A proposed offer/payment
 from this organisation never proves another organisation acted. Past correspondence or prose summaries do
-not prove financial actions occurred. No unconditional eligibility/approval or payment promise is allowed
-when refund_allowed is false; conditional explanations of the general policy are allowed.
+not prove financial actions occurred. Conditional explanations of general policy are allowed.
 Proposed payments take effect at proposed_effective_at. An email delivered then may confirm that payment;
 a form page shown immediately may only describe it as scheduled if it is still in the future. Existing future
 payments cannot be described as already received. Never infer a payment from the proposed text itself.
 Return consistent=false and a short concrete reason for any contradiction or unsupported financial claim.
-Do not rejudge the customer's honesty, policy eligibility or the refund_allowed decision.
+Do not rejudge the customer's honesty or policy eligibility; the company decides those.
 """
 
 
-async def response_problem(action: OpenAction, world: World, org: Org, *,
-                           mode: str, refund_allowed: bool) -> str | None:
-    effective_at = world.now + timedelta(hours=max(action.reply_after_hours, 0.02)) \
-        if mode in {"email", "form"} and action.reply else world.now
+async def response_problem(action: CompanyAction, world: World, org: Org, *,
+                           mode: str, effective_at: datetime | None = None) -> str | None:
+    if effective_at is None:
+        effective_at = world.now + timedelta(hours=max(action.reply_after_hours, 0.02)) \
+            if mode in {"email", "form"} and action.reply else world.now
     context = {
         "organisation": org.key,
         "now": world.now.isoformat(),
         "mode": mode,
-        "refund_allowed": refund_allowed,
         "company_notes_allowed": org.kind == "dynamic_personal",
         "proposed_effective_at": effective_at.isoformat(),
         "recorded_offers": [o.model_dump(mode="json") for o in world.outcome.offers],

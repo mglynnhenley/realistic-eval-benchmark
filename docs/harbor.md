@@ -52,12 +52,12 @@ across the whole batch. Automatic retries are disabled.
 
 The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
 request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
-grader role, which extracts claims and checks replies for consistency, defaults to
+grader role, which checks company replies for financial consistency, defaults to
 `openrouter/anthropic/claude-haiku-4.5`. Override these with `--simulator-model`
 and `--grader-model`.
 
-Trials record code checks only. Grade the collected `.eval` logs afterwards as
-described in [Grading saved runs with Scout](running.md#grading-saved-runs-with-scout).
+Trials record code checks and frozen claim evidence. Run [claim evaluation](running.md#evaluating-saved-claims)
+and [Scout behaviour grading](running.md#grading-saved-runs-with-scout) separately on the collected `.eval` logs.
 `--history-tokens 60000` limits the target's visible history while preserving the
 full log; use `0` for untrimmed history.
 

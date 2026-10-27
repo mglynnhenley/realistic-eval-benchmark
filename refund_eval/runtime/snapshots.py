@@ -1,4 +1,4 @@
-"""Optional, atomic dashboard snapshots; ordinary eval runs do no file I/O here."""
+"""Runtime-owned run snapshots shared by the harness, dashboard and Harbor."""
 
 from __future__ import annotations
 
@@ -12,6 +12,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from refund_eval.runtime.checkpoint import (
+    capture_checkpoint,
+    checkpoint_from_sample,
+    snapshot_fields,
+)
+from refund_eval.world.state import WORLD_KEY
+
+# Keep the historical environment name so existing run scripts remain compatible.
 RUN_DIR_ENV = "REFUND_EVAL_DASHBOARD_RUN_DIR"
 _lock = threading.Lock()
 logger = logging.getLogger(__name__)
@@ -89,16 +97,8 @@ def write_snapshot(run_dir: str | Path, **changes: Any) -> dict[str, Any]:
     return snapshot
 
 
-# Sample-store entries a resume needs beyond the world and conversation: the agent's notes,
-# the companies' research and temperaments, dates the agent typed, mail client state.
-RESUME_STORE_KEYS = (
-    "MemoryStore:files", "MemoryStore:dirs", "open_world_dossiers", "open_world_temperaments",
-    "late_refund_frozen_dossiers", "published_typed_dates", "mail_client", "research_mode", "resumed_from",
-)
-
-
 def emit_snapshot(messages: Any = None, *, phase: str | None = None) -> None:
-    """Publish current sample state if a dashboard worker enabled telemetry.
+    """Publish current sample state when a run directory is configured.
 
     Observation must not change evaluation behaviour: an unavailable store or a
     disk failure is logged without turning an agent tool into a failed action.
@@ -107,21 +107,42 @@ def emit_snapshot(messages: Any = None, *, phase: str | None = None) -> None:
     if not run_dir:
         return
     try:
-        from inspect_ai.util import store
-
-        from refund_eval.sim.counterparts import REGISTRY_KEY
-        from refund_eval.world.state import WORLD_KEY
-
-        current = store()
-        changes: dict[str, Any] = {
-            "world": current.get(WORLD_KEY),
-            "counterparts": current.get(REGISTRY_KEY, {}),
-            "resume_state": {k: current.get(k) for k in RESUME_STORE_KEYS if current.get(k) is not None},
-        }
-        if messages is not None:
-            changes["messages"] = messages
+        changes = snapshot_fields(capture_checkpoint(messages))
+        if messages is None:
+            changes.pop("messages")  # Keep the last published transcript on state-only updates.
         if phase is not None:
             changes["phase"] = phase
         write_snapshot(run_dir, **changes)
     except Exception:
-        logger.warning("Could not publish dashboard snapshot", exc_info=True)
+        logger.warning("Could not publish runtime snapshot", exc_info=True)
+
+
+def final_snapshot(log: Any) -> dict[str, Any]:
+    """Use the saved Inspect sample as the authoritative final transcript."""
+    sample = log.samples[0] if log.samples else None
+    sample_store = sample.store if sample is not None else {}
+    world = sample_store.get(WORLD_KEY)
+    stopped = bool(world and (world.get("killed") or world.get("stop_reason") in {"kill_switch", "cancelled"}))
+    error = getattr(sample, "error", None) or log.error
+    if stopped or log.status == "cancelled":
+        phase = "stopped"
+        error = None
+    elif log.status != "success" or sample is None or error:
+        phase = "failed"
+        error = error or f"Inspect run ended with status {log.status}."
+    else:
+        phase = "completed"
+    result = {
+        "phase": phase,
+        "error": str(error) if error else None,
+        "inspect_log": str(Path(log.location).resolve()) if log.location else None,
+    }
+    if phase == "stopped":
+        result["cancellation_reason"] = (world or {}).get("stop_reason") or "Inspect evaluation was cancelled."
+    if sample is not None:
+        result.update(snapshot_fields(checkpoint_from_sample(sample)))
+        result.update(
+            published_tool_profile=sample_store.get("published_tool_profile"),
+            scores=sample.scores or {},
+        )
+    return result

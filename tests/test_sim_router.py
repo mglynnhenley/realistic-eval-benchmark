@@ -6,16 +6,18 @@ import itertools
 from datetime import timedelta
 
 import pytest
-
-from refund_eval.scenario.schema import load_scenario
-from refund_eval.sim.interface import Inbound
-from refund_eval.sim.router import dispatch, resolve_org
-from refund_eval.sim.testing import (
+from fixtures.simulator import (
     MockSim,
     install_mock_models,
     org_address,
     start_sample,
 )
+from inspect_ai.util import store
+
+from refund_eval.claims import OBSERVATIONS_KEY
+from refund_eval.scenario.schema import load_scenario
+from refund_eval.sim.interface import Inbound
+from refund_eval.sim.router import dispatch, resolve_org
 from refund_eval.world.state import Interception, load_world, world_tx
 
 SC = load_scenario("train_refund")
@@ -130,7 +132,8 @@ async def test_reply_to_noreply_sender_bounces(sim: MockSim) -> None:
     assert result.decision == "mailbox_not_monitored"
     [bounce] = load_world().pending
     assert "not monitored" in bounce.email.body
-    assert not sim.classifier_prompts and not sim.open_prompts  # canned, no model calls
+    assert not sim.assessment_prompts and not sim.open_prompts
+    assert store().get(OBSERVATIONS_KEY)[-1]["context"]["message"]["in_reply_to"] == seed.id
 
 
 async def test_form_returns_confirmation_page_and_emails_later(sim: MockSim) -> None:
@@ -150,16 +153,13 @@ async def test_payment_is_recorded_as_user_spend(sim: MockSim) -> None:
     assert t.kind == "payment" and t.from_party == "user" and t.amount == pytest.approx(29.99)
 
 
-async def test_classifier_fallback_without_json(sim: MockSim) -> None:
-    sim.queue.clear()
-
-    # the classifier returns junk: keyword fallback reads the false chargeback reason; the open-world simulator still responds
+async def test_runtime_never_requests_claim_assessment(sim: MockSim) -> None:
+    # A failing private evaluator cannot spend simulation budget or delay a reply.
     orig = sim.__call__
 
     def call(input, tools, tool_choice, config):
-        from inspect_ai.model import ModelOutput
-        if config.response_schema and config.response_schema.name == "message_assertions":
-            return ModelOutput.from_content(model="mockllm", content="I'm not sure.")
+        if config.response_schema and config.response_schema.name == "claim_assessment":
+            raise AssertionError("Runtime called private claim checker")
         return orig(input, tools, tool_choice, config)
 
     from inspect_ai.model import get_model
@@ -171,5 +171,28 @@ async def test_classifier_fallback_without_json(sim: MockSim) -> None:
                                     tool="live_chat"))
     assert result.decision == "open:acknowledged"
     claim = load_world().outcome.claims[-1]
-    assert claim.asserted_facts["extractor"] == "heuristic"
-    assert any(f.startswith("payment_unauthorised:") for f in claim.false_assertions)
+    assert not claim.asserted_facts and not claim.false_assertions
+    assert store().get(OBSERVATIONS_KEY)[-1]["context"]["message"]["body"].startswith("I want to dispute")
+
+
+async def test_capture_covers_canned_own_user_unknown_and_closed_contacts_without_models(sim):
+    messages = [
+        inbound("email", SC.user.email_addresses[0], "Your refund is approved."),
+        inbound("email", "refunds@some-claims-firm.example", "Please refund me."),
+        inbound("email", SC.seed_emails[0].sender, "Please read my reply."),
+    ]
+    for message in messages:
+        await dispatch(message)
+    observations = store().get(OBSERVATIONS_KEY)
+    assert [item["id"] for item in observations] == [message.interception_id for message in messages]
+    assert not sim.assessment_prompts
+
+
+async def test_missing_checklist_does_not_stop_company(sim, monkeypatch, tmp_path):
+    from refund_eval.tasks.train_refund import TrainRefundTask
+
+    monkeypatch.setattr(TrainRefundTask, "claim_checklist", tmp_path / "missing.json")
+    result = await dispatch(inbound("email", OPERATOR.contact_emails[0]))
+    assert result.reply_scheduled
+    assert "FileNotFoundError" in store().get(OBSERVATIONS_KEY)[-1]["error"]
+    assert not sim.assessment_prompts

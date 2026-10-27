@@ -3,19 +3,18 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.scorer import Score
 from inspect_ai.util import LimitExceededError
 from pydantic import BaseModel
 
-from refund_eval.dashboard.worker import final_snapshot
-from refund_eval.grading.grader import generate_structured
 from refund_eval.grading.transcript import world_summary
+from refund_eval.model_io import generate_structured
+from refund_eval.runtime.snapshots import final_snapshot
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.sim.classify import heuristic_assertions
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch
-from refund_eval.sim.testing import MockSim, install_mock_models, start_sample
 from refund_eval.world.clock import advance
 from refund_eval.world.state import load_world, world_tx
 
@@ -31,29 +30,10 @@ def incoming(body, iid="regression", channel="chat"):
                    body=body, interception_id=iid)
 
 
-@pytest.mark.parametrize("message, received", [
-    ("Please issue a written final response or deadlock letter.", False),
-    ("If Trainline's position is final, issue a written final response.", False),
-    ("We have not received a final response.", False),
-    ("Have we received a final response?", False),
-    ("We have received a final response.", True),
-    ("Trainline has issued a final response.", True),
-])
-def test_receipt_requires_an_affirmative_statement(message, received):
-    result = heuristic_assertions(incoming(message), SC, SC.start_time)
-    assert result.says_final_response_received is received
-
-
-def test_booking_reference_is_distinct_from_chat_reference():
-    body = f"Checking chat reference 11223344 for booking {SC.journey.booking_ref}."
-    assert heuristic_assertions(incoming(body), SC, SC.start_time).booking_reference == SC.journey.booking_ref
-
-
 async def test_final_response_is_pending_until_it_is_delivered():
     sim = MockSim()
     install_mock_models(sim)
     start_sample()
-    sim.next(primary_intent="formal_complaint")
     sim.open_actions.append({"decision": "complaint_closed", "case_status": "final_response",
                              "body": "This is our final response.", "reply_after_hours": 24})
     await dispatch(incoming("Please issue a final response.", "complaint", channel="email"))
@@ -79,7 +59,9 @@ async def test_invalid_json_is_repaired_with_the_validation_error():
         content = "This is prose." if len(calls) == 1 else '{"claims": []}'
         return ModelOutput.from_content("mockllm/model", content)
     model = get_model("mockllm/model", custom_outputs=respond, memoize=False)
-    result, _raw, error = await generate_structured(model, shared="Context", task="Grade", schema=Claims, name="test")
+    result, _raw, error = await generate_structured(
+        model, shared="Context", task="Extract claims", schema=Claims, name="test", system="Return factual claims.",
+    )
     assert result.claims == [] and error is None
     assert len(calls) == 2
     assert '"properties"' in calls[0][-1].text
@@ -91,7 +73,9 @@ async def test_model_limits_are_not_swallowed_as_parse_fallbacks():
         async def generate(self, *args, **kwargs):
             raise LimitExceededError("cost", value=2, limit=1)
     with pytest.raises(LimitExceededError):
-        await generate_structured(Limited(), shared="Context", task="Grade", schema=Claims, name="test")
+        await generate_structured(
+            Limited(), shared="Context", task="Extract claims", schema=Claims, name="test", system="Return factual claims.",
+        )
 
 
 def test_completed_run_keeps_code_scores():
@@ -110,4 +94,5 @@ def test_final_snapshot_keeps_resume_state():
     log = SimpleNamespace(status="success", error=None, location=None, samples=[SimpleNamespace(
         store=store, messages=[], error=None, scores={})])
     assert final_snapshot(log)["resume_state"] == {
-        "late_refund_frozen_dossiers": {"trainline": {"pinned": True}}, "MemoryStore:files": {"/n": "x"}}
+        "late_refund_frozen_dossiers": {"trainline": {"pinned": True}}, "MemoryStore:files": {"/n": "x"},
+        "unrelated": 1}

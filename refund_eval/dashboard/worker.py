@@ -15,18 +15,17 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
 from refund_eval.config import RunConfig, resolve_cost_limits
-from refund_eval.dashboard.telemetry import (
-    EMPTY_SNAPSHOT,
-    RESUME_STORE_KEYS,
-    RUN_DIR_ENV,
-    write_snapshot,
-)
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
-from refund_eval.sim.counterparts import REGISTRY_KEY
+from refund_eval.runtime.checkpoint import RunCheckpoint
+from refund_eval.runtime.snapshots import (
+    EMPTY_SNAPSHOT,
+    RUN_DIR_ENV,
+    final_snapshot,
+    write_snapshot,
+)
 from refund_eval.task import impossible_refund
 from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
-from refund_eval.world.state import WORLD_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -88,41 +87,6 @@ def worker_environment(run_dir: Path):
                 os.environ[name] = value
 
 
-def final_snapshot(log: Any) -> dict[str, Any]:
-    """Use the saved Inspect sample as the authoritative final transcript."""
-    sample = log.samples[0] if log.samples else None
-    sample_store = sample.store if sample is not None else {}
-    world = sample_store.get(WORLD_KEY)
-    stopped = bool(world and (world.get("killed") or world.get("stop_reason") in {"kill_switch", "cancelled"}))
-    error = getattr(sample, "error", None) or log.error
-    if stopped or log.status == "cancelled":
-        phase = "stopped"
-        error = None
-    elif log.status != "success" or sample is None or error:
-        phase = "failed"
-        error = error or f"Inspect run ended with status {log.status}."
-    else:
-        phase = "completed"
-    result = {
-        "phase": phase,
-        "error": str(error) if error else None,
-        "inspect_log": str(Path(log.location).resolve()) if log.location else None,
-    }
-    if phase == "stopped":
-        result["cancellation_reason"] = (world or {}).get("stop_reason") or "Inspect evaluation was cancelled."
-    if sample is not None:
-        result.update(
-            messages=sample.messages,
-            world=world,
-            counterparts=sample_store.get(REGISTRY_KEY, {}),
-            published_tool_profile=sample_store.get("published_tool_profile"),
-            scores=sample.scores or {},
-            # Harbor's final snapshot replaces the live one; keep it resumable.
-            resume_state={k: sample_store[k] for k in RESUME_STORE_KEYS if sample_store.get(k) is not None},
-        )
-    return result
-
-
 def recover_snapshot(destination: Path) -> dict[str, Any]:
     """Recover Inspect's artifact, falling back to the last live snapshot."""
     recovered: dict[str, Any] = {}
@@ -135,10 +99,12 @@ def recover_snapshot(destination: Path) -> dict[str, Any]:
         recovered["inspect_log"] = str(logs[-1])
         try:
             saved = final_snapshot(read_eval_log(str(logs[-1])))
-            # A cancellation during startup can save an empty sample after the
-            # harness already published useful state. Keep that state as fallback.
-            for name in ("world", "messages"):
-                if not saved.get(name):
+            # Recover a checkpoint as one unit: an incomplete final sample must
+            # not replace the live tools/observations with empty state while
+            # keeping an older world and transcript beside it.
+            if ((recovered.get("world") or recovered.get("messages"))
+                    and (not saved.get("world") or not saved.get("messages"))):
+                for name in RunCheckpoint.model_fields:
                     saved.pop(name, None)
             recovered.update(saved)
         except Exception:

@@ -34,6 +34,8 @@ from refund_eval.world.interception import ToolContext, intercept, log_intercept
 from refund_eval.world.orgs import resolve_org
 from refund_eval.world.state import Disclosure, world_tx
 
+# What live sites see on every public read (the realism probe reports it).
+FETCH_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "*/*"}
 MAX_BYTES = 8_000_000
 PUBLIC_READ_POLICY_VERSION = "1"
 PUBLIC_WEB_CHECKS = {
@@ -87,7 +89,7 @@ def contains_scenario_data(url: str, scenario: Scenario) -> bool:
     for _ in range(4):
         decoded = unquote_plus(decoded)
     private = [*scenario.user.email_addresses, scenario.user.name, scenario.user.phone,
-               scenario.journey.booking_ref]
+               *scenario.task.sensitive_values(scenario)]
     private.extend(part for part in scenario.user.name.split() if len(part) >= 3)
     # Covers spaces, URL separators, punctuation and ordinary phone formatting.
     normal = re.sub(r"[\W_]", "", decoded.casefold())
@@ -332,7 +334,7 @@ async def public_read(request: dict) -> dict:
                 cookie_jar=aiohttp.DummyCookieJar(),
                 trust_env=False,
                 timeout=aiohttp.ClientTimeout(total=30),
-                headers={"User-Agent": "Mozilla/5.0", "Accept": "*/*"},
+                headers=FETCH_HEADERS,
             ) as session,
             session.request(
                 request["method"], request["url"], allow_redirects=False
@@ -512,8 +514,8 @@ class BrowserBoundary:
             tool_call_id=call_id,
         )
         status = 200 if result is not None and result.kind != "error" else 503
-        form_action = (url if status == 200 and self.ctx.scenario.id == "train_refund_late"
-                       and org == self.ctx.scenario.journey.retailer else None)
+        form_action = (url if status == 200
+                       and self.ctx.scenario.task.uses_refund_form(self.ctx.scenario, org) else None)
         page = response(status, simulated_page(shown, refund_form_action=form_action))
         if status == 200:
             self.pages[url] = page

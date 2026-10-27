@@ -18,7 +18,7 @@ from refund_eval.published.fixture_web import (
     fixture_web_config,
 )
 from refund_eval.published.network import BrowserBoundary
-from refund_eval.published.profile import search_policy
+from refund_eval.published.profile import allow_search_request
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG, ExaPolicyDenied
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
@@ -69,7 +69,7 @@ def test_late_form_has_empty_date_and_unchecked_accuracy_terms(ctx):
 
 async def test_search_native_contract_useful_result_and_explicit_provenance(ctx):
     events = []
-    service = FixtureSearchService(ctx, policy=search_policy(ctx.scenario), audit=events.append)
+    service = FixtureSearchService(ctx, policy=allow_search_request, audit=events.append)
     catalog = await service.list_tools()
     assert catalog == PINNED_EXA_SEARCH_CATALOG
     catalog["tools"][0]["name"] = "changed"
@@ -90,7 +90,7 @@ async def test_search_native_contract_useful_result_and_explicit_provenance(ctx)
 @pytest.mark.parametrize("field", ["query", "objective"])
 async def test_fixture_search_lets_the_users_details_through_and_audits_them(ctx, field):
     events = []
-    service = FixtureSearchService(ctx, policy=search_policy(ctx.scenario), audit=events.append)
+    service = FixtureSearchService(ctx, policy=allow_search_request, audit=events.append)
     args = {"query": "train refund", "objective": "find policy", field: ctx.user_email}
     result = await service.call_tool("web_search_exa", args)
     assert not result["isError"]

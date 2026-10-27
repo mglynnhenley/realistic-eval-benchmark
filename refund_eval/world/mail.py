@@ -391,12 +391,6 @@ def make_mail_source(kind: str) -> MailSource:
     raise ValueError(f"Unknown mail source {kind!r}; use 'fixture', 'fixture:<path>' or 'gmail'")
 
 
-def bind_mail_source(source: MailSource, scenario: Scenario) -> MailSource:
-    """Personalise a source to the scenario if it supports that (the fixture does)."""
-    bind = getattr(source, "for_scenario", None)
-    return bind(scenario) if callable(bind) else source
-
-
 def seed_emails(scenario: Scenario) -> list[Email]:
     """The scenario's seed mail as overlay emails (for initialising a World)."""
     return [

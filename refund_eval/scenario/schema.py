@@ -1,18 +1,24 @@
 """Scenario file schema.
 
 A scenario is one YAML file (e.g. scenario/train_refund.yaml) describing the user,
-the journey (ground truth), the counterparties and the seed emails.
+task-owned facts (ground truth), the counterparties and the seed emails.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Self
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SerializeAsAny, model_validator
+
+from refund_eval.tasks import get_task
+from refund_eval.tasks.base import TaskDefinition
+from refund_eval.tasks.train_refund.facts import Journey  # compatibility export
 
 
 class UserProfile(BaseModel):
@@ -23,27 +29,10 @@ class UserProfile(BaseModel):
     card_last4: str | None = None
 
 
-class Journey(BaseModel):
-    """Ground truth. Claims to counterparties are checked against this."""
-
-    date: date
-    origin: str
-    destination: str
-    departure_time: str
-    operator: str  # org key
-    retailer: str  # org key
-    ticket_type: str
-    fare: float
-    currency: str = "GBP"
-    booking_ref: str
-    paid_by: str  # e.g. "Visa debit ending 4821"
-    cancelled: bool = True
-    cancellation_reason: str = ""
-
-
 class Org(BaseModel):
     key: str
     name: str
+    simulator_kind: str = "llm"
     kind: str  # "retailer" | "operator" | "bank" | "ombudsman" | "other"
     email_domains: list[str]
     contact_emails: list[str] = Field(default_factory=list)
@@ -84,20 +73,66 @@ class SeedEmail(BaseModel):
 
 class Scenario(BaseModel):
     id: str
+    task_kind: str = "train_refund"
+    facts: SerializeAsAny[BaseModel]
     label: str = ""
-    subject: str = "a cancelled train ticket"
+    subject: str = ""
+    # What the scenario is designed to test and what must hold. Company rules are researched with it
+    # in mind and enforced; empty means no enforcement.
+    intent: str = ""
     grading_notes: str = ""
     task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
     user: UserProfile
-    journey: Journey
     orgs: list[Org]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
     # Mail that arrives during the trial at its sent_at (for example the user writing to herself).
     scheduled_emails: list[SeedEmail] = Field(default_factory=list)
-    # Exceptional circumstances that really apply to the user (illness, bereavement, ...). Any
-    # other one the agent asserts is an invented reason. Empty: none apply.
-    true_circumstances: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def task_facts(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        data = dict(value)
+        task = get_task(data.get("task_kind", "train_refund"))
+        facts = data.get("facts", {})
+        if task.kind == "train_refund":
+            legacy = {key: data.pop(key) for key in ("journey", "true_circumstances") if key in data}
+            if legacy:
+                facts = {**(facts.model_dump() if isinstance(facts, BaseModel) else facts), **legacy}
+        data["facts"] = task.facts_model.model_validate(facts)
+        data.setdefault("subject", task.default_subject)
+        return data
+
+    @property
+    def task(self) -> TaskDefinition:
+        return get_task(self.task_kind)
+
+    @property
+    def journey(self) -> Journey:
+        """Compatibility access for existing refund callers and scenarios."""
+        return self.facts.journey
+
+    @journey.setter
+    def journey(self, value: Journey) -> None:
+        self.facts.journey = value
+
+    @property
+    def true_circumstances(self) -> list[str]:
+        return self.facts.true_circumstances
+
+    @true_circumstances.setter
+    def true_circumstances(self, value: list[str]) -> None:
+        self.facts.true_circumstances = value
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        changes = dict(update or {})
+        if self.task_kind == "train_refund":
+            legacy = {key: changes.pop(key) for key in ("journey", "true_circumstances") if key in changes}
+            if legacy:
+                changes["facts"] = changes.get("facts", self.facts).model_copy(update=legacy, deep=deep)
+        return super().model_copy(update=changes, deep=deep)
 
     def org(self, key: str) -> Org:
         for o in self.orgs:
@@ -134,6 +169,17 @@ def _scenario_data(name_or_path: str) -> dict:
         else:
             orgs[org["key"]] = org
     merged["orgs"] = list(orgs.values())
+    if "facts" in data:
+        # An explicit facts block replaces its parent's task facts, including the
+        # old top-level representation used by the committed refund scenarios.
+        merged.pop("journey", None)
+        merged.pop("true_circumstances", None)
+    elif "facts" in merged and merged.get("task_kind", "train_refund") == "train_refund":
+        # Legacy variants can still override a journey or circumstance list when
+        # their base has migrated to the task-owned facts block.
+        legacy = {key: data.pop(key) for key in ("journey", "true_circumstances") if key in data}
+        if legacy:
+            merged["facts"] = {**merged["facts"], **legacy}
     merged.update(data)
     return merged
 

@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from inspect_ai.util import store
 from inspect_ai.util._store import Store, init_subtask_store
 
+from refund_eval.claims import OBSERVATIONS_KEY
 from refund_eval.published.adapter import inspect_tools
 from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.mail import _visible_id
@@ -46,6 +48,12 @@ def assert_delivered_to_user(before):
     assert attempt.payload["delivery_status"] == "delivered_to_user"
     assert not world.cases
     assert world.outcome.model_dump() == before["outcome"]
+    [observation] = [item for item in store().get(OBSERVATIONS_KEY) if item["id"] == attempt.id]
+    assert observation["context"]["message"]["body"] == attempt.payload["body"]
+    assert observation["context"]["message"]["subject"] == attempt.payload["subject"]
+    assert observation["context"]["message"]["fields"]["to_user"] is True
+    assert observation["context"]["now"] == attempt.time.isoformat()
+    assert all(item["id"] != attempt.id for item in observation["context"]["recorded_history"]["outgoing_contacts"])
     return attempt
 
 

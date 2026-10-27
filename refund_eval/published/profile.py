@@ -84,27 +84,24 @@ def _fixture_readiness(_time_bucket: int) -> dict:
         return {
             "configured": False,
             "reason": "Start Docker and build the browser image: "
-                      "docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime",
+                      f"docker build -t {DEFAULT_BROWSER_IMAGE} refund_eval/published/browser_runtime",
         }
     return {"configured": True, "reason": "Simulated inbox and websites are ready; no Gmail connection is needed."}
 
 
-def search_policy(scenario: Scenario):
+def allow_search_request(request: dict) -> bool:
     """Every query goes out and is audited, the user's own details included:
     privacy is graded from the audit, not enforced by a block. Only the argument
     shape is checked and credential-shaped text withheld."""
 
-    def allow(request: dict) -> bool:
-        args = request.get("arguments", {})
-        if set(args) - {"query", "objective", "numResults"}:
-            return False
-        values = [args.get("query"), args.get("objective")]
-        if not all(isinstance(value, str) and value.strip() for value in values):
-            return False
-        text = " ".join(values).casefold()
-        return not re.search(r"(?:token|password|secret)\s*[:=]", text)
-
-    return allow
+    args = request.get("arguments", {})
+    if set(args) - {"query", "objective", "numResults"}:
+        return False
+    values = [args.get("query"), args.get("objective")]
+    if not all(isinstance(value, str) and value.strip() for value in values):
+        return False
+    text = " ".join(values).casefold()
+    return not re.search(r"(?:token|password|secret)\s*[:=]", text)
 
 
 @asynccontextmanager
@@ -131,7 +128,7 @@ async def published_tools(
               hybrid_readiness(**runtime_args))
     if not status["configured"]:
         raise ValueError(status["reason"])
-    from refund_eval.dashboard.telemetry import emit_snapshot
+    from refund_eval.runtime.snapshots import emit_snapshot
 
     emit_snapshot(phase="checking_tools")
     source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture")
@@ -144,6 +141,7 @@ async def published_tools(
         "name": source.path.name,
         "sha256": hashlib.sha256(source.path.read_bytes()).hexdigest(),
     }
+    browser_image = DEFAULT_BROWSER_IMAGE
 
     if data_mode == "fixture":
         from refund_eval.published.fixture_web import (
@@ -152,7 +150,6 @@ async def published_tools(
             fixture_web_config,
         )
         boundary_config = fixture_web_config(ctx)
-        browser_image = DEFAULT_BROWSER_IMAGE
         profile_config = {
             "data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
             "web_dataset": FIXTURE_WEB_DATASET, "browser_image": browser_image,
@@ -161,7 +158,6 @@ async def published_tools(
         }
     else:
         boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
-        browser_image = DEFAULT_BROWSER_IMAGE
         profile_config = {
             "data_mode": "hybrid", **mode_details,
             "mail": FIXTURE_MAIL_PROVENANCE, "browser_image": browser_image,
@@ -198,10 +194,10 @@ async def published_tools(
             )
 
         if data_mode == "fixture":
-            search = FixtureSearchService(ctx, policy=search_policy(scenario), audit=search_audit)
+            search = FixtureSearchService(ctx, policy=allow_search_request, audit=search_audit)
         else:
             search = ExaSearchService(
-                policy=search_policy(scenario),
+                policy=allow_search_request,
                 audit=search_audit,
                 api_key=os.environ.get(HYBRID_EXA_KEY_ENV),
             )

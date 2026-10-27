@@ -9,12 +9,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fixtures.simulator import start_sample
 from inspect_ai.model import ChatMessageAssistant
 from inspect_ai.scorer import Score
 
 from refund_eval.dashboard import worker
-from refund_eval.dashboard.telemetry import RUN_DIR_ENV, emit_snapshot, write_snapshot
-from refund_eval.sim.testing import start_sample
+from refund_eval.runtime.snapshots import RUN_DIR_ENV, emit_snapshot, write_snapshot
 from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
 from refund_eval.world.state import world_tx
 
@@ -77,7 +77,7 @@ def test_measurement_failure_keeps_snapshot_transcript_and_scores(tmp_path, monk
 
 
 def test_measurement_import_failure_is_isolated(monkeypatch):
-    from refund_eval.dashboard.telemetry import activity_measurements
+    from refund_eval.runtime.snapshots import activity_measurements
 
     monkeypatch.setitem(sys.modules, "refund_eval.grading.long_horizon", None)
     analysis = activity_measurements({"messages": [], "world": None})

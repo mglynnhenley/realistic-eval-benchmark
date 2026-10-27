@@ -21,12 +21,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, time, timedelta
 from typing import Literal
-from zoneinfo import ZoneInfo
 
 from refund_eval.world.state import Email, World
+from refund_eval.world.timeutil import LONDON
+from refund_eval.world.timeutil import as_aware as aware
+from refund_eval.world.timeutil import to_london as london
 
 CHECKIN_HOURS = (9, 17)
-LONDON = ZoneInfo("Europe/London")
 
 WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "continue"]
 
@@ -36,14 +37,6 @@ _LABELS: dict[str, str] = {
     "requested": "Scheduled wake-up",
     "continue": "Continue",
 }
-
-
-def aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=LONDON)
-
-
-def london(dt: datetime) -> datetime:
-    return aware(dt).astimezone(LONDON)
 
 
 def format_stamp(when: datetime) -> str:

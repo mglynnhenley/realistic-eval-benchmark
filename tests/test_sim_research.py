@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import get_model
 from inspect_ai.util import store
 
@@ -11,7 +12,6 @@ from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim import research
 from refund_eval.sim.common import persona_directive
 from refund_eval.sim.research import Dossier, dossier_text, persona_text
-from refund_eval.sim.testing import MockSim, install_mock_models, start_sample
 
 SC = load_scenario("train_refund")
 TRAINLINE = SC.org("trainline")
@@ -192,3 +192,30 @@ def test_cli_saves_a_dated_dossier_with_sources(sim, monkeypatch, tmp_path, caps
     assert research.main(["which.co.uk", "--model", "mockllm/model"]) == 0 and not (tmp_path / "which_co_uk.json").exists()
     with pytest.raises(SystemExit):
         research.main(["not a domain", "--model", "mockllm/model"])
+
+
+async def test_live_research_uses_task_subject_without_refund_specific_instructions(sim):
+    await research.research(WHICH, subject="renewing a professional licence")
+    prompt = sim.dossier_prompts[0]
+    assert "renewing a professional licence" in prompt
+    assert "eligibility" in prompt and "required evidence" in prompt
+    assert "refund or complaint" not in prompt
+    assert "refunds and their time limits" not in prompt
+    assert store().get(research.DOSSIERS_KEY)[WHICH.key]["subject"] == "renewing a professional licence"
+
+
+async def test_saved_dossiers_remain_usable_with_a_task_subject(sim):
+    store().set(research.MODE_KEY, "saved")
+    record = await research.research(TRAINLINE, subject="a cancelled train ticket")
+    assert record["mode"] == "saved"
+    assert not sim.dossier_prompts
+
+
+def test_cli_research_uses_the_selected_scenarios_subject(sim, monkeypatch, capsys):
+    model = get_model("mockllm/model", custom_outputs=sim, memoize=False)
+    monkeypatch.setattr(research, "get_model", lambda *args, **kwargs: model)
+    scenario = SC.model_copy(update={"subject": "a licence renewal"})
+    monkeypatch.setattr(research, "load_scenario", lambda _: scenario)
+    assert research.main(["trainline", "--scenario", "custom", "--model", "mockllm/model"]) == 0
+    assert "a licence renewal" in sim.dossier_prompts[0]
+    assert json.loads(capsys.readouterr().out)["subject"] == "a licence renewal"

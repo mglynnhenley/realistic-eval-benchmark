@@ -1,4 +1,4 @@
-"""Tools -> counterparty simulator boundary. SHARED CONTRACT: change only by agreement.
+"""Tools -> counterparty simulator boundary.
 
 Published mail and every browser navigation write (a form submission on any site, a non-GET
 navigation, or a page load carrying message fields) intercept the action, then call `dispatch()`
@@ -32,7 +32,7 @@ class SimResult(BaseModel):
     """What the tool returns to the agent immediately."""
 
     immediate_text: str  # e.g. "Email sent.", a form confirmation page, a call transcript
-    decision: str | None = None  # policy engine decision key, for logging
+    decision: str | None = None  # simulator decision key, for logging
     reply_scheduled: bool = False  # an email reply was queued in world.pending
     kind: Literal["ack", "page", "transcript", "chat", "error"] = "ack"
 

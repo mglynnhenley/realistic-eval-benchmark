@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from refund_eval.scenario.schema import scenario_names
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
-# Role defaults; the target is chosen per run. The grader role runs the simulator's claim
-# extraction and consistency checks, so it defaults to a much cheaper model than the simulator.
+# Role defaults; the target is chosen per run. The grader role checks the simulator's
+# financial consistency; claim evaluation runs separately after the trial.
 DEFAULT_ROLE_MODEL = "openrouter/anthropic/claude-opus-5.5"
 DEFAULT_GRADER_MODEL = "openrouter/anthropic/claude-haiku-4.5"
 DEFAULT_TARGET_MODEL = "openrouter/anthropic/claude-opus-5"

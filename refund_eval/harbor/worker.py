@@ -43,6 +43,9 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     if any(output.iterdir()):
         raise ValueError("Trial output directory must be empty; use a separate directory per attempt")
     write_json(output / "request.json", request.model_dump(mode="json"))
+    from refund_eval.realism.probe import sandbox_facts
+
+    write_json(output / "probe.json", sandbox_facts())  # what this sandbox reveals; read by `realism open --probe`
     settings = request.settings
     inbox = DEFAULT_FIXTURE_PATH
     if settings.inbox_sha256:
@@ -77,8 +80,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     if log.status != "success" or not log.samples or log.samples[0].error:
         raise RuntimeError(f"Inspect trial failed; see {log.location}: {log.error}")
     sample = log.samples[0]
-    from refund_eval.dashboard.telemetry import json_safe
-    from refund_eval.dashboard.worker import final_snapshot
+    from refund_eval.runtime.snapshots import final_snapshot, json_safe
 
     snapshot = json_safe(final_snapshot(log))
     write_json(output / "snapshot.json", snapshot)
@@ -92,7 +94,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
     usage = {
         "models": {k: v.model_dump(mode="json") for k, v in sample.model_usage.items()},
         "roles": {k: v.model_dump(mode="json") for k, v in sample.role_usage.items()},
-        "note": "Role usage separates simulator calls from grader calls (the simulator's claim extractor); "
+        "note": "Role usage separates simulator calls from grader calls (the simulator's financial consistency checker); "
                 "the trial cost limit covers every model call in the trial.",
     }
     write_json(output / "usage.json", usage)

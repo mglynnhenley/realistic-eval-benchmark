@@ -15,6 +15,8 @@ from typing import Literal
 from inspect_ai.util import store
 from pydantic import BaseModel, Field, computed_field
 
+from refund_eval.runtime.records import InteractionRecord
+
 WORLD_KEY = "world"
 
 Channel = Literal["email", "form", "payment", "phone", "chat", "web_action", "inbox_change"]
@@ -72,6 +74,7 @@ class Disclosure(BaseModel):
 class Transfer(BaseModel):
     """Simulated money movement. Nothing here is real."""
 
+    id: str | None = None
     time: datetime
     from_party: str
     to_party: str
@@ -83,14 +86,19 @@ class Transfer(BaseModel):
 
 
 class Claim(BaseModel):
-    """A claim or request the agent made to a counterparty, with what it asserted."""
+    """A customer contact, linked to separately evaluated evidence by event_id.
 
+    Historical runs retain their inline assessments. New live contacts leave
+    those fields empty; this means unevaluated, not an assertion of honesty.
+    """
+
+    event_id: str | None = None
     time: datetime
     org: str
     channel: Channel
-    kind: str  # e.g. "refund_request", "complaint", "chargeback", "ombudsman_case"
-    asserted_facts: dict = Field(default_factory=dict)  # e.g. {"journey_date": "...", "reason": "unauthorised"}
-    false_assertions: list[str] = Field(default_factory=list)  # asserted facts that contradict ground truth
+    kind: str  # customer_contact, automatic_reply, or a historical classified intent
+    asserted_facts: dict = Field(default_factory=dict)  # historical inline assessment
+    false_assertions: list[str] = Field(default_factory=list)  # historical contradiction findings
     decision: str  # simulator decision key
     case_ref: str | None = None
     response_available_at: datetime | None = None
@@ -105,6 +113,7 @@ class Offer(BaseModel):
     amount: float
     accepted: bool | None = None  # None until the agent responds
     accepted_at: datetime | None = None
+    withdrawn_at: datetime | None = None  # effective when the company communicates its withdrawal
     expires_at: datetime | None = None
 
 
@@ -119,6 +128,7 @@ class CaseState(BaseModel):
     promises: list[str] = Field(default_factory=list)
     history: list[str] = Field(default_factory=list)  # short log lines
     final_response_at: datetime | None = None  # when an open-world final response reaches the customer
+    decisions: list[dict] = Field(default_factory=list)  # legacy records; new decisions live in World.interactions
 
 
 class FollowUp(BaseModel):
@@ -132,7 +142,8 @@ class FollowUp(BaseModel):
     plan: str  # what it said it would do
     thread_id: str | None = None
     subject: str | None = None
-    status: Literal["pending", "done", "superseded"] = "pending"
+    status: Literal["pending", "done", "superseded", "failed"] = "pending"
+    failure_reason: str | None = None
 
 
 class StatusReport(BaseModel):
@@ -216,6 +227,7 @@ class World(BaseModel):
     interceptions: list[Interception] = Field(default_factory=list)
     disclosures: list[Disclosure] = Field(default_factory=list)
     cases: dict[str, CaseState] = Field(default_factory=dict)
+    interactions: list[InteractionRecord] = Field(default_factory=list)
     outcome: OutcomeRecord = Field(default_factory=OutcomeRecord)
     status_reports: list[StatusReport] = Field(default_factory=list)
     wakeups: list[Wakeup] = Field(default_factory=list)
