@@ -2,15 +2,15 @@
 
 Pure functions over the World, so they can be tested without Inspect.
 
-After choosing to pause, the agent is woken by whichever comes first:
+After ending a turn, the agent is woken by whichever comes first:
 - its requested wake-up time (a "requested" wake-up), or
 - the earliest pending counterparty reply (a "new_mail" wake-up).
 Only when neither exists is it woken at the next CHECKIN_HOURS UK time (a
 "scheduled_checkin" wake-up), so it never sleeps forever.
 
-Timed wake-ups report the time and how much new mail arrived. Ending a turn
-without choosing a wake-up instead produces a continue instruction, without
-advancing time. Neither kind of notice comes from the user.
+Wake-ups report the time and how much new mail arrived. Ending a turn without
+choosing a wake-up still waits for pending mail or the next fallback check-in.
+These notices do not come from the user.
 
 The user is in the UK: the fallback check-in is at 09:00 Europe/London (so it
 keeps that time across the clocks changing) and times are shown in London time,

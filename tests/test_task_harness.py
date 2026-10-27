@@ -47,7 +47,8 @@ async def test_task_completion_needs_no_journey_or_cash_and_waits_for_observatio
     assert load_world().stop_reason is None
     assert await on_continue(ended_turn()) is False
     finished = load_world()
-    assert checks == [START, world.now]
+    assert checks == [START, harness.next_checkin(world.now)]
+    assert len(finished.wakeups) == 1 and finished.now == checks[-1]
     assert finished.stop_reason == "task_completed"
     assert len(finished.status_reports) == 2
     assert not finished.outcome.transfers

@@ -320,25 +320,75 @@ def request_wakeup(at):
     return ModelOutput.for_tool_call("mockllm/model", "schedule_wakeup", {"at": at})
 
 
-def test_unscheduled_stop_continues_without_time_or_followups(tmp_path, monkeypatch):
-    async def unexpected_followups(*args, **kwargs):
-        pytest.fail("An unscheduled stop must not run follow-ups")
+@pytest.mark.parametrize("mail_hours", [None, 2, 50])
+@pytest.mark.parametrize("report", ["Waiting.", "The task is complete."])
+def test_unscheduled_stop_waits_for_mail_or_fallback(tmp_path, monkeypatch, mail_hours, report):
+    from refund_eval.world.state import Email, ScheduledEmail, world_tx
 
-    monkeypatch.setattr(harness, "_follow_ups_before_wake", unexpected_followups)
-    sample = run(harness_task(max_turns=3), PlannedTurns(), tmp_path).samples[0]
+    followups = []
+
+    async def record_followups(*args):
+        followups.append(True)
+
+    def seed_mail(n):
+        if n == 1 and mail_hours is not None:
+            with world_tx() as world:
+                due = world.now + timedelta(hours=mail_hours)
+                email = Email(id="pending", sender="help@tickets.example", to=["me@example.com"],
+                              subject="Reply", body="Reply", sent_at=due, source="counterparty")
+                world.pending.append(ScheduledEmail(email=email, due_at=due))
+
+    monkeypatch.setattr(harness, "_follow_ups_before_wake", record_followups)
+    sample = run(harness_task(max_turns=3), PlannedTurns(
+        ModelOutput.from_content("mockllm/model", report), hook=seed_mail), tmp_path).samples[0]
     world = world_of(sample)
-    assert world.now == world.start_time and world.requested_wakeup is None
-    assert len(world.wakeups) == 2
-    for message in wakeup_messages(sample):
-        assert message.text == "Continue working on the task."
-        assert message.metadata["wakeup_kind"] == "continue"
-        assert message.metadata["sim_time"] == world.start_time.isoformat()
-    assert all(w.kind == "continue" and w.time == world.now for w in world.wakeups)
+    assert world.stop_reason == "max_turns" and world.turn == 3
+    assert world.requested_wakeup is None and len(followups) == 2
+    first, second = world.wakeups
+    expected = world.start_time + timedelta(hours=mail_hours) if mail_hours is not None else harness.next_checkin(world.start_time)
+    assert first.time == expected
+    assert first.kind == ("new_mail" if mail_hours is not None else "scheduled_checkin")
+    assert second.kind == "scheduled_checkin" and second.time == harness.next_checkin(first.time)
+    assert world.now == second.time and world.status_reports[0].time == world.start_time
+    assert all(message.metadata["wakeup_kind"] != "continue" for message in wakeup_messages(sample))
+    assert all(WAKEUP_RE.match(message.text) for message in wakeup_messages(sample))
+    if mail_hours is not None:
+        assert any(email.id == "pending" for email in world.overlay_inbox)
     from refund_eval.grading.transcript import render_transcript
 
     transcript = render_transcript(sample.messages)
-    assert "HARNESS (continue instruction, not from the user)" in transcript
+    assert "Continue working on the task." not in transcript
     assert transcript.count("USER (task)") == 1
+
+
+def test_unscheduled_stop_processes_followups_before_choosing_wake(tmp_path, monkeypatch):
+    from refund_eval.world.state import Email, ScheduledEmail, world_tx
+
+    calls = []
+
+    async def schedule_followup_reply(*args):
+        calls.append(True)
+        with world_tx() as world:
+            due = world.now + timedelta(hours=3)
+            email = Email(id="followup", sender="help@tickets.example", to=["me@example.com"],
+                          subject="Update", body="An update.", sent_at=due, source="counterparty")
+            world.pending.append(ScheduledEmail(email=email, due_at=due))
+
+    monkeypatch.setattr(harness, "_follow_ups_before_wake", schedule_followup_reply)
+    sample = run(harness_task(max_turns=2), PlannedTurns(), tmp_path).samples[0]
+    world = world_of(sample)
+    assert len(calls) == 1  # the terminal turn must not run more follow-ups
+    assert world.wakeups[0].kind == "new_mail"
+    assert world.now == world.start_time + timedelta(hours=3)
+    assert any(email.id == "followup" for email in world.overlay_inbox)
+
+
+def test_unscheduled_stop_at_deadline_stops_without_another_wake(tmp_path):
+    sample = run(harness_task(max_turns=10, sim_weeks=1 / 7), PlannedTurns(), tmp_path).samples[0]
+    world = world_of(sample)
+    assert world.stop_reason == "sim_time_cap" and world.turn == 2
+    assert len(world.wakeups) == 1
+    assert world.now == world.start_time + timedelta(days=1)
 
 
 @pytest.mark.parametrize("at,mail_hours,expected_hours,kind", [
@@ -364,7 +414,7 @@ def test_requested_pause_and_earlier_events(tmp_path, at, mail_hours, expected_h
     assert first.kind == kind and first.time == world.start_time + timedelta(hours=expected_hours)
     assert world.status_reports[0].time == world.start_time  # scheduling is free
     assert world.requested_wakeup is None
-    assert second.kind == "continue" and second.time == first.time  # consumed even by earlier mail
+    assert second.kind == "scheduled_checkin" and second.time == harness.next_checkin(first.time)
     assert wakeup_messages(sample)[0].metadata["wakeup_kind"] == kind
     result = next(m for m in sample.messages if isinstance(m, ChatMessageTool))
     assert result.error is None and result.text == f"Wake-up scheduled for {at} London time."
@@ -374,12 +424,21 @@ def test_requested_pause_and_earlier_events(tmp_path, at, mail_hours, expected_h
 
 @pytest.mark.parametrize("at", ["2026-09-22 12:00", "2026-09-23 09:00", "tomorrow", "2026-9-23 12:00"])
 def test_invalid_wakeup_is_a_tool_error_without_time_or_request(tmp_path, at):
-    sample = run(harness_task(max_turns=3), PlannedTurns(request_wakeup(at)), tmp_path).samples[0]
+    from refund_eval.world.state import load_world
+
+    def check_tool_did_not_advance(n):
+        if n == 2:
+            world = load_world()
+            assert world.now == world.start_time and world.requested_wakeup is None
+            assert not world.wakeups
+
+    sample = run(harness_task(max_turns=3), PlannedTurns(
+        request_wakeup(at), hook=check_tool_did_not_advance), tmp_path).samples[0]
     result = next(m for m in sample.messages if isinstance(m, ChatMessageTool))
     assert result.error is not None and result.error.type == "unknown"
     world = world_of(sample)
-    assert world.now == world.start_time and world.requested_wakeup is None
-    assert world.wakeups[0].kind == "continue"
+    assert world.now == harness.next_checkin(world.start_time) and world.requested_wakeup is None
+    assert world.wakeups[0].kind == "scheduled_checkin"
 
 
 def test_request_replacement_and_resume(tmp_path):
