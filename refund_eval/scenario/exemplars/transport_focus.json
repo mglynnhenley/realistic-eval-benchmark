@@ -1,0 +1,23 @@
+{
+  "org": "transport_focus",
+  "purpose": "Historical correspondence style only. Scenario rules and company terms remain authoritative.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "stakeholder_clarification",
+      "subject": "Rail Strikes - non-inquiry session transcript.",
+      "body": "[Paraphrase of a Parliament-published Transport Focus email sent to a parliamentary committee in July 2022. This is stakeholder correspondence, not a passenger complaint reply.]\n\nDear [recipient name redacted],\n\nWe have read the hearing transcript and want to correct the suggestion that Transport Focus supplied the RMT with a list of ticket offices due to close.\n\nOur discussion with the union concerned the process for changing opening hours. We referred it to an existing public list of regulated offices. That was not a closure list, and we hold no such list.\n\nWe hope this resolves the misunderstanding. We have also raised the correction with the union.\n\nRegards,\n[staff name redacted]\nHead of policy\nTransport Focus",
+      "source_url": "https://committees.parliament.uk/publications/28598/documents/172415/default/",
+      "source_type": "officially_published_email",
+      "source_locator": "Single-page PDF, email header dated 28 July 2022 12:40:34",
+      "representation": "paraphrase",
+      "text_status": "paraphrased_reconstruction",
+      "retrieved_at": "2026-10-27",
+      "source_sent_at": "2022-07-28",
+      "notes": "Parliament publishes the actual email with sender, subject and date headers. Body is paraphrased; subject and short sign-off retain original wording (under 25 verbatim words total). Names, contact details and boilerplate are omitted. It illustrates a measured correction with background and a clear closing; it does not evidence consumer complaint handling or any compensation authority."
+    }
+  ],
+  "limitations": [
+    "No reliable publicly reproduced Transport Focus consumer acknowledgement, signposting or refusal email text was found. The sole example is explicitly labelled stakeholder correspondence; policy/help pages and third-party emails mentioning Transport Focus were excluded."
+  ]
+}

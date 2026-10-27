@@ -23,6 +23,16 @@ The realism loop finds simulated artefacts that an agent noticed, or could have 
 
 Transcripts only show what the agent saw. Each Harbor trial also saves `probe.json`, recording what the sandbox, its browser and its live web requests reveal (for example `navigator.webdriver`, a headless user agent, the time zone and the fetch headers live sites receive). Pass these files to `open --probe` or the loop's `probes` argument to add them as `sandbox` and `internet` findings. Fixes may change anything in the setup except the scenario's rules and the companies' terms.
 
+Organisation simulators also read up to three varied correspondence examples from
+`refund_eval/scenario/exemplars/<org>.json`. These are historical public examples,
+including explicitly labelled paraphrases. Each records its source, retrieval
+date, representation and research limitations; those details accompany the text
+in the simulator prompt. They guide format, tone and structure, and do not
+override scenario rules, company terms, eligibility or configured reply timing.
+Personal contacts receive no organisation examples. A recipient's public post
+does not independently authenticate the original sender, and descriptive subjects
+are marked when the original subject was unavailable.
+
 All commands are run as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late]`:
 
 | Command | Purpose |

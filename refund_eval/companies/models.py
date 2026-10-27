@@ -91,6 +91,7 @@ class CompanyContext(BaseModel):
     persona: str = ""
     temperament: str = ""
     realism: str = ""
+    examples: str = ""
     case_ref: str | None = None
     history: list[str] = Field(default_factory=list)
     offers: list[str] = Field(default_factory=list)

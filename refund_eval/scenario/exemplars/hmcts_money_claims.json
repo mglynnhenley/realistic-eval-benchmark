@@ -1,0 +1,49 @@
+{
+  "org": "hmcts_money_claims",
+  "usage": "Historical correspondence style references only. Recipient-reported excerpts and labelled paraphrases are not authenticated court documents, legal advice or current procedural rules. Scenario rules and locked terms remain authoritative; do not reuse case identifiers or staff names.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "judgment_request_returned",
+      "subject": "Judgment request returned [descriptive subject]",
+      "body": "[Recipient-posted quotation of a historical Moneyclaim email; staff name redacted. The quotation is the reported message, not a new court decision.]\n\n\"Dear Claimant.\nYour judgment request is returned for the following reason(s): Part Admission filed.\nRegards\"\n[Staff name redacted]",
+      "source_url": "https://www.justanswer.co.uk/law/bykml-filed-small-claims-action-government.html",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Customer's initial question and follow-up beginning Here is the sole content of the email received today; public Q&A dated 18 January 2019",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 15,
+      "representation": "verbatim_excerpt",
+      "notes": "Public page fetched successfully. Customer explicitly identifies the passage as the content of a received Moneyclaim email; authenticity is not independently established. Only the email is reproduced, excluding the site's legal advice and the claimant's interpretation. The brief administrative notice gives a reason without determining the merits of the underlying claim. Names are redacted; subject is descriptive."
+    },
+    {
+      "kind": "administrative_error_referral",
+      "subject": "Your hearing fee query [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of a recipient-posted Money Claims Online email; original subject and staff identity unavailable or redacted.]\n\nDear [recipient],\n\nI am sorry this has happened. I have contacted the court and sent evidence that your hearing fee was paid in time. I have asked for the matter to go to a district judge to consider reinstating the claim and arranging another hearing. I am waiting to hear whether that can be done.\n\nKind regards\n[Staff name redacted]",
+      "source_url": "https://www.justanswer.co.uk/employment-law/wacl7-thomas-judge-hi-thomas-hope-well-just-wanted.html",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Customer follow-up beginning this is another email from money claims online; first of two quoted replies concerning the hearing-fee query",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 0,
+      "representation": "paraphrase",
+      "notes": "Public page fetched successfully. Recipient quotes two received MCOL replies and separately quotes local-court correspondence; this example uses the first MCOL reply only. Names and local-court identity omitted. The body is a paraphrase, with generic salutation and closing. Authenticity is unverified. It preserves the distinction between staff referring an administrative problem and a judge deciding whether to reinstate a claim. It does not adopt the Q&A site's legal advice."
+    },
+    {
+      "kind": "pending_investigation_update",
+      "subject": "Update on your court query [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of a second recipient-posted Money Claims Online email; original subject and staff identity unavailable or redacted.]\n\nGood morning,\n\nThe court has received our message about your claim being struck out and is investigating. I cannot give you an estimate of when its enquiries will finish. The court will contact you when it has completed them. Please contact us if you need further assistance.\n\nKind regards\n[Staff name redacted]",
+      "source_url": "https://www.justanswer.co.uk/employment-law/wacl7-thomas-judge-hi-thomas-hope-well-just-wanted.html",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Same customer follow-up; second MCOL reply introduced as a further response after following up a few days later",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 0,
+      "representation": "paraphrase",
+      "notes": "Public page fetched successfully. This is a distinct reported follow-up email from the same incident as the preceding example, not an independent case. No duration is inferred from the customer's account. Authenticity is unverified. Generic greetings and closing are retained in a labelled paraphrase; names, case identifier, exact dates and local court are omitted. Useful for restrained status wording that makes no promise of an outcome or deadline."
+    }
+  ],
+  "limitations": [
+    "Three reported emails come from two recipient accounts on a public legal Q&A site; no independently authenticated HMCTS originals or headers were located for these items.",
+    "The second and third examples are follow-ups in one incident and must not be treated as evidence of frequency or general service performance.",
+    "Only the first body is a short quotation; other bodies are labelled paraphrases. Subjects are descriptive additions.",
+    "Historical administrative explanations do not set current court procedure, eligibility, fees, response deadlines or the outcome of any claim."
+  ]
+}
