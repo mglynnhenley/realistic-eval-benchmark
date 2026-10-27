@@ -63,7 +63,7 @@ async def test_exa_uses_exact_discovered_catalog_and_forwards_native_result():
         catalog = await service.list_tools()
         assert catalog == PINNED_EXA_SEARCH_CATALOG
         assert catalog["tools"][0]["inputSchema"]["required"] == ["query", "objective"]
-        assert PINNED_EXA_SEARCH_CATALOG_SHA256 == "10d7c8659a693fd0efd874b31847e8d0cfe1fa7ce4e55db9cedac4f302a7598f"
+        assert PINNED_EXA_SEARCH_CATALOG_SHA256 == "424bba669c95a5fc0dd48e9456903c73bb40d1ff1a0eee09207098a2dbee657b"
         assert await service.call_tool("web_search_exa", ARGUMENTS) == NATIVE_RESULT
         assert service.server_info == {"name": "exa-search-server", "version": "3.2.1"}
         assert service.initialization_result["capabilities"] == {"tools": {}}

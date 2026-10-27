@@ -2,8 +2,9 @@
 
 This is infrastructure, not a replacement agent tool: descriptors and call
 results come from the upstream MCP server and are forwarded unchanged. The
-catalog below was captured with initialize/tools/list (no search) on 2026-09-30.
-The hosted server reported 3.2.1; its schema differs from GitHub main, notably
+catalog below was captured with initialize/tools/list (no search) on 2026-09-30
+(server 3.2.1) and re-reviewed on 2026-10-27 (server 3.5.0 added only a display title).
+The hosted server's schema differs from GitHub main, notably
 by requiring ``objective``. A changed catalog fails closed until reviewed.
 
 Sources:
@@ -36,12 +37,12 @@ from refund_eval.published.mcp import MCPError, MCPHTTPClient, MCPRPCError
 EXA_SEARCH_ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_exa"
 EXA_SEARCH_TOOL = "web_search_exa"
 MCP_PROTOCOL_VERSION = "2025-06-18"
-EXA_CATALOG_CAPTURED_AT = "2026-09-30"
-EXA_CATALOG_SERVER_VERSION = "3.2.1"
+EXA_CATALOG_CAPTURED_AT = "2026-10-27"
+EXA_CATALOG_SERVER_VERSION = "3.5.0"
 MAX_RESPONSE_BYTES = 8_000_000
 
 # Exact upstream tools/list result, not a hand-written tool implementation.
-PINNED_EXA_SEARCH_CATALOG: dict[str, Any] = json.loads(r'''{"tools":[{"name":"web_search_exa","description":"Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering questions about any topic.\n      Returns: Clean text content from top search results.\n\n      Query tips:\n      describe the ideal page, not keywords. \"blog post comparing React and Vue performance\" not \"React vs Vue\".\n      Use category:people / category:company to search through Linkedin profiles / companies respectively.\n      If highlights are insufficient, follow up with web_fetch_exa on the best URLs.","inputSchema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Natural language search query. Should be a semantically rich description of the ideal page, not just keywords. Optionally include category:<type> (company, people) to focus results — e.g. 'category:people John Doe software engineer'."},"numResults":{"type":"number","description":"Number of search results to return (default: 10)."},"objective":{"type":"string","minLength":1,"maxLength":4096,"description":"Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them."}},"required":["query","objective"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":true,"idempotentHint":true},"execution":{"taskSupport":"forbidden"}}]}''')
+PINNED_EXA_SEARCH_CATALOG: dict[str, Any] = json.loads(r'''{"tools":[{"name":"web_search_exa","description":"Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering questions about any topic.\n      Returns: Clean text content from top search results.\n\n      Query tips:\n      describe the ideal page, not keywords. \"blog post comparing React and Vue performance\" not \"React vs Vue\".\n      Use category:people / category:company to search through Linkedin profiles / companies respectively.\n      If highlights are insufficient, follow up with web_fetch_exa on the best URLs.","inputSchema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Natural language search query. Should be a semantically rich description of the ideal page, not just keywords. Optionally include category:<type> (company, people) to focus results — e.g. 'category:people John Doe software engineer'."},"numResults":{"type":"number","description":"Number of search results to return (default: 10)."},"objective":{"type":"string","minLength":1,"maxLength":4096,"description":"Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them."}},"required":["query","objective"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":true,"idempotentHint":true},"execution":{"taskSupport":"forbidden"},"title":"Web Search"}]}''')
 
 
 def catalog_sha256(catalog: dict[str, Any]) -> str:
