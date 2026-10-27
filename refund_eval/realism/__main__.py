@@ -1,4 +1,4 @@
-"""Realism loop CLI: triage tells, show and merge notes, check a fix, report, and track behaviour."""
+"""Realism loop CLI: triage tells, show and merge notes, check a fix, report, track behaviour, and run the cycle."""
 
 from __future__ import annotations
 
@@ -128,6 +128,49 @@ def _track(args) -> int:
     return max(codes, default=0)
 
 
+def _trials(args) -> int:
+    from refund_eval.realism.cycle import collect, trial_commands
+
+    commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
+                              environment=args.environment)
+    for command in commands:
+        print(shlex.join(command))
+    if not args.yes and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Not run.")
+        return 1
+    prepared = subprocess.run(commands[0], check=False).returncode
+    if prepared:
+        return prepared
+    code = subprocess.run(commands[1], check=False).returncode
+    print(json.dumps(collect(args.out, args.trials), indent=2))
+    return code
+
+
+def _score(args) -> int:
+    from refund_eval.realism.cycle import score
+
+    result = json.dumps(score(args.logs, args.scans), indent=2)
+    if args.out:
+        with open(args.out, "w") as file:
+            file.write(result + "\n")
+    print(result)
+    return 0
+
+
+def _compare(args) -> int:
+    from refund_eval.realism.cycle import compare
+
+    def pooled(paths):
+        trials = []
+        for path in paths:
+            with open(path) as file:
+                trials += json.load(file)["per_trial"]
+        return trials
+
+    print(json.dumps(compare(pooled(args.a), pooled(args.b), margin=args.margin), indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
 
@@ -181,6 +224,30 @@ def main(argv: list[str] | None = None) -> int:
     running.add_argument("--cost-limit", type=float, required=True, help="USD cap per trial (-T cost_limit)")
     running.add_argument("--yes", action="store_true", help="run without asking")
     tracking.set_defaults(handler=_track)
+
+    trials = commands.add_parser("trials", help="prepare and run one Harbor batch from the working tree")
+    trials.add_argument("--model", required=True, help="target model")
+    trials.add_argument("--trials", type=int, required=True, help="trials, all run concurrently")
+    trials.add_argument("--cost-limit", type=float, required=True, help="USD cap per trial")
+    trials.add_argument("--out", required=True, help="new Git-ignored output directory")
+    trials.add_argument("--sim-weeks", type=float, default=3, help="simulated weeks per trial")
+    trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
+    trials.add_argument("--yes", action="store_true", help="run without asking")
+    trials.set_defaults(handler=_trials)
+    scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
+    scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")
+    scoring.add_argument("--scans", required=True, help="Scout results directory with the tells scanner")
+    scoring.add_argument("--out", help="also write the score JSON here")
+    scoring.set_defaults(handler=_score)
+    comparing = commands.add_parser(
+        "compare", help="bootstrap candidate minus champion tells per trial",
+        description="Pool per_trial from the champion (--a) and candidate (--b) score files and bootstrap the "
+                    "difference of means (B - A). Decision: better if the 95% interval's upper bound < -margin, worse if its lower bound > margin, "
+                    "else unclear.")
+    comparing.add_argument("--a", nargs="+", required=True, metavar="FILE", help="champion score files")
+    comparing.add_argument("--b", nargs="+", required=True, metavar="FILE", help="candidate score files")
+    comparing.add_argument("--margin", type=float, default=0, help="tells per trial the interval must clear")
+    comparing.set_defaults(handler=_compare)
 
     args = parser.parse_args(argv)
     args.extra = extra

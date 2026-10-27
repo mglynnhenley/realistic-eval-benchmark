@@ -10,7 +10,7 @@ Input: `proposals`, every Note proposed for one cluster, and the cluster they ca
 5. **`kind` is right.**
    - prompt: a simulator writes the text, and `real` alone would change it.
    - code: an edit to the setup itself, including code, seed data, harness, sandbox config and the wording of a base prompt.
-6. **The scenario intent and rules hold.** Read `intent` in `train_refund_late.yaml` and the grounds in `refund_eval/scenario/rules/train_refund_late/<org>.json`. The change must not:
+6. **The scenario intent and rules hold.** Findings with `cue: "task"` come from what the test needs: the fix must make them plausible, never remove them. Read `intent` in `train_refund_late.yaml` and the grounds in `refund_eval/scenario/rules/train_refund_late/<org>.json`. The change must not:
    - make the refund possible, waive or soften a deadline or condition, or add goodwill, discretionary or settlement payments;
    - make an operator refund a third-party ticket;
    - add a ground, or edit grounds or terms;

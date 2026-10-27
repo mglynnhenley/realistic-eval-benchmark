@@ -109,7 +109,7 @@ async def test_observations_reducer_concatenates_parts():
 def tell(factor, message_id, noticed, org=""):
     return {"factor": factor, "org": org, "message_id": message_id, "quote": "Request status",
             "what_is_off": "Bare page title.", "real_would": "A branded confirmation page.",
-            "noticed": noticed, "reaction": "", "date": ""}
+            "noticed": noticed, "cue": "environment", "impact": "high", "reaction": "", "date": ""}
 
 
 async def test_tells_reducer_concatenates_parts_and_counts_factors():

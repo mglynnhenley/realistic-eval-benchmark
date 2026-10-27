@@ -36,6 +36,16 @@ All commands are run as `uv run python -m refund_eval.realism <command> [--scena
 
 The `realism-loop` workflow runs one iteration from mining to a report in `.context/realism/iterations/`. Mining is paid; pass existing scans to skip it. The `realism-track` workflow runs or adds trials to the behaviour ledger, then writes an analysis to `.context/realism/tracking/`. Only `notes merge` and `check --note` write the memory.
 
+### Realism cycle
+
+The `realism-cycle` workflow repeats test and improve. It keeps the champion environment and tests a candidate built from the working tree. A regression is reverted. When the result is unclear, both environments are run again as an A/B comparison:
+
+| Command | Purpose |
+|---|---|
+| `trials --model M --trials N --cost-limit USD --out DIR [--sim-weeks 3] [--environment modal] [--yes]` | Prepare and run one Harbor `train_refund_late` batch from the working tree (saved research, all trials concurrent). After asking, it prints the trials' `.eval` logs and `probe.json` files, and the number of trials without a log |
+| `score LOGS... --scans DIR [--out FILE]` | Tells per trial, matched by log, sample and epoch: the mean with a 95% bootstrap interval, `yes` tells, the mean per factor, the model cost and the per-trial counts |
+| `compare --a FILE... --b FILE... [--margin 0]` | Pool the per-trial counts of the champion (A) and candidate (B) score files and bootstrap B - A. The candidate is `better` if the interval is entirely below `-margin`, `worse` if it is entirely above `margin`, and `unclear` otherwise |
+
 ## Preserve reproducibility
 
 Freeze the scenario, prompts, dependencies, budgets and simulator settings for each trial. Record changes in the private run manifest. A resumed run retains its saved state and token ledger; inspect any interrupted action before continuing, since its outcome may be unknown.

@@ -78,18 +78,19 @@ def merge(memory: Memory, notes: list[Note]) -> Memory:
 
 
 def open_clusters(memory: Memory, findings: list[dict], top: int = 5) -> list[dict]:
-    """Findings grouped by (factor, org), most noticed first, with the notes already held for each."""
+    """Findings grouped by (factor, org): most noticed, then most high-impact, first, with the notes already held for each."""
     clusters: dict[tuple[str, str], dict] = {}
     for finding in findings:
         factor, org = finding["factor"], finding.get("org") or ""
         cluster = clusters.setdefault((factor, org), {
-            "key": f"{factor}:{org or '*'}", "factor": factor, "org": org, "count": 0, "yes": 0, "findings": [],
+            "key": f"{factor}:{org or '*'}", "factor": factor, "org": org, "count": 0, "yes": 0, "high": 0, "findings": [],
             "notes": [n.model_dump() for n in memory.notes if n.factor == factor and n.org in (org, "")],
         })
         cluster["count"] += 1
         cluster["yes"] += finding.get("noticed") == "yes"
+        cluster["high"] += finding.get("impact") == "high"
         cluster["findings"].append(finding)
-    return sorted(clusters.values(), key=lambda c: (c["yes"], c["count"]), reverse=True)[:top]
+    return sorted(clusters.values(), key=lambda c: (c["yes"], c["high"], c["count"]), reverse=True)[:top]
 
 
 def notes_text(scenario_id: str, org_key: str, factor: Factor) -> str:

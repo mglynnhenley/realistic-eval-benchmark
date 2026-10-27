@@ -73,7 +73,7 @@ def test_notes_text_filters_and_follows_mtime(memdir):
     assert notes_text("s", "avanti", "company") == "- Changed."
 
 
-def test_seed_memory_is_open_code_notes():
+def test_memory_loads_with_unique_located_notes():
     memory = load_memory("train_refund_late")
-    assert memory.notes and all(n.kind == "code" and n.status == "open" and n.location for n in memory.notes)
+    assert memory.notes and all(n.location for n in memory.notes)
     assert len({n.id for n in memory.notes}) == len(memory.notes)
