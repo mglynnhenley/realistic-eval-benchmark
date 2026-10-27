@@ -61,6 +61,9 @@ def test_private_gp_thread_is_in_mailbox_only():
     assert len(gp_mail) == 2
     assert all("migraine" in email.body.lower() for email in gp_mail)
     assert all("outside the clinical team" in " ".join(email.body.split()) for email in gp_mail)
+    assert all("private" not in email.subject.lower() for email in gp_mail)
+    reply = next(e for e in gp_mail if e.id == "seed-gp-reply")
+    assert "keep this correspondence confidential" not in reply.body
     prompt = render_system_prompt(late) + "\n" + task_message(late)
     assert "migraine" not in prompt.lower()
     assert "Dr Shah" not in prompt
