@@ -32,7 +32,8 @@ from refund_eval.output_paths import validate_private_output
 
 ROOT = Path(__file__).resolve().parents[1]
 JUDGES = ["openrouter/anthropic/claude-opus-5.5", "openrouter/openai/gpt-6.1-sol"]
-SCANNERS = [*scout_scanners.BEHAVIOURS, "observations"]
+UNGRADED = ["observations", "tells"]
+SCANNERS = [*scout_scanners.BEHAVIOURS, *UNGRADED]
 OPENROUTER = "https://openrouter.ai/api/v1"
 # Approximate characters per input token, configurable here by provider.
 # Estimates are for planning only; billing depends on the provider's tokenizer.
@@ -110,7 +111,7 @@ def estimate(logs: list[str], judges: list[str], names: list[str], limit: int | 
 
 
 def results(locations: dict[str, str]) -> pd.DataFrame:
-    """One row per transcript x scanner x judge. Observations count their items."""
+    """One row per transcript x scanner x judge. Observations count their items; tells show yes/possible."""
     rows = []
     for judge, location in locations.items():
         for name, df in scan_results_df(location).scanners.items():
@@ -120,6 +121,10 @@ def results(locations: dict[str, str]) -> pd.DataFrame:
                     value = "error"
                 elif name == "observations":
                     value = str(len(json.loads(r["value"])["observations"]))
+                elif name == "tells":
+                    tells = json.loads(r["value"])["tells"]
+                    yes = sum(t["noticed"] == "yes" for t in tells)
+                    value = f"{yes}/{len(tells) - yes}"
                 else:
                     value = str(r["value"])
                 rows.append({
@@ -162,11 +167,11 @@ def load_validation(path: Path) -> list[dict[str, str]]:
 def report(df: pd.DataFrame, validation: list[dict[str, str]] | None = None) -> None:
     table = df.pivot_table(index=["model", "transcript"], columns=["scanner", "judge"], values="value", aggfunc="first")
     table = table[sorted(table.columns, key=lambda c: (SCANNERS.index(c[0]), c[1]))]
-    print("\nResults (observations = number of items flagged):")
+    print("\nResults (observations = number of items flagged; tells = noticed yes/possible):")
     print(table.to_string())
 
     print("\nJudges differ by 2 or more:")
-    graded = df[df["value"].str.isdigit() & (df["scanner"] != "observations")].astype({"value": int})
+    graded = df[df["value"].str.isdigit() & ~df["scanner"].isin(UNGRADED)].astype({"value": int})
     spread = graded.groupby(["model", "transcript", "scanner"])["value"].agg(["min", "max"])
     wide = spread[spread["max"] - spread["min"] >= 2]
     for (model, transcript, scanner), _ in wide.iterrows():
@@ -193,7 +198,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--judges", nargs="+", default=JUDGES, help="Judge models, one scan each")
     parser.add_argument("--scans", default="scans", help="Results directory (default: scans/)")
     parser.add_argument("--validation", type=Path, help="Optional private validation CSV (log,behaviour,op,value,note)")
-    parser.add_argument("--scanners", nargs="+", default=SCANNERS, choices=SCANNERS, help="Scanners to run (default: all six)")
+    parser.add_argument("--scanners", nargs="+", default=SCANNERS, choices=SCANNERS, help="Scanners to run (default: all)")
     parser.add_argument("--limit", type=int, help="Scan only the first N transcripts")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
     args = parser.parse_args(argv)

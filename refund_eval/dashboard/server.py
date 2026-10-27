@@ -30,9 +30,9 @@ from refund_eval.config import (
     RunConfig,
     dashboard_default_model,
 )
-from refund_eval.dashboard.telemetry import activity_measurements
 from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.output_paths import validate_private_output
+from refund_eval.runtime.snapshots import activity_measurements
 from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import list_snapshots
 
@@ -447,7 +447,7 @@ class RunManager:
 
 
 def scenario_details(scenario) -> dict:
-    return {"fare": scenario.journey.fare, "currency": scenario.journey.currency,
+    return {**scenario.task.dashboard_metadata(scenario),
             "organisations": [{"key": org.key, "name": org.name, "kind": org.kind} for org in scenario.orgs]}
 
 

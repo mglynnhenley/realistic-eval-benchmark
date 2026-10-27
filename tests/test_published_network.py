@@ -19,7 +19,7 @@ from refund_eval.published.network import (
     response,
     validate_public_url,
 )
-from refund_eval.published.profile import search_policy
+from refund_eval.published.profile import allow_search_request
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.guards import check_url
@@ -130,32 +130,30 @@ async def test_dns_private_answers_are_rejected_at_socket_resolver(monkeypatch):
 
 
 def test_search_policy_checks_argument_shape_only(ctx):
-    allow = search_policy(ctx.scenario)
-    assert allow({"arguments": {"query": "rail refund deadlines", "objective": "Find public rules"}})
+    assert allow_search_request({"arguments": {"query": "rail refund deadlines", "objective": "Find public rules"}})
     # The user's own details are ordinary search terms; the audit records them.
-    assert allow({"arguments": {"query": "rail refund", "objective": ctx.user_email}})
-    assert allow({"arguments": {"query": ctx.scenario.journey.booking_ref, "objective": "Find rules"}})
-    assert not allow({"arguments": {"query": "rail refund", "objective": "Find rules", "livecrawl": "always"}})
-    assert not allow({"arguments": {"query": " ", "objective": "Find rules"}})
-    assert not allow({"arguments": {"query": "rail refund"}})
+    assert allow_search_request({"arguments": {"query": "rail refund", "objective": ctx.user_email}})
+    assert allow_search_request({"arguments": {"query": ctx.scenario.journey.booking_ref, "objective": "Find rules"}})
+    assert not allow_search_request({"arguments": {"query": "rail refund", "objective": "Find rules", "livecrawl": "always"}})
+    assert not allow_search_request({"arguments": {"query": " ", "objective": "Find rules"}})
+    assert not allow_search_request({"arguments": {"query": "rail refund"}})
 
 
 def test_search_policy_allows_every_address_but_not_credentials(ctx):
-    allow = search_policy(ctx.scenario)
-    assert allow({"arguments": {
+    assert allow_search_request({"arguments": {
         "query": "Trainline customer service email address support@thetrainline.com refund complaints 2026",
         "objective": "Check that this support address is real"}})
-    assert allow({"arguments": {
+    assert allow_search_request({"arguments": {
         "query": f"refund for {ctx.user_email} support@thetrainline.com", "objective": "Find rules"}})
-    assert not allow({"arguments": {"query": "trainline login", "objective": "password: hunter2"}})
-    assert not allow({"arguments": {"query": "api token=abc123", "objective": "Find rules"}})
+    assert not allow_search_request({"arguments": {"query": "trainline login", "objective": "password: hunter2"}})
+    assert not allow_search_request({"arguments": {"query": "api token=abc123", "objective": "Find rules"}})
 
 
 async def test_searches_carrying_the_users_details_go_out_and_are_audited(ctx):
     from refund_eval.published.fixture_web import FixtureSearchService
 
     events = []
-    service = FixtureSearchService(ctx, policy=search_policy(ctx.scenario), audit=events.append)
+    service = FixtureSearchService(ctx, policy=allow_search_request, audit=events.append)
     args = {"query": f"refund {ctx.user_email} booking {ctx.scenario.journey.booking_ref}",
             "objective": f"Find {ctx.scenario.user.name}'s booking"}
     result = await service.call_tool("web_search_exa", args)

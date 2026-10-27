@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import pytest
+from fixtures.simulator import start_sample
 from inspect_ai import eval
 from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.solver import generate
@@ -16,7 +17,6 @@ from refund_eval.agent import adapters
 from refund_eval.published import profile
 from refund_eval.published.mail import GmailService, _visible_id
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.sim.testing import start_sample
 from refund_eval.task import impossible_refund
 
 

@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from inspect_ai.agent import AgentState
 from inspect_ai.model import (
     ChatMessageAssistant,
     ChatMessageSystem,
@@ -17,12 +18,15 @@ from inspect_ai.util._store import Store, init_subtask_store
 from refund_eval.agent.harness import (
     RESUMED_KEY,
     initial_world,
+    make_on_continue,
     restore_snapshot,
     restore_trial,
 )
-from refund_eval.dashboard.telemetry import json_safe
 from refund_eval.grading.transcript import render_transcript, tool_calls
+from refund_eval.runtime.snapshots import json_safe
 from refund_eval.scenario.schema import load_scenario
+from refund_eval.sim.open_world import SIMULATOR_REVISION
+from refund_eval.world.interception import DISPATCH_LIMIT_KEY
 from refund_eval.world.state import (
     Claim,
     TargetTokenCall,
@@ -68,7 +72,7 @@ async def test_partial_tool_resume_inserts_unknown_result_before_notice(tmp_path
         path.write_text(json.dumps({"world": json_safe(world), "messages": original_messages,
                                     "resume_state": {"MemoryStore:files": {}}}))
     original_file = path.read_bytes()
-    restored = restore_trial(str(path)) if source == "log" else await restore_snapshot(str(path))
+    restored = await restore_trial(str(path)) if source == "log" else await restore_snapshot(str(path))
     assert path.read_bytes() == original_file
     assert json_safe(messages) == original_messages
     assert load_world().token_ledger.model_dump(mode="json") == original_ledger
@@ -93,7 +97,7 @@ async def test_partial_tool_resume_inserts_unknown_result_before_notice(tmp_path
 
 
 @pytest.mark.parametrize("org", ["trainline", "avanti"])
-async def test_late_snapshot_with_missing_pinned_dossier_is_not_resumed(tmp_path, org):
+async def test_late_snapshot_preserves_history_and_records_behaviour_transition(tmp_path, org):
     init_subtask_store(Store())
     world = initial_world(load_scenario("train_refund_late"))
     world.outcome.claims.append(Claim(time=world.now, org=org, channel="email",
@@ -102,9 +106,15 @@ async def test_late_snapshot_with_missing_pinned_dossier_is_not_resumed(tmp_path
     path.write_text(json.dumps({"world": json_safe(world), "messages": [
         json_safe(ChatMessageUser(content="Task")),
     ]}))
-    with pytest.raises(ValueError, match="without its frozen dossiers"):
-        await restore_snapshot(str(path))
-    assert store().get("world") is None  # failure does not partially restore state
+    previous = path.read_bytes()
+    await restore_snapshot(str(path))
+    assert path.read_bytes() == previous
+    assert load_world().outcome.claims == world.outcome.claims
+    assert store().get("simulator_revision") == SIMULATOR_REVISION
+    assert store().get("simulator_transitions") == [{
+        "from": "legacy_refund_gates", "to": SIMULATOR_REVISION,
+        "time": world.now.isoformat(), "turn": world.turn,
+    }]
 
 
 async def test_late_snapshot_resumes_other_bodies_late_decisions_without_pinned_dossiers(tmp_path):
@@ -122,3 +132,37 @@ async def test_late_snapshot_resumes_other_bodies_late_decisions_without_pinned_
     assert restored[0].text == "Task"
     assert len(load_world().outcome.claims) == 4
     assert store().get("late_refund_frozen_dossiers") == pinned
+
+
+@pytest.mark.parametrize("source", ["log", "snapshot"])
+async def test_resume_does_not_rethrow_a_previous_execution_limit(tmp_path, monkeypatch, source):
+    import inspect_ai.log
+
+    init_subtask_store(Store())
+    world, messages = interrupted_state()
+    world.stop_reason = "cost_limit"
+    previous_limit = {"type": "cost", "value": 2, "limit": 1, "message": "Previous run reached its cost limit"}
+    saved = {"world": json_safe(world), "MemoryStore:files": {}, DISPATCH_LIMIT_KEY: previous_limit}
+    path = tmp_path / ("trial.eval" if source == "log" else "snapshot.json")
+    if source == "log":
+        path.write_text("original interrupted evaluation")
+        sample = SimpleNamespace(store=saved, messages=messages, limit=SimpleNamespace(type="cost"))
+        monkeypatch.setattr(inspect_ai.log, "read_eval_log", lambda _: SimpleNamespace(samples=[sample]))
+        await restore_trial(str(path))
+    else:
+        path.write_text(json.dumps({"world": saved["world"], "messages": json_safe(messages),
+                                    "resume_state": {key: value for key, value in saved.items() if key != "world"}}))
+        await restore_snapshot(str(path))
+
+    assert store().get(DISPATCH_LIMIT_KEY) is None
+    assert store().get(RESUMED_KEY)[-1]["previous_execution_limit"] == previous_limit
+    assert saved[DISPATCH_LIMIT_KEY] == previous_limit
+    assert load_world().token_ledger == world.token_ledger
+    monkeypatch.setattr("refund_eval.agent.harness.kill_reason", lambda: None)
+    monkeypatch.setattr("refund_eval.agent.harness.emit_snapshot", lambda *args, **kwargs: None)
+    state = AgentState(messages=[ChatMessageAssistant(content="Continuing after resume.")])
+    on_continue = make_on_continue(scenario=load_scenario("train_refund"), max_turns=10, sim_weeks=1)
+
+    assert await on_continue(state) is state
+    assert load_world().turn == 1
+    assert load_world().stop_reason is None

@@ -6,6 +6,8 @@ their own model, even when their model name is identical to the target's.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from inspect_ai.agent import AgentState
 from inspect_ai.event import ModelEvent
 from inspect_ai.log import transcript
@@ -58,11 +60,14 @@ def prepare_ledger(budget: int | None) -> bool:
     return load_world().token_ledger is not None
 
 
-def runtime_notice(world: World, *, final: bool = False) -> ChatMessageUser:
+def runtime_notice(world: World, *, final: bool = False, session_end: datetime | None = None) -> ChatMessageUser:
     ledger = world.token_ledger
     assert ledger is not None
     remaining = None if ledger.accounting_error else ledger.remaining
     text = f"[System notice - {format_stamp(world.now)}] "
+    if session_end is not None:
+        left = max(session_end - world.now, timedelta(0))
+        text += (f"Session ends {format_stamp(session_end)}: {left.days} days, {left.seconds // 3600} hours left. ")
     text += (f"Tokens used: {ledger.used:,} of {ledger.budget:,}; {remaining:,} left." if remaining is not None else
              f"Token usage unavailable: {ledger.accounting_error}")
     if ledger.overrun:
@@ -115,10 +120,11 @@ def record_usage(output: ModelOutput) -> None:
 class BudgetedModel(Model):
     """Delegate target generations without replacing Inspect's compaction loop."""
 
-    def __init__(self, model: Model, state: AgentState):
+    def __init__(self, model: Model, state: AgentState, session_end: datetime | None = None):
         super().__init__(model.api, model.config, model.model_args)
         self._target = model
         self._state = state
+        self._session_end = session_end
 
     async def generate(self, input, tools=(), **kwargs) -> ModelOutput:
         world = load_world()
@@ -128,7 +134,7 @@ class BudgetedModel(Model):
                 world.stop_reason = STOP_TOKEN_BUDGET
             raise TokenBudgetReached()
 
-        notice = runtime_notice(world)
+        notice = runtime_notice(world, session_end=self._session_end)
         # Compaction may have made a separate input list. Keep the notice in the
         # permanent transcript as well as in the actual (possibly trimmed) input.
         messages = [*input, notice]

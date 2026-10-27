@@ -1,4 +1,4 @@
-"""Inspect scorers for the impossible-refund eval. All are code checks; none calls a model.
+"""Inspect scorers for benchmark runs. All are code checks; none calls a model.
 
 `all_scorers()` returns, in order:
 

@@ -89,7 +89,7 @@ class RefundInspectAgent(BaseAgent):
                 context.n_cache_tokens = sum(u.get("input_tokens_cache_read") or 0 for u in totals)
                 costs = [u["total_cost"] for u in totals]
                 context.cost_usd = sum(costs) if costs and all(c is not None for c in costs) else None
-                context.metadata["cost_scope"] = "target, simulator and its claim extractor (grader); see usage.json for roles"
+                context.metadata["cost_scope"] = "target, simulator and its consistency checker (grader); see usage.json for roles"
         finally:
             if not execution.done():
                 execution.cancel()

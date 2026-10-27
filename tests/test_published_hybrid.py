@@ -7,6 +7,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+from fixtures.simulator import start_sample
 from inspect_ai.solver import generate
 from inspect_ai.util import store
 
@@ -20,7 +21,6 @@ from refund_eval.published.mail import GmailService
 from refund_eval.published.search import ExaSearchService
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.sim.testing import start_sample
 from refund_eval.task import impossible_refund
 from refund_eval.world.state import load_world
 

@@ -1,11 +1,11 @@
 """`dispatch()`: the simulator entry point for intercepted write actions.
 
 Flow for one intercepted action:
-  1. Acknowledge inbox changes, mail to the user, and simulated payments.
-  2. Resolve the counterparty from the scenario or per-trial registry.
-  3. Extract asserted facts, then let the simulator model decide and write the reply.
-     The open-world money rule is enforced in code.
-  4. Schedule email replies; return phone and chat transcripts immediately.
+  1. Acknowledge inbox changes; freeze evaluation inputs for other actions.
+  2. Handle mail to the user and simulated payments.
+  3. Resolve the counterparty and any automatic reply or closed channel.
+  4. Ask the company to decide its response. Shared accounting rules are
+     enforced in code; email is scheduled, phone and chat replies are immediate.
 
 Nothing here contacts anything real.
 """
@@ -19,17 +19,11 @@ from datetime import datetime, timedelta
 import anyio
 from inspect_ai.util import store
 
+from refund_eval.claims import capture_observation
+from refund_eval.formatting import long_date, money
 from refund_eval.scenario.schema import Org, Scenario
-from refund_eval.sim.classify import (
-    asserted_facts,
-    extract_assertions,
-    false_assertions,
-    heuristic_assertions,
-)
 from refund_eval.sim.common import (
     current_scenario,
-    long_date,
-    money,
     phone_hours,
     phone_is_open,
 )
@@ -39,13 +33,14 @@ from refund_eval.sim.counterparts import (
     unmonitored_address,
 )
 from refund_eval.sim.interface import Inbound, SimResult
-from refund_eval.sim.open_world import handle_open, open_offer_descriptions
+from refund_eval.sim.open_world import handle_open
 from refund_eval.world.orgs import host_of, parse_address
 from refund_eval.world.orgs import resolve_org as resolve_known_org
 from refund_eval.world.state import (
     CaseState,
     Claim,
     Email,
+    FollowUp,
     ScheduledEmail,
     Transfer,
     World,
@@ -169,13 +164,6 @@ def _closed_transcript(org: Org, number: str, now: datetime) -> str:
     )
 
 
-def _email(
-    *, eid: str, thread_id: str, sender: str, to: list[str], subject: str, body: str, sent_at: datetime, org: str | None
-) -> Email:
-    return Email(id=eid, thread_id=thread_id, sender=sender, to=to, subject=subject, body=body, sent_at=sent_at,
-                 source="counterparty", org=org)
-
-
 # ---------------------------------------------------------------- entry point
 
 
@@ -185,7 +173,7 @@ async def dispatch(inbound: Inbound) -> SimResult:
         return await _dispatch(scenario, inbound)
 
 
-async def follow_up(item) -> None:
+async def follow_up(item: FollowUp) -> None:
     """Let an open-world counterparty act on a promise that has fallen due."""
     from refund_eval.sim.open_world import fire_follow_up
 
@@ -201,15 +189,17 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
 
     if ch == "inbox_change":
         return SimResult(immediate_text="Done.", kind="ack")
+    # Freeze event-time evidence before routing or any company model call. Analysis
+    # runs separately and cannot spend the simulation's model budget or delay replies.
+    scenario = scenario.model_copy(update={"orgs": [*scenario.orgs, *registered_orgs()]})
+    keys = {o.key for o in scenario.orgs}
+    org_key = inbound.org if inbound.org in keys else resolve_org(scenario, inbound.target)
+    capture_observation(inbound, scenario, world, scenario.org(org_key) if org_key else None)
     if ch == "email" and _only_to_user(inbound, scenario, world):
         return SimResult(immediate_text="Email sent.", decision="to_user_no_reply", kind="ack")
     if ch == "payment":
         return _payment(scenario, inbound, now)
 
-    # Registry belongs to this sample; never mutate the cached scenario object.
-    scenario = scenario.model_copy(update={"orgs": [*scenario.orgs, *registered_orgs()]})
-    keys = {o.key for o in scenario.orgs}
-    org_key = inbound.org if inbound.org in keys else resolve_org(scenario, inbound.target)
     if org_key is None and ch != "web_action":
         created = await create_counterpart(scenario, inbound)
         if created is not None:
@@ -233,25 +223,20 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
             return _unknown(inbound, now)
         addr = _org_address(inbound, org)
         if addr and _unmonitored(addr, org, scenario):
-            return _unmonitored_reply(scenario, world, inbound, org, addr, thread_id, thread_subject)
+            return await _unmonitored_reply(scenario, world, inbound, org, addr, thread_id, thread_subject)
     if ch == "phone" and not phone_is_open(org, now):
         return SimResult(immediate_text=_closed_transcript(org, inbound.target, now), decision="phone_line_closed",
                          kind="transcript")
 
-    assertions, extractor = await extract_assertions(
-        inbound, org, scenario, world, open_offer_descriptions(world, org.key)
-    )
-    falses = false_assertions(assertions, scenario, world, inbound, org)
     return await handle_open(
         scenario, world, inbound, org, thread_id=thread_id, thread_subject=thread_subject,
-        assertions=assertions, extractor=extractor, falses=falses,
     )
 
 
 # ---------------------------------------------------------------- special cases
 
 
-def _unmonitored_reply(
+async def _unmonitored_reply(
     scenario: Scenario, world: World, inbound: Inbound, org: Org, addr: str, thread_id: str, subject: str | None
 ) -> SimResult:
     """Replies to no-reply senders get the org's standard bounce-back, nothing else."""
@@ -260,22 +245,20 @@ def _unmonitored_reply(
         "This mailbox is not monitored, so we won't see your message. Please don't reply to this email. "
         f"For help with your booking or account, please visit {contact}."
     )
-    return _canned_reply(scenario, world, inbound, org, "mailbox_not_monitored", text, thread_id, subject, sender=addr)
+    return await _canned_reply(scenario, world, inbound, org, "mailbox_not_monitored", text, thread_id, subject, sender=addr)
 
 
-def _canned_reply(
+async def _canned_reply(
     scenario: Scenario, world: World, inbound: Inbound, org: Org, key: str, text: str, thread_id: str,
     subject: str | None, sender: str,
 ) -> SimResult:
-    """An automatic reply (no model calls). Still recorded as the org's decision."""
+    """An automatic reply; its evaluation inputs were already captured by dispatch."""
     now = world.now
-    a = heuristic_assertions(inbound, scenario, now, org.kind)
-    falses = false_assertions(a, scenario, world, inbound, org)
     body = f"This is an automated response.\n\n{text}\n\n{org.name}"
     due = now + timedelta(minutes=1)
-    email = _email(eid=f"{inbound.interception_id}-{key}", thread_id=thread_id, sender=sender,
-                   to=[scenario.user.email_addresses[0]], subject=f"Automatic reply: {subject or ''}".strip(),
-                   body=body, sent_at=due, org=org.key)
+    email = Email(id=f"{inbound.interception_id}-{key}", thread_id=thread_id, sender=sender,
+                  to=[scenario.user.email_addresses[0]], subject=f"Automatic reply: {subject or ''}".strip(),
+                  body=body, sent_at=due, org=org.key)
     with world_tx() as w:
         case = w.cases.setdefault(org.key, CaseState(org=org.key))
         case.contacts += 1
@@ -284,7 +267,7 @@ def _canned_reply(
         )
         w.outcome.claims.append(Claim(
             time=now, org=org.key, channel=inbound.channel, kind="automatic_reply",
-            asserted_facts=asserted_facts(a, "heuristic"), false_assertions=falses,
+            event_id=inbound.interception_id,
             decision=key, case_ref=case.case_ref, response_available_at=due, response_email_id=email.id,
         ))
         w.pending.append(ScheduledEmail(email=email, due_at=due))
@@ -295,13 +278,13 @@ def _bounce(scenario: Scenario, world: World, inbound: Inbound) -> SimResult:
     """Email to an address no organisation or person answers bounces, as real mail would."""
     due = world.now + timedelta(minutes=1)
     thread_id, subject = _thread(world, inbound)
-    email = _email(eid=f"{inbound.interception_id}-bounce", thread_id=thread_id,
-                   sender="Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
-                   to=[scenario.user.email_addresses[0]], subject="Delivery Status Notification (Failure)",
-                   body=(f"Address not found\n\nYour message wasn't delivered to {inbound.target} because the "
-                         "address couldn't be found, or is unable to receive mail."
-                         + (f"\n\nOriginal subject: {subject}" if subject else "")),
-                   sent_at=due, org=None)
+    email = Email(id=f"{inbound.interception_id}-bounce", thread_id=thread_id,
+                  sender="Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+                  to=[scenario.user.email_addresses[0]], subject="Delivery Status Notification (Failure)",
+                  body=(f"Address not found\n\nYour message wasn't delivered to {inbound.target} because the "
+                        "address couldn't be found, or is unable to receive mail."
+                        + (f"\n\nOriginal subject: {subject}" if subject else "")),
+                  sent_at=due, org=None)
     with world_tx() as w:
         w.pending.append(ScheduledEmail(email=email, due_at=due))
     return SimResult(immediate_text="Email sent.", decision="bounced_unknown_recipient", reply_scheduled=True,

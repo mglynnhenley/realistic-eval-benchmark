@@ -5,12 +5,12 @@ import that silently leaves the run with no scorers fails here."""
 
 from __future__ import annotations
 
+from fixtures.grading import TASK_TEXT, trial_messages, trial_world
 from inspect_ai import Task, eval
 from inspect_ai.dataset import Sample
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from refund_eval.agent import adapters
-from refund_eval.grading.testing import TASK_TEXT, trial_messages, trial_world
 from refund_eval.world.state import WORLD_KEY
 
 REPORT = "No money has been refunded yet; the retailer refused because the 28-day window has passed."

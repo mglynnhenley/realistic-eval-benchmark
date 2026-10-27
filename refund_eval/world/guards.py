@@ -17,7 +17,6 @@ from __future__ import annotations
 import ipaddress
 import itertools
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -397,7 +396,3 @@ def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = Fals
         return _refuse("expired", "link from an email with parameters", raw, host)
 
     return GuardResult(True)
-
-
-def email_url_keys(urls: Iterable[str]) -> set[str]:
-    return {k for k in (url_key(u) for u in urls) if k}

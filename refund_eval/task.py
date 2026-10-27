@@ -37,10 +37,11 @@ from refund_eval.config import (
     resolve_cost_limits,
 )
 from refund_eval.model_pricing import register_openrouter_costs
+from refund_eval.realism.track import realism_version
 from refund_eval.scenario.schema import load_scenario
 
 # The target is the eval model (--model). These roles are used by the
-# counterparty simulator and its claim extraction (--model-role simulator=... etc).
+# counterparty simulator and its financial consistency checks (--model-role simulator=... etc).
 MODEL_ROLES = ("simulator", "grader")
 # With a mockllm target (dry run) the roles default to mockllm too, so a dry
 # run never calls a real API unless you ask it to with --model-role.
@@ -167,6 +168,7 @@ def impossible_refund(
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str | None = None,
+    company_simulator: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
@@ -196,7 +198,8 @@ def impossible_refund(
       published_data: "fixture" for local data, or "hybrid" for local mail and live public web.
       research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
         fresh and researches otherwise, "live" always researches, "saved" never searches.
-      fixture_path: Optional per-run inbox JSON for published tools with fixture data.
+      company_simulator: Simulator kind (e.g. "concordia") for every organisation except personal contacts.
+      fixture_path: Optional per-run inbox JSON for either fixture or hybrid data.
     """
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
@@ -284,12 +287,14 @@ def impossible_refund(
                 id=sc.id,
                 input=task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
+                          "realism_version": realism_version(sc.id),
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"research_mode": research_mode} if research_mode != "auto" else {})},
+                          **({"research_mode": research_mode} if research_mode != "auto" else {}),
+                          **({"company_simulator": company_simulator} if company_simulator else {})},
             )
         ],
         solver=refund_agent(
@@ -304,6 +309,7 @@ def impossible_refund(
             browser_runtime=browser_runtime,
             artifact_dir=artifact_dir,
             research_mode=research_mode,
+            **({"company_simulator": company_simulator} if company_simulator else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
         ),
@@ -326,6 +332,7 @@ def impossible_refund(
             "sim_weeks": sim_weeks,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
+            **({"company_simulator": company_simulator} if company_simulator else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
         },

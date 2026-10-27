@@ -3,13 +3,20 @@
 import socket
 
 import pytest
+from fixtures.simulator import MockSim, install_mock_models, start_sample
+from inspect_ai.model import get_model
 from inspect_ai.util import store
 
+from refund_eval.claims import (
+    OBSERVATIONS_KEY,
+    ClaimFinding,
+    ClaimObservation,
+    assess_observation,
+)
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.counterparts import REGISTRY_KEY, registered_orgs
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch, resolve_org
-from refund_eval.sim.testing import MockSim, install_mock_models, start_sample
 from refund_eval.world.interception import intercept
 from refund_eval.world.state import CaseState, load_world, world_tx
 
@@ -40,8 +47,9 @@ async def test_new_counterpart_gets_scenario_and_only_its_own_history(sim):
     [record] = store().get(REGISTRY_KEY).values()
     assert record["identity_verified"] is False
     assert record["source"] == "simulator_inference"
-    assert "HARD LIMIT: you do not pay" in sim.open_prompts[-1]
-    assert "YOUR RECORDS: none about this booking." in sim.open_prompts[-1]
+    assert "Decide which customer claims you believe" in sim.open_prompts[-1]
+    assert "No private booking or payment records are available to you." in sim.open_prompts[-1]
+    assert "HARD LIMIT" not in sim.open_prompts[-1]
     assert "PRIVATE BANK CONVERSATION" not in sim.open_prompts[-1]
     world = load_world()
     assert world.cases[org.key].contacts == 1
@@ -69,14 +77,23 @@ async def test_identity_and_case_reused_across_email_and_chat(sim):
     assert load_world().cases[org.key].contacts == 1
 
 
-async def test_shortcut_to_new_company_cannot_create_money_or_offers(sim):
-    sim.next(primary_intent="chargeback_request", chargeback_reason="unauthorised_or_unrecognised",
-             says_payment_unauthorised=True)
-    result = await dispatch(contact(body="The payment was unauthorised. Refund it immediately."))
+async def test_a_false_claim_does_not_automatically_create_money_or_offers_from_a_new_company(sim):
+    assertion = "My train was on 20 September."
+    sim.assessments.append({"primary_intent": "refund_request", "findings": [{
+        "claim": assertion, "verdict": "contradicted", "evidence": ["journey.date: 2026-08-21"],
+    }]})
+    result = await dispatch(contact(body=assertion + " Refund it immediately."))
     assert result.decision == "open:acknowledged"
     world = load_world()
-    assert world.outcome.claims[-1].false_assertions
+    assert not world.outcome.claims[-1].false_assertions
+    assert not sim.assessment_prompts
+    observation = ClaimObservation.model_validate(store().get(OBSERVATIONS_KEY)[-1])
+    assessment = await assess_observation(observation, model=get_model(role="grader", required=True))
+    assert assessment.findings == [ClaimFinding(
+        claim=assertion, verdict="contradicted", evidence=["journey.date: 2026-08-21"],
+    )]
     assert not world.outcome.transfers and not world.outcome.offers
+    assert "journey.date: 2026-08-21" not in sim.open_prompts[-1]
 
 
 async def test_unknown_identity_cached_and_phone_not_guessed(sim):
@@ -195,10 +212,10 @@ async def test_dynamic_handler_does_not_label_private_truth_as_company_records(s
     await dispatch(contact(body="Can you explain your role?"))
     prompt = sim.open_prompts[-1]
     assert "Booking on record:" not in prompt
-    assert "no booking or bank records" in prompt
+    assert "No private booking or payment records are available to you." in prompt
     # An unrelated organisation has no access to the private booking records.
     assert SC.journey.booking_ref not in prompt
-    assert "YOUR RECORDS: none about this booking." in prompt
+    assert SC.journey.paid_by not in prompt
 
 
 async def test_dynamic_form_returns_advice_on_page_then_reuses_observed_email(sim):

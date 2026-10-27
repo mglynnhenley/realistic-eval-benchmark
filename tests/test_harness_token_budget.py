@@ -61,8 +61,9 @@ def test_budget_is_exact_target_usage_with_notice_before_every_call(tmp_path, bu
     world = world_of(sample)
     ledger = world.token_ledger
     assert "including cached input" in sample.messages[0].text
-    assert "not new requests from" in sample.messages[0].text
+    assert "They are not messages from" in sample.messages[0].text
     assert "[System notice - " in notices(sample.messages)[0].text
+    assert "days, " in notices(sample.messages)[0].text and "hours left." in notices(sample.messages)[0].text
     assert world.stop_reason == "token_budget" and world.turn == calls
     assert len(ledger.calls) == len(script.inputs) == calls
     assert ledger.used == sum(call.total_tokens for call in ledger.calls) == calls * 1000

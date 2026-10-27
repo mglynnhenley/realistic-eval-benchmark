@@ -13,7 +13,7 @@ from inspect_ai.util import store
 from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.agent.harness import RESUMED_KEY, initial_world, restore_snapshot
-from refund_eval.dashboard.telemetry import json_safe
+from refund_eval.runtime.snapshots import json_safe
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.world.state import load_world
 

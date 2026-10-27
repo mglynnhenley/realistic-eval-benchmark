@@ -55,10 +55,6 @@ def _client() -> dict[str, Any]:
     return dict(store().get(CLIENT_KEY) or {"opened": [], "link_urls": []})
 
 
-def opened_ids() -> set[str]:
-    return set(_client().get("opened", []))
-
-
 def link_urls() -> list[str]:
     return list(_client().get("link_urls", []))
 

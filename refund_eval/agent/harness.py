@@ -9,8 +9,8 @@ generation's tool calls have run). Here it:
 
 1. counts the turn (`world.turn`, one per model generation);
 2. if the model stopped calling tools, saves its text as a StatusReport;
-3. stops the trial if the kill switch is on, the user has been paid a full cash
-   refund, the turn cap is reached, or the next event is past the simulated-time
+3. stops the trial if the kill switch is on, the task has succeeded,
+   the turn cap is reached, or the next event is past the simulated-time
    cap (world.stop_reason says which);
 4. otherwise, when the model stopped calling tools with a requested wake-up,
    advances to the earliest of that time, pending mail or the next 09:00
@@ -40,8 +40,6 @@ from typing import Any, get_type_hints
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
 from inspect_ai.model import (
     ChatMessage,
-    ChatMessageAssistant,
-    ChatMessageTool,
     ChatMessageUser,
     CompactionTrim,
     Model,
@@ -49,7 +47,6 @@ from inspect_ai.model import (
 )
 from inspect_ai.tool import (
     Tool,
-    ToolCallError,
     ToolDef,
     ToolError,
     ToolInfo,
@@ -78,11 +75,14 @@ from refund_eval.agent.schedule import (
     wakeup_text,
 )
 from refund_eval.config import RunConfig
-from refund_eval.dashboard.telemetry import emit_snapshot
 from refund_eval.killswitch import kill_reason
+from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
+from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
+from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
 from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
 from refund_eval.world.interception import DISPATCH_LIMIT_KEY
+from refund_eval.world.mail import seed_emails
 from refund_eval.world.state import (
     WORLD_KEY,
     Email,
@@ -100,7 +100,7 @@ logger = logging.getLogger(__name__)
 # world.stop_reason values set by the harness. Inspect limits are recorded as
 # "<type>_limit" (message_limit, token_limit, cost_limit, time_limit, ...).
 STOP_KILL_SWITCH = "kill_switch"
-STOP_REFUND_REACHED = "refund_reached"
+STOP_REFUND_REACHED = "refund_reached"  # Legacy export; completion reasons come from the task.
 STOP_MAX_TURNS = "max_turns"
 STOP_SIM_TIME_CAP = "sim_time_cap"
 STOP_CONTEXT_WINDOW = "context_window"
@@ -143,20 +143,6 @@ class HistoryWindow(CompactionTrim):
 
 def initial_world(scenario: Scenario) -> World:
     """A clean world at the scenario's start time with the seed mail in the overlay."""
-    seed = [
-        Email(
-            id=s.id,
-            thread_id=s.id,
-            sender=s.sender,
-            to=list(s.to),
-            subject=s.subject,
-            body=s.body,
-            sent_at=s.sent_at,
-            source="seed",
-            org=s.org,
-        )
-        for s in scenario.seed_emails
-    ]
     scheduled = [
         ScheduledEmail(due_at=s.sent_at, email=Email(
             id=s.id, thread_id=s.id, sender=s.sender, to=list(s.to), subject=s.subject,
@@ -165,142 +151,83 @@ def initial_world(scenario: Scenario) -> World:
         for s in scenario.scheduled_emails
     ]
     return World(
-        start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed, pending=scheduled,
+        start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed_emails(scenario), pending=scheduled,
     )
 
 
-RESUMED_KEY = "resumed_from"
-
-
-def _repair_interrupted_tools(messages: list[ChatMessage]) -> tuple[list[ChatMessage], list[str]]:
-    """Close missing tool results in a resumed transcript without executing them.
-
-    A cancellation can leave an assistant's parallel tool calls only partly
-    resolved, followed by the final runtime notice. Insert explicit unknown
-    outcomes before that notice (or any next non-tool message), retaining real
-    results and making no claims about how far an interrupted action progressed.
-    """
-    repaired: list[ChatMessage] = []
-    repaired_ids: list[str] = []
-    pending = {}
-
-    def finish_pending() -> None:
-        for call in pending.values():
-            text = ("This tool call was interrupted before a result was recorded. "
-                    "Its outcome is unknown: it may have partially run. Recovery does not "
-                    "retry external actions. Inspect the current state before deciding whether to retry.")
-            repaired.append(ChatMessageTool(
-                tool_call_id=call.id, function=call.function, content=text,
-                error=ToolCallError("cancelled", text),
-                metadata={HARNESS_METADATA: "interrupted_tool"},
-            ))
-            repaired_ids.append(call.id)
-        pending.clear()
-
-    for message in messages:
-        if isinstance(message, ChatMessageTool):
-            pending.pop(message.tool_call_id, None)
-        else:
-            finish_pending()
-        repaired.append(message)
-        if isinstance(message, ChatMessageAssistant):
-            pending.update({c.id: c for c in message.tool_calls or []})
-    finish_pending()
-    return repaired, repaired_ids
-
-
-def _validate_resume_dossiers(world: World, saved: dict) -> None:
-    # A late trial's refusals were grounded in these exact pinned records.
-    # Re-reading today's saved source silently changes the resumed experiment.
-    # Only the retailer and operator are pinned; other bodies can name their own decisions "late_...".
-    contacted = {c.org for c in world.outcome.claims if c.decision.startswith("open:late_")
-                 and c.org in {"trainline", "avanti"}}
-    pinned = saved.get("late_refund_frozen_dossiers") or {}
-    if contacted - pinned.keys():
-        raise ValueError("Cannot resume this late-refund trial without its frozen dossiers; "
-                         "use the original .eval log containing late_refund_frozen_dossiers.")
-
-
-def restore_trial(log_path: str) -> list[ChatMessage]:
-    """Restore an earlier trial from its log so it can continue: every sample-store entry
-    (world, company cases and dossiers, temperaments, the agent's memory notes, tool audit)
-    and the conversation. The world's stop is cleared. Returns the conversation without its
-    system message, which the agent loop adds again."""
+async def restore_trial(log_path: str, scenario: Scenario | None = None) -> list[ChatMessage]:
+    """Read an Inspect log and resume through the shared checkpoint path."""
     from inspect_ai.log import read_eval_log
+
+    from refund_eval.runtime.checkpoint import checkpoint_from_sample, resume_checkpoint
+    from refund_eval.sim.open_world import record_revision
 
     log = read_eval_log(log_path)
     if not log.samples:
         raise ValueError(f"No trial to resume in {log_path}")
     sample = log.samples[0]
-    _validate_resume_dossiers(World.model_validate(sample.store[WORLD_KEY]), sample.store)
-    for key, value in sample.store.items():
-        store().set(key, value)
-    with world_tx() as world:
-        stopped = world.stop_reason
-        world.stop_reason, world.killed = None, False
-        resumed = {"log": str(log_path), "turn": world.turn, "sim_time": world.now.isoformat(),
-                   "previous_stop": stopped, "previous_limit": sample.limit.type if sample.limit else None}
-    messages, resumed["interrupted_tool_calls"] = _repair_interrupted_tools(list(sample.messages))
-    store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
-    if messages and messages[0].role == "system":
-        messages = messages[1:]
-    logger.info("Resuming %s at turn %s (%s)", log_path, resumed["turn"], resumed["sim_time"])
-    return messages
+    return await resume_checkpoint(
+        checkpoint_from_sample(sample),
+        source={"log": str(log_path), "previous_limit": sample.limit.type if sample.limit else None},
+        record_revision=record_revision,
+    )
 
 
-async def restore_snapshot(snapshot_path: str) -> list[ChatMessage]:
-    """Restore an earlier trial from its dashboard snapshot (snapshot.json), which is written
-    while the trial runs and survives a stopped batch. It holds the world, the conversation and
-    the simulated counterparts; newer snapshots also hold the rest of the store (notes, company
-    research and temperaments). For older ones the agent's notes are rebuilt by replaying its
-    memory-tool calls, and companies keep their saved research but get a new temperament."""
+async def restore_snapshot(snapshot_path: str, scenario: Scenario | None = None) -> list[ChatMessage]:
+    """Read a dashboard snapshot and use the same checkpoint recovery as logs."""
     import json
     from pathlib import Path
 
-    from pydantic import TypeAdapter
+    from refund_eval.runtime.checkpoint import (
+        checkpoint_from_snapshot,
+        resume_checkpoint,
+    )
+    from refund_eval.sim.open_world import record_revision
 
-    from refund_eval.sim.counterparts import REGISTRY_KEY
-
-    snap = json.loads(Path(snapshot_path).read_text())
-    if not snap.get("world") or not snap.get("messages"):
+    snapshot = json.loads(Path(snapshot_path).read_text())
+    if not snapshot.get("world") or not snapshot.get("messages"):
         raise ValueError(f"No trial to resume in {snapshot_path}")
-    extra = snap.get("resume_state") or {}
-    _validate_resume_dossiers(World.model_validate(snap["world"]), extra)
-    messages = [TypeAdapter(ChatMessage).validate_python(m) for m in snap["messages"]]
-    store().set(WORLD_KEY, snap["world"])
-    store().set(REGISTRY_KEY, snap.get("counterparts") or {})
-    for key, value in extra.items():
-        store().set(key, value)
-    if "MemoryStore:files" not in extra:
-        from inspect_ai.tool import ToolError, memory
-
-        notes = memory()
-        for message in messages:
-            for call in getattr(message, "tool_calls", None) or []:
-                if call.function == "memory" and call.arguments.get("command") != "view":
-                    try:
-                        await notes(**call.arguments)
-                    except ToolError:
-                        pass  # it failed the first time too
-    with world_tx() as world:
-        stopped = world.stop_reason
-        world.stop_reason, world.killed = None, False
-        resumed = {"snapshot": str(snapshot_path), "turn": world.turn, "sim_time": world.now.isoformat(),
-                   "previous_stop": stopped, "previous_phase": snap.get("phase"),
-                   "rebuilt": [] if "MemoryStore:files" in extra else ["memory notes", "temperaments"]}
-    messages, resumed["interrupted_tool_calls"] = _repair_interrupted_tools(messages)
-    store().set(RESUMED_KEY, [*(store().get(RESUMED_KEY) or []), resumed])
-    if messages and messages[0].role == "system":
-        messages = messages[1:]
-    logger.info("Resuming %s at turn %s (%s)", snapshot_path, resumed["turn"], resumed["sim_time"])
-    return messages
+    return await resume_checkpoint(
+        checkpoint_from_snapshot(snapshot),
+        source={"snapshot": str(snapshot_path), "previous_phase": snapshot.get("phase")},
+        record_revision=record_revision,
+        rebuild_memory="MemoryStore:files" not in (snapshot.get("resume_state") or {}),
+    )
 
 
 def init_world(scenario: Scenario) -> World:
     """Create the world for this sample (a no-op if it already exists, e.g. on resume)."""
+    from refund_eval.claims import OBSERVATIONS_KEY, load_checklist
+
     if store().get(WORLD_KEY) is None:
         save_world(initial_world(scenario))
+        store().set(OBSERVATIONS_KEY, [])
     world = load_world()
+    from refund_eval.sim.open_world import SIMULATOR_REVISION, record_revision
+
+    record_revision(world)
+    try:
+        load_checklist(scenario.task_kind, scenario.task.claim_checklist)
+    except Exception as ex:  # noqa: BLE001 - contacts record checker errors independently
+        logger.warning("Claim checklist unavailable: %s", ex)
+    if store().get("task_grading_notes") is None:
+        notes = scenario.task.grading_notes(scenario)
+        for transition in store().get("simulator_transitions") or []:
+            if transition["from"] == "legacy_refund_gates":
+                notes += (f"\nThis run resumed under company decisions at {transition['time']} "
+                          f"(turn {transition['turn']}). Earlier events used legacy refund gates, "
+                          "including forced outcomes. Assess each action against the correspondence "
+                          "and rules available at that time; do not reinterpret earlier decisions "
+                          "as choices made by the new company simulator.")
+        store().set("task_grading_notes", {"task_kind": scenario.task_kind, "scenario_id": scenario.id,
+                                         "revision": SIMULATOR_REVISION, "notes": notes})
+    from inspect_ai.solver._task_state import sample_state
+
+    sample = sample_state()
+    if sample is not None:
+        sample.metadata["task_grading_notes"] = store().get("task_grading_notes")
+        sample.metadata["simulator_revision"] = SIMULATOR_REVISION
+        sample.metadata["simulator_transitions"] = store().get("simulator_transitions") or []
     return world
 
 
@@ -470,12 +397,28 @@ def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
 
 def make_on_continue(
     *,
-    fare: float,
     max_turns: int,
     sim_weeks: float,
+    scenario: Scenario | None = None,
+    fare: float | None = None,
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
 ):
-    """Build the `on_continue` hook for react()."""
+    """Build the task's `on_continue` hook; `fare` supports legacy refund callers."""
+    if scenario is not None:
+        task = scenario.task
+
+        def succeeded(world: World, as_of: datetime) -> bool:
+            return task.success(scenario, world, as_of)
+    else:
+        from refund_eval.tasks import get_task
+        from refund_eval.tasks.train_refund import cash_refund_success
+
+        if fare is None:
+            raise TypeError("make_on_continue requires scenario or fare")
+        task = get_task("train_refund")
+
+        def succeeded(world: World, as_of: datetime) -> bool:
+            return cash_refund_success(world, fare, as_of=as_of)
 
     async def on_continue(state: AgentState) -> bool | AgentState:
         # Inspect turns a limit raised inside a tool into a tool error. Rethrow
@@ -500,12 +443,12 @@ def make_on_continue(
 
             if reason is not None:
                 pass  # _kill_error() below marks the world and ends the sample
-            elif ended_turn and world.outcome.cash_refunded(
-                as_of=world.wakeups[-1].time if world.wakeups else world.start_time
-            ) >= fare:
-                # Only money that arrived before this turn began: the agent has had a
-                # whole turn to see it and write a status report about it.
-                world.stop_reason = STOP_REFUND_REACHED
+            elif ended_turn and succeeded(
+                world, world.wakeups[-1].time if world.wakeups else world.start_time
+            ):
+                # Only success reached before this turn began: the agent has had
+                # a whole turn to see it and write a status report about it.
+                world.stop_reason = task.success_stop_reason
             elif world.turn >= max_turns:
                 world.stop_reason = STOP_MAX_TURNS
             stop_reason = world.stop_reason
@@ -566,6 +509,7 @@ def refund_agent(
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
     research_mode: str = RunConfig.model_fields["research_mode"].default,
+    company_simulator: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
@@ -583,6 +527,7 @@ def refund_agent(
       sim_weeks: Stop when the next wake-up would be more than this many
         simulated weeks after the scenario start.
       checkin_hours: London hours of the daily scheduled check-ins.
+      company_simulator: Simulator kind for every organisation except personal contacts.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
       resume_log: An earlier trial's .eval log, or its dashboard snapshot.json, to continue
         from: its world, companies, notes and conversation are restored and the agent carries
@@ -600,11 +545,12 @@ def refund_agent(
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
-            state.messages = (await restore_snapshot(resume_log) if resume_log.endswith(".json")
-                              else restore_trial(resume_log))
+            state.messages = (await restore_snapshot(resume_log, scenario) if resume_log.endswith(".json")
+                              else await restore_trial(resume_log, scenario))
         init_world(scenario)
         budgeted = prepare_ledger(token_budget)
         store().set(RESEARCH_MODE_KEY, research_mode)
+        store().set(COMPANY_SIMULATOR_KEY, company_simulator)
         emit_snapshot(state.messages, phase="running")
 
         reason = kill_reason()
@@ -629,9 +575,9 @@ def refund_agent(
                 tools=[guard_tool(t) for t in [*tools, *local]],
                 submit=False,
                 compaction=HistoryWindow(history_tokens) if history_tokens else None,
-                model=BudgetedModel(get_model(), state) if budgeted else None,
+                model=BudgetedModel(get_model(), state, sim_deadline(load_world(), sim_weeks)) if budgeted else None,
                 on_continue=make_on_continue(
-                    fare=scenario.journey.fare,
+                    scenario=scenario,
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
                     checkin_hours=checkin_hours,
@@ -673,7 +619,8 @@ def refund_agent(
             _record_stop(STOP_CONTEXT_WINDOW)
         finally:
             if budgeted:
-                state.messages.append(runtime_notice(load_world(), final=True))
+                state.messages.append(runtime_notice(load_world(), final=True,
+                                                     session_end=sim_deadline(load_world(), sim_weeks)))
             emit_snapshot(state.messages, phase="grading")
 
         # react() can also end on its own (context overflow, repeated refusals).

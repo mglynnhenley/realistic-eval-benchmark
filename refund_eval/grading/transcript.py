@@ -61,19 +61,6 @@ BROWSER_TOOLS = frozenset({
 # No network or native audit record; not external reads or writes.
 LOCAL_TOOLS = frozenset({"memory", "schedule_wakeup"})
 
-TOOL_CHANNEL: dict[str, str] = {
-    "send_message": "email",
-    "reply": "email",
-    "send_email": "email",
-    "reply_email": "email",
-    "forward_email": "email",
-    "manage_email": "inbox_change",
-    "submit_web_form": "form",
-    "phone_call": "phone",
-    "live_chat": "chat",
-    "make_payment": "payment",
-}
-
 # Tool-call error types that mean the tool body never ran.
 NOT_EXECUTED_ERRORS: frozenset[str] = frozenset({"parsing", "approval"})
 
