@@ -18,7 +18,8 @@ const a = args || {}
 const list = v => (v == null ? [] : Array.isArray(v) ? v : [v])
 const q = s => JSON.stringify(String(s))
 const logs = list(a.logs)
-const judges = list(a.judges)
+// One fixed judge for every target, so counts compare across iterations and models.
+const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.5']
 const scenario = a.scenario || 'train_refund_late'
 const top = Math.min(a.top || 5, 5)
 const probes = a.probes || []
