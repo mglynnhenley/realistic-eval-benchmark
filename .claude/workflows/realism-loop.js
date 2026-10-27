@@ -23,8 +23,7 @@ const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.
 const scenario = a.scenario || 'train_refund_late'
 const top = Math.min(a.top || 5, 5)
 const probes = a.probes || []
-const MAX_VERIFY = a.maxVerify || 5
-const MAX_FIX = a.maxFix || 2
+const MAX_FIX = a.maxFix || 10
 const CLI = 'uv run python -m refund_eval.realism'
 const role = (name, inputs) =>
   `Read .claude/workflows/realism/${name}.md and follow it.\n\nInputs (JSON):\n${JSON.stringify(inputs, null, 2)}`
@@ -67,6 +66,7 @@ const VERDICT = {
   properties: { verdict: { enum: ['accept', 'revise', 'reject'] }, note: NOTE, reason: str },
   required: ['verdict', 'note', 'reason'],
 }
+const VERDICTS = { type: 'object', properties: { verdicts: { type: 'array', items: VERDICT } }, required: ['verdicts'] }
 const MERGE = { type: 'object', properties: { file: str, output: str, ok: { type: 'boolean' } }, required: ['file', 'output', 'ok'] }
 const FIX = {
   type: 'object',
@@ -128,24 +128,25 @@ if (!clusters.length) {
   return { ts, scans, clusters: 0 }
 }
 
-const perCluster = Math.max(1, Math.floor(MAX_VERIFY / clusters.length))
+// One verifier per cluster checks every proposal from that cluster's investigator.
 const verdicts = (await pipeline(
   clusters,
   c => agent(role('investigator', { scenario, cluster: c }), { label: `investigate ${c.key}`, phase: 'Investigate', schema: PROPOSALS }),
   (r, c) => {
     const notes = (r && r.notes) || []
-    if (notes.length > perCluster) drop(`${c.key}: verified ${perCluster} of ${notes.length} proposals; not verified: ${notes.slice(perCluster).map(n => n.id).join(', ')}`)
-    return parallel(notes.slice(0, perCluster).map(n => () =>
-      agent(role('verifier', { scenario, cluster: { key: c.key, factor: c.factor, org: c.org, findings: c.findings, notes: c.notes }, note: n }),
-        { label: `verify ${n.id}`, phase: 'Verify', schema: VERDICT })
-        .then(v => v && { ...v, cluster: c.key })))
+    if (!notes.length) return []
+    return agent(role('verifier', { scenario, cluster: { key: c.key, factor: c.factor, org: c.org, findings: c.findings, notes: c.notes }, proposals: notes }),
+      { label: `verify ${c.key}`, phase: 'Verify', schema: VERDICTS })
+      .then(v => ((v && v.verdicts) || []).map(x => ({ ...x, cluster: c.key })))
   },
 )).filter(Boolean).flat().filter(Boolean)
 
 const findingsOf = {}
 for (const v of verdicts) findingsOf[v.note.id] = (clusters.find(c => c.key === v.cluster) || {}).findings || []
-const accepted = verdicts.filter(v => v.verdict === 'accept').map(v => ({ ...v.note, status: 'accepted' }))
-const revised = verdicts.filter(v => v.verdict === 'revise').map(v => ({ ...v.note, status: 'open' }))
+// The verifier sets status: accepted (accept, or a revision that now passes), open (revision still failing) or rejected.
+const accepted = verdicts.filter(v => v.verdict !== 'reject' && v.note.status === 'accepted')
+  .map(v => ({ ...v.note, status: 'accepted' }))
+const revised = verdicts.filter(v => v.verdict === 'revise' && v.note.status !== 'accepted').map(v => ({ ...v.note, status: 'open' }))
 log(`${accepted.length} accepted, ${revised.length} revised, ${verdicts.length - accepted.length - revised.length} rejected`)
 
 phase('Merge')

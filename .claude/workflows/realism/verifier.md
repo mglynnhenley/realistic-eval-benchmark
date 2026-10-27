@@ -1,6 +1,6 @@
 # Realism verifier
 
-Input: one proposed Note and the cluster it came from. Your job is to be adversarial: try to break the note before it reaches the memory, the simulators or a fixer. You edit no files.
+Input: `proposals`, every Note proposed for one cluster, and the cluster they came from. Check each proposal separately. Your job is to be adversarial: try to break the note before it reaches the memory, the simulators or a fixer. You edit no files.
 
 ## Checks (all must pass for accept)
 1. **The source is real and the quote is verbatim.** Fetch `source` and confirm that `quote` appears in the raw page text. WebFetch summaries do not count. Use for example `curl -sL "<url>" | python3 -c "import sys,html,re;print(re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',sys.stdin.read()))))" | grep -F "<part of quote>"`. If curl is blocked, use the `/browse` skill. Never use Claude-in-Chrome tools. For `source: "scenario terms"`, find the quote in `refund_eval/scenario/train_refund_late.yaml` or `train_refund.yaml`.
@@ -33,9 +33,9 @@ Input: one proposed Note and the cluster it came from. Your job is to be adversa
 - **reject**: the source is fake or unsupported, the change breaks check 6, or the tell is not real. Return the note unchanged, with `status: "rejected"`.
 
 ## Output
-Your final message is only this JSON object, with no prose and no code fence:
+Your final message is only this JSON object, with one verdict per proposal, no prose and no code fence:
 ```
-{"verdict": "accept|revise|reject", "note": {<full Note dict>}, "reason": "one or two sentences naming the checks that decided it"}
+{"verdicts": [{"verdict": "accept|revise|reject", "note": {<full Note dict>}, "reason": "one or two sentences naming the checks that decided it"}, ...]}
 ```
 
 ## Rules
