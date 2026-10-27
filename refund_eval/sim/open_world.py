@@ -241,6 +241,12 @@ class PreparedCompanyAction:
     sender: str | None
 
 
+def _pending_due(world: World, org: Org) -> datetime | None:
+    """When this organisation's last pending reply reaches the customer, if any."""
+    return max((p.due_at for p in world.pending
+                if p.email.org == org.key and p.email.source == "counterparty"), key=as_aware, default=None)
+
+
 def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: Org,
                     record: dict | None, inbound_target: str | None) -> PreparedCompanyAction:
     action = action.model_copy(deep=True)
@@ -256,6 +262,11 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
     effective_at = world.now
     if event.mode in {"email", "form"} and action.reply and sender:
         effective_at += timedelta(hours=action.reply_after_hours)
+        if org.kind != "dynamic_personal":
+            # Keep a later reply behind any earlier one still on its way.
+            pending_due = _pending_due(world, org)
+            if pending_due is not None and as_aware(pending_due) >= as_aware(effective_at):
+                effective_at = pending_due + timedelta(minutes=10)
     return PreparedCompanyAction(action, effective_at, sender)
 
 
@@ -296,7 +307,8 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
                            "ask for evidence or escalate instead")
         if (problem is None and event.kind == "contact" and org.kind.startswith("dynamic_")
                 and org.kind != "dynamic_personal" and event.mode in {"email", "form"}
-                and not (action.reply and action.body.strip())):
+                and not (action.reply and action.body.strip())
+                and (action.reply or _pending_due(world, org) is None)):
             problem = "you reply to every contact; set reply true and write the email"
         if problem is None and action.notes_to_others and org.kind != "dynamic_personal":
             problem = "companies cannot contact other organisations; remove notes and claims of such contact"
@@ -387,7 +399,9 @@ def apply_open(
     if customer_contact:
         case.contacts += 1
     cause = cause or (f"note from {prompted_by}" if prompted_by else f"customer {inbound.channel}")
-    reply = (f"reply due {effective_at:%Y-%m-%d %H:%M}" if action.reply and effective_at > now
+    # An unsent reply is a draft; delivered email enters context with its own date.
+    reply = (f"reply drafted {now:%Y-%m-%d %H:%M}; not yet sent as of that time; "
+             f"arrives {effective_at:%Y-%m-%d %H:%M}" if action.reply and effective_at > now
              else "replied" if action.reply else "no reply")
     if customer_contact or prompted_by:
         case.history.append(f"{now:%Y-%m-%d %H:%M} {cause} | received: {inbound.body}"
