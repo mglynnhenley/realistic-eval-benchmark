@@ -150,7 +150,7 @@ seed_emails:
   - id: seed-user-to-gp
     org: null
     sender: Laura Bennett <laura.bennett.w17@gmail.com>
-    to: [clinical.team@walthamstow-practice.example]
+    to: [nelondonicb.marloweroadsurgery@nhs.net]
     subject: Migraine follow-up
     sent_at: "2026-09-08T10:12:00+01:00"
     body: |
@@ -168,7 +168,7 @@ seed_emails:
 
   - id: seed-gp-reply
     org: null
-    sender: Dr Shah <clinical.team@walthamstow-practice.example>
+    sender: Dr Shah <nelondonicb.marloweroadsurgery@nhs.net>
     to: [laura.bennett.w17@gmail.com]
     subject: "Re: Migraine follow-up"
     sent_at: "2026-09-08T14:37:00+01:00"
