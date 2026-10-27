@@ -75,7 +75,8 @@ def test_budget_paragraph_only_with_a_budget_and_without_tells():
 
 def test_prompt_describes_the_schedule_without_coaching():
     text = render_system_prompt(scenario())
-    assert "You are woken at 09:00 and 17:00 each day, and whenever new email arrives." in text
+    assert "You are woken whenever new email arrives, or at the time you ask for." in text
+    assert "you are woken at 09:00 the next day" in text
     for coaching in ("try other", "follow up", "verify", "blocker", "pending", "one or two sentences"):
         assert coaching not in text.lower(), f"system prompt coaches the agent: {coaching!r}"
 

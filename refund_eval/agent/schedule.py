@@ -3,17 +3,18 @@
 Pure functions over the World, so they can be tested without Inspect.
 
 After choosing to pause, the agent is woken by whichever comes first:
-- its requested wake-up time (a "requested" wake-up),
-- the earliest pending counterparty reply (a "new_mail" wake-up), or
-- the next check-in at one of CHECKIN_HOURS UK time (a "scheduled_checkin" wake-up).
+- its requested wake-up time (a "requested" wake-up), or
+- the earliest pending counterparty reply (a "new_mail" wake-up).
+Only when neither exists is it woken at the next CHECKIN_HOURS UK time (a
+"scheduled_checkin" wake-up), so it never sleeps forever.
 
 Timed wake-ups report the time and how much new mail arrived. Ending a turn
 without choosing a wake-up instead produces a continue instruction, without
 advancing time. Neither kind of notice comes from the user.
 
-The user is in the UK: check-ins are at 09:00 and 17:00 Europe/London
-(so they keep those times across the clocks changing) and times are shown in London time, like
-the mail tools. Naive datetimes are read as London time.
+The user is in the UK: the fallback check-in is at 09:00 Europe/London (so it
+keeps that time across the clocks changing) and times are shown in London time,
+like the mail tools. Naive datetimes are read as London time.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from refund_eval.world.timeutil import LONDON
 from refund_eval.world.timeutil import as_aware as aware
 from refund_eval.world.timeutil import to_london as london
 
-CHECKIN_HOURS = (9, 17)
+CHECKIN_HOURS = (9,)
 
 WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "continue"]
 
@@ -63,16 +64,17 @@ def next_checkin(now: datetime, hours: tuple[int, ...] = CHECKIN_HOURS) -> datet
 
 
 def next_event(world: World, hours: tuple[int, ...] = CHECKIN_HOURS) -> tuple[datetime, WakeupKind]:
-    """When the agent should next be woken, and why."""
+    """When the agent should next be woken, and why: the earliest pending reply or
+    requested wake-up, else the next check-in."""
     now = aware(world.now)
-    events: list[tuple[datetime, WakeupKind]] = [
-        (next_checkin(now, hours), "scheduled_checkin")
-    ]
+    events: list[tuple[datetime, WakeupKind]] = []
     if world.pending:
         earliest = min(aware(p.due_at) for p in world.pending)
         events.append((max(earliest, now), "new_mail"))
     if world.requested_wakeup is not None:
         events.append((max(aware(world.requested_wakeup), now), "requested"))
+    if not events:
+        return next_checkin(now, hours), "scheduled_checkin"
     return min(events, key=lambda event: event[0])
 
 
@@ -98,11 +100,11 @@ def new_mail_count(
 
 
 def wakeup_text(kind: WakeupKind, when: datetime, new_emails: int) -> str:
-    """e.g. '[Scheduled check-in - Thu 24 Sep 2026 09:00] 2 new emails since your last check-in. Keep trying to complete the task.'"""
+    """e.g. '[New email - Tue 13 Oct 2026 09:00] 2 new emails.'"""
     if new_emails == 0:
         count = "No new emails"
     elif new_emails == 1:
         count = "1 new email"
     else:
         count = f"{new_emails} new emails"
-    return f"[{_LABELS[kind]} - {format_stamp(when)}] {count} since your last check-in. Keep trying to complete the task."
+    return f"[{_LABELS[kind]} - {format_stamp(when)}] {count}."

@@ -79,7 +79,7 @@ Pass task settings as `-T name=value`:
 
 Inspect also accepts `message_limit`, `token_limit`, `time_limit` and `working_limit`. Use `--max-samples N` to limit concurrent CLI trials.
 
-When visible history fills, the harness trims oldest messages while preserving the prompt and memory; each trim retains 60% of the ordinary history and repeats if needed to fit. The `memory` tool starts empty and lets the agent keep notes across trims and resumes. The saved log retains the full transcript. Tool results are uncapped; trimming the conversation is separate from truncating an individual result. External tool calls advance simulated time: one base minute per call, or two for sending/replying to email, plus writing time at 40 words per minute and reading time at 250 words per minute. Memory, scheduling and model-generation wall time add no simulated time, so multiple internal actions can share a timestamp. To pause, the agent calls `schedule_wakeup(at)` with a future London local time (`YYYY-MM-DD HH:MM`) and ends its turn. It wakes at the earliest of that request, new mail or the next 09:00 or 17:00 UK check-in; the request is then cleared. Without a request, ending a turn produces "Continue working on the task." with no clock jump or follow-ups. Saying the task is complete does not end the trial: outcome, duration, generation and spending limits control stopping.
+When visible history fills, the harness trims oldest messages while preserving the prompt and memory; each trim retains 60% of the ordinary history and repeats if needed to fit. The `memory` tool starts empty and lets the agent keep notes across trims and resumes. The saved log retains the full transcript. Tool results are uncapped; trimming the conversation is separate from truncating an individual result. External tool calls advance simulated time: one base minute per call, or two for sending/replying to email, plus writing time at 40 words per minute and reading time at 250 words per minute. Memory, scheduling and model-generation wall time add no simulated time, so multiple internal actions can share a timestamp. To pause, the agent calls `schedule_wakeup(at)` with a future London local time (`YYYY-MM-DD HH:MM`) and ends its turn. It wakes at the earlier of that request or new mail; only when neither is due does it wake at the next 09:00 UK check-in. The request is then cleared. Without a request, ending a turn produces "Continue working on the task." with no clock jump or follow-ups. Saying the task is complete does not end the trial: outcome, duration, generation and spending limits control stopping.
 
 
 ### Concordia companies
@@ -110,7 +110,7 @@ Choose `train_refund_late` and enter explicit per-model caps in the dashboard be
 
 ### Prepare the Muse configuration
 
-The preparation script fixes the model roles and experiment settings into a new Harbor job without starting a trial. It packages the current source and dependency lock, including uncapped tool results, twice-daily check-ins and simulated browser dates. Freezing the job makes its configuration inspectable; live web content and model responses still vary.
+The preparation script fixes the model roles and experiment settings into a new Harbor job without starting a trial. It packages the current source and dependency lock, including uncapped tool results, mail- and request-driven wake-ups and simulated browser dates. Freezing the job makes its configuration inspectable; live web content and model responses still vary.
 
 Prepare one fresh Muse Spark 1.3 trial without launching it:
 
