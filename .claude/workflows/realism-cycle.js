@@ -13,9 +13,18 @@ export const meta = {
 }
 
 const a = args || {}
+// At most args.maxAgents (default 8) agents run at once; the rest queue.
+const MAX_AGENTS = a.maxAgents || 8
+let active = 0
+const waiting = []
+const limited = async (...xs) => {
+  while (active >= MAX_AGENTS) await new Promise(r => waiting.push(r))
+  active++
+  try { return await agent(...xs) } finally { active--; const next = waiting.shift(); if (next) next() }
+}
 const num = (v, d) => (v == null ? d : v)
 const list = v => (v == null ? [] : Array.isArray(v) ? v : [v])
-const q = s => JSON.stringify(String(s))
+const q = s => "'" + String(s).replaceAll("'", "'\\''") + "'"
 const repo = a.repo || '/Users/matilda/conductor/workspaces/realistic-eval-benchmark/kelowna'
 const cycleDir = a.cycleDir || `${repo}-cycle`
 const branch = a.branch || 'realism/cycle'
@@ -153,23 +162,24 @@ const money = x => Math.round(x * 100) / 100
 
 // Trials -> tells scan -> score, from the working tree at `cwd`. Throws on failure.
 async function test(r, tag, cwd) {
-  const out = `${roundDir(r)}/${tag}`
+  // args.retryFrom: rounds from this one on run their trials again into fresh directories (e.g. after an API failure).
+  const out = `${roundDir(r)}/${tag}${a.retryFrom != null && r >= a.retryFrom ? '-retry' : ''}`
   const ph = r === 0 ? 'Baseline' : 'Test'
-  const run = await agent(inDir(cwd,
+  const run = await limited(inDir(cwd,
     `Run the target-model trials. ${PAID} They can take hours: start the command with run_in_background and wait until it exits; never start it twice.\n` +
       `mkdir -p ${q(out)} && ${CLI} trials --model ${q(model)} --trials ${trials} --cost-limit ${costLimit} --out ${q(`${out}/trials`)} --sim-weeks ${simWeeks} --yes > ${q(`${out}/trials.json`)}\n` +
       `Return the JSON it printed (logs, probes, failed), ok=true if it exited 0 with at least one log, and the error text otherwise.`),
   { label: `r${r} ${tag} trials`, phase: ph, schema: TRIALS, effort: 'low' })
   if (!run || !run.ok || !run.logs.length) throw new Error(`r${r} ${tag} trials failed: ${run ? run.error : 'agent failed'}`)
   const scans = `${out}/scans`
-  const scan = await agent(inDir(cwd,
+  const scan = await limited(inDir(cwd,
     `Run the Scout tells scanner on these logs. ${PAID}\n` +
       `uv run python scout/run.py ${run.logs.map(q).join(' ')} --scanners tells --yes --scans ${q(scans)} --judges ${judges.map(q).join(' ')}\n` +
       `Return ok=true if the scan completed, and the error text otherwise.`),
   { label: `r${r} ${tag} scan`, phase: ph, schema: OK, effort: 'low' })
   if (!scan || !scan.ok) throw new Error(`r${r} ${tag} scan failed: ${scan ? scan.error : 'agent failed'}`)
   const file = `${out}/score.json`
-  const score = await agent(inCycle(
+  const score = await limited(inCycle(
     `Run: ${CLI} score ${run.logs.map(q).join(' ')} --scans ${q(scans)} --out ${q(file)}\nReturn the JSON it printed, unchanged.`),
   { label: `r${r} ${tag} score`, phase: ph, schema: SCORE, effort: 'low' })
   if (!score) throw new Error(`r${r} ${tag} score failed`)
@@ -177,7 +187,7 @@ async function test(r, tag, cwd) {
   return { logs: run.logs, probes: run.probes, failed: run.failed, scans, score: { ...score, file } }
 }
 
-const compare = (r, label, A, B) => agent(inCycle(
+const compare = (r, label, A, B) => limited(inCycle(
   `Run: ${CLI} compare --a ${A.map(q).join(' ')} --b ${B.map(q).join(' ')}\nReturn the JSON it printed, unchanged.`),
 { label: `r${r} ${label}`, phase: 'Decide', schema: COMPARE, effort: 'low' })
 
@@ -186,7 +196,7 @@ async function improve(r, run, recent) {
   const dir = roundDir(r)
   const dropped = []
   const drop = m => { dropped.push(m); log(m) }
-  const triage = await agent(inCycle(
+  const triage = await limited(inCycle(
     `Run: ${CLI} open --scans ${q(run.scans)}${run.probes.length ? ` --probe ${run.probes.map(q).join(' ')}` : ''} --top ${top} --scenario ${scenario}\n` +
       `Also run: git rev-parse HEAD\nReturn the sha as base and the printed JSON list, unchanged, as clusters.`),
   { label: `r${r} triage`, phase: 'Improve', schema: CLUSTERS, effort: 'low' })
@@ -198,12 +208,12 @@ async function improve(r, run, recent) {
 
   const verdicts = (await pipeline(
     clusters,
-    c => agent(inCycle(role('investigator', { scenario, cluster: c, recent_changes: recent })),
+    c => limited(inCycle(role('investigator', { scenario, cluster: c, recent_changes: recent })),
       { label: `r${r} investigate ${c.key}`, phase: 'Improve', schema: PROPOSALS }),
     (p, c) => {
       const notes = (p && p.notes) || []
       if (!notes.length) return []
-      return agent(inCycle(role('verifier', { scenario, cluster: { key: c.key, factor: c.factor, org: c.org, findings: c.findings, notes: c.notes }, proposals: notes })),
+      return limited(inCycle(role('verifier', { scenario, cluster: { key: c.key, factor: c.factor, org: c.org, findings: c.findings, notes: c.notes }, proposals: notes })),
         { label: `r${r} verify ${c.key}`, phase: 'Improve', schema: VERDICTS })
         .then(v => ((v && v.verdicts) || []).map(x => ({ ...x, cluster: c.key })))
     },
@@ -219,24 +229,28 @@ async function improve(r, run, recent) {
   const toMerge = [...accepted, ...revised]
   if (toMerge.length) {
     const file = `${dir}/proposals.json`
-    merged = await agent(inCycle(
+    merged = await limited(inCycle(
       `mkdir -p ${q(dir)}, write this JSON list of notes exactly as given to ${file}, then run:\n${CLI} notes merge ${q(file)} --scenario ${scenario}\n` +
         `Return the file path, the command output, and ok=true if the merge succeeded.\n\n${JSON.stringify(toMerge, null, 2)}`),
     { label: `r${r} merge`, phase: 'Improve', schema: MERGE, effort: 'low' })
   }
 
-  const code = accepted.filter(n => n.kind === 'code')
+  // One fixer per note id: the same note can be accepted from several clusters.
+  const code = accepted.filter((n, i) => n.kind === 'code' && accepted.findIndex(m => m.id === n.id) === i)
   const prompts = accepted.filter(n => n.kind === 'prompt')
   if (code.length > MAX_FIX) drop(`r${r}: fixed ${MAX_FIX} of ${code.length} code notes; not fixed: ${code.slice(MAX_FIX).map(n => n.id).join(', ')}`)
   if (prompts.length && !(merged && merged.ok)) drop(`r${r}: merge failed, so prompt notes were not checked`)
-  const fixBranch = n => `realism/${n.id}-r${r}`
+  const fixBranch = n => `${branch}-fix/${n.id}-r${r}`
   const [fixes, checked] = await parallel([
     () => parallel(code.slice(0, MAX_FIX).map(n => () =>
-      agent(role('fixer', { scenario, note: n, findings: findingsOf[n.id] },
-        `\nIn step 1, base your branch on the cycle branch, not this worktree's branch: \`git switch -c ${fixBranch(n)} ${branch}\`.`),
+      limited(role('fixer', { scenario, note: n, findings: findingsOf[n.id] },
+        `\nIn step 1, base your branch on the cycle branch, not this worktree's branch: \`git switch -c ${fixBranch(n)} ${branch}\`.` +
+        ` If ${fixBranch(n)} already exists with commits beyond ${branch} (an earlier attempt at this note), do not redo the fix: ` +
+        `\`git switch ${fixBranch(n)}\` (or inspect it with git log if it is checked out in another worktree), run its tests, and report it as done with its existing commit and files.` +
+        ` If it exists with no commits of its own, delete it (\`git branch -D\`) and start as above.`),
       { label: `r${r} fix ${n.id}`, phase: 'Improve', isolation: 'worktree', schema: FIX }))),
     () => (prompts.length && merged && merged.ok
-      ? agent(inCycle(
+      ? limited(inCycle(
         `Check that the merged prompt notes below fix their tells on real interactions. For each note, using at most 2 interactions:\n` +
           `1. From the note's findings take the log, and list its interactions: uv run python -m refund_eval.companies list --log LOG\n` +
           `2. Pick the interaction whose output produced the finding (match org, date and quoted text).\n` +
@@ -246,25 +260,29 @@ async function improve(r, run, recent) {
       { label: `r${r} check`, phase: 'Improve', schema: CHECKS })
       : null),
   ])
-  const done = (fixes || []).filter(f => f && f.changed && f.status === 'done' && f.branch)
+  // A fixer that reused an earlier commit reports changed=false but still has a branch to merge.
+  const done = (fixes || []).filter(f => f && f.branch && (f.changed || f.commit) && f.status !== 'blocked')
 
-  const integrated = await agent(inCycle(
+  const integrated = await limited(inCycle(
     `Build the round ${r} candidate on the cycle branch ${branch}, checked out in ${cycleDir}.\n` +
       `1. Confirm git rev-parse --abbrev-ref HEAD is ${branch} and HEAD is ${base}; otherwise stop with ok=false.\n` +
       `2. If refund_eval/scenario/realism/ has changes: git add refund_eval/scenario/realism/ && git commit -m "Realism round ${r} candidate: realism notes" ` +
       `(plus any attribution trailer your instructions require). Commit nothing else.\n` +
-      `3. For each branch below, in order: git merge --no-ff -m "Realism round ${r} candidate: merge BRANCH" BRANCH. ` +
-      `On a conflict run git merge --abort, record the branch and its conflicting files, and go on to the next.\n` +
+      `3. For each branch below, in order: git merge --no-ff -m "Realism round ${r} candidate: merge BRANCH" BRANCH.\n` +
+      `   On a conflict, resolve it so that both the branch's fix and the fixes already merged are kept (read each side's diff and its new tests), ` +
+      `then git add the resolved files and git commit --no-edit. Never resolve by dropping either side.\n` +
+      `   After every merge, run uv run pytest -q. If it fails and you cannot fix it within that merge's files, undo the merge with ` +
+      `git reset --hard HEAD~1 and record the branch and its failing tests as a conflict. Record a branch as a conflict only if you could not merge it with all tests passing.\n` +
       `4. Return ok, candidate = git rev-parse HEAD, the merged branches, the conflicts and whether the memory was committed.\n\n` +
       `Branches: ${JSON.stringify(done.map(f => f.branch))}`),
-  { label: `r${r} integrate`, phase: 'Improve', schema: INTEGRATE, effort: 'low' })
+  { label: `r${r} integrate`, phase: 'Improve', schema: INTEGRATE })
   if (!integrated || !integrated.ok) throw new Error(`r${r} integrate failed: ${integrated ? integrated.error : 'agent failed'}`)
   for (const c of integrated.conflicts) drop(`r${r}: ${c.branch} conflicted (${c.files.join(', ')}); not in the candidate`)
   return { base, candidate: integrated.candidate, clusters, verdicts, merged, fixes: (fixes || []).filter(Boolean), checks: checked ? checked.checks : [], integrated, dropped }
 }
 
 phase('Setup')
-const setup = await agent(
+const setup = await limited(
   `Prepare the realism cycle worktree. Never switch branches in ${repo}; never read or print .env.\n` +
     `1. If ${cycleDir} does not exist: if \`git -C ${q(repo)} show-ref --verify --quiet refs/heads/${branch}\` succeeds, run git -C ${q(repo)} worktree add ${q(cycleDir)} ${branch}; ` +
     `otherwise git -C ${q(repo)} worktree add ${q(cycleDir)} -b ${branch} HEAD. If it exists, it must be a worktree on ${branch} (git -C ${q(cycleDir)} rev-parse --abbrev-ref HEAD); otherwise stop with ok=false.\n` +
@@ -313,7 +331,7 @@ for (let r = 1; r <= maxRounds; r++) {
           log(`r${r}: unclear and no budget for an A/B rerun; reverting`)
         } else {
           abPath = `${cycleDir}-champion-r${r}`
-          const made = await agent(inCycle(
+          const made = await limited(inCycle(
             `Make a temporary worktree at the champion commit for an A/B rerun.\n` +
               `1. If ${abPath} exists, git worktree remove --force ${q(abPath)}.\n` +
               `2. git worktree add --detach ${q(abPath)} ${champion.commit}\n` +
@@ -340,7 +358,7 @@ for (let r = 1; r <= maxRounds; r++) {
 
   phase('Decide')
   const changed = imp.candidate !== imp.base
-  const finish = await agent(inCycle(
+  const finish = await limited(inCycle(
     `Finish realism round ${r} on the cycle branch ${branch} (HEAD should be ${imp.candidate}).\n` +
       (changed && !accept
         ? `- The candidate was rejected. Revert the round's commits, newest first, one revert commit each:\n` +
@@ -370,7 +388,7 @@ for (let r = 1; r <= maxRounds; r++) {
 
   phase('Report')
   const out = `${OUT}/round-${r}.md`
-  await agent(inCycle(role('reporter', {
+  await limited(inCycle(role('reporter', {
     scenario, round: r, out, scans: cand ? cand.scans : null,
     clusters: imp.clusters.map(c => ({ key: c.key, factor: c.factor, org: c.org, count: c.count, yes: c.yes, notes: c.notes.map(n => n.id) })),
     verdicts: imp.verdicts, merged: imp.merged, fixes: imp.fixes, checks: imp.checks, integrated: imp.integrated, dropped: imp.dropped,
@@ -386,7 +404,7 @@ for (let r = 1; r <= maxRounds; r++) {
 }
 
 phase('Report')
-const summary = await agent(inCycle(
+const summary = await limited(inCycle(
   `Write ${OUT}/summary.md, a short plain summary of this realism cycle, using the data below and the round reports ${OUT}/round-*.md. Sections:\n` +
     `- Champion: the commit, its tells_per_trial with ci, and why the cycle stopped.\n` +
     `- Trajectory: a table with one row per round (round, decision, candidate sha, champion tells_per_trial, candidate tells_per_trial, compare delta and ci, spend so far).\n` +
