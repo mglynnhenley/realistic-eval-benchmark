@@ -370,3 +370,17 @@ def test_prepared_search_auth_mismatch_stops_before_launch(context, monkeypatch,
         loop._prepare_trials(context, {**loop._protocol({}), "search_auth": declared},
                              out, context.worktree, "synthetic")
     assert not context.ledger.exists()
+
+
+def test_unknown_candidate_native_accounting_keeps_hold_and_never_scans(context, adapters, monkeypatch):
+    protocol = loop._protocol(context.settings)
+    monkeypatch.setattr(loop, "_run_trials", lambda *a: {
+        "logs": ["original.eval"], "failed": 0, "valid_trials": protocol["trials"],
+        "returncode": 0, "cost_usd": None, "native_attribution": {"status": "unknown"}})
+    monkeypatch.setattr(loop, "_run_scan", lambda *a: pytest.fail("Unknown native accounting must stop before scan"))
+    with pytest.raises(ValueError, match="trial reservation remains held"):
+        loop._batch(context, protocol, context.settings["source_commit"], loop._hashes(context.worktree),
+                    "candidate-native-unknown", cwd=context.worktree, trial_reserve=2, scan_reserve=1)
+    spend = stages.show(context.ledger, context.settings["budget_usd"])
+    assert spend["held_usd"] == 2 and spend["actual_usd"] == 0
+    assert list(spend["stages"]) == ["candidate-native-unknown-trials"]

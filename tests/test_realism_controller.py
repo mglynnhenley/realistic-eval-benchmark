@@ -89,7 +89,7 @@ def loop(job, monkeypatch):
     monkeypatch.setattr(autonomous, "cleanup_job", lambda c: calls["cleanup"].append(c.directory) or
                         {"sessions": [], "terminated": [], "unresolved": []})
     monkeypatch.setattr(measurement, "_export", lambda *a: "synthetic-export")
-    monkeypatch.setattr(controller, "analyze", lambda *a: {"status": "unknown", "cognitive_reading_inferred": False})
+    monkeypatch.setattr(controller, "analyze", lambda *a: {"status": "verified", "cognitive_reading_inferred": False})
     return options, calls
 
 
@@ -201,3 +201,12 @@ def test_frozen_job_copy_rejects_mutation_without_repreparation_or_payment(loop,
     with pytest.raises(ValueError, match="artifact bytes changed"):
         autonomous._frozen_trials(plan["protocol"], options["run_dir"] / "copy", {**freeze, "directory": str(original)})
     assert len(calls["prepare"]) == 1 and not calls["batch"]
+
+
+def test_unknown_native_evidence_cannot_seal_clean_success(loop, monkeypatch):
+    options, calls = loop
+    plan = controller.run_candidate(**options)
+    monkeypatch.setattr(controller, "analyze", lambda *a: {"status": "unknown"})
+    result = controller.run_candidate(**options, execute=True, execution_review=execution_review(options, plan))
+    assert result["status"] == "reconciliation_required"
+    assert len(calls["cleanup"]) == 1

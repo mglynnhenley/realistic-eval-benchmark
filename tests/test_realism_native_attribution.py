@@ -160,3 +160,27 @@ def test_incomplete_all_event_accounting_stays_unknown(monkeypatch, tmp_path, ki
         sample.events.append(extra)
     result = native.analyze([str(path)])
     assert result['status'] == 'unknown', result
+
+
+@pytest.mark.parametrize("consistent", [False, True])
+def test_native_cost_coverage_is_checked_before_publishing_trial_actual(monkeypatch, tmp_path, consistent):
+    from refund_eval.realism import autonomous
+    sample, path = native_sample(monkeypatch, tmp_path)
+    if not consistent:
+        sample.model_usage = {}
+    context = SimpleNamespace(command=lambda *a, **k: {"returncode": 0},
+        settings={"trial_wallclock_limit": 60}, validate_native_usage=True)
+    monkeypatch.setattr(autonomous, "collect", lambda *a: {"logs": [str(path)], "failed": 0})
+    monkeypatch.setattr(autonomous, "_native_cost", lambda *a: .5)
+    out = tmp_path / "trials"
+    result = autonomous._run_trials(context, autonomous._protocol({}), out, tmp_path, "synthetic")
+    assert result["cost_usd"] == (.5 if consistent else None)
+    assert result["native_attribution"]["status"] == ("verified" if consistent else "unknown")
+
+
+@pytest.mark.parametrize("cost", [None, -1, float("nan"), float("inf")])
+def test_unknown_or_invalid_individual_native_cost_rejects_accounting(monkeypatch, tmp_path, cost):
+    sample, path = native_sample(monkeypatch, tmp_path)
+    extra = next(e for e in sample.events if e.event == "model" and e.role == "simulator")
+    extra.output.usage.total_cost = cost
+    assert native.analyze([str(path)])["status"] == "unknown"

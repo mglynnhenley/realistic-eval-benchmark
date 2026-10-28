@@ -171,6 +171,14 @@ def _run_trials(context, protocol, out, cwd, tag):
     collected = collect(str(out), protocol["trials"])
     collected["returncode"] = result["returncode"]
     collected["cost_usd"] = _native_cost(collected["logs"]) if not collected["failed"] else None
+    if getattr(context, "validate_native_usage", False):
+        from refund_eval.realism.native_attribution import analyze
+
+        attribution = analyze(collected["logs"])
+        collected["native_attribution"] = attribution
+        if attribution["status"] != "verified":
+            collected["cost_usd"] = None
+        atomic_json(out.parent / "native-accounting.json", attribution)
     return collected
 
 
@@ -282,6 +290,8 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
             or len(set(trials["logs"])) != len(trials["logs"])):
         raise ValueError("Every requested trial must succeed exactly once; paid stages are never retried")
     atomic_json(out / "trials.json", trials)
+    if trials.get("native_attribution", {}).get("status", "verified") != "verified":
+        raise ValueError("Native accounting is unknown; trial reservation remains held for reconciliation")
     context.check_cancelled()
     context.update(f"{tag}: scanning saved trials", source_commit=commit)
     scans = out / "scans"
@@ -308,7 +318,8 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
         raise ValueError("Incomplete or invalid strict score")
     _assert_source(context, commit, hashes, cwd=cwd, tag=f"{tag}-finished")
     batch = {"tag": tag, "commit": commit, "protocol": protocol, "score": result,
-             "logs": trials["logs"], "scans": str(scans), "path": str(out)}
+             "logs": trials["logs"], "scans": str(scans), "path": str(out),
+             **({"native_attribution": trials["native_attribution"]} if "native_attribution" in trials else {})}
     atomic_json(out / "result.json", batch)
     return batch
 

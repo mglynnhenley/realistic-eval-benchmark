@@ -6,6 +6,7 @@ boundaries remain unknown; exact input inclusion never establishes cognition.
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -114,6 +115,10 @@ def analyze(logs):
                 billed = [event for event in events if event.output.usage is not None]
                 require(bool(billed) and all(event.pending or event.error or event.output.usage is not None
                                             for event in events), "Native generation usage is missing")
+                require(all(type(event.output.usage.total_cost) in (int, float)
+                            and math.isfinite(event.output.usage.total_cost)
+                            and event.output.usage.total_cost >= 0 for event in billed),
+                        "Raw native event cost is unknown or invalid")
                 require(set(sample.model_usage or {}) == {event.model for event in billed},
                         "Native model aggregate coverage differs from raw events")
                 require(set(sample.role_usage or {}) == {event.role for event in billed if event.role is not None},

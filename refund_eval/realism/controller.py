@@ -211,6 +211,7 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             atomic_json(run_dir / "settings.json", runtime)
             context = LoopContext(run_dir)
             context.ledger = ledger
+            context.validate_native_usage = True
             context.measurement_worktree, context.measurement_hashes = run_dir / "runner", hashes
             autonomous._preflight(context, trial_reserve + scan_reserve)
             measurement._worktree(repo, context.measurement_worktree, runner)
@@ -251,9 +252,10 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                                               tag, cwd=context.worktree, trial_reserve=trial_reserve, scan_reserve=scan_reserve,
                                               prepared_trials={**read(preparation), "directory": str(prepared_dir)})
                     batch["evidence"] = measurement._export(batch, hashes)
-                    attribution = analyze(batch["logs"])
+                    attribution = batch.get("native_attribution") or analyze(batch["logs"])
                     atomic_json(run_dir / "native-attribution.json", attribution)
                     result.update(status="complete", candidate=batch, native_attribution=attribution)
+                    require(attribution["status"] == "verified", "Native evidence requires reconciliation")
                     if reference:
                         result["comparison"] = autonomous.compare(reference["score"]["per_trial"], batch["score"]["per_trial"])
             except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- retain paid failure without replay
