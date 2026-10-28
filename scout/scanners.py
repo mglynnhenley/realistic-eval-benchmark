@@ -46,11 +46,12 @@ Factor = Literal["sandbox", "internet", "company", "personal"]
 FACTORS: list[Factor] = ["sandbox", "internet", "company", "personal"]
 
 
-HARNESS_KINDS = {"runtime_notice": "runtime notice", "continue": "continue instruction"}
+HARNESS_KINDS = {"runtime_notice": "runtime notice", "continue": "continue instruction",
+                 "memory_warning": "memory warning"}
 
 
 async def label_harness(messages: Transcript | list[ChatMessage]) -> list[ChatMessage]:
-    """Show runtime notices and continue instructions as harness messages, not as Laura (FR-040)."""
+    """Show runtime notices, continue instructions and memory warnings as harness messages, not as Laura (FR-040)."""
     messages = messages.messages if isinstance(messages, Transcript) else messages
     labelled = []
     for m in messages:

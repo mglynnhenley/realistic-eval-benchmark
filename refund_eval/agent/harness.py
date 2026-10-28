@@ -27,6 +27,8 @@ For long horizons the model sees a rolling window of recent history
 (`history_tokens`), trimmed by Inspect's compaction, plus a memory tool for
 notes, as Vending-Bench does. Compaction changes only the model's input: the
 sample's messages, which the dashboard and scorers read, keep the full history.
+Shortly before a trim, the hook adds a harness message asking the agent to save
+notes; it stays in the history so graders see what the model saw.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ from typing import Any, get_type_hints
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
 from inspect_ai.model import (
     ChatMessage,
+    ChatMessageAssistant,
     ChatMessageUser,
     CompactionTrim,
     Model,
@@ -114,6 +117,18 @@ WAKEUP_METADATA = "wakeup"
 
 # Share of the non-prefix history kept by each trim; Vending-Bench 2 keeps about 61%.
 HISTORY_PRESERVE = 0.6
+HISTORY_COMPACTIONS_KEY = "history_compactions"
+
+# Before the window is trimmed the agent is told once, as Inspect's memory integration
+# does, but in words that fit an assistant's errands. A compaction cycle is the number
+# of compactions recorded so far; the store keeps the cycle last warned in.
+MEMORY_WARNING_SHARE = 0.9
+MEMORY_WARNING_CYCLE_KEY = "history_warning_cycle"
+MEMORY_WARNING_TEXT = (
+    "Older messages will soon be removed from your view. Use memory to save anything you "
+    "will need later: who you have contacted and when, what each has replied, anything "
+    "promised by you or to you, reference numbers, and your next steps."
+)
 
 
 class HistoryWindow(CompactionTrim):
@@ -396,6 +411,38 @@ def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
     )
 
 
+async def visible_tokens(state: AgentState) -> int | None:
+    """The window the next generation would see, before any trimming.
+
+    Like Inspect's compaction estimate: the last generation's input as the provider
+    counted it (cached input included), plus the messages added since."""
+    usage = state.output.usage if state.output.choices else None
+    if usage is None:
+        return None
+    last = max((i for i, m in enumerate(state.messages) if isinstance(m, ChatMessageAssistant)), default=None)
+    added = state.messages[last:] if last is not None else []
+    return (usage.input_tokens + (usage.input_tokens_cache_read or 0) + (usage.input_tokens_cache_write or 0)
+            + (await get_model().count_tokens(added) if added else 0))
+
+
+async def memory_warning(state: AgentState, history_tokens: int, now: datetime) -> ChatMessageUser | None:
+    """The pre-trim warning, at most once per compaction cycle.
+
+    Only between 90% of the window and the window itself, as in Inspect: past it,
+    the window is trimmed before the agent could act on a warning."""
+    cycle = len(store().get(HISTORY_COMPACTIONS_KEY) or [])
+    if store().get(MEMORY_WARNING_CYCLE_KEY) == cycle:
+        return None
+    tokens = await visible_tokens(state)
+    if tokens is None or not MEMORY_WARNING_SHARE * history_tokens < tokens <= history_tokens:
+        return None
+    store().set(MEMORY_WARNING_CYCLE_KEY, cycle)
+    return ChatMessageUser(content=MEMORY_WARNING_TEXT, metadata={
+        HARNESS_METADATA: "memory_warning", "sim_time": now.isoformat(),
+        "tokens": tokens, "history_tokens": history_tokens, "compaction_cycle": cycle,
+    })
+
+
 def make_on_continue(
     *,
     max_turns: int,
@@ -403,8 +450,11 @@ def make_on_continue(
     scenario: Scenario | None = None,
     fare: float | None = None,
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
+    history_tokens: int = 0,
 ):
-    """Build the task's `on_continue` hook; `fare` supports legacy refund callers."""
+    """Build the task's `on_continue` hook; `fare` supports legacy refund callers.
+
+    With `history_tokens`, the hook also gives the pre-trim memory warning."""
     if scenario is not None:
         task = scenario.task
 
@@ -472,6 +522,11 @@ def make_on_continue(
             raise error
         if wakeup is not None and stop_reason is None:
             state.messages.append(wakeup_message(wakeup))
+        if history_tokens and stop_reason is None:
+            # Appended in place, so it reaches the next generation on either return path.
+            warning = await memory_warning(state, history_tokens, load_world().now)
+            if warning is not None:
+                state.messages.append(warning)
         emit_snapshot(state.messages, phase="running")
         if stop_reason is not None:
             return False
@@ -578,6 +633,7 @@ def refund_agent(
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
                     checkin_hours=checkin_hours,
+                    history_tokens=history_tokens,
                 ),
             )
 
