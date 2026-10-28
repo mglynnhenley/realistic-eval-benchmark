@@ -37,7 +37,7 @@ the message that set it off. The probe is a lead for the loop, not a headline re
     models.
 - **Conversion** (`published.convert`):
   - Each file is `fc.weight [2, d]`, `fc.bias [2]`, with class 1 = aware.
-  - The score is the aware-minus-unaware logit margin: `direction = w1 - w0`, `threshold = b0 - b1`, `scale = 1`.
+  - The score is the aware-minus-unaware logit margin: `direction = w1 - w0`, `threshold = b0 - b1`.
     Above 0 means aware.
   - Their `model_<i>.pth` reads `output_hidden_states[i]`, which is the output of decoder layer `i - 1`, so
     `Probe.layer = i - 1`. Hidden state 0 is the embeddings and is rejected.
@@ -56,7 +56,7 @@ the message that set it off. The probe is a lead for the loop, not a headline re
   - `transcript.chat` keeps reasoning in a separate `reasoning` field. Redacted reasoning is skipped.
 - **History length.** Two of Qwen3-32B's three OpenRouter providers have 20k or 41k context, but `realism trials`
   defaulted to 60k history. `--history-tokens` was added (workflow arg `historyTokens`); use about 24,000.
-- **Pooling (`pool="mean"`, all published probes).** The probes were trained on activations averaged over reasoning
+- **Reading each turn.** The probes were trained on activations averaged over reasoning
   spans, so `Reader` replays each assistant turn as it was generated (`model.turn_ids`) and averages over the turn's
   own tokens:
   - The context is the chat before the turn with the generation prompt. Earlier turns appear without their
@@ -66,9 +66,9 @@ the message that set it off. The probe is a lead for the loop, not a headline re
   - The forward pass stops after the probed layer.
   - Each turn is one forward pass of at most `--window` tokens (default 8192). When the context is longer, the
     system message and the most recent tokens are kept. The agent itself saw a longer history.
-- **`pool="last"` is unused.** It reads one token before each turn's content, over the whole chat rendered once in
-  chunks (`probe.windows`, `model.locate`). No published probe uses it; it came from the trained-probe version.
-  Remove it if no single-token probe is added.
+- **One reading mode (cleanup, 2026-10-28).** The trained-probe version also read a single token before each turn
+  over the whole chat in chunks. No published probe reads that way, so it was removed, together with the probe's
+  `scale` and `pool` fields.
 - **Transcript conversion** (`transcript.chat`):
   - Tool results become `user` messages starting `[<fn> result]`, and tool calls become `[call fn(json)]` lines.
   - Consecutive same-role messages are merged so templates see strict alternation.

@@ -27,8 +27,8 @@ def _fetch(args) -> int:
     except ModuleNotFoundError as exc:
         return _missing(exc)
     probe.save(args.out)
-    accuracy = "" if probe.accuracy is None else f", published accuracy {probe.accuracy:.1%}"
-    print(f"{probe.model} decoder layer {probe.layer} ({probe.pool} pooling{accuracy}) -> {args.out}")
+    accuracy = "" if probe.accuracy is None else f" (published accuracy {probe.accuracy:.1%})"
+    print(f"{probe.model} decoder layer {probe.layer}{accuracy} -> {args.out}")
     return 0
 
 
