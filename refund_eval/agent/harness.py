@@ -12,9 +12,9 @@ generation's tool calls have run). Here it:
 3. stops the trial if the kill switch is on, the task has succeeded,
    the turn cap is reached, or the next event is past the simulated-time
    cap (world.stop_reason says which);
-4. otherwise, when the model stopped calling tools with a requested wake-up,
-   advances to the earliest of that time, pending mail or the next 09:00
-   check-in. Without a request, tells it to continue without advancing time.
+4. otherwise, when the model stopped calling tools, advances to the earlier
+   of its requested wake-up and pending mail, or the next 09:00 check-in
+   when neither is pending.
 
 With a target token budget, BudgetedModel adds a runtime notice before each
 generation and records provider usage before tools run. It stops immediately
@@ -309,8 +309,9 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
 @tool
 def schedule_wakeup() -> Tool:
     async def execute(at: str) -> str:
-        """Choose when to resume after ending your turn. Earlier email or the
-        morning check-in can bring you back first, which clears the request.
+        """Choose when to resume after ending your turn. Earlier email can
+        bring you back first, which clears the request. Without a request or
+        pending email, you resume at the next morning check-in.
         Calling this again before pausing replaces it.
 
         Args:
@@ -454,20 +455,16 @@ def make_on_continue(
             stop_reason = world.stop_reason
 
         if ended_turn and reason is None and stop_reason is None:
-            if load_world().requested_wakeup is None:
-                with world_tx() as world:
-                    wakeup = Wakeup(kind="continue", time=world.now, text="Continue working on the task.")
-                    world.wakeups.append(wakeup)
-            else:
-                # Counterparties keep promises made before the next wake-up, which may
-                # bring that wake-up forward. Then wake the agent.
-                await _follow_ups_before_wake(sim_weeks, checkin_hours)
-                with world_tx() as world:
-                    wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
-                    world.requested_wakeup = None
-                    if wakeup is None:
-                        world.stop_reason = STOP_SIM_TIME_CAP
-                    stop_reason = world.stop_reason
+            # Counterparties keep promises made before the next wake-up, which may
+            # bring that wake-up forward. Then wake on mail or the requested time,
+            # falling back to the next morning only when neither is pending.
+            await _follow_ups_before_wake(sim_weeks, checkin_hours)
+            with world_tx() as world:
+                wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
+                world.requested_wakeup = None
+                if wakeup is None:
+                    world.stop_reason = STOP_SIM_TIME_CAP
+                stop_reason = world.stop_reason
 
         if reason is not None:
             error = _kill_error(reason)

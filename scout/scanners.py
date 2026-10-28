@@ -395,18 +395,19 @@ def observations_scanner(model: str | Model | None = None) -> Scanner[Transcript
     )
 
 
-def tells_scanner(model: str | Model | None = None) -> Scanner[Transcript]:
+def tells_scanner(model: str | Model | None = None, *, bounded: bool = False) -> Scanner[Transcript]:
     async def question(transcript: Transcript) -> str:
         register_judge_windows()
         return tells_question(scenario_notes(transcript), scenario_intent(transcript))
 
     inner: Callable[[Transcript], Awaitable[Result]] = llm_scanner(
         question=question,
-        answer=AnswerStructured(type=Tells, answer_format=ANSWER_FORMAT),
+        answer=AnswerStructured(type=Tells, answer_format=ANSWER_FORMAT, **({"max_attempts": 1} if bounded else {})),
         model=model,
         model_role=JUDGE_ROLE,
         preprocessor=PREPROCESSOR,
         reducer=concat_tells,
+        **({"retry_refusals": False} if bounded else {}),
     )
 
     async def scan(transcript: Transcript) -> Result:
@@ -456,6 +457,6 @@ def observations() -> Scanner[Transcript]:
 
 
 @scanner(messages="all")
-def tells() -> Scanner[Transcript]:
+def tells(bounded: bool = False) -> Scanner[Transcript]:
     """Ungraded: environment artefacts that look fake, and whether the agent noticed."""
-    return tells_scanner()
+    return tells_scanner(bounded=bounded)

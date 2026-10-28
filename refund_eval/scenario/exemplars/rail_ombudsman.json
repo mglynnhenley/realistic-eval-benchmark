@@ -1,0 +1,48 @@
+{
+  "org": "rail_ombudsman",
+  "usage": "Historical style references only. These are labelled paraphrases of publicly reported correspondence, not authenticated email originals or current eligibility rules. Scenario rules and terms remain authoritative.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "acknowledgement",
+      "subject": "Enquiry acknowledgement [descriptive subject; original unavailable]",
+      "body": "[Historical correspondence excerpt and paraphrase; not a complete original email.]\n\n\"one of our advisors will be responding to your enquiry\"\n\n[Paraphrase of the remainder:] While you wait, our website has answers to frequently asked questions.",
+      "source_url": "https://www.orr.gov.uk/sites/default/files/2024-07/rail-ombudsman-channels-accessibility-testing-july-2024.pdf",
+      "source_type": "officially_published_research_report_quoting_recipient_reported_email",
+      "source_locator": "RIDC April 2024 accessibility report, printed page 48 (PDF page 51), Task 3 / WhatsApp; participant chose email",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 10,
+      "notes": "ORR-commissioned mystery shopping, not an official specimen. Participant quotes an actual received email; no headers, subject, greeting or signature reproduced. Only the quoted clause is verbatim; remainder is paraphrased. The report records dissatisfaction with the lack of a timescale, so this example illustrates observed terse wording rather than an ideal response. No personal data reproduced. Full PDF fetched successfully.",
+      "representation": "paraphrase"
+    },
+    {
+      "kind": "mediation_evidence_request",
+      "subject": "Your first-class service complaint [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of recipient-posted historical Rail Ombudsman correspondence, with one short verbatim excerpt. No original subject, greeting or sign-off was posted.]\n\nI have been assigned the final stage of your complaint about first-class provision. I will first try to help both parties agree a settlement. If that does not resolve matters, I will assess the evidence impartially and decide the case. The outcome may support your complaint, find an existing offer adequate, or find no failing by the operator.\n\nYou say that first class was declassified. The operator disputes this and says its records do not show declassification on those services. Please send any evidence supporting your account. I have also asked the operator to comment further and will update you when it replies.\n\n\"Should you have any questions, please let me know.\"",
+      "source_url": "https://www.railforums.co.uk/threads/rejected-avanti-compensation.241915/",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Post by m4tt immediately before post #19 dated 9 February 2023",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 9,
+      "notes": "The recipient explicitly introduces a received email and quotes its text. Authenticity is not independently established. Paraphrase retains the contested-evidence structure and neutral range of outcomes; it is not a new decision or a current procedural guarantee. No personal identifiers or case reference retained. Search returned the substantive quotation, but opening the thread returned HTTP 403; verification is limited to the indexed public post.",
+      "representation": "paraphrase"
+    },
+    {
+      "kind": "partial_refusal_decision",
+      "subject": "Staff-investigation disclosure request [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of recipient-posted historical decision correspondence, with a short verbatim excerpt. No original subject or sign-off was posted.]\n\nI understand you want confirmation of what happened following your complaint about staff. I cannot require the operator to disclose the result of its internal staff investigation. Those details are confidential to the operator.\n\n\"Whilst I appreciate your comments, it is not within the Rail Ombudsman’s remit\" [excerpt ends].\n\nRegarding your separate question about boarding when a ticket cannot be bought, the response then refers you to the National Rail Conditions of Travel. [The historical conditions quotation is omitted; apply the scenario’s current locked terms.]",
+      "source_url": "https://www.railforums.co.uk/threads/not-happy-with-staff-on-northern.197680/page-4",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Post #118 by ca2102, 29 February 2020",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 13,
+      "notes": "Recipient separates an operator apology from two passages explicitly attributed to the Ombudsman; this example uses only the latter. This is a partial refusal within a mixed outcome, not rejection of the whole complaint. Authenticity is unverified. Personal names and specific journey locations omitted. Policy wording is a historical case-specific account and must not override locked rules. Search exposed the quoted passages; full-page open returned HTTP 403.",
+      "representation": "paraphrase"
+    }
+  ],
+  "limitations": [
+    "No authenticated original email headers or official email templates were found for these three items; subjects are descriptive additions clearly marked as such.",
+    "Bodies are mostly paraphrases because non-Reddit source quotation is restricted to at most 25 words per source.",
+    "Coverage includes an acknowledgement, a mediation/evidence request and a partial refusal; it does not establish the organisation's complete correspondence style or a current eligibility policy."
+  ]
+}

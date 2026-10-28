@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 from collections import Counter
+from pathlib import Path
 
 from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
@@ -131,30 +132,75 @@ def _track(args) -> int:
 def _trials(args) -> int:
     from refund_eval.realism.cycle import collect, trial_commands
 
-    commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
-                              environment=args.environment)
-    for command in commands:
+    try:
+        commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
+                                  environment=args.environment, scenario=args.scenario,
+                                  token_budget=args.token_budget, max_turns=args.max_turns,
+                                  time_limit=args.time_limit)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    for command in commands[:1] if args.prepare_only else commands:
         print(shlex.join(command))
-    if not args.yes and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes"):
+    if (not args.prepare_only and not args.yes
+            and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes")):
         print("Not run.")
         return 1
     prepared = subprocess.run(commands[0], check=False).returncode
-    if prepared:
+    if prepared or args.prepare_only:
         return prepared
     code = subprocess.run(commands[1], check=False).returncode
-    print(json.dumps(collect(args.out, args.trials), indent=2))
-    return code
+    result = collect(args.out, args.trials)
+    print(json.dumps(result, indent=2))
+    return code or int(bool(result["failed"]))
 
 
 def _score(args) -> int:
     from refund_eval.realism.cycle import score
 
-    result = json.dumps(score(args.logs, args.scans), indent=2)
+    try:
+        options = {}
+        if args.source_map:
+            aliases = json.loads(Path(args.source_map).read_text())
+            if not isinstance(aliases, dict) or any(
+                not isinstance(source, str) or not source or not isinstance(target, str) or not target
+                for source, target in aliases.items()
+            ):
+                raise ValueError("Source map must be a JSON object mapping nonempty source strings to log paths")
+            options["source_aliases"] = aliases
+        result = json.dumps(score(args.logs, args.scans, expected_trials=args.expected_trials,
+                                  judge=args.judge, **options), indent=2)
+    except (ValueError, OSError) as error:
+        print(f"Cannot score trials: {error}", file=sys.stderr)
+        return 1
     if args.out:
         with open(args.out, "w") as file:
             file.write(result + "\n")
     print(result)
     return 0
+
+
+def _measure(args) -> int:
+    from refund_eval.realism.measurement import run_measurement
+
+    settings = {"scenario": args.scenario, "model": args.model, "judge": args.judge,
+                "trials": args.trials, "token_budget": args.token_budget,
+                "per_trial_cost": args.cost_limit, "scan_reserve": args.scan_reserve,
+                "sim_weeks": args.sim_weeks, "max_turns": args.max_turns,
+                "time_limit": args.time_limit, "trial_wallclock_limit": args.time_limit}
+    try:
+        repo = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+        result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
+                                 baseline=args.base, candidate=args.candidate,
+                                 review=Path(args.review).resolve(), budget=args.budget,
+                                 settings=settings,
+                                 baseline_evidence=Path(args.baseline_evidence).resolve() if args.baseline_evidence else None,
+                                 execute=args.execute)
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f"Cannot measure candidate: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("status") in {"prepared", "complete"} else 1
 
 
 def _compare(args) -> int:
@@ -225,19 +271,46 @@ def main(argv: list[str] | None = None) -> int:
     running.add_argument("--yes", action="store_true", help="run without asking")
     tracking.set_defaults(handler=_track)
 
-    trials = commands.add_parser("trials", help="prepare and run one Harbor batch from the working tree")
+    trials = commands.add_parser("trials", parents=[common], help="prepare and run one Harbor batch from the working tree")
     trials.add_argument("--model", required=True, help="target model")
     trials.add_argument("--trials", type=int, required=True, help="trials, all run concurrently")
     trials.add_argument("--cost-limit", type=float, required=True, help="USD cap per trial")
     trials.add_argument("--out", required=True, help="new Git-ignored output directory")
     trials.add_argument("--sim-weeks", type=float, default=3, help="simulated weeks per trial")
+    trials.add_argument("--token-budget", type=int, default=1_000_000,
+                        help="target tokens including cached input (default: 1000000 for a short screen)")
+    trials.add_argument("--max-turns", type=int, default=10000, help="maximum target turns per trial")
+    trials.add_argument("--time-limit", type=int, default=36000, help="wall-clock seconds per Harbor trial")
+    trials.add_argument("--prepare-only", action="store_true", help="prepare frozen config without launching paid trials")
     trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
+    measure = commands.add_parser("measure", parents=[common],
+                                  help="prepare a reviewed candidate comparison; --execute launches paid measurement")
+    measure.add_argument("--base", required=True, help="baseline Git commit")
+    measure.add_argument("--candidate", required=True, help="reviewed candidate Git commit")
+    measure.add_argument("--review", required=True, help="JSON review of the exact baseline and candidate")
+    measure.add_argument("--out", required=True, help="saved measurement run directory")
+    measure.add_argument("--budget", required=True, type=float, help="additional model USD allowance within existing authorization")
+    measure.add_argument("--baseline-evidence", help="verified saved baseline evidence manifest")
+    measure.add_argument("--execute", action="store_true", help="explicitly launch paid stages (default: prepare only)")
+    measure.add_argument("--model", default="openrouter/anthropic/claude-haiku-4.5")
+    measure.add_argument("--judge", default="openrouter/anthropic/claude-opus-5.5")
+    measure.add_argument("--trials", type=int, default=3)
+    measure.add_argument("--token-budget", type=int, default=1_000_000)
+    measure.add_argument("--cost-limit", type=float, default=.5)
+    measure.add_argument("--scan-reserve", type=float, default=2)
+    measure.add_argument("--sim-weeks", type=float, default=3)
+    measure.add_argument("--max-turns", type=int, default=10000)
+    measure.add_argument("--time-limit", type=int, default=1800, help="wall-clock seconds per trial batch (default: 1800)")
+    measure.set_defaults(handler=_measure)
     scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
     scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")
     scoring.add_argument("--scans", required=True, help="Scout results directory with the tells scanner")
+    scoring.add_argument("--expected-trials", type=int, help="require exactly this many successful trial/scan pairs")
+    scoring.add_argument("--judge", help="select one judge when the scans directory contains several")
     scoring.add_argument("--out", help="also write the score JSON here")
+    scoring.add_argument("--source-map", help="JSON mapping original scan sources to relocated log paths")
     scoring.set_defaults(handler=_score)
     comparing = commands.add_parser(
         "compare", help="bootstrap candidate minus champion tells per trial",

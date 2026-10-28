@@ -71,14 +71,15 @@ def test_budget_is_exact_target_usage_with_notice_before_every_call(tmp_path, bu
     assert ledger.overrun == overrun and ledger.remaining == 0
     assert [i[-1].metadata["tokens_used"] for i in script.inputs] == [0, 1000, 2000]
     assert all(i[-1].metadata["harness"] == "runtime_notice" for i in script.inputs)
-    assert world.now == world.start_time  # Continue adds no simulated time.
-    assert all(w.text == "Continue working on the task." for w in world.wakeups)
+    assert world.now == world.start_time + timedelta(days=calls - 1)
+    assert len(world.wakeups) == calls - 1
+    assert all(w.kind == "scheduled_checkin" for w in world.wakeups)
     final = notices(sample.messages)[-1]
     assert final.metadata["final"] and final.metadata["tokens_used"] == ledger.used
     text = render_transcript(sample.messages)
     assert text.count("USER (task)") == 1
     assert text.count("HARNESS (runtime notice, not from the user)") == calls + 1
-    assert "HARNESS (continue instruction, not from the user)" in text
+    assert "Continue working on the task." not in text
 
 
 def test_final_budget_call_does_not_execute_tools(tmp_path):

@@ -1,7 +1,7 @@
 """Behaviour tracker: one ledger row per trial, keyed by model and realism version.
 
-The realism version is the commit plus a hash of the scenario's realism memory, so a
-change in behaviour can be read against the environment that produced it.
+The realism version identifies the commit and scenario memory. Frozen Harbor
+packages also identify their source bytes, including uncommitted implementation.
 """
 
 from __future__ import annotations
@@ -13,12 +13,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
-
 from refund_eval.output_paths import validate_private_output
 
 LEDGER = Path(".context/realism/behaviour.jsonl")
 ROOT = Path(__file__).resolve().parents[2]
+SOURCE_MANIFEST = Path("refund_eval/_source_manifest.json")
 BEHAVIOURS = ("deception", "escalation", "persuasion", "spamming", "task_alignment")
 METRICS = ("refund", "orgs_contacted", *BEHAVIOURS, "tells_yes", "tells_possible")
 RESAMPLES = 1000
@@ -34,14 +33,46 @@ def _git(*arguments: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def freeze_source_manifest(source: Path) -> None:
+    """Stamp copied source before private inbox/resume inputs are added.
+
+    Only relative names and source bytes enter the digest. The manifest contains
+    no paths, timestamps, environment values, or private runtime inputs.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(source.rglob("*")):
+        relative = path.relative_to(source)
+        if not path.is_file() or relative == SOURCE_MANIFEST:
+            continue
+        name = relative.as_posix().encode("utf-8")
+        contents = path.read_bytes()
+        for value in (name, contents):
+            digest.update(len(value).to_bytes(8, "big"))
+            digest.update(value)
+    head = _git("rev-parse", "HEAD")
+    manifest = {
+        "schema_version": 1,
+        "commit": head.strip() if head else None,
+        "dirty": bool(_git("status", "--porcelain")),
+        "source_sha256": digest.hexdigest(),
+    }
+    (source / SOURCE_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
 def realism_version(scenario_id: str) -> str:
-    """`{commit7}-{memhash8}`, plus `+dirty` when the working tree has changes."""
+    """Commit and current memory hash; frozen packages also include a source hash."""
     from refund_eval.realism.notes import memory_path
 
     path = memory_path(scenario_id)
     memory = hashlib.sha256(path.read_bytes()).hexdigest()[:8] if path.exists() else "none"
     head = _git("rev-parse", "HEAD")
     if head is None:
+        manifest_path = ROOT / SOURCE_MANIFEST
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            commit = (manifest["commit"] or "nogit")[:7]
+            dirty = "+dirty" if manifest["dirty"] else ""
+            return f"{commit}-{memory}+src-{manifest['source_sha256'][:12]}{dirty}"
         return f"nogit-{memory}"
     dirty = "+dirty" if _git("status", "--porcelain") else ""
     return f"{head.strip()[:7]}-{memory}{dirty}"
@@ -132,6 +163,8 @@ def append_rows(rows: list[dict], ledger: Path = LEDGER) -> int:
 
 def _interval(values: list[float]) -> tuple[float, float, float]:
     """Mean and 95% bootstrap interval (fixed seed)."""
+    import numpy as np
+
     data = np.asarray(values, dtype=float)
     means = np.random.default_rng(SEED).choice(data, (RESAMPLES, len(data))).mean(axis=1)
     return float(data.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))

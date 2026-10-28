@@ -1,0 +1,36 @@
+{
+  "org": "trainline",
+  "notes": "Three researched examples of recipient-posted correspondence. Two are explicitly labeled copyright-safe reconstructions. No verified auto-acknowledgement email was found. Two examples concern one dispute, providing different exchange stages rather than independent cases. Recipient attribution does not independently authenticate the sender. Style references only; scenario-specific terms and locked payment rules retain authority.",
+  "examples": [
+    {
+      "kind": "refusal",
+      "representation": "verbatim_excerpt",
+      "source_type": "recipient_posted_email",
+      "subject": "[Subject not published: refusal after completed journey]",
+      "body": "[Verbatim excerpt of an email attributed to Trainline by its recipient on Reddit. Original subject, greeting and sign-off were not published.]\n\n> I have checked with my resources and confirm that your service is disrupted by the service provider Great Western Railway and I would like to inform you that we are just the online retailer's and we only sell tickets on behalf of the service provider. We share the information that has been provided to us by the service provider.\n> If we receive any cancellation update from the service then we will definitely share that with our customer. If there is any sudden cancellation from the service then we will not be able to do anything in that situation. We always to try to update our customer about any changes on the booking.\n> Moreover, as you where able to complete the journey using the same ticket in this case wo wont be able to honor your refund request. In this case kindly get in contact with the Customer Relation team as they are the highest point of contact.",
+      "source": "https://www.reddit.com/r/LegalAdviceUK/comments/1hzq14s/trainline_sold_me_a_train_ticket_after_the/",
+      "retrieved": "2026-10-27",
+      "notes": "Recipient-posted email quotation in a Reddit post dated 2025-01-12, attributed to u/iwouldlikethings. Verified the live page and all three quoted paragraphs; commenter advice is excluded. Transcribed as published, including grammatical errors. No personal names, contact details or case identifiers occur in the excerpt, so no additional redactions were required. Subject is an explicit editorial description, not an original subject. No original headers or independent sender authentication are available. Historical style only: the retailer explanation, refusal and escalation wording do not establish current policy or override scenario rules."
+    },
+    {
+      "kind": "request_information",
+      "representation": "paraphrase",
+      "source_type": "recipient_posted_email",
+      "subject": "[Subject not published: clarify alternative travel or abandoned journey]",
+      "body": "[Paraphrased reconstruction of a publicly posted Trainline email; not an authentic quotation. Historical style reference only.]\n\nDear [redacted],\n\nI appreciate you getting in touch and am sorry that the cancelled train affected your plans. I can help look into the refund.\n\nI have located the booking using [redacted] and checked the journey details. The outward train was cancelled. Before I proceed, please let me know whether you used these tickets to take a different train, or decided to abandon the trip.\n\nAwaiting your response.\n\nKind regards,\n[redacted]\nCustomer Service Representative",
+      "source": "https://techrights.org/n/2024/04/05/When_Electronic_or_Digital_is_Objectively_Worse.shtml",
+      "retrieved": "2026-10-27",
+      "notes": "First-person article dated 2024-04-05, publishing a redacted Trainline exchange involving the author and his wife. Verified the final quoted Trainline email, which confirms an outward cancellation and asks whether alternative travel occurred. This reconstructs that one email only, not customer messages or website policy. Personal and agent names and the already-redacted transaction ID are replaced with [redacted]; journey/date omitted. Subject was not published and is marked editorial. Substantive sentences are paraphrased; fewer than 25 generic greeting/closing words are retained verbatim from this source. Public attribution is not independent authentication. This and the conditional-approval example below come from the same customer dispute, not independent cases. No general eligibility rule should be inferred."
+    },
+    {
+      "kind": "conditional_approval",
+      "representation": "paraphrase",
+      "source_type": "recipient_posted_email",
+      "subject": "[Subject not published: refund requested; return collected tickets]",
+      "body": "[Paraphrased reconstruction of a publicly posted Trainline email; not an authentic quotation. Historical style reference only.]\n\nDear [redacted],\n\nI have reviewed your message and am sorry about the disruption to your trip. I checked the cancellation and submitted a request for the full GBP 19.20 ticket refund.\n\nBecause you already collected the paper tickets, please post the unused originals to our refunds team. In this case the email asked for their return within 28 days and said payment would follow receipt in around seven to ten working days.\n\nWe sell tickets for the train operators and cannot control their service disruptions. I appreciate how disappointing the cancellation was and your patience while we deal with it.\n\nThe agent also explained the restrictions of the Advance tickets in this particular booking. Please reply if you need any further assistance.\n\nWarm regards,\n[redacted]\nCustomer service representative",
+      "source": "https://techrights.org/n/2024/04/11/Video_Trainline_Finally_Issues_a_Refund_But_It_Took_9_Days_and_.shtml",
+      "retrieved": "2026-10-27",
+      "notes": "First-person follow-up dated 2024-04-11, updated 2024-04-12, quoting an email to the author's wife attributed to a Trainline agent. Verified the quoted email beginning after the statement that a message was sent to his wife, including GBP 19.20 and the physical-ticket-return requirement. Paraphrased reconstruction; fewer than 25 generic greeting/closing words are retained verbatim from this source. Personal/agent names and booking identifiers replaced with [redacted], postal address omitted, and Advance-ticket restrictions summarized. The source also quotes a later successful-refund notice; that separate notice is not misrepresented as this email. Subject was not published and is editorial. Same dispute as the request-information example; recipient attribution is not independent authentication. The amount, 28-day request and seven-to-ten-day estimate describe that 2024 case only; scenario-specific terms and locked payment rules retain authority."
+    }
+  ]
+}

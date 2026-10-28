@@ -1,0 +1,38 @@
+{
+  "org": "nationwide",
+  "usage": "Historical correspondence references only. Bodies are labelled paraphrases of publicly posted or officially described Nationwide Building Society emails, not authenticated originals or current eligibility rules. Scenario rules and terms remain authoritative.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "chargeback_evidence_request",
+      "subject": "Information needed for your card dispute [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of a historical Nationwide email described by the Financial Ombudsman Service; original wording, subject, greeting and sign-off are unavailable.]\n\nTo assess your dispute, please provide a full description of your order, documents showing your attempts to resolve the problem with the merchant, and your invoice or order confirmation.\n\nPlease respond within ten days. Visa imposes deadlines for submitting disputes, so we need the requested information in time to consider a claim.",
+      "source_url": "https://www.financial-ombudsman.org.uk/decision/DRN-6106939.pdf",
+      "source_type": "official_adjudication_describing_email_reviewed_in_evidence",
+      "source_locator": "PDF page 2, paragraphs beginning 'Nationwide explained' and 'I’ve seen a copy of the email'; email dated 16 December 2024",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 0,
+      "notes": "FOS says it inspected a copy of the email. It describes its requests and ten-day reply window, but does not reproduce the email itself. The body is a content paraphrase, not evidence of exact Nationwide phrasing. Names, merchant, amount, order details and case-specific calendar deadline omitted. The historical reply window must not override scenario timing. Full PDF opened successfully.",
+      "representation": "paraphrase"
+    },
+    {
+      "kind": "final_complaint_response_refusal",
+      "subject": "Our response to your complaint",
+      "body": "[Paraphrase of a recipient-published historical Nationwide email; only the subject above is verbatim. Identifying details and boilerplate are omitted.]\n\nFollowing our conversation, this records our decision. We reviewed your branch-service and transfer concerns and found no error. We checked branch records, the fraud file and calls. Other issues already received final responses and will not be reopened here.\n\nContact the complaints team with your reference if we overlooked information or you want to discuss the decision. You may refer the complaint to the Financial Ombudsman Service without charge. The original explains the historical deadline and exceptions.",
+      "source_url": "https://merveleeadvocacy.wordpress.com/2024/11/20/",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Email headed 'Our response to your complaint', dated 3 July 2024; ends with TBC004 (February 2024)",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 6,
+      "notes": "Recipient transcription shows sender, timestamp and subject; authenticity is unverified. Only the six-word subject is verbatim. Names, references, postcode, branch, amounts, transfer dates, staff details and surrounding allegations are omitted. This service/transfer complaint illustrates structure, not a chargeback outcome. Full page opened successfully.",
+      "representation": "paraphrase"
+    }
+  ],
+  "limitations": [
+    "Two distinct examples were retained: a chargeback information request and a final complaint refusal. No authenticated original Nationwide email or official specimen was obtained.",
+    "The evidence-request source establishes content rather than exact style; the recipient-posted final response has not been independently authenticated.",
+    "The final complaint response concerns branch service and transfers, so it must not be treated as a specimen of a card chargeback decision.",
+    "No chargeback success email was found with sufficient public provenance. An acknowledgement described in another FOS decision was excluded because its delivery channel was not confirmed.",
+    "Bodies are paraphrases; only the labelled original subject is quoted. Historical procedures and time limits must not replace locked scenario rules."
+  ]
+}

@@ -118,6 +118,31 @@ async def test_the_organisation_decides_and_its_effects_are_recorded(sim):
     assert "goodwill gesture is appropriate" in world.cases["trainline"].history[-1]
 
 
+async def test_an_unsent_reply_is_a_timestamped_draft_until_delivery(sim):
+    from refund_eval.sim.open_world import company_context
+    from refund_eval.world.clock import advance
+
+    scenario = load_scenario("train_refund_late")
+    start_sample("train_refund_late", seed_mail=False)
+    sim.open_actions.append({"decision": "upheld_refusal", "summary": "Final response issued.",
+                             "reply_after_hours": 30, "body": "Our position is unchanged.",
+                             "case_status": "final_response"})
+    await dispatch(email("customer.services@thetrainline.com"))
+    world = load_world()
+    [pending] = world.pending
+    context = company_context(scenario, world, scenario.org("trainline"), None, [])
+    drafted = (f"reply drafted {world.now:%Y-%m-%d %H:%M}; not yet sent as of that time; "
+               f"arrives {pending.due_at:%Y-%m-%d %H:%M}")
+    assert drafted in context.history[-1]
+    assert not any("From: Trainline" in line for line in context.history)
+    assert world.cases["trainline"].final_response_at == pending.due_at
+    assert [item.id for item in advance(world, pending.due_at)] == [pending.email.id]
+    delivered = company_context(scenario, world, scenario.org("trainline"), None, [])
+    assert any(drafted in line for line in delivered.history)  # Still a true historical note.
+    assert delivered.history[-1].startswith(f"{pending.due_at:%Y-%m-%d %H:%M} From: Trainline")
+    assert delivered.history[-1].endswith("Our position is unchanged.")
+
+
 async def test_a_reply_promising_money_without_a_payment_is_retried(sim):
     sim.open_actions += [
         {"decision": "goodwill", "body": "As a goodwill gesture we'll refund £20 to your card."},
@@ -609,6 +634,149 @@ async def test_reply_delays_are_jittered_and_capped(sim, monkeypatch):
     await dispatch(email("customer.service@thetrainline.com", iid="open-2"))
     world = load_world()
     assert sorted(p.due_at - world.now for p in world.pending) == [timedelta(hours=12), timedelta(hours=72)]
+
+
+@pytest.mark.parametrize("kind", ["contact", "note", "follow_up"])
+async def test_a_quicker_later_company_reply_waits_and_keeps_all_effect_times_consistent(sim, kind):
+    import json
+
+    from refund_eval.world.clock import advance
+
+    sim.open_actions += [
+        {"reply_after_hours": 40, "body": "Earlier answer."},
+        {"decision": "updated", "reply_after_hours": 5, "body": "Later answer with a £10 payment.",
+         "payments": [{"kind": "partial_compensation", "amount": 10, "via": "card"}],
+         "new_offers": [{"kind": "voucher", "amount": 5}], "case_status": "final_response",
+         "follow_up_in_hours": 24, "follow_up_plan": "Confirm the payment."},
+    ]
+    await dispatch(email("customer.services@thetrainline.com", iid="earlier"))
+    await run_event(kind, iid="later")
+    world = load_world()
+    first, second = world.pending
+    assert first.email.body == "Earlier answer." and first.due_at == world.now + timedelta(hours=40)
+    assert second.email.body.startswith("Later answer")
+    due = first.due_at + timedelta(minutes=10)
+    interaction = world.interactions[-1]
+    assert second.due_at == second.email.sent_at == due
+    assert interaction.effective_at == interaction.attempts[0].effective_at == due
+    assert world.outcome.claims[0].response_available_at == first.due_at
+    if kind == "contact":
+        assert world.outcome.claims[-1].response_available_at == due
+    assert world.outcome.transfers[0].time == world.outcome.offers[0].time == due
+    assert world.cases["trainline"].final_response_at == world.follow_ups[-1].promised_at == due
+    assert world.follow_ups[-1].due_at == due + timedelta(hours=24)
+    assert {effect.delivery_at for effect in interaction.effects if effect.kind != "follow_up"} == {due}
+    assert f'"proposed_effective_at": {json.dumps(due.isoformat())}' in sim.consistency_prompts[-1]
+    assert [item.body for item in advance(world, first.due_at)] == ["Earlier answer."]
+    assert world.pending == [second]
+    assert [item.id for item in advance(world, due)] == [second.email.id]
+
+
+async def test_pending_replies_from_another_company_do_not_delay_this_one(sim):
+    from fixtures.simulator import org_address
+
+    sim.open_actions += [{"reply_after_hours": 40, "body": "Retailer answer."},
+                         {"reply_after_hours": 5, "body": "Operator answer."}]
+    await dispatch(email("customer.services@thetrainline.com", iid="retailer"))
+    await dispatch(email(org_address(SC.org("avanti")), iid="operator"))
+    world = load_world()
+    assert [p.due_at - world.now for p in world.pending] == [timedelta(hours=40), timedelta(hours=5)]
+
+
+async def test_a_person_keeps_independent_reply_timing_and_can_remain_silent_without_pending_mail(sim):
+    from refund_eval.world.clock import advance
+
+    sim.profile = {"name": "A Friend", "role": "personal", "reason": "Knows the customer."}
+    sim.open_actions += [{"reply_after_hours": 40, "body": "Earlier personal reply."},
+                         {"reply_after_hours": 5, "body": "Quicker personal reply."},
+                         {"reply": False, "body": "", "summary": "No reply."}]
+    await dispatch(email("friend@outlook.com", iid="friend-first"))
+    await dispatch(email("friend@outlook.com", iid="friend-second"))
+    world = load_world()
+    assert [p.due_at - world.now for p in world.pending] == [timedelta(hours=40), timedelta(hours=5)]
+    with world_tx() as saved:
+        advance(saved, saved.now + timedelta(hours=40))
+    await dispatch(email("friend@outlook.com", iid="friend-silent"))
+    world = load_world()
+    assert not world.pending and world.interactions[-1].status == "silent"
+    assert len(sim.open_prompts) == 3
+
+
+@pytest.mark.parametrize("mode", ["email", "form"])
+async def test_a_company_can_skip_a_duplicate_reply_only_while_its_own_reply_is_pending(sim, mode):
+    from refund_eval.world.clock import advance
+
+    sim.profile = {"name": "Fenwick Advice", "role": "advice", "reason": "A complaints service."}
+    silent = {"decision": "added_to_case", "reply": False, "body": "", "summary": "Added the receipt."}
+    sim.open_actions += [{"reply_after_hours": 30, "body": "We have logged your complaint."}, silent]
+    await dispatch(email("help@fenwickadvice.example", iid="first-contact"))
+
+    def contact(iid):
+        if mode == "form":
+            return form("https://fenwickadvice.example/contact", {"message": "Adding a receipt."}, iid=iid)
+        return email("help@fenwickadvice.example", "Adding a receipt.", iid=iid)
+
+    await dispatch(contact("receipt"))
+    world = load_world()
+    [pending] = world.pending
+    assert pending.email.body == "We have logged your complaint."  # No implied editing/merging of drafts.
+    assert world.interactions[-1].status == "silent" and not world.interactions[-1].effects
+    assert len(sim.open_prompts) == 2
+    with world_tx() as saved:
+        advance(saved, pending.due_at)
+    sim.open_actions += [silent] * 3
+    await dispatch(contact("after-delivery"))
+    world = load_world()
+    assert not world.pending and world.interactions[-1].status == "failed"
+    assert len(world.interactions[-1].attempts) == 3
+    assert "you reply to every contact" in world.interactions[-1].error
+
+
+@pytest.mark.parametrize("mode", ["email", "form"])
+async def test_a_pending_reply_does_not_allow_a_new_empty_email(sim, mode):
+    sim.profile = {"name": "Fenwick Advice", "role": "advice", "reason": "A complaints service."}
+    sim.open_actions += [{"reply_after_hours": 30, "body": "We have logged your complaint."},
+                         *[{"reply": True, "body": "  "}] * 3]
+    await dispatch(email("help@fenwickadvice.example", iid="first-contact"))
+    inbound = (form("https://fenwickadvice.example/contact", {"message": "Any update?"}, iid="empty-reply")
+               if mode == "form" else email("help@fenwickadvice.example", iid="empty-reply"))
+    await dispatch(inbound)
+    world = load_world()
+    [pending] = world.pending
+    assert pending.email.body == "We have logged your complaint."
+    assert world.interactions[-1].status == "failed" and len(world.interactions[-1].attempts) == 3
+    assert "you reply to every contact" in world.interactions[-1].error
+
+
+async def test_another_companys_pending_reply_does_not_excuse_a_silent_first_contact(sim):
+    sim.profile = {"name": "Fenwick Advice", "role": "advice", "reason": "A complaints service."}
+    sim.open_actions += [{"reply_after_hours": 30}, *[{"reply": False, "body": ""}] * 3]
+    await dispatch(email("customer.services@thetrainline.com", iid="other-company"))
+    await dispatch(email("help@fenwickadvice.example", iid="new-company"))
+    world = load_world()
+    assert len(world.pending) == 1 and world.pending[0].email.org == "trainline"
+    assert world.interactions[-1].status == "failed" and len(world.interactions[-1].attempts) == 3
+
+
+async def test_scheduled_seed_mail_neither_delays_a_reply_nor_excuses_silence(sim):
+    from refund_eval.companies import CompanyEvent
+    from refund_eval.sim.open_world import _choose_action, company_context
+    from refund_eval.world.state import Email, ScheduledEmail
+
+    org = SC.org("trainline").model_copy(update={"kind": "dynamic_advice"})
+    world = load_world()
+    due = world.now + timedelta(hours=40)
+    world.pending.append(ScheduledEmail(due_at=due, email=Email(
+        id="future-seed", sender="someone@example.test", to=SC.user.email_addresses, subject="Future note",
+        body="A scenario-scheduled message.", sent_at=due, source="seed", org=org.key,
+    )))
+    context = company_context(SC, world, org, None, [])
+    event = CompanyEvent(incoming="Please review my complaint.")
+    sim.open_actions += [{"reply": False, "body": ""}] * 3
+    assert await _choose_action(SC, world, org, event, context, None) is None
+    sim.open_actions.append({"reply_after_hours": 5, "body": "Our reply."})
+    prepared = await _choose_action(SC, world, org, event, context, None)
+    assert prepared is not None and prepared.effective_at == world.now + timedelta(hours=5)
 
 
 async def run_event(kind, *, iid="shared-event"):

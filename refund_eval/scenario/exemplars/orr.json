@@ -1,0 +1,22 @@
+{
+  "org": "orr",
+  "purpose": "Historical correspondence style only. Scenario rules and company terms remain authoritative.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "remit_refusal_and_signposting",
+      "subject": "Unpaid-fares complaint [descriptive subject; original not published]",
+      "body": "[Paraphrase of recipient-published historical ORR correspondence; not a verbatim email. The original subject and delivery headers were not published.]\n\nWe acknowledge the appeal letter you copied to us about an unpaid-fares notice.\n\nPenalty-fare schemes fall under the Department for Transport rather than our own regulatory responsibility. The department’s website provides the relevant rules.\n\nIf you remain dissatisfied with the appeal response, Passenger Focus may be able to approach the industry on your behalf. Questions about the regulation of these schemes can instead be addressed to the department.\n\nWe regret that we cannot take this matter forward, and hope these contacts help.\n\n[Individual staff name and historical contact details omitted.]",
+      "source_url": "https://www.railforums.co.uk/threads/unfair-ticket-challenge-advice-request.75630/",
+      "source_type": "recipient_posted_correspondence_delivery_channel_unverified",
+      "source_locator": "JayJay50 post introduced as a reply just received from the rail regulator, immediately before post #29 dated 6 December 2012",
+      "representation": "paraphrase",
+      "text_status": "paraphrased_reconstruction",
+      "retrieved_at": "2026-10-27",
+      "notes": "Search indexing exposes the quoted reply and Office of Rail Regulation signature; direct page retrieval returned HTTP 403. No headers independently authenticate its sender or establish email delivery. This 2012 response may misclassify the underlying excess-fare dispute as a penalty fare; preserve only its acknowledgement/remit/signposting structure. Historical remit and contacts are not current policy. No personal names, references or addresses retained."
+    }
+  ],
+  "limitations": [
+    "One recipient-reported historical reply was located. No verified consumer auto-acknowledgement template was found."
+  ]
+}

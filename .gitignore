@@ -56,6 +56,12 @@ node_modules/
 # Local analysis tools; not part of the benchmark runtime.
 /.claude/*
 !/.claude/workflows/
-/.agents/
+!/.claude/commands/
+/.claude/commands/*
+!/.claude/commands/realism-loop.md
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/realism-loop/
 /.gstack/
 /skills-lock.json

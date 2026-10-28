@@ -20,6 +20,7 @@ from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
 from refund_eval.harbor.__main__ import main, prepare
 from refund_eval.harbor.agent import RefundInspectAgent
 from refund_eval.harbor.config import TrialSettings
+from refund_eval.realism import track
 from refund_eval.scenario.schema import load_scenario
 
 
@@ -59,10 +60,48 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert task.config.environment.cpus == 2
     assert task.config.environment.memory_mb == 4096
     assert (source / "refund_eval/scenario/inbox.json").is_file()
+    manifest = json.loads((source / track.SOURCE_MANIFEST).read_text())
+    assert set(manifest) == {"schema_version", "commit", "dirty", "source_sha256"}
+    assert manifest["commit"] == subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    assert len(manifest["source_sha256"]) == 64
+    assert not (source / ".git").exists()
     assert not any(p.name in {".env", ".secrets", "node_modules", ".venv", ".context"}
                    for p in source.rglob("*"))
     with pytest.raises(FileExistsError):
         prepare(output, settings=published_settings(), model="openrouter/example/model")
+
+
+def test_frozen_source_hash_is_deterministic_and_tracks_content_and_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(track, "_git", lambda *args: "0123456789abcdef" if args[0] == "rev-parse" else " M source")
+    snapshots = [tmp_path / "first", tmp_path / "second"]
+    for source in snapshots:
+        (source / "refund_eval").mkdir(parents=True)
+    for name, content in [("refund_eval/b.py", b"b"), ("refund_eval/a.py", b"a")]:
+        (snapshots[0] / name).write_bytes(content)
+    for name, content in [("refund_eval/a.py", b"a"), ("refund_eval/b.py", b"b")]:
+        (snapshots[1] / name).write_bytes(content)
+
+    def stamp(source):
+        track.freeze_source_manifest(source)
+        return json.loads((source / track.SOURCE_MANIFEST).read_text())
+
+    original = stamp(snapshots[0])
+    assert stamp(snapshots[0]) == original  # the generated manifest excludes itself
+    assert stamp(snapshots[1]) == original  # creation order and destination do not matter
+    (snapshots[1] / "refund_eval/a.py").write_bytes(b"changed")
+    changed = stamp(snapshots[1])
+    assert changed["commit"] == original["commit"] and changed["dirty"] == original["dirty"]
+    assert changed["source_sha256"] != original["source_sha256"]
+    (snapshots[1] / "refund_eval/a.py").rename(snapshots[1] / "refund_eval/c.py")
+    assert stamp(snapshots[1])["source_sha256"] != changed["source_sha256"]
+    monkeypatch.setattr(track, "ROOT", snapshots[0])
+    monkeypatch.setattr(track, "_git", lambda *args: None)
+    memory = snapshots[0] / "refund_eval/memory.json"
+    monkeypatch.setattr("refund_eval.realism.notes.memory_path", lambda scenario: memory)
+    suffix = f"+src-{original['source_sha256'][:12]}+dirty"
+    assert track.realism_version("s") == f"0123456-none{suffix}"
+    memory.write_bytes(b"{}")
+    assert track.realism_version("s") == f"0123456-44136fa3{suffix}"
 
 
 def test_prepare_rejects_unignored_output_before_creating_job(tmp_path):

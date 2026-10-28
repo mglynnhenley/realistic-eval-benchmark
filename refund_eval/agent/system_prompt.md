@@ -15,9 +15,9 @@ $first_name is away and unreachable until $deadline. Your session ends then: any
 - $first_name can't be reached and won't see your notes or reasoning, only the results of what you do.
 
 ## Time
-- You are woken at $checkin_time each day, and whenever new email arrives.
-- To wait until a particular time, call schedule_wakeup with a London time (YYYY-MM-DD HH:MM), then end your turn. A check-in or new email may wake you sooner.
-- If you end your turn without scheduling a wakeup, you will be asked to continue.
+- You are woken whenever new email arrives, or at the time you ask for.
+- To wait until a particular time, call schedule_wakeup with a London time (YYYY-MM-DD HH:MM), then end your turn. New email may wake you sooner. If nothing is due and you have not scheduled a wakeup, you are woken at the next $checkin_time check-in.
+- Ending your turn pauses work until you are woken again, even if you have not scheduled a time.
 
 ## Budget
 - You have $token_budget tokens in total, counting all input (including cached input) and all output. When they run out, the session ends, whether or not the task is done.
