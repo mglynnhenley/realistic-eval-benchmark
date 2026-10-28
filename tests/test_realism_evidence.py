@@ -104,6 +104,58 @@ def test_real_native_logs_and_scout_scans_relocate_without_original_files(batch,
     assert all(str(copied) in log for log in loaded["source_map"].values())
 
 
+def test_frozen_parts_schema2_roundtrip_uses_real_native_ids_and_relocated_sources(batch, tmp_path):
+    import asyncio
+
+    from test_frozen_scan_parts import checked, native_messages, scan_row
+
+    from refund_eval.realism import scan_parts
+
+    root = Path(batch["path"])
+    protocol = {**batch["protocol"], "scan_protocol": scan_parts.VERSION,
+                "scan_max_parts_per_transcript": 4, "scan_max_parts_total": 12}
+    batch["protocol"] = protocol
+    source_manifest = root / "manifest.json"
+    original = json.loads(source_manifest.read_text())
+    original["protocol"] = protocol
+    source_manifest.write_text(json.dumps(original))
+    for index, log in enumerate(batch["logs"]):
+        native_messages(Path(log), protocol, eval_id=f"evaluation-{index}")
+    plan = asyncio.run(scan_parts.build(batch["logs"], checked(), max_parts_per_transcript=4, max_parts_total=12))
+    frozen = root / "scans" / scan_parts.PLAN_NAME
+    frozen.write_text(json.dumps(plan))
+    sha = scan_parts.file_digest(frozen)
+    spec_path = next((root / "scans").rglob("_scan.json"))
+    spec = json.loads(spec_path.read_text())
+    spec["scanners"]["tells"]["params"].update(parts_protocol=scan_parts.VERSION,
+                                              parts_plan=str(frozen), parts_sha256=sha)
+    spec_path.write_text(json.dumps(spec))
+    records = []
+    for index, item in enumerate(plan["per_transcript"]):
+        row = scan_row({**plan, "per_transcript": [item]})
+        row["metadata"]["plan_sha256"] = sha
+        row["transcript_source_uri"] = "file://" + item["source"]
+        row["transcript_metadata"]["eval_status"] = "success"
+        row.update(scanner_name="tells", scanner_key="tells", scanner_version=0,
+                   uuid=f"result-{index}", scan_error="", transcript_error="")
+        for event in row["scan_events"]:
+            event["call"]["response"]["id"] += f"-transcript{index}"
+        for key in ("value", "metadata", "transcript_metadata", "scan_events", "message_references", "event_references"):
+            row[key] = json.dumps(row[key])
+        records.append(row)
+    pd.DataFrame(records).to_parquet(spec_path.parent / "tells.parquet")
+    manifest = evidence.write_evidence(batch, HASHES)
+    assert json.loads(manifest.read_text())["schema"] == 2
+    copied = tmp_path / "portable"
+    shutil.copytree(manifest.parent, copied)
+    shutil.rmtree(root)
+    loaded = evidence.load_evidence(copied / "manifest.json", commit=COMMIT, protocol=protocol, hashes=HASHES)
+    assert loaded["score"]["per_trial"] == [0, 0]
+    with pytest.raises(ValueError, match="protocol"):
+        evidence.load_evidence(copied / "manifest.json", commit=COMMIT,
+                               protocol={key: value for key, value in protocol.items() if not key.startswith("scan_" )}, hashes=HASHES)
+
+
 @pytest.mark.parametrize("mutation", ["log", "scan", "missing", "extra", "symlink", "commit", "protocol", "hashes", "count"])
 def test_mutated_or_incompatible_evidence_is_rejected(batch, mutation):
     manifest = evidence.write_evidence(batch, HASHES)

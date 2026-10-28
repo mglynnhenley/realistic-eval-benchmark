@@ -195,6 +195,18 @@ def _measure(args) -> int:
                 "per_trial_cost": args.cost_limit, "scan_reserve": args.scan_reserve,
                 "sim_weeks": args.sim_weeks, "max_turns": args.max_turns,
                 "time_limit": args.time_limit, "trial_wallclock_limit": args.time_limit}
+    if args.trial_deadline_policy is not None:
+        from refund_eval.harbor.deadlines import trial_deadlines
+
+        settings["trial_deadline_policy"] = args.trial_deadline_policy
+        settings["trial_wallclock_limit"] = trial_deadlines(args.time_limit, args.trial_deadline_policy)["command_hard_seconds"]
+    if args.scan_protocol is not None:
+        settings.update(scan_protocol=args.scan_protocol,
+                        scan_max_parts_per_transcript=(4 if args.scan_max_parts_per_transcript is None else args.scan_max_parts_per_transcript),
+                        scan_max_parts_total=(12 if args.scan_max_parts_total is None else args.scan_max_parts_total))
+    elif args.scan_max_parts_per_transcript is not None or args.scan_max_parts_total is not None:
+        print("Part limits require --scan-protocol", file=sys.stderr)
+        return 1
     try:
         repo = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
         if args.candidate_only:
@@ -335,9 +347,13 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--token-budget", type=int, default=1_000_000)
     measure.add_argument("--cost-limit", type=float, default=.5)
     measure.add_argument("--scan-reserve", type=float, default=2)
+    measure.add_argument("--scan-protocol", choices=["frozen-parts-v1"], help="Opt in to exhaustive, frozen whole-message scan parts")
+    measure.add_argument("--scan-max-parts-per-transcript", type=int)
+    measure.add_argument("--scan-max-parts-total", type=int)
     measure.add_argument("--sim-weeks", type=float, default=3)
     measure.add_argument("--max-turns", type=int, default=10000)
-    measure.add_argument("--time-limit", type=int, default=1800, help="wall-clock seconds per trial batch (default: 1800)")
+    measure.add_argument("--trial-deadline-policy", choices=["bounded-lifecycle-v1"], default=None)
+    measure.add_argument("--time-limit", type=int, default=1800, help="Inspect sample seconds; legacy batch bound is the same, opt-in lifecycle adds finite setup/cleanup")
     measure.set_defaults(handler=_measure)
     scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
     scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")

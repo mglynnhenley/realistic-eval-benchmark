@@ -209,10 +209,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--limit", type=int, help="Scan only the first N transcripts")
     parser.add_argument("--max-tokens", type=positive_int, help="Explicit maximum output tokens per scanner call (default unchanged)")
     parser.add_argument("--bounded-tells", action="store_true", help="Tells only: one answer attempt, no refusal/API retries; requires explicit --max-tokens <=8192")
+    parser.add_argument("--parts-plan", type=Path, help="Explicit frozen-parts-v1 plan; never automatically splits or retries")
+    parser.add_argument("--parts-sha256", help="Exact frozen plan file digest")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
     args = parser.parse_args(argv)
     if args.bounded_tells and (args.scanners != ["tells"] or args.max_tokens is None or args.max_tokens > 8192):
         parser.error("--bounded-tells requires --scanners tells and explicit --max-tokens between 1 and 8192")
+    if bool(args.parts_plan) != bool(args.parts_sha256) or (args.parts_plan and
+            (not args.bounded_tells or len(args.judges) != 1 or args.limit is not None)):
+        parser.error("Frozen parts require exact plan/digest, one bounded judge, and complete transcripts")
     try:
         scans = validate_private_output(args.scans)
         scan_dirs = {judge: validate_private_output(scans / short(judge)) for judge in args.judges}
@@ -221,7 +226,29 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
     load_dotenv(ROOT / ".env")
 
-    estimate(args.logs, args.judges, args.scanners, args.limit)
+    part_options = {}
+    if args.parts_plan:
+        from refund_eval.realism.scan_parts import (
+            PLAN_NAME,
+            VERSION,
+            load,
+            require,
+            validate,
+        )
+
+        plan = load(args.parts_plan, args.parts_sha256)
+        require(plan["checked"]["judge"] == args.judges[0] and plan["checked"]["max_tokens"] == args.max_tokens,
+                "Frozen plan differs from selected judge/output cap")
+        asyncio.run(validate(plan, args.logs))
+        scans.mkdir(parents=True, exist_ok=True)
+        copied = scans / PLAN_NAME
+        with copied.open("xb") as stream:
+            stream.write(args.parts_plan.read_bytes())
+        load(copied, args.parts_sha256)
+        part_options = {"parts_protocol": VERSION, "parts_plan": str(copied), "parts_sha256": args.parts_sha256}
+        print(f"Frozen scan parts: {sum(len(r['parts']) for r in plan['per_transcript'])}; bound ${plan['required_usd']:.6f}")
+    else:
+        estimate(args.logs, args.judges, args.scanners, args.limit)
     if not args.yes:
         try:
             answer = input("Scan now? [y/N] ")
@@ -240,7 +267,7 @@ def main(argv: list[str] | None = None) -> None:
                                  max_retries=0, memoize=False)
                        if args.bounded_tells else judge)
         status = scan(
-            scanners={name: (getattr(scout_scanners, name)(bounded=True) if args.bounded_tells else getattr(scout_scanners, name)())
+            scanners={name: (getattr(scout_scanners, name)(bounded=True, **part_options) if args.bounded_tells else getattr(scout_scanners, name)())
                       for name in args.scanners},
             transcripts=transcripts_from(args.logs),
             scans=str(scan_dirs[judge]),
@@ -252,6 +279,8 @@ def main(argv: list[str] | None = None) -> None:
             limit=args.limit,
         )
         locations[judge] = status.location
+        if args.parts_plan and (not status.complete or status.errors):
+            raise ValueError("Frozen scan incomplete; preserve every charge/hold and original output. No retry is authorised.")
         if not status.complete:
             print(f"Scan incomplete ({len(status.errors)} errors). Retry the errors with: uv run scout scan resume {status.location}")
     report(results(locations), validation)

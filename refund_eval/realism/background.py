@@ -256,8 +256,29 @@ class JobContext:
         if self.cancelled or (self.directory / "cancel.json").exists():
             raise InterruptedError("Job cancelled")
 
-    def _stop_child(self) -> None:
+    def _stop_child(self, *, hard_deadline: float | None = None, force_group: bool = False) -> None:
         if self.child is None:
+            return
+        if hard_deadline is not None:
+            # This exact POSIX group belongs to this command. Its launcher may
+            # exit before Python has finished collecting remote artifacts.
+            if force_group or self.child.poll() is None:
+                try:
+                    os.killpg(self.child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                while time.monotonic() < hard_deadline:
+                    self.child.poll()
+                    try:
+                        os.killpg(self.child.pid, 0)
+                    except ProcessLookupError:
+                        return
+                    time.sleep(min(.05, max(0, hard_deadline - time.monotonic())))
+                try:
+                    os.killpg(self.child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.child.poll()  # Never add an unbounded reap after the hard limit.
             return
         from refund_eval.published.mcp import descendant_pids, kill_processes
         descendants = descendant_pids(self.child.pid)
@@ -278,7 +299,7 @@ class JobContext:
 
     def command(self, argv: list[str], *, name: str, timeout: int = 600,
                 cwd: str | Path | None = None, env: dict[str, str] | None = None,
-                allow_cancelled: bool = False) -> dict:
+                allow_cancelled: bool = False, termination_grace: int | None = None) -> dict:
         """Run a bounded local command, preserving output privately; never a shell."""
         if not allow_cancelled:
             self.check_cancelled()
@@ -287,15 +308,47 @@ class JobContext:
         workdir = Path(cwd or self.worktree).resolve()
         if not workdir.is_relative_to(self.directory.resolve()):
             raise ValueError("Command cwd must be this job's isolated directory")
+        if termination_grace is not None and (type(termination_grace) is not int or termination_grace <= 0
+                                              or type(timeout) is not int or timeout <= 0):
+            raise ValueError("Native soft and termination bounds must be positive integers")
+        started = time.monotonic()
+        hard_deadline = started + timeout + termination_grace if termination_grace is not None else None
+        if hard_deadline is not None:
+            from refund_eval.harbor.deadlines import HOST_START_ENV
+
+            env = {**os.environ, **(env or {}), HOST_START_ENV: str(started)}
         with (self.directory / f"{name}.log").open("wb") as output:
             os.chmod(output.name, 0o600)
             self.child = subprocess.Popen(argv, cwd=workdir, env=env, stdin=subprocess.DEVNULL,
                                           stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+            primary = None
             try:
-                code = self.child.wait(timeout=timeout)
+                code = self.child.wait(timeout=(max(0, started + timeout - time.monotonic())
+                                                if hard_deadline is not None else timeout))
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
-                self._stop_child()
-                self.child = None
+                # Freeze the first stop bound too: an early cancellation gets
+                # only the termination allowance, never the unused sample time.
+                stop_deadline = (min(hard_deadline, time.monotonic() + termination_grace)
+                                 if hard_deadline is not None else None)
+                # Repeated external stops must not interrupt or reset native grace.
+                previous = {}
+                if hard_deadline is not None:
+                    for signum in (signal.SIGINT, signal.SIGTERM):
+                        previous[signum] = signal.signal(signum, signal.SIG_IGN)
+                try:
+                    if hard_deadline is None:
+                        self._stop_child()
+                    elif primary is not None or self.child.poll() is None:
+                        # A launcher may have exited after a signal, while owned
+                        # descendants are still collecting artifacts.
+                        self._stop_child(hard_deadline=stop_deadline, force_group=primary is not None)
+                finally:
+                    self.child = None
+                    for signum, handler in previous.items():
+                        signal.signal(signum, handler)
         if not allow_cancelled:
             self.check_cancelled()
         return {"returncode": code, "log": str(self.directory / f"{name}.log")}
