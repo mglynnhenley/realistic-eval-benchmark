@@ -118,14 +118,23 @@ def _prepare_trials(context, protocol, out, cwd, tag):
 
 def _run_trials(context, protocol, out, cwd, tag):
     result = context.command(_trial_commands(protocol, out)[1], name=f"{tag}-trials", cwd=cwd,
-                             timeout=protocol["time_limit"] + 1200)
+                             timeout=context.settings.get("trial_wallclock_limit", protocol["time_limit"] + 1200))
     collected = collect(str(out), protocol["trials"])
     collected["returncode"] = result["returncode"]
     collected["cost_usd"] = _native_cost(collected["logs"]) if not collected["failed"] else None
     return collected
 
 
-def _scan_plan(protocol, logs):
+def _scan_plan(protocol, logs, context=None):
+    if context is not None and getattr(context, "measurement_worktree", None) is not None:
+        program = ("import asyncio,json,sys; from refund_eval.realism.scan_budget import plan; "
+                   "p=json.loads(sys.argv[1]); "
+                   "print(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
+                   "max_tokens=p['scan_max_tokens'],single_attempt=True))))")
+        identity = hashlib.sha256(json.dumps(logs).encode()).hexdigest()[:12]
+        return json.loads(_command(context, ["uv", "run", "python", "-c", program,
+                                            json.dumps(protocol), json.dumps(logs)],
+                                   name=f"scan-plan-{identity}", cwd=context.measurement_worktree))
     from refund_eval.realism.scan_budget import plan
     return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True))
 
@@ -133,17 +142,20 @@ def _scan_plan(protocol, logs):
 def _run_scan(context, protocol, logs, scans, cwd, tag):
     _command(context, ["uv", "run", "python", "scout/run.py", *logs, "--scanners", "tells", "--yes",
                        "--scans", str(scans), "--judges", protocol["judge"], "--bounded-tells", "--max-tokens", str(protocol["scan_max_tokens"])],
-             name=f"{tag}-scan", cwd=cwd, timeout=protocol["time_limit"])
+             name=f"{tag}-scan", cwd=getattr(context, "measurement_worktree", cwd), timeout=protocol["time_limit"])
     # Scout does not expose a reliable aggregate bill in its CLI result. Hold the
     # estimate until usage can be reconciled; an absent charge is never zero.
     return {"cost_usd": None}
 
 
-def _score(context, protocol, logs, scans, cwd, out, tag):
+def _score(context, protocol, logs, scans, cwd, out, tag, *, source_map=None):
     path = out / "score.json"
-    _command(context, ["uv", "run", "python", "-m", "refund_eval.realism", "score", *logs,
-                       "--scans", str(scans), "--judge", protocol["judge"], "--expected-trials",
-                       str(protocol["trials"]), "--out", str(path)], name=f"{tag}-score", cwd=cwd)
+    argv = ["uv", "run", "python", "-m", "refund_eval.realism", "score", *logs,
+            "--scans", str(scans), "--judge", protocol["judge"], "--expected-trials",
+            str(protocol["trials"]), "--out", str(path)]
+    if source_map is not None:
+        argv.extend(["--source-map", str(source_map)])
+    _command(context, argv, name=f"{tag}-score", cwd=getattr(context, "measurement_worktree", cwd))
     return json.loads(path.read_text())
 
 
@@ -176,6 +188,7 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
     out = context.directory / "batches" / tag
     out.mkdir(parents=True, exist_ok=False)
     atomic_json(out / "manifest.json", {"source_commit": commit, "protocol": protocol, "hashes": hashes,
+                                       "measurement_hashes": getattr(context, "measurement_hashes", hashes),
                                        "trial_reserve_usd": trial_reserve, "scan_reserve_usd": scan_reserve})
     context.update(f"{tag}: running {protocol['trials']} short trials", source_commit=commit)
     prepared = _prepare_trials(context, protocol, out / "trials", cwd, tag)
@@ -199,7 +212,9 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
     context.check_cancelled()
     context.update(f"{tag}: scanning saved trials", source_commit=commit)
     scans = out / "scans"
-    scan_plan = _scan_plan(protocol, trials["logs"])
+    scan_plan = (_scan_plan(protocol, trials["logs"], context)
+                 if getattr(context, "measurement_worktree", None) is not None
+                 else _scan_plan(protocol, trials["logs"]))
     atomic_json(out / "scan-budget.json", scan_plan)
     if not math.isfinite(scan_plan["required_usd"]) or scan_plan["required_usd"] <= 0:
         raise ValueError("Cannot establish a scan cost bound from current pricing")

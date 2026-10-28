@@ -106,8 +106,9 @@ async def test_existing_guard_tests_may_be_read_but_never_rewritten(context, mon
         return next(responses)
 
     monkeypatch.setattr(api_repair, "_call", call)
-    with pytest.raises(ValueError, match="existing guard assertions"):
-        await api_repair.repair(context, [])
+    result = await api_repair.repair(context, [])
+    assert result["status"] == "rejected"
+    assert result["stage"] == "propose" and result["code"] == "existing_guard_rewrite"
     assert "assert magnitude(3) == 3" in (context.worktree / "tests/test_demo.py").read_text()
 
 
@@ -183,3 +184,62 @@ async def test_missing_usage_holds_full_reservation_and_future_measurement_budge
     with pytest.raises(ValueError, match="measurement"):
         await api_repair._call(context, "two", "review", "model", "task", {})
     assert len(stages.show(context.ledger, 10)["stages"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target,code", [("refund_eval/world/mail.py", "unsupported_path"),
+                                        ("refund_eval/sim/unread.py", "uninspected_source")])
+async def test_unread_proposal_is_structured_rejection_with_original_charges_and_no_retry(context, monkeypatch, target, code):
+    import json
+
+    path = context.worktree / target
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("def original():\n    return 'synthetic original'\n")
+    api_repair._git(context, "add", ".")
+    api_repair._git(context, "commit", "-m", "Add synthetic unread source")
+    original, head = path.read_bytes(), api_repair._git(context, "rev-parse", "HEAD")
+    outputs = iter([
+        ({"paths": ["refund_eval/sim/demo.py"]}, .10),
+        ({"classification": "realism", "files": [{"path": target, "content": "def rewritten():\n    return 1\n"}]}, .14),
+    ])
+    calls = []
+
+    async def prices(model):
+        return .000001, .000005
+
+    async def request(model, messages, max_tokens):
+        calls.append(messages)
+        value, cost = next(outputs)
+        return {"choices": [{"message": {"content": json.dumps(value)}}], "usage": {"cost": cost}}
+
+    monkeypatch.setattr(api_repair, "_prices", prices)
+    monkeypatch.setattr(api_repair, "_request", request)
+    result = await api_repair.repair(context, [{"finding": "synthetic placeholder email"}])
+    assert result["status"] == "rejected" and result["stage"] == "propose" and result["code"] == code
+    assert result["commit"] is None and not result["verified"]
+    assert result["spend_usd"] == pytest.approx(.24)
+    assert result["known_spend_usd"] == pytest.approx(.24) and result["held_usd"] == 0
+    assert len(calls) == 2
+    assert path.read_bytes() == original
+    assert api_repair._git(context, "rev-parse", "HEAD") == head
+    assert api_repair._git(context, "status", "--porcelain") == ""
+    assert all(item["status"] == "complete" for item in stages.show(context.ledger, 10)["stages"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("files,code", [("not a list", "invalid_edits"), ([{}], "invalid_edit"),
+                                      ([{"path": "refund_eval/sim/demo.py", "content": "def ("}], "invalid_python")])
+async def test_malformed_edit_proposals_return_rejections_without_followup(context, monkeypatch, files, code):
+    outputs = iter([{"paths": ["refund_eval/sim/demo.py"]}, {"classification": "realism", "files": files}])
+    calls = []
+
+    async def call(*args, **kwargs):
+        calls.append(args[1])
+        return next(outputs)
+
+    monkeypatch.setattr(api_repair, "_call", call)
+    original = (context.worktree / "refund_eval/sim/demo.py").read_bytes()
+    result = await api_repair.repair(context, [])
+    assert result["status"] == "rejected" and result["code"] == code
+    assert calls == ["select", "propose"]
+    assert (context.worktree / "refund_eval/sim/demo.py").read_bytes() == original

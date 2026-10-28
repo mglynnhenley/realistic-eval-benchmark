@@ -75,12 +75,15 @@ def _cost(sample, evaluation) -> float | None:
 
 
 def score(logs: list[str], scans: str, *, expected_trials: int | None = None,
-          judge: str | None = None) -> dict:
+          judge: str | None = None, source_aliases: dict[str, str] | None = None) -> dict:
     """Score only complete trial/scan pairs, including explicitly scanned zero-tell answers."""
     from refund_eval.realism.coverage import validated_samples
 
     rows, costs = [], []
-    for evaluation, sample, tells in validated_samples(logs, scans, expected_trials=expected_trials, judge=judge):
+    options = {"expected_trials": expected_trials, "judge": judge}
+    if source_aliases is not None:
+        options["source_aliases"] = source_aliases
+    for evaluation, sample, tells in validated_samples(logs, scans, **options):
         rows.append(tells)
         costs.append(_cost(sample, evaluation))
     counts = [len(tells) for tells in rows]

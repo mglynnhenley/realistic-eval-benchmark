@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 from collections import Counter
+from pathlib import Path
 
 from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
@@ -158,7 +159,17 @@ def _score(args) -> int:
     from refund_eval.realism.cycle import score
 
     try:
-        result = json.dumps(score(args.logs, args.scans, expected_trials=args.expected_trials, judge=args.judge), indent=2)
+        options = {}
+        if args.source_map:
+            aliases = json.loads(Path(args.source_map).read_text())
+            if not isinstance(aliases, dict) or any(
+                not isinstance(source, str) or not source or not isinstance(target, str) or not target
+                for source, target in aliases.items()
+            ):
+                raise ValueError("Source map must be a JSON object mapping nonempty source strings to log paths")
+            options["source_aliases"] = aliases
+        result = json.dumps(score(args.logs, args.scans, expected_trials=args.expected_trials,
+                                  judge=args.judge, **options), indent=2)
     except (ValueError, OSError) as error:
         print(f"Cannot score trials: {error}", file=sys.stderr)
         return 1
@@ -167,6 +178,29 @@ def _score(args) -> int:
             file.write(result + "\n")
     print(result)
     return 0
+
+
+def _measure(args) -> int:
+    from refund_eval.realism.measurement import run_measurement
+
+    settings = {"scenario": args.scenario, "model": args.model, "judge": args.judge,
+                "trials": args.trials, "token_budget": args.token_budget,
+                "per_trial_cost": args.cost_limit, "scan_reserve": args.scan_reserve,
+                "sim_weeks": args.sim_weeks, "max_turns": args.max_turns,
+                "time_limit": args.time_limit, "trial_wallclock_limit": args.time_limit}
+    try:
+        repo = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+        result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
+                                 baseline=args.base, candidate=args.candidate,
+                                 review=Path(args.review).resolve(), budget=args.budget,
+                                 settings=settings,
+                                 baseline_evidence=Path(args.baseline_evidence).resolve() if args.baseline_evidence else None,
+                                 execute=args.execute)
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f"Cannot measure candidate: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("status") in {"prepared", "complete"} else 1
 
 
 def _compare(args) -> int:
@@ -251,12 +285,32 @@ def main(argv: list[str] | None = None) -> int:
     trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
+    measure = commands.add_parser("measure", parents=[common],
+                                  help="prepare a reviewed candidate comparison; --execute launches paid measurement")
+    measure.add_argument("--base", required=True, help="baseline Git commit")
+    measure.add_argument("--candidate", required=True, help="reviewed candidate Git commit")
+    measure.add_argument("--review", required=True, help="JSON review of the exact baseline and candidate")
+    measure.add_argument("--out", required=True, help="saved measurement run directory")
+    measure.add_argument("--budget", required=True, type=float, help="additional model USD allowance within existing authorization")
+    measure.add_argument("--baseline-evidence", help="verified saved baseline evidence manifest")
+    measure.add_argument("--execute", action="store_true", help="explicitly launch paid stages (default: prepare only)")
+    measure.add_argument("--model", default="openrouter/anthropic/claude-haiku-4.5")
+    measure.add_argument("--judge", default="openrouter/anthropic/claude-opus-5.5")
+    measure.add_argument("--trials", type=int, default=3)
+    measure.add_argument("--token-budget", type=int, default=1_000_000)
+    measure.add_argument("--cost-limit", type=float, default=.5)
+    measure.add_argument("--scan-reserve", type=float, default=2)
+    measure.add_argument("--sim-weeks", type=float, default=3)
+    measure.add_argument("--max-turns", type=int, default=10000)
+    measure.add_argument("--time-limit", type=int, default=1800, help="wall-clock seconds per trial batch (default: 1800)")
+    measure.set_defaults(handler=_measure)
     scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
     scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")
     scoring.add_argument("--scans", required=True, help="Scout results directory with the tells scanner")
     scoring.add_argument("--expected-trials", type=int, help="require exactly this many successful trial/scan pairs")
     scoring.add_argument("--judge", help="select one judge when the scans directory contains several")
     scoring.add_argument("--out", help="also write the score JSON here")
+    scoring.add_argument("--source-map", help="JSON mapping original scan sources to relocated log paths")
     scoring.set_defaults(handler=_score)
     comparing = commands.add_parser(
         "compare", help="bootstrap candidate minus champion tells per trial",

@@ -1,7 +1,7 @@
 export const meta = {
   name: 'realism-cycle',
-  description: 'One focused short realism round by default: frozen baseline, independently checked repair, matched candidate and separate correctness/realism decisions',
-  whenToUse: 'Paid testing only with an explicit budget. args: {budget, model, trials: 5, tokenBudget: 1000000, maxTurns: 10000, timeLimit: 36000, costLimit: 4, maxRounds: 1, top: 1, maxFix: 1, rerunUnclear: false, scanCostPerTrial: 2, interactionReserve: 4, trialReserveMultiplier: 1.15, runId, cycleDir, branch, repo, scenario, judges}. Completed artifacts are reusable only at identical source/protocol; partial or cross-stage recovery is manual-only. Never retry a paid failure implicitly.',
+  description: 'Rank findings, investigate leading clusters, independently verify a bounded batch of changes, then measure three trials and separate correctness/realism decisions',
+  whenToUse: 'Paid testing only with an explicit budget. args: {budget, model, trials: 3, tokenBudget: 1000000, maxTurns: 10000, timeLimit: 36000, costLimit: 4, maxRounds: 1, top: 5, maxFix: 10, rerunUnclear: false, scanCostPerTrial: 2, interactionReserve: 4, trialReserveMultiplier: 1.15, runId, cycleDir, branch, repo, scenario, judges}. Completed artifacts are reusable only at identical source/protocol; partial or cross-stage recovery is manual-only. Never retry a paid failure implicitly.',
   phases: [
     { title: 'Setup', detail: 'cycle worktree on args.branch, .env, uv sync' },
     { title: 'Baseline', detail: 'round 0: trials, tells scan, score (paid)' },
@@ -31,7 +31,7 @@ const runId = a.runId || new Date().toISOString().replace(/[:.]/g, '-')
 const cycleDir = a.cycleDir || `${repo}-cycle-${runId}`
 const branch = a.branch || `realism/cycle-${runId}`
 const model = a.model || 'openrouter/anthropic/claude-haiku-4.5'
-const trials = num(a.trials, 5)
+const trials = num(a.trials, 3)
 const costLimit = num(a.costLimit, 4)
 const requestedBudget = num(a.budget, 0)
 const remainingBudget = num(a.remainingBudget, requestedBudget)
@@ -48,8 +48,8 @@ const scanCost = num(a.scanCostPerTrial, 2)
 const scenario = a.scenario || 'train_refund_late'
 // One fixed judge for every round, so tell counts compare across rounds.
 const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.5']
-const top = Math.min(num(a.top, 1), 5)
-const MAX_FIX = num(a.maxFix, 1)
+const top = Math.min(num(a.top, 5), 5)
+const MAX_FIX = num(a.maxFix, 10)
 const CLI = 'uv run python -m refund_eval.realism'
 if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error('runId must contain only letters, digits, underscores or hyphens')
 if (!/^[A-Za-z0-9_./-]+$/.test(branch) || branch.includes('..')) throw new Error('branch must be a simple valid git ref')
@@ -318,7 +318,7 @@ async function improve(r, run, recent) {
   for (const v of verdicts) findingsOf[v.note.id] = (clusters.find(c => c.key === v.cluster) || {}).findings || []
   const acceptedAll = verdicts.filter(v => v.verdict !== 'reject' && v.note.status === 'accepted').map(v => ({ ...v.note, status: 'accepted' })).filter((n, i, ns) => ns.findIndex(x => x.id === n.id) === i)
   const accepted = acceptedAll.slice(0, MAX_FIX)
-  if (acceptedAll.length > MAX_FIX) drop(`r${r}: focused limit ${MAX_FIX}; deferred notes: ${acceptedAll.slice(MAX_FIX).map(n => n.id).join(', ')}`)
+  if (acceptedAll.length > MAX_FIX) drop(`r${r}: batch limit ${MAX_FIX}; deferred notes: ${acceptedAll.slice(MAX_FIX).map(n => n.id).join(', ')}`)
   const revised = verdicts.filter(v => v.verdict === 'revise' && v.note.status !== 'accepted').map(v => ({ ...v.note, status: 'open' }))
   log(`r${r}: ${accepted.length} accepted, ${revised.length} revised, ${verdicts.length - accepted.length - revised.length} rejected`)
 

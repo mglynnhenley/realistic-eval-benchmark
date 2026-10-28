@@ -35,6 +35,14 @@ LOCKED = {"refund_eval/sim/open_world.py", "refund_eval/sim/rules.py", "refund_e
 MAX_FILE = 60_000
 
 
+class ProposalRejected(ValueError):
+    """An expected model-output refusal, distinct from execution failures."""
+
+    def __init__(self, stage: str, code: str, reason: str):
+        super().__init__(reason)
+        self.stage, self.code, self.reason = stage, code, reason
+
+
 def public_path(root: Path, name: str) -> Path:
     """Only a narrow Python repair surface, excluding terms, judges and controller."""
     path = Path(name)
@@ -116,15 +124,21 @@ async def _call(context, name: str, kind: str, model: str, task: str, data, max_
     stages.finish(context.ledger, context.settings["budget_usd"], stage, "complete", actual)
     # Account for the response before parsing or other unpaid work can fail.
     context.check_cancelled()
-    raw = response["choices"][0]["message"]["content"]
+    try:
+        raw = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise ProposalRejected(name, "invalid_model_response", "Repair model returned no usable message") from None
     private = context.directory / f"{stage}.json"
     private.write_text(json.dumps({"model": model, "response_model": response.get("model"),
         "generation_id": response.get("id"), "output": raw, "usage": response.get("usage"),
         "reservation_usd": amount, "input_price": input_price, "output_price": output_price}, indent=2))
     private.chmod(0o600)
-    result = extract_json(raw)
+    try:
+        result = extract_json(raw) if isinstance(raw, str) else None
+    except (ValueError, TypeError):
+        raise ProposalRejected(name, "invalid_model_json", "Repair model did not return valid JSON") from None
     if not isinstance(result, dict):
-        raise ValueError("Repair model did not return an object")  # noqa: TRY004 -- malformed paid response
+        raise ProposalRejected(name, "invalid_model_object", "Repair model did not return a JSON object")
     return result
 
 
@@ -171,7 +185,8 @@ async def repair(context, findings) -> dict:
     context.settings["repair_initial_committed_usd"] = initial["committed_usd"]
     result = {"status": "no_change", "commit": None, "branch": None, "files": [], "classification": None,
               "verified": False, "defect": "", "before_evidence": "", "after_evidence": "", "checks": {},
-              "scenario_preserved": False, "spend_usd": None, "held_usd": 0, "reason": ""}
+              "scenario_preserved": False, "spend_usd": None, "held_usd": 0, "reason": "",
+              "stage": None, "code": None}
     originals = {}
     accepted = False
     try:
@@ -199,38 +214,53 @@ async def repair(context, findings) -> dict:
             'Choose up to 6 paths to inspect for ONE recurring environment issue. Return {"paths":[...],"reason":"..."}; empty paths means no supported repair.',
             {"findings": findings, "available_python_files": names}, max_tokens=1500)
         paths = selected.get("paths", [])
-        if not isinstance(paths, list) or len(paths) > 6 or any(p not in names for p in paths):
-            raise ValueError("Invalid public source selection")
+        if (not isinstance(paths, list) or len(paths) > 6
+                or any(not isinstance(p, str) or p not in names for p in paths)
+                or len(set(paths)) != len(paths)):
+            raise ProposalRejected("select", "invalid_source_selection", "Model selected unsupported or invalid public source paths")
         if not paths:
             result["reason"] = str(selected.get("reason", "No supported repair"))
+            result.update(stage="select", code="no_candidate")
             return result
         contents = {}
         for name in paths:
             path = public_path(context.worktree, name)
             if path.stat().st_size > MAX_FILE:
-                raise ValueError("Selected source exceeds supported file size")
+                raise ProposalRejected("inspect", "source_too_large", "Selected source exceeds supported file size")
             contents[name] = path.read_text()
         proposal = await _call(context, "propose", "coding", actor,
             'Propose the smallest single repair, or no change. Return {"classification":"correctness|realism", "defect":"specific violation", "files":[{"path":"...","content":"complete new text"}], "reason":"..."}. Edit only inspected source files or add focused tests/test_*.py files. Maximum 4 files, each 60000 UTF-8 bytes. Do not rewrite existing tests to hide failures.',
             {"findings": findings, "files": contents}, max_tokens=16000)
         edits = proposal.get("files", [])
         classification = proposal.get("classification")
+        if not isinstance(edits, list):
+            raise ProposalRejected("propose", "invalid_edits", "Repair proposal files must be a list")
         if not edits:
             result["reason"] = str(proposal.get("reason", "No focused change proposed"))
+            result.update(stage="propose", code="no_candidate")
             return result
-        if classification not in {"correctness", "realism"} or not isinstance(edits, list) or len(edits) > 4:
-            raise ValueError("Invalid focused repair proposal")
+        if classification not in {"correctness", "realism"} or len(edits) > 4:
+            raise ProposalRejected("propose", "invalid_proposal", "Repair proposal needs a supported classification and at most four files")
         changes = {}
         for edit in edits:
+            if (not isinstance(edit, dict) or not isinstance(edit.get("path"), str)
+                    or not isinstance(edit.get("content"), str)):
+                raise ProposalRejected("propose", "invalid_edit", "Each proposed edit needs a text path and complete text content")
             name, text = edit["path"], edit["content"]
-            path = public_path(context.worktree, name)
+            try:
+                path = public_path(context.worktree, name)
+            except ValueError:
+                raise ProposalRejected("propose", "unsupported_path", "Repair proposal changes a path outside the supported repair surface") from None
             if name.startswith("tests/") and path.exists():
-                raise ValueError("API repairs may add regression tests, never modify existing guard assertions")
+                raise ProposalRejected("propose", "existing_guard_rewrite", "API repairs may add regression tests, never modify existing guard assertions")
             if (name not in contents and not (name.startswith("tests/test_") and not path.exists())):
-                raise ValueError("Proposal edits uninspected source")
+                raise ProposalRejected("propose", "uninspected_source", "Repair proposal edits source the model did not inspect")
             if name in changes or not isinstance(text, str) or len(text.encode()) > MAX_FILE:
-                raise ValueError("Invalid duplicate or oversized edit")
-            compile(text, name, "exec")
+                raise ProposalRejected("propose", "invalid_edit", "Repair proposal contains a duplicate or oversized edit")
+            try:
+                compile(text, name, "exec")
+            except SyntaxError:
+                raise ProposalRejected("propose", "invalid_python", "Proposed source does not compile as Python") from None
             changes[name] = text
             originals[name] = path.read_bytes() if path.exists() else None
         context.update("verify_correctness")
@@ -242,19 +272,25 @@ async def repair(context, findings) -> dict:
                 {"findings": findings, "original": contents, "proposal": proposal}, max_tokens=5000)
             if witness.get("supported") is not True:
                 result["status"], result["reason"] = "rejected", str(witness.get("reason", "No independent reproduction"))
+                result.update(stage="witness", code="unsupported_defect")
                 return result
             prefix = re.sub(r"[^a-zA-Z0-9_]", "_", context.settings.get("repair_stage_prefix", "repair"))
             witness_name = f"tests/test_api_witness_{prefix}.py"
             witness_path = public_path(context.worktree, witness_name)
             text = witness.get("test_content", "")
-            if witness_path.exists() or witness_name in changes or not text or len(text.encode()) > MAX_FILE:
-                raise ValueError("Invalid independent witness test")
-            compile(text, witness_name, "exec")
+            if (witness_path.exists() or witness_name in changes or not isinstance(text, str)
+                    or not text or len(text.encode()) > MAX_FILE):
+                raise ProposalRejected("witness", "invalid_witness", "Independent witness is missing, oversized, or conflicts with existing files")
+            try:
+                compile(text, witness_name, "exec")
+            except SyntaxError:
+                raise ProposalRejected("witness", "invalid_python", "Independent witness does not compile as Python") from None
             originals[witness_name] = None
             witness_path.write_text(text)
             before = _command(context, [sys.executable, "-m", "pytest", "-q", witness_name], "repair-before", checks=True)
             if before["returncode"] != 1 or not re.search(r"\b[1-9][0-9]* failed\b", before["output"]):
                 result["status"], result["reason"] = "rejected", "Independent witness did not demonstrate a failing assertion on the original"
+                result.update(stage="witness", code="no_before_failure")
                 return result
             if _git(context, "diff", "--name-only", "HEAD"):
                 raise ValueError("Independent witness modified tracked source during reproduction")
@@ -266,6 +302,7 @@ async def repair(context, findings) -> dict:
             after = _command(context, [sys.executable, "-m", "pytest", "-q", witness_name], "repair-after", checks=True)
             if after["returncode"] != 0:
                 result["status"], result["reason"] = "rejected", "Independent witness still fails after the proposed repair"
+                result.update(stage="witness", code="after_failure")
                 return result
         context.update("offline_tests")
         all_names = list(changes) + ([witness_name] if witness_name else [])
@@ -273,6 +310,7 @@ async def repair(context, findings) -> dict:
                   "ruff": _command(context, [sys.executable, "-m", "ruff", "check", *all_names], "repair-ruff", checks=True)}
         if any(item["returncode"] for item in checks.values()):
             result["status"], result["reason"] = "rejected", "Offline tests or Ruff rejected the repair"
+            result.update(stage="checks", code="checks_failed")
             result["checks"] = checks
             return result
         actual_files = set(_git(context, "diff", "--name-only", "HEAD").splitlines())
@@ -289,6 +327,7 @@ async def repair(context, findings) -> dict:
         if (review.get("approved") is not True or review.get("scenario_preserved") is not True
                 or review.get("classification") != classification):
             result["status"], result["reason"] = "rejected", str(review.get("reason", "Independent review rejected change"))
+            result.update(stage="final-review", code="review_rejected")
             return result
         if _git(context, "rev-parse", "HEAD") != base or _diff(context, all_names, originals) != diff:
             raise ValueError("Candidate source changed after its exact final review")
@@ -301,6 +340,9 @@ async def repair(context, findings) -> dict:
                       before_evidence=before.get("output", ""), after_evidence=after.get("output", ""),
                       checks=checks, scenario_preserved=True, reason=str(review.get("reason", "")))
         return result
+    except ProposalRejected as error:
+        result.update(status="rejected", stage=error.stage, code=error.code, reason=error.reason)
+        return result
     finally:
         if not accepted:
             for name, original in originals.items():
@@ -311,5 +353,5 @@ async def repair(context, findings) -> dict:
                     path.write_bytes(original)
         final = stages.show(context.ledger, context.settings["budget_usd"])
         result["held_usd"] = final["held_usd"] - initial["held_usd"]
-        result["spend_usd"] = (final["actual_usd"] - initial["actual_usd"]
-                               if result["held_usd"] == 0 else None)
+        result["known_spend_usd"] = final["actual_usd"] - initial["actual_usd"]
+        result["spend_usd"] = result["known_spend_usd"] if result["held_usd"] == 0 else None

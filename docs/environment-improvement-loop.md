@@ -72,7 +72,7 @@ progress. A separate hosted controller service is deferred.
 |---|---|---|
 | Triage saved findings, investigate causes, select verified proposals, implement and test | Primary cloud coding agent | Clean candidate commit and evidence for the selected changes |
 | Check the exact diff, tests and benchmark semantics | Fresh reviewer session | Approve or reject that candidate |
-| Run three baseline and three candidate Modal trials | Measurement command | Frozen configurations and native logs |
+| Run the requested new trials; reuse a compatible saved baseline or run a fresh baseline | Measurement command | Frozen configurations and native logs |
 | Scan transcripts and compare scores | Direct model APIs plus deterministic scoring | Results, spend and correctness/realism decisions |
 | Explain the outcome and select another bounded round | Primary agent | Report and saved next action |
 
@@ -98,12 +98,16 @@ repeat experiments.
 
 Agents should read relevant tracked code, scenario data, rules and tests, and edit
 an isolated candidate branch. Validate the diff against protected benchmark rules.
-Run measurement and scoring from a clean, fixed baseline checkout; candidate code
+Run scanning and scoring from a clean, fixed runner checkout; candidate code
 must not replace its own scorer, budget checks or protocol. A reviewer operates on
 the exact commit later measured. Verified correctness and aggregate realism remain
 separate decisions; three trials per arm provide exploratory evidence. The current
-whole-scenario-file locks remain conservative: a cosmetic YAML change needs an
-explicitly reviewed field-level exception or an eligible alternative first fix.
+protected paths remain conservative: scenario YAML, rules, schema and dossiers,
+grading, measurement and budget infrastructure are excluded from candidate
+changes. Scenario realism notes and exemplars, and eligible environment/harness
+changes, remain available subject to independent semantic review. Record proposals
+needing protected paths as `needs_scope_change`; a review receipt does not override
+that gate. Select eligible changes for the measured batch.
 
 Persist run ID, baseline/candidate commits, protocol, stage status, external job
 IDs, ledger and artifact paths under one private run directory. Reserve spend
@@ -112,11 +116,45 @@ when their exact commits and protocol match. An interrupted or unknown paid stag
 stops for reconciliation; restarting the agent never means launching it again.
 Manual recovery is acceptable for this first version.
 
-Reuse `stages.py`, `cycle.py`, coverage checks and the existing Modal commands.
-A small refactor is still required: `autonomous.py` hardwires the two-call API
-repair actor, runs scoring from candidate source, and does not expose a standalone
-measurement command. The ledger CLI alone does not execute, wait for and reconcile
-a paid command. The proposed cloud workflow is **not integrated yet**.
+The standalone `measure` command uses `stages.py`, `cycle.py`, coverage checks and
+the existing Modal helpers. It accepts reviewed commits without invoking the
+legacy API repair actor. Preparation is the default; `--execute` explicitly
+launches paid stages. The command owns reservation, execution, accounting and
+saved results. The coding session remains responsible for investigation, review
+and the final correctness/retention judgment. See the [cloud handoff brief](realism-cloud-agent.md)
+for setup, exact receipt format and a copy-paste task.
+
+For example, after producing the reviewed commits and receipt:
+
+```sh
+uv run python -m refund_eval.realism measure \
+  --base BASE_COMMIT --candidate CANDIDATE_COMMIT \
+  --review .context/realism/review.json --out .context/realism/pilot-001 \
+  --budget AUTHORIZED_MODEL_USD --trials 3 --token-budget 200000 \
+  --cost-limit 0.5 --scan-reserve 2 --time-limit 1800
+```
+
+Replace the uppercase placeholders. Inspect `plan.json`; add `--execute` to the
+same command when paid execution is already authorised. `--budget 0` is valid for
+unpaid preparation; use a new output directory if changing the saved budget or
+other immutable settings. No extra confirmation is required for work already
+within the user's explicit authorization. A prepared result is not a running job.
+
+At these settings the fresh six-trial comparison reserves $7.45 in model spend:
+two arms of `(3 × $0.50 × 1.15) + $2` each. With a compatible saved baseline,
+`--baseline-evidence PATH/manifest.json` runs only three new candidate trials and
+reserves $3.725. The short token and time limits are checkpoints, not full-length
+behaviour evaluation. The plan may be unaffordable, trials may be incomplete, or
+the actual transcript scan bound may exceed its reserve; these stop measurement.
+
+Completed arms export portable evidence under `batches/<arm>/evidence/`; transfer
+the entire directory, including its manifest, native logs, scans and provenance.
+Reuse requires the exact baseline commit, per-trial protocol, fixed judge and
+trusted measurement hashes, and complete validated evidence. Only trial count
+may differ: five matching saved baseline trials can be compared with three new
+candidate trials. Five old long trials do not match this short protocol and
+remain diagnostic evidence. Historical logs without validated provenance are
+not automatically adopted or silently rescanned.
 
 The first live custom worker hid the actual scenario-data origin of a finding by
 using its write allowlist for reading. Its two-call actor could not follow imports
@@ -131,8 +169,9 @@ automated workspace creation, recurring routines, fleet management and automatic
 multi-round recovery until one repair and one comparison succeed.
 
 Conductor cloud machines have sleep/lifetime limits; saved files can survive while
-processes stop. Use short pilot checkpoints and explicit wall-clock limits; the
-current ten-hour-per-arm defaults leave little lifetime margin for other work.
+processes stop. Use short pilot checkpoints and explicit wall-clock limits;
+`measure` defaults to 1,800 seconds per batch, while the older trial/worker
+commands retain longer defaults.
 This first version runs unattended within a session and supports
 manual restart, rather than guaranteeing continuous operation. Later, add a small
 supervisor only if automatic wake/recovery is needed. See [workspace lifecycle](https://www.conductor.build/docs/cloud/working-with-cloud-workspaces).
@@ -144,7 +183,12 @@ file checks are correctness guards, not credential isolation. Configure only the
 credentials needed for the pilot. See [API](https://www.conductor.build/docs/api),
 [hosted MCP](https://www.conductor.build/docs/api/mcp) and [pricing](https://www.conductor.build/pricing).
 
-### Autonomous background worker (MCP)
+### Legacy experimental background worker (MCP)
+
+This optional implementation is retained for investigation and compatibility.
+It is not the recommended cloud workflow. Its custom API repair actor has the
+source-discovery limitations described above; use the coding-agent workflow and
+standalone `measure` command for the next iteration.
 
 The `refund-realism` MCP server exposes `realism_start`, `realism_status`,
 `realism_results` and `realism_cancel`. The server starts a detached Python worker;
@@ -235,8 +279,9 @@ operation. It is not the detached worker.
 
 | Command | Purpose |
 |---|---|
+| `measure --base COMMIT --candidate COMMIT --review FILE --out DIR --budget USD [--baseline-evidence FILE] [--execute]` | Prepare a reviewed comparison by default; explicit execution reserves and runs only required paid stages. Use `--budget 0` for unpaid planning. |
 | `trials --model M --trials N --cost-limit USD --out DIR [--token-budget 1000000] [--sim-weeks 3] [--environment modal] [--prepare-only] [--yes]` | Prepare a frozen Harbor batch; `--prepare-only` never launches trials. All trial attempts run concurrently, with no automatic retries. |
-| `score LOGS... --scans DIR [--judge M] [--expected-trials N] [--out FILE]` | Strictly validate complete native samples and matching successful scans, then report tells per trial and factors. A missing scan is unknown, never zero. |
+| `score LOGS... --scans DIR [--judge M] [--expected-trials N] [--source-map FILE] [--out FILE]` | Strictly validate complete native samples and matching successful scans, then report tells per trial and factors. Source maps preserve provenance when logs move. A missing scan is unknown, never zero. |
 | `compare --a FILE... --b FILE... [--margin 0]` | Bootstrap B minus A; report better, worse or unclear. Compare only identical trial and judging protocols. |
 
 ## Preserve reproducibility

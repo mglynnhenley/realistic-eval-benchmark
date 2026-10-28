@@ -112,3 +112,36 @@ def test_scan_rows_reads_scout_dataframe_and_requires_completed_status(monkeypat
 def test_no_trials_is_not_a_perfect_score():
     with pytest.raises(ValueError, match="No trial"):
         coverage.validated_samples([], "scans")
+
+
+def test_explicit_source_aliases_relocate_without_collapsing_sample_identity(batch):
+    logs, _, rows = batch
+    aliases = {}
+    for index, row in enumerate(rows):
+        original = f"/original/{index}/same.eval"
+        row["transcript_source_uri"] = f"file://{original}"
+        aliases[original] = logs[index]
+    assert len(coverage.validated_samples(logs, "scans", source_aliases=aliases)) == 2
+    meta = json.loads(rows[0]["transcript_metadata"])
+    meta["eval_id"] = "wrong"
+    rows[0]["transcript_metadata"] = json.dumps(meta)
+    with pytest.raises(ValueError, match="identity"):
+        coverage.validated_samples(logs, "scans", source_aliases=aliases)
+
+
+@pytest.mark.parametrize("aliases", [None, {"a": "/unrequested/log.eval"},
+                                     {"/a": "one", "file:///a": "two"}, {"/a": "one", "/b": "one"}])
+def test_source_aliases_reject_ambiguous_and_unrequested_paths(batch, aliases):
+    logs, _, _ = batch
+    aliases = [] if aliases is None else {
+        key: logs[0] if value == "one" else logs[1] if value == "two" else value
+        for key, value in aliases.items()}
+    with pytest.raises(ValueError, match="Source aliases"):
+        coverage.validated_samples(logs, "scans", source_aliases=aliases)
+
+
+def test_copied_evaluation_samples_are_rejected_even_at_different_paths(batch):
+    logs, evaluations, _ = batch
+    evaluations[logs[1]].eval.eval_id = evaluations[logs[0]].eval.eval_id
+    with pytest.raises(ValueError, match="Duplicate evaluation sample"):
+        coverage.validated_samples(logs, "scans")

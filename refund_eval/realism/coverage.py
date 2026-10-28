@@ -68,7 +68,7 @@ def scan_rows(scans: str | Path, judge: str | None = None) -> list[dict]:
 
 
 def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: int | None = None,
-                      judge: str | None = None) -> list[tuple]:
+                      judge: str | None = None, source_aliases: dict[str, str] | None = None) -> list[tuple]:
     """Return (evaluation, sample, tells) only with exactly one valid answer per trial.
 
     Unlike load_tells, a complete {"tells": []} counts as coverage. An absent,
@@ -85,6 +85,22 @@ def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: in
     sources = [source_identity(log) for log in logs]
     if len(set(sources)) != len(sources):
         raise ValueError("Duplicate trial log supplied")
+    aliases = {}
+    if source_aliases is not None:
+        if not isinstance(source_aliases, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in source_aliases.items()):
+            raise ValueError("Source aliases must map original sources to local log paths")
+        for key, value in source_aliases.items():
+            original, relocated = source_identity(key), source_identity(value)
+            if original in aliases or relocated not in sources:
+                raise ValueError("Source aliases must be unambiguous and target supplied logs")
+            if original in sources and original != relocated:
+                raise ValueError("Source aliases cannot replace a supplied log identity")
+            aliases[original] = relocated
+        if len(set(aliases.values())) != len(aliases):
+            raise ValueError("Source aliases must be one-to-one")
+    identities = set()
     for log, source in zip(logs, sources, strict=True):
         evaluation = read_eval_log(log)
         if evaluation.status != "success" or evaluation.error is not None or not evaluation.samples:
@@ -97,6 +113,13 @@ def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: in
             if sample.error or not sample.completed_at or getattr(sample, "invalidation", None):
                 raise ValueError(f"Trial sample is unsuccessful or incomplete: {log}")
             key = (source, str(sample.id), str(sample.epoch))
+            eval_id = getattr(getattr(evaluation, "eval", None), "eval_id", None)
+            if not eval_id:
+                raise ValueError("Trial log lacks its evaluation identity")
+            identity = (str(eval_id), str(sample.id), str(sample.epoch))
+            if identity in identities:
+                raise ValueError("Duplicate evaluation sample across trial logs")
+            identities.add(identity)
             if key in expected:
                 raise ValueError(f"Duplicate trial sample: {key}")
             expected[key] = (evaluation, sample)
@@ -109,7 +132,8 @@ def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: in
         meta = _object(row.get("transcript_metadata"), "transcript metadata")
         if "id" not in meta or "epoch" not in meta:
             raise ValueError("Scan result lacks sample id or epoch")
-        key = (source_identity(row["transcript_source_uri"]), str(meta["id"]), str(meta["epoch"]))
+        original = source_identity(row["transcript_source_uri"])
+        key = (aliases.get(original, original), str(meta["id"]), str(meta["epoch"]))
         if key not in expected:
             raise ValueError(f"Scan result does not match a requested trial: {key}")
         if key in answers:
