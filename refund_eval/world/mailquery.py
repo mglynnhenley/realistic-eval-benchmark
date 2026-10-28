@@ -230,6 +230,22 @@ class MailQuery:
     def matches(self, e: Email, ctx: MatchContext) -> bool:
         return self.root.test(e, ctx)
 
+    def evaluate_known(self, predicate: Callable[[Pred], bool | None]) -> bool | None:
+        """Evaluate known leaf results (including leaf negation); None stays unknown."""
+        def evaluate(node: Pred | _Group) -> bool | None:
+            if isinstance(node, Pred):
+                return predicate(node)
+            results = [evaluate(child) for child in node.children]
+            if node.either:
+                result = True if any(r is True for r in results) else (
+                    False if all(r is False for r in results) else None)
+            else:
+                result = False if any(r is False for r in results) else (
+                    True if all(r is True for r in results) else None)
+            return not result if node.neg and result is not None else result
+
+        return evaluate(self.root)
+
 
 @dataclass
 class _Scope:
