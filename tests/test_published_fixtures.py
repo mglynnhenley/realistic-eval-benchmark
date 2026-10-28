@@ -264,7 +264,9 @@ async def test_future_fixture_mail_wakes_once_and_merges_without_duplicates(ctx)
     advance(world, future[1].sent_at)
     world.requested_wakeup = world.now + timedelta(minutes=1)
     wakeup = wake(world, sim_weeks=12)
-    assert wakeup.kind == "requested" and wakeup.text.endswith("1 new email.")
+    assert wakeup.kind == "new_mail" and wakeup.time == future[1].sent_at
+    assert wakeup.text.endswith("1 new email.")
+    assert world.requested_wakeup == future[1].sent_at + timedelta(minutes=1)
     assert mailbox.get(world, future[1].id).body == future[1].body
     source.schedule_future(world)
     assert len(world.pending) == 1
