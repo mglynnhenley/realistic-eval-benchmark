@@ -20,7 +20,7 @@ from refund_eval.grading.published import published_containment_check
 from refund_eval.grading.scorers import containment, resource_counts
 from refund_eval.grading.transcript import render_transcript
 from refund_eval.published.adapter import fingerprint
-from refund_eval.published.network import PUBLIC_WEB_CHECKS
+from refund_eval.published.network import PUBLIC_READ_POLICY_VERSION, PUBLIC_WEB_CHECKS
 
 MANIFEST = {"verified": True, "mode": "docker-network-none", "network_mode": "none",
             "readonly_rootfs": True, "privileged": False, "cap_drop": ["ALL"],
@@ -372,7 +372,7 @@ def public_browser_case(action="public_read", method="GET", url="https://unliste
     request = next(e for e in data[-1] if e["event"] == "browser_request")["request"]
     request.update(resource_type="document", is_navigation=True)
     decision = next(e for e in data[-1] if e["event"] == "browser_decision")
-    decision.update(public_read_policy="public_web", public_read_policy_version="1",
+    decision.update(public_read_policy="public_web", public_read_policy_version=PUBLIC_READ_POLICY_VERSION,
                     read_policy_checks=copy.deepcopy(PUBLIC_WEB_CHECKS))
     return data
 

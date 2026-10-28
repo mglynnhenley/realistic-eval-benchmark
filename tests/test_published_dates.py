@@ -9,7 +9,11 @@ from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.agent.harness import initial_world
 from refund_eval.agent.schedule import london
-from refund_eval.published.adapter import AUDIT_KEY, inspect_tools
+from refund_eval.published.adapter import (
+    AUDIT_KEY,
+    PUBLIC_SEARCH_PROVENANCE,
+    inspect_tools,
+)
 from refund_eval.published.dates import shift_dates
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import load_scenario
@@ -79,8 +83,9 @@ async def test_web_results_preserve_source_dates_and_raw_audit(world, live_web):
     page = f"Updated {real_today:%d %B %Y}; your journey on {real_today - timedelta(days=3):%d %B %Y}"
     [tool] = await inspect_tools(PageService(page), source="exa", live_web=live_web)
     typed = f"journey {real_today - timedelta(days=3):%d %B %Y}"
-    [content] = await tool.tool(query=typed, objective="Find a policy")
+    content, *context = await tool.tool(query=typed, objective="Find a policy")
     assert content.text == page
+    assert [part.text for part in context] == ([PUBLIC_SEARCH_PROVENANCE] if live_web else [])
     [event] = [e for e in store().get(AUDIT_KEY) if e["event"] == "result"]
     assert event["result"]["content"][0]["text"] == page
     assert not any(e["event"] == "dates_shifted" for e in store().get(AUDIT_KEY))

@@ -20,7 +20,14 @@ import re
 import socket
 from collections.abc import Callable
 from typing import Literal
-from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    unquote,
+    unquote_plus,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 
 import aiohttp
 from aiohttp.abc import AbstractResolver
@@ -37,7 +44,7 @@ from refund_eval.world.state import Disclosure, world_tx
 # What live sites see on every public read (the realism probe reports it).
 FETCH_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "*/*"}
 MAX_BYTES = 8_000_000
-PUBLIC_READ_POLICY_VERSION = "1"
+PUBLIC_READ_POLICY_VERSION = "2"
 PUBLIC_WEB_CHECKS = {
     "url_guard": "passed",
     "scenario_identity_filter": "applied",
@@ -344,9 +351,38 @@ def validate_public_destination(url: str) -> None:
     raise ValueError("Invalid encoded HTTP destination")
 
 
+def _anonymous_form_guard_url(url: str) -> str | None:
+    """Recognise a public Customer Voice questionnaire ID, never a response ID.
+
+    Only the identifier's token heuristic is replaced for classification. The
+    original URL is fetched, without credentials, and every destination/DNS,
+    redirect, action and write check still applies. This does not establish that
+    the provider serves the form anonymously or accepts a submission.
+    """
+    parts = urlsplit(url)
+    if (parts.scheme != "https" or parts.netloc != "customervoice.microsoft.com"
+            or parts.path != "/Pages/ResponsePage.aspx" or parts.fragment):
+        return None
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    fields = dict(pairs)
+    if (len(fields) != len(pairs) or set(fields) - {"id", "embed", "compact", "ctx"}
+            or not re.fullmatch(r"[A-Za-z0-9_-]{16,256}", fields.get("id", ""))
+            or any(fields[key] not in {"true", "false"} for key in ("embed", "compact") if key in fields)
+            or ("ctx" in fields and fields["ctx"] != "{}")):
+        return None
+    return urlunsplit(parts._replace(query=urlencode([
+        (key, "public-questionnaire" if key == "id" else value) for key, value in pairs
+    ])))
+
+
 def validate_public_url(url: str, *, static_asset: bool = False) -> None:
-    """`static_asset` admits content-hashed file names; every other check stays."""
-    if not check_url(url, hashed_path_ok=static_asset).allowed or urlsplit(url).fragment:
+    """Validate a public read, with narrow passive-asset/questionnaire ID cases."""
+    verdict = check_url(url, hashed_path_ok=static_asset)
+    if not verdict.allowed and verdict.reason == "token-like value in parameter 'id'" and not static_asset:
+        form_url = _anonymous_form_guard_url(url)
+        if form_url is not None:
+            verdict = check_url(form_url)
+    if not verdict.allowed or urlsplit(url).fragment:
         raise ValueError(f"Invalid public read URL: {url}")
     validate_public_destination(url)
 

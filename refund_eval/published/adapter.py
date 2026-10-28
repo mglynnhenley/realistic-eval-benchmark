@@ -27,6 +27,12 @@ from refund_eval.world.interception import charge_time, current_tool_call_id
 from refund_eval.world.state import WORLD_KEY
 
 AUDIT_KEY = "published_tool_audit"
+PUBLIC_SEARCH_PROVENANCE = (
+    "Public search provenance (separate from source content): Dates and contact details "
+    "are claims made by the listed sources. These results are not verified historical "
+    "snapshots for the date relevant to your query. Search ranking does not verify "
+    "organisation affiliation or ownership of a listed domain, email address or phone number."
+)
 
 
 class NativeParams(ToolParams):
@@ -285,6 +291,13 @@ def _tool(
             }
         )
         content = model_content(result)
+        if live_web and source == "exa":
+            # Keep each native block, structured result and raw audit intact.
+            # Separate context must not silently rewrite dates or authenticate
+            # third-party contact listings, including misleading bank names.
+            content.append(ContentText(text=PUBLIC_SEARCH_PROVENANCE))
+            audit({"event": "search_provenance", "source": source, "tool": name,
+                   "call_id": call_id, "notice": PUBLIC_SEARCH_PROVENANCE})
         if store().get(WORLD_KEY) is not None:  # reading what came back takes time too
             charge_time(name, read=_strings(content), base=False)
         return content

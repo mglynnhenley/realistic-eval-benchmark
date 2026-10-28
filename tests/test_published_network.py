@@ -10,6 +10,7 @@ from refund_eval.agent.harness import initial_world
 from refund_eval.published.adapter import AUDIT_KEY
 from refund_eval.published.network import (
     NAVIGATION_BLOCKED_PAGE,
+    PUBLIC_READ_POLICY_VERSION,
     PUBLIC_WEB_CHECKS,
     SUBMISSION_FAILED_TEXT,
     BrowserBoundary,
@@ -203,7 +204,7 @@ async def test_public_web_reads_unlisted_pages_with_credential_free_policy_audit
     decision = store().get(AUDIT_KEY)[-1]
     assert decision["action"] == "public_read"
     assert decision["public_read_policy"] == "public_web"
-    assert decision["public_read_policy_version"] == "1"
+    assert decision["public_read_policy_version"] == PUBLIC_READ_POLICY_VERSION
     assert decision["read_policy_checks"] == PUBLIC_WEB_CHECKS
 
 
