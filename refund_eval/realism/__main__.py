@@ -220,9 +220,10 @@ def _measure(args) -> int:
                                    runner_review=Path(args.runner_review).resolve(),
                                    baseline_evidence=args.baseline_evidence,
                                    historical_evidence=args.historical_evidence,
-                                   execute=args.execute, execution_review=args.execution_review)
+                                   execute=args.execute, execution_review=args.execution_review,
+                                   prior_unknown_review=args.prior_unknown_review)
         else:
-            if any((args.shared_ledger, args.runner_review, args.historical_evidence, args.execution_review)):
+            if any((args.shared_ledger, args.runner_review, args.historical_evidence, args.execution_review, args.prior_unknown_review)):
                 raise ValueError("Loop-specific inputs require --candidate-only")
             result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
                                  baseline=args.base, candidate=args.candidate,
@@ -340,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--runner-review", help="exact independent infrastructure approval")
     measure.add_argument("--historical-evidence", help="validated diagnostic history, never included in comparison")
     measure.add_argument("--execution-review", help="exact independent prepared-request approval")
+    measure.add_argument("--prior-unknown-review", type=Path, help="Exact independently approved original native hold disposition; candidate-only")
     measure.add_argument("--execute", action="store_true", help="explicitly launch paid stages (default: prepare only)")
     measure.add_argument("--model", help="target model (candidate-only defaults to Sonnet; comparison defaults to Haiku)")
     measure.add_argument("--judge", default="openrouter/anthropic/claude-opus-5.5")

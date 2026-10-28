@@ -163,3 +163,22 @@ def test_explicit_lifecycle_flag_binds_sample_and_outer_separately(cli_runner, t
     assert settings["time_limit"] == 1800
     assert settings["trial_wallclock_limit"] == trial_deadlines(1800)["command_hard_seconds"] == 4200
     assert loop._protocol(settings)["trial_deadlines"] == trial_deadlines(1800)
+
+
+def test_prior_unknown_review_is_candidate_only_and_outside_protocol(cli_runner, monkeypatch, tmp_path):
+    from refund_eval.realism import controller
+
+    calls = []
+    monkeypatch.setattr(controller, "run_candidate", lambda **kwargs: calls.append(kwargs) or {"status": "prepared"})
+    review = tmp_path / "independent-disposition.json"
+    args = arguments(tmp_path)
+    assert cli.main(args + ["--prior-unknown-review", str(review)]) == 2
+    assert not calls and not cli_runner
+    args += ["--candidate-only", "--shared-ledger", "ledger", "--runner-review", "runner"]
+    assert cli.main(args) == 0
+    assert calls[-1]["prior_unknown_review"] is None
+    assert cli.main(args + ["--prior-unknown-review", str(review), "--trial-deadline-policy", "bounded-lifecycle-v1",
+                            "--scan-protocol", "frozen-parts-v1"]) == 0
+    assert calls[-1]["prior_unknown_review"] == review
+    assert "prior_unknown_disposition" not in calls[-1]["settings"]
+    assert loop._protocol(calls[-1]["settings"])["trial_deadlines"]["command_hard_seconds"] == 4200

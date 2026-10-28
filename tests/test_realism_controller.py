@@ -210,3 +210,79 @@ def test_unknown_native_evidence_cannot_seal_clean_success(loop, monkeypatch):
     result = controller.run_candidate(**options, execute=True, execution_review=execution_review(options, plan))
     assert result["status"] == "reconciliation_required"
     assert len(calls["cleanup"]) == 1
+
+
+def test_retained_hold_controller_prepares_and_executes_with_readonly_validation(loop, monkeypatch, tmp_path):
+    from test_realism_retained_hold import identity, make_case, write
+
+    from refund_eval.realism import retained_hold as hold
+
+    options, calls = loop
+    options["budget"] = 100
+    case = make_case(tmp_path, monkeypatch, repo=options["repo"], ledger=options["ledger"], run_dir=options["run_dir"])
+    legacy_dir = options["run_dir"].with_name("legacy")
+    rejected = controller.run_candidate(**{**options, "run_dir": legacy_dir})
+    assert rejected["status"] == "rejected" and "Reconcile" in rejected["reason"]
+    base = controller.read(legacy_dir / "request.json")
+    base.pop("fingerprint")
+    case["binding"] = hold.future_binding(options["repo"], options["run_dir"], base)
+    case["review"]["future_binding"] = case["binding"]
+    write(case["review_path"], case["review"])
+    options["prior_unknown_review"] = case["review_path"]
+    monkeypatch.setattr(stages, "show", lambda *a: pytest.fail("Opted controller used mutating show"))
+    before = identity(options["ledger"])
+    plan = controller.run_candidate(**options)
+    assert plan["status"] == "prepared", plan
+    assert plan["prior_unknown_disposition"]["stage"]["id"] == case["stage"]
+    assert before == identity(options["ledger"])
+    assert not calls["batch"]
+
+    def batch(context, protocol, commit, hashes, tag, **kwargs):
+        calls["batch"].append(tag)
+        context.reserve_stage(tag + "-trials", "trials", plan["trial_reserve_usd"])
+        stages.finish(context.ledger, 100, tag + "-trials", "complete", actual=.2)
+        context.reserve_stage(tag + "-tells", "tells", plan["scan_reserve_usd"])
+        stages.finish(context.ledger, 100, tag + "-tells", "complete", actual=.1)
+        return {"logs": [], "path": str(context.directory / "batch"), "score": {"per_trial": [1]}}
+
+    monkeypatch.setattr(autonomous, "_batch", batch)
+    result = controller.run_candidate(**options, execute=True, execution_review=execution_review(options, plan))
+    assert result["status"] == "complete", result
+    assert result["spend"]["stages"][case["stage"]] == case["value"]["stages"][case["stage"]]
+    assert controller.read_result(options["run_dir"]) == result
+    # Opt-in measure dispatch never retries a started original; historical read is explicit above.
+    assert controller.run_candidate(**options, execute=True)["status"] == "rejected"
+    assert len(calls["batch"]) == 1
+
+
+def test_retained_hold_changed_before_execution_never_marks_or_reserves(loop, monkeypatch, tmp_path):
+    from test_realism_retained_hold import identity, make_case, write
+
+    from refund_eval.realism import retained_hold as hold
+
+    options, calls = loop
+    options["budget"] = 100
+    case = make_case(tmp_path, monkeypatch, repo=options["repo"], ledger=options["ledger"], run_dir=options["run_dir"])
+    legacy_dir = options["run_dir"].with_name("legacy")
+    controller.run_candidate(**{**options, "run_dir": legacy_dir})
+    base = controller.read(legacy_dir / "request.json")
+    base.pop("fingerprint")
+    case["review"]["future_binding"] = hold.future_binding(options["repo"], options["run_dir"], base)
+    write(case["review_path"], case["review"])
+    options["prior_unknown_review"] = case["review_path"]
+    plan = controller.run_candidate(**options)
+    approval = execution_review(options, plan)
+    # The current execution preflight callback simulates an independent ledger writer.
+    def scan_preflight(*args):
+        value = json.loads(options["ledger"].read_bytes())
+        value["stages"][case["stage"]]["reserve_usd"] = 7
+        write(options["ledger"], value)
+        return {"planned_at": "variable", "tariff": "same"}
+
+    monkeypatch.setattr(autonomous, "_scan_preflight", scan_preflight)
+    result = controller.run_candidate(**options, execute=True, execution_review=approval)
+    assert result["status"] == "rejected", result
+    after_external_write = identity(options["ledger"])
+    assert not (options["run_dir"] / "execution-started.json").exists() and not calls["batch"]
+    assert controller.run_candidate(**options)["status"] == "rejected"
+    assert identity(options["ledger"]) == after_external_write

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from refund_eval.realism import autonomous, measurement, stages
+from refund_eval.realism import autonomous, measurement, retained_hold, stages
 from refund_eval.realism.background import JobContext, atomic_json, now
 from refund_eval.realism.evidence import load_evidence
 from refund_eval.realism.native_attribution import analyze
@@ -134,7 +134,7 @@ def read_result(run_dir):
 
 def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                   ledger, budget, settings, baseline_evidence=None, historical_evidence=None,
-                  execute=False, execution_review=None):
+                  execute=False, execution_review=None, prior_unknown_review=None):
     """Prepare/read/execute one candidate-only round, with no baseline fallback."""
     repo, run_dir, ledger = Path(repo).resolve(), Path(run_dir).resolve(), Path(ledger).resolve()
     context = None
@@ -179,21 +179,28 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
         if historical_evidence:
             history = historical_reference(Path(historical_evidence).resolve())
         # Current allowance may differ from old requests, which stay immutable.
-        spend = stages.show(ledger, budget)
-        amendment = (spend.get("budget_amendments") or [{}])[-1].get("id")
-        request = {"version": 1, "mode": "candidate_only", "baseline_for_review": base,
-                   "candidate": changed, "runner": runner, "protocol": protocol,
-                   "measurement_hashes": hashes, "shared_ledger": str(ledger), "budget_usd": budget,
-                   "budget_amendment_id": amendment, "trial_reserve_usd": trial_reserve,
-                   "scan_reserve_usd": scan_reserve, "trial_wallclock_limit": selected["trial_wallclock_limit"],
-                   "review_sha256": hashlib.sha256(review_bytes).hexdigest(),
-                   "runner_review_sha256": sha(runner_review),
-                   "baseline_evidence": str(Path(baseline_evidence).resolve()) if baseline_evidence else None,
-                   "baseline_evidence_sha256": sha(baseline_evidence) if baseline_evidence else None,
-                   "historical_reference": history, "interpretation": INTERPRETATION}
-        fingerprint = measurement._json_hash(request)
-        tag = f"loop-{fingerprint[:16]}-candidate"
+        spend = stages.show(ledger, budget) if prior_unknown_review is None else None
         with measurement._exclusive(repo):
+            if prior_unknown_review is not None:
+                spend = retained_hold.read_spend(ledger, budget)
+            amendment = (spend.get("budget_amendments") or [{}])[-1].get("id")
+            request = {"version": 1, "mode": "candidate_only", "baseline_for_review": base,
+                       "candidate": changed, "runner": runner, "protocol": protocol,
+                       "measurement_hashes": hashes, "shared_ledger": str(ledger), "budget_usd": budget,
+                       "budget_amendment_id": amendment, "trial_reserve_usd": trial_reserve,
+                       "scan_reserve_usd": scan_reserve, "trial_wallclock_limit": selected["trial_wallclock_limit"],
+                       "review_sha256": hashlib.sha256(review_bytes).hexdigest(),
+                       "runner_review_sha256": sha(runner_review),
+                       "baseline_evidence": str(Path(baseline_evidence).resolve()) if baseline_evidence else None,
+                       "baseline_evidence_sha256": sha(baseline_evidence) if baseline_evidence else None,
+                       "historical_reference": history, "interpretation": INTERPRETATION}
+            if prior_unknown_review is not None:
+                binding = retained_hold.future_binding(repo, run_dir, request)
+                request["prior_unknown_disposition"] = retained_hold.freeze_disposition(
+                    repo, prior_unknown_review, ledger=ledger, budget=budget, binding=binding,
+                    required_reserve=trial_reserve + scan_reserve)
+            fingerprint = measurement._json_hash(request)
+            tag = f"loop-{fingerprint[:16]}-candidate"
             run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             manifest, marker = run_dir / "request.json", run_dir / "execution-started.json"
             if manifest.exists():
@@ -210,14 +217,22 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                 raise measurement.Rejected("Execution already started; reconcile original work without replay")
             require(not any(f"{tag}-{suffix}" in spend["stages"] for suffix in ("trials", "tells")),
                     "Existing paid stage requires reconciliation even without a local start marker")
-            require(all(item.get("actual_usd") is not None and item.get("status") == "complete"
-                        for item in spend["stages"].values()), "Reconcile previous paid stages before a new round")
+            if prior_unknown_review is None:
+                require(all(item.get("actual_usd") is not None and item.get("status") == "complete"
+                            for item in spend["stages"].values()), "Reconcile previous paid stages before a new round")
             runtime = {**selected, "repo": str(repo), "job_id": run_dir.name,
                        "budget_usd": budget, "source_commit": changed}
             atomic_json(run_dir / "settings.json", runtime)
             context = LoopContext(run_dir)
             context.ledger = ledger
             context.validate_native_usage = True
+            if prior_unknown_review is not None:
+                context.read_spend = retained_hold.read_spend
+                guard = retained_hold.ReservationGuard(
+                    repo, prior_unknown_review, ledger=ledger, budget=budget, binding=binding,
+                    disposition=request["prior_unknown_disposition"], fingerprint=fingerprint,
+                    trial_reserve=trial_reserve, scan_reserve=scan_reserve)
+                context.reserve_stage = guard.reserve
             context.measurement_worktree, context.measurement_hashes = run_dir / "runner", hashes
             autonomous._preflight(context, trial_reserve + scan_reserve)
             measurement._worktree(repo, context.measurement_worktree, runner)
@@ -248,6 +263,11 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             require({k: v for k, v in fresh.items() if k != "planned_at"}
                     == {k: v for k, v in read(run_dir / "public-preflight.json").items() if k != "planned_at"},
                     "Public scan tariff/preflight changed after review")
+            if prior_unknown_review is not None:
+                require(retained_hold.freeze_disposition(
+                    repo, prior_unknown_review, ledger=ledger, budget=budget, binding=binding,
+                    required_reserve=trial_reserve + scan_reserve) == request["prior_unknown_disposition"],
+                    "Retained-hold approval changed before execution")
             with marker.open("x") as stream:
                 json.dump({"fingerprint": fingerprint, "started_at": now()}, stream)
             result = {"mode": "candidate_only", "fingerprint": fingerprint,
@@ -271,7 +291,8 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                     cleanup = autonomous.cleanup_job(context)
                 except Exception as error:  # noqa: BLE001 -- missing cleanup remains unknown
                     cleanup = {"remote_state": "unknown", "error_type": type(error).__name__}
-                result.update(cleanup=cleanup, spend=stages.show(ledger, budget), finished_at=now())
+                result.update(cleanup=cleanup, spend=(retained_hold.read_spend(ledger, budget)
+                              if prior_unknown_review is not None else stages.show(ledger, budget)), finished_at=now())
                 if not cleanup_verified(cleanup):
                     result["status"] = "reconciliation_required"
                 if result["status"] == "complete" and any(

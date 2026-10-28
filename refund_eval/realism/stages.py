@@ -60,12 +60,18 @@ def _locked(path: str | Path, budget: float):
                 os.unlink(temporary)
 
 
-def reserve(path: str | Path, budget: float, stage: str, kind: str, amount: float) -> dict:
-    """Persist a start sentinel and reserve; duplicate stage IDs always fail."""
+def reserve(path: str | Path, budget: float, stage: str, kind: str, amount: float, *, validate=None) -> dict:
+    """Persist a start sentinel; optional trusted validation runs in the same lock.
+
+    A rejecting validator must not mutate the ledger. No write occurs on failure.
+    Duplicate IDs and affordability retain their ordinary checks afterwards.
+    """
     amount = _money(amount, "reservation", positive=True)
     if not stage or kind not in {"trials", "tells", "interaction", "coding", "review"}:
         raise ValueError("A stage ID and supported paid-stage kind are required")
     with _locked(path, budget) as ledger:
+        if validate is not None:
+            validate(ledger)
         if stage in ledger["stages"]:
             raise ValueError(f"Paid stage {stage!r} already started; reconcile saved results, do not retry")
         if amount > summary(ledger)["remaining_usd"] + 1e-9:

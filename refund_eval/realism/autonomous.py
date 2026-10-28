@@ -329,7 +329,8 @@ def _repair(context, findings):
 
 def _preflight(context, required):
     context.check_cancelled()
-    remaining = stages.show(context.ledger, context.settings["budget_usd"])["remaining_usd"]
+    reader = getattr(context, "read_spend", None) or stages.show
+    remaining = reader(context.ledger, context.settings["budget_usd"])["remaining_usd"]
     if required > remaining + 1e-9:
         raise BudgetStop(f"Declared remaining stages require ${required:.3f}; ${remaining:.3f} remains")
 
@@ -353,7 +354,10 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
     atomic_json(out / "prepared-source.json", prepared)
     context.check_cancelled()
     trial_id = f"{tag}-trials"
-    stages.reserve(context.ledger, context.settings["budget_usd"], trial_id, "trials", trial_reserve)
+    reserve = getattr(context, "reserve_stage", None)
+    if reserve is None:
+        reserve = lambda stage, kind, amount: stages.reserve(context.ledger, context.settings["budget_usd"], stage, kind, amount)
+    reserve(trial_id, "trials", trial_reserve)
     trials = None
     try:
         trials = _run_trials(context, protocol, out / "trials", cwd, tag)
@@ -388,7 +392,7 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
     if scan_plan["required_usd"] > scan_reserve + 1e-9:
         raise BudgetStop("Saved transcript scan exceeds its declared reserve; no judge call was launched")
     scan_id = f"{tag}-tells"
-    stages.reserve(context.ledger, context.settings["budget_usd"], scan_id, "tells", scan_reserve)
+    reserve(scan_id, "tells", scan_reserve)
     scanned = None
     try:
         scanned = _run_scan(context, protocol, trials["logs"], scans, cwd, tag)
