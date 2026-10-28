@@ -212,7 +212,8 @@ def test_history_window_builds_trim_compaction_and_memory_tool(tmp_path, monkeyp
     # the note was saved through the guarded tool into the sample store, at no simulated cost
     [create] = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function == "memory"]
     assert create.error is None and "/memories/notes.md" in create.text
-    assert sample.store["MemoryStore:files"] == {"/memories/notes.md": NOTE}
+    assert sample.store["MemoryStore:files"] == {"/memories/notes.md": NOTE,
+                                                 harness.MEMORY_NOTES_PATH: harness.MEMORY_TEMPLATE}
     assert world_of(sample).status_reports[0].time == scenario().start_time  # memory call took no time
 
 
