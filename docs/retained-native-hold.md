@@ -1,5 +1,31 @@
 # Reviewed continuation with the original native hold retained
 
+`retained-native-holds-v2` is a separate explicitly reviewed case for exactly two
+original failed native stages. The same optional `--prior-unknown-review` path
+dispatches on the supplied review's strict version; omission and the original
+v1 schema remain unchanged. Neither version changes the observation protocol,
+controller or reservation arithmetic.
+
+The v2 disposition replaces singular `stage` with an ordered two-element
+`stages` list of full canonical stage descriptors. Its `artifacts` object contains
+exactly `scope_review`, `budget_review` and `originals`; the latter is the ordered
+two-element list of `{label, artifacts}` objects derived from the pinned
+independent scope. Every original descriptor and proof must match that scope.
+The review kind is `retained_native_holds_disposition_review`, and its explicit
+`retained_both_full_holds` acknowledgement replaces v1's `retained_full_hold`.
+All other acknowledgement limits remain mandatory. Source, current raw ledger,
+amendment, full future request and unique future directory remain bound.
+
+Both original full reservations and null actual costs remain unchanged. Their
+sealed results, independent terminal/accounting proofs and exact-owned cleanup
+are rechecked without a remote query. An earlier no-match cleanup is retained as
+no matches, not described as new terminations. Every third unknown, active stage,
+changed historical value or proof, consumed identity or unaffordable reservation
+rejects. Native-to-scan validation uses the existing atomic guard and removes
+only the current known successful native stage when comparing the entire old
+ledger. A new unknown outcome blocks again; v2 is not a general unknown-stage
+allowlist, an original retry or a provider invoice-cap guarantee.
+
 The candidate-only coordinator normally refuses a new round if any previous paid
 stage is unfinished or has unknown cost. That default is unchanged. The optional
 `measure --candidate-only --prior-unknown-review PATH` selects
