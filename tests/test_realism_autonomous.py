@@ -66,6 +66,7 @@ def context(tmp_path, monkeypatch):
 @pytest.fixture
 def adapters(monkeypatch):
     calls = []
+    monkeypatch.setattr(loop, "_scan_preflight", lambda *args: {"judge": "synthetic judge"})
     monkeypatch.setattr(loop, "_prepare_trials", lambda context, protocol, out, cwd, tag: {
         "commit": context.git("rev-parse", "HEAD", cwd=cwd), "dirty": False})
 

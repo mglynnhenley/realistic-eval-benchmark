@@ -80,6 +80,61 @@ async def test_explicit_zero_tariffs_remain_supported(planned, price):
 
 
 @pytest.mark.asyncio
+async def test_no_web_tells_does_not_charge_optional_search_tariff(planned):
+    metadata, _ = planned
+    metadata["pricing"]["web_search"] = "0.01"
+    result = await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+    assert result["tariff"]["web_search"] == "0.01"
+    assert result["tariff_applicability"]["web_search"]["applicable"] is False
+    bound = 50_000 + 3000 + 16_384
+    assert result["required_usd"] == pytest.approx(bound * .00000625 + 8192 * .000025)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["request", "image", "internal_reasoning", "unknown_future_fee"])
+async def test_no_web_protocol_still_rejects_other_unbounded_charges(planned, field):
+    metadata, _ = planned
+    metadata["pricing"][field] = "0.01"
+    with pytest.raises(ValueError, match="tariff"):
+        await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [None, "", False, "nan", "-1"])
+async def test_unknown_search_tariff_is_not_silently_rewritten(planned, value):
+    metadata, _ = planned
+    metadata["pricing"]["web_search"] = value
+    with pytest.raises(ValueError, match="pricing"):
+        await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+
+
+@pytest.mark.asyncio
+async def test_online_model_variant_is_never_given_a_no_web_bound(planned):
+    with pytest.raises(ValueError, match="unsupported"):
+        await scan_budget.plan(["a.eval"], JUDGE + ":online", single_attempt=True)
+
+
+@pytest.mark.asyncio
+async def test_public_cache_rates_cannot_exceed_the_input_reservation(planned):
+    metadata, _ = planned
+    metadata["pricing"]["input_cache_write_1h"] = ".000008"
+    metadata["pricing"]["input_cache_read"] = ".000009"
+    result = await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+    assert result["prompt_price_bound"] == .000009
+
+
+@pytest.mark.asyncio
+async def test_judge_preflight_requires_no_transcript_or_inference(planned, monkeypatch):
+    async def forbidden(_):
+        pytest.fail("Judge preflight must not require a future transcript")
+
+    monkeypatch.setattr(scan_budget, "rendered_inputs", forbidden)
+    result = await scan_budget.preflight(JUDGE, single_attempt=True)
+    assert result["judge"] == JUDGE
+    assert "required_usd" not in result
+
+
+@pytest.mark.asyncio
 async def test_legacy_retries_and_unknown_judge_are_not_given_one_call_reservation(planned):
     with pytest.raises(ValueError, match="single-attempt"):
         await scan_budget.plan(["a.eval"], JUDGE)
@@ -187,6 +242,7 @@ def test_bounded_tells_disables_answer_refusal_and_api_retries(runner, monkeypat
     assert factories == [{"bounded": True}]
     assert scans[0]["model_config"].max_retries == 0
     assert scans[0]["model_config"].max_tokens == 8192
+    assert scans[0]["model_config"].extra_body == {"plugins": []}
 
 
 @pytest.mark.parametrize("extra", [[], ["--max-tokens", "8193", "--scanners", "tells"], ["--max-tokens", "8192"]])

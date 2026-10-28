@@ -45,6 +45,7 @@ def job(tmp_path):
 @pytest.fixture
 def adapters(monkeypatch):
     calls = {"trials": [], "scan": [], "cleanup": []}
+    monkeypatch.setattr(autonomous, "_scan_preflight", lambda *args: {"judge": "synthetic judge"})
 
     def prepare(context, protocol, out, cwd, tag):
         return {"commit": git(cwd, "rev-parse", "HEAD"), "dirty": False}
@@ -191,6 +192,18 @@ def test_scan_bound_exceeds_reserve_stops_without_judge_call(job, adapters, monk
     assert result["spend"]["actual_usd"] == .4
     assert result["spend"]["held_usd"] == 0
     assert not adapters["scan"]
+
+
+def test_judge_preflight_rejects_before_any_trial_or_model_reservation(job, adapters, monkeypatch):
+    def reject(*args):
+        raise ValueError("Synthetic unsupported judge tariff")
+
+    monkeypatch.setattr(autonomous, "_scan_preflight", reject, raising=False)
+    result = measurement.run_measurement(**job, execute=True)
+    assert result["status"] == "failed"
+    assert not adapters["trials"] and not adapters["scan"]
+    assert result["spend"]["stages"] == {}
+    assert result["spend"]["committed_usd"] == 0
 
 
 def test_reuses_five_matching_baseline_trials_and_only_runs_three_new(job, adapters, monkeypatch, tmp_path):

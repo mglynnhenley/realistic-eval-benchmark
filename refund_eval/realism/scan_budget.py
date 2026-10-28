@@ -79,33 +79,53 @@ def _price(pricing: dict, field: str, *, required: bool = True) -> float:
     return price
 
 
-async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
-               single_attempt: bool = False) -> dict:
-    """Return a reservation only for an explicitly single-attempt tells protocol.
+def bounded_tells_config(max_tokens: int):
+    """The fixed text/answer-tool protocol covered by this reservation planner."""
+    from inspect_ai.model import GenerateConfig
 
-    Caller must pass the same output cap and disable answer/refusal/API retries
-    in Scout; the default refuses an unbounded legacy scanner configuration.
+    if type(max_tokens) is not int or max_tokens <= 0 or max_tokens > OUTPUT_CAP:
+        raise ValueError(f"Scanner output cap must be between 1 and {OUTPUT_CAP}")
+    # No plugin is enabled, including OpenRouter's opt-in native web search.
+    # Scout declares only its structured answer tool (no context/web tools).
+    return GenerateConfig(cache_prompt=False, max_tokens=max_tokens, max_retries=0,
+                          extra_body={"plugins": []})
+
+
+async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
+                    single_attempt: bool = False) -> dict:
+    """Check the fixed no-web judge protocol and public tariffs before trials.
+
+    This does not know future transcript sizes; ``plan`` must still render and
+    bound the actual saved logs before judging. No inference request is made.
     """
     if not single_attempt:
         raise ValueError("Scan planning requires an explicitly single-attempt scanner protocol")
-    if type(max_tokens) is not int or max_tokens <= 0 or max_tokens > OUTPUT_CAP:
-        raise ValueError(f"Scanner output cap must be between 1 and {OUTPUT_CAP}")
-    if not logs or len(set(logs)) != len(logs):
-        raise ValueError("Distinct saved trial logs are required")
+    bounded_tells_config(max_tokens)
     name = judge.removeprefix("openrouter/")
-    if name not in SUPPORTED_WINDOWS:
+    if not judge.startswith("openrouter/") or name not in SUPPORTED_WINDOWS:
         raise ValueError("Judge context/segmentation policy is unsupported by the reservation planner")
     metadata = await model_metadata(judge)
     pricing = metadata.get("pricing")
-    if not isinstance(pricing, dict) or pricing.get("overrides"):
+    if (not isinstance(pricing, dict)
+            or ("overrides" in pricing and pricing["overrides"] != [])):
         raise ValueError("Unknown or tiered judge pricing is unsupported")
-    for field in ("request", "image", "web_search", "internal_reasoning"):
+    input_rates = ("prompt", "input_cache_write", "input_cache_read", "input_cache_write_1h")
+    known = {*input_rates, "completion", "overrides", "request", "image", "web_search", "internal_reasoning"}
+    if set(pricing) - known:
+        raise ValueError("Unknown judge tariff fields are unsupported")
+    for field in ("request", "image", "internal_reasoning"):
         if _price(pricing, field, required=False):
             raise ValueError(f"Additional judge {field} tariff is unsupported")
+    # https://openrouter.ai/docs/guides/features/plugins/web-search:
+    # search is opt-in via a web plugin/tool or :online model variant. The
+    # exact base-model allowlist and bounded_tells_config exclude those paths.
+    # Validate and preserve the published price; do not pretend it is zero.
+    _price(pricing, "web_search", required=False)
     # Scout's split-template call config can request caching even when the run
-    # config disables it. Require the published write tariff and cover the larger
-    # input rate; missing cache pricing must not silently become a zero premium.
-    prompt_price = max(_price(pricing, "prompt"), _price(pricing, "input_cache_write"))
+    # config disables it. Cover every published cache rate conservatively, even
+    # the longer TTL, without inventing a zero for unknown cache-write pricing.
+    prompt_price = max(_price(pricing, field, required=field in {"prompt", "input_cache_write"})
+                       for field in input_rates)
     output_price = _price(pricing, "completion")
     try:
         official_window = int(metadata["context_length"])
@@ -114,6 +134,25 @@ async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
     window = min(official_window, SUPPORTED_WINDOWS[name])
     if window <= 0:
         raise ValueError("Invalid official judge context window")
+    return {"judge": judge, "max_tokens": max_tokens, "single_attempt": True,
+            "context_window": window, "tariff": pricing, "prompt_price_bound": prompt_price,
+            "output_price": output_price, "tariff_source": "https://openrouter.ai/api/v1/models",
+            "tariff_applicability": {"web_search": {"applicable": False,
+                "reason": "Fixed base model; plugins disabled; only the structured answer tool is declared"}},
+            "planned_at": datetime.now(UTC).isoformat()}
+
+
+async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
+               single_attempt: bool = False) -> dict:
+    """Bound actual logs for the same fixed protocol as ``bounded_tells_config``.
+
+    Caller must use that config, an exact supported base model, and the bounded
+    tells scanner with no additional tools. Legacy/unbounded scans are refused.
+    """
+    if not logs or len(set(logs)) != len(logs):
+        raise ValueError("Distinct saved trial logs are required")
+    checked = await preflight(judge, max_tokens=max_tokens, single_attempt=single_attempt)
+    window = checked["context_window"]
     rows = await rendered_inputs(logs)
     if not rows or len({r["transcript_id"] for r in rows}) != len(rows):
         raise ValueError("Empty or duplicate rendered transcripts")
@@ -124,11 +163,8 @@ async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
         # explicit output cap ensure the text does not need multi-part scanning.
         if bound + max_tokens > int(window * .9):
             raise ValueError("Rendered input may require segmentation; no paid scan was authorised")
-        cost = bound * prompt_price + max_tokens * output_price
+        cost = bound * checked["prompt_price_bound"] + max_tokens * checked["output_price"]
         row.update(input_token_bound=bound, output_token_bound=max_tokens, required_usd=cost)
         required += cost
-    return {"required_usd": required, "judge": judge, "max_tokens": max_tokens,
-            "single_attempt": True, "framing_tokens_per_transcript": FRAMING_TOKENS,
-            "context_window": window, "tariff": pricing, "prompt_price_bound": prompt_price,
-            "output_price": output_price, "tariff_source": "https://openrouter.ai/api/v1/models",
-            "planned_at": datetime.now(UTC).isoformat(), "per_transcript": rows}
+    return {**checked, "required_usd": required, "framing_tokens_per_transcript": FRAMING_TOKENS,
+            "per_transcript": rows}

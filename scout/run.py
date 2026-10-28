@@ -29,6 +29,7 @@ from inspect_scout import (
 )
 
 from refund_eval.output_paths import validate_private_output
+from refund_eval.realism.scan_budget import bounded_tells_config
 
 ROOT = Path(__file__).resolve().parents[1]
 JUDGES = ["openrouter/anthropic/claude-opus-5.5", "openrouter/openai/gpt-6.1-sol"]
@@ -239,9 +240,9 @@ def main(argv: list[str] | None = None) -> None:
             scans=str(scan_dirs[judge]),
             model_roles={"judge": judge},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
-            model_config=GenerateConfig(cache_prompt=False,
-                **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}),
-                **({"max_retries": 0} if args.bounded_tells else {})),
+            model_config=(bounded_tells_config(args.max_tokens) if args.bounded_tells else
+                          GenerateConfig(cache_prompt=False,
+                              **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}))),
             limit=args.limit,
         )
         locations[judge] = status.location

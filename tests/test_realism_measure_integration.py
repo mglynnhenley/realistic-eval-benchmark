@@ -122,13 +122,16 @@ def repository(tmp_path, monkeypatch):
 @pytest.fixture
 def processes(monkeypatch):
     original = JobContext.command
-    calls = {"trials": [], "scans": [], "score_cwds": [], "damaged_scan": False}
+    calls = {"trials": [], "scans": [], "score_cwds": [], "damaged_scan": False, "unsupported_tariff": False}
 
     def option(argv, name):
         return argv[argv.index(name) + 1]
 
     def command(context, argv, *, name, cwd=None, timeout=600, **kwargs):
         cwd = Path(cwd or context.worktree)
+        if argv[:3] == ["uv", "run", "--frozen"]:
+            assert argv[3:6] == ["--python", sys.executable, "python"]
+            argv = ["uv", "run", *argv[5:]]
         if argv[0] == "git":
             return original(context, argv, name=name, cwd=cwd, timeout=timeout, **kwargs)
         if argv[:4] == ["scripts/harbor", "python", "-m", "refund_eval.harbor"]:
@@ -179,7 +182,10 @@ def processes(monkeypatch):
                 # Only public pricing is substituted; real transcript rendering
                 # and conservative token/cost planning execute in the runner.
                 metadata = {"context_length": 1_000_000, "pricing": {
-                    "prompt": "0.000001", "completion": "0.000005", "input_cache_write": "0.00000125"}}
+                    "prompt": "0.000001", "completion": "0.000005", "input_cache_write": "0.00000125",
+                    "web_search": "0.01"}}
+                if calls["unsupported_tariff"]:
+                    metadata["pricing"]["request"] = "0.01"
                 prefix = ("import refund_eval.realism.scan_budget as sb; "
                           "exec('async def fixed_metadata(judge): return ' + repr(" + repr(metadata) + ")); "
                           "sb.model_metadata=fixed_metadata; ")
@@ -285,6 +291,19 @@ def test_incomplete_native_scan_fails_and_cannot_replay_paid_trial(repository, p
     assert cli.main(argv) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "reconciliation_required"
     assert len(processes["trials"]) == len(processes["scans"]) == 1
+
+
+def test_incompatible_public_judge_tariff_stops_before_paid_trials(repository, processes, tmp_path, capsys):
+    processes["unsupported_tariff"] = True
+    argv, out = _arguments(repository, tmp_path)
+    assert cli.main(argv) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "failed"
+    assert result["spend"]["stages"] == {}
+    assert result["spend"]["committed_usd"] == 0
+    assert not processes["trials"] and not processes["scans"]
+    assert not (out / "batches/baseline/trials").exists()
+    assert "Additional judge request tariff" in (out / "judge-preflight.log").read_text()
 
 
 def test_direct_measurement_loads_search_environment_before_freezing_protocol(repository, monkeypatch, tmp_path):

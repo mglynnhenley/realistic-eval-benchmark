@@ -264,6 +264,15 @@ provider-enforced billing ceilings. Modal compute is billed separately.
 Published tariffs must contain explicit finite prices for prompt, completion and
 cache writes. Null, empty or boolean prices are unknown and stop scan planning;
 they are never interpreted as free. Explicit numeric zero remains valid.
+The bounded tells protocol uses exact base-model names, disables OpenRouter
+plugins and declares only the structured answer tool. Its published optional
+`web_search` tariff is preserved with an explicit inapplicability reason rather
+than treated as a per-request fee. Other unsupported charges and unknown tariff
+fields still stop planning; published cache rates are covered conservatively.
+Each arm checks the judge's public metadata before reserving or launching trials,
+then renders the actual saved transcripts and rechecks their complete cost bound
+before scanning. This free check cannot guarantee that future logs fit the scan
+reserve or context window. Results are saved as `judge-preflight.json`.
 
 `realism_start` returns a `job_id`. Pass it to `realism_status` for progress and
 spend, `realism_results` for saved results, or `realism_cancel` to stop that job.

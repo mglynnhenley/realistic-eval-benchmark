@@ -131,6 +131,22 @@ def _run_trials(context, protocol, out, cwd, tag):
     return collected
 
 
+def _scan_preflight(protocol, context=None):
+    if context is not None and getattr(context, "measurement_worktree", None) is not None:
+        program = ("import asyncio,json,sys; from pathlib import Path; "
+                   "from refund_eval.realism.scan_budget import preflight; p=json.loads(sys.argv[1]); "
+                   "Path(sys.argv[2]).write_text(json.dumps(asyncio.run(preflight(p['judge'],"
+                   "max_tokens=p['scan_max_tokens'],single_attempt=True))))")
+        output = context.directory / "judge-preflight.json"
+        output.unlink(missing_ok=True)
+        _command(context, ["uv", "run", "--frozen", "--python", sys.executable, "python", "-c", program,
+                           json.dumps(protocol), str(output)], name="judge-preflight",
+                 cwd=context.measurement_worktree)
+        return json.loads(output.read_text())
+    from refund_eval.realism.scan_budget import preflight
+    return asyncio.run(preflight(protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True))
+
+
 def _scan_plan(protocol, logs, context=None):
     if context is not None and getattr(context, "measurement_worktree", None) is not None:
         program = ("import asyncio,json,sys; from pathlib import Path; "
@@ -196,8 +212,10 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
     context.check_cancelled()
     _assert_source(context, commit, hashes, cwd=cwd, tag=tag)
     _preflight(context, trial_reserve + scan_reserve)
+    judge_preflight = _scan_preflight(protocol, context)
     out = context.directory / "batches" / tag
     out.mkdir(parents=True, exist_ok=False)
+    atomic_json(out / "judge-preflight.json", judge_preflight)
     atomic_json(out / "manifest.json", {"source_commit": commit, "protocol": protocol, "hashes": hashes,
                                        "measurement_hashes": getattr(context, "measurement_hashes", hashes),
                                        "trial_reserve_usd": trial_reserve, "scan_reserve_usd": scan_reserve})

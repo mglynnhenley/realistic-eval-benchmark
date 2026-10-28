@@ -141,6 +141,7 @@ def test_unscorable_native_samples_stop_batch_before_any_judge_call(monkeypatch,
                               settings={"budget_usd": 5}, check_cancelled=lambda: None,
                               update=lambda *args, **kwargs: None)
     protocol = autonomous._protocol({"trials": 1})
+    monkeypatch.setattr(autonomous, "_scan_preflight", lambda *args: {"judge": "synthetic judge"})
     monkeypatch.setattr(autonomous, "_assert_source", lambda *args, **kwargs: None)
     monkeypatch.setattr(autonomous, "_prepare_trials", lambda *args: {"commit": "source", "dirty": False})
 
