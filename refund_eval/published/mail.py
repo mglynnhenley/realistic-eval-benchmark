@@ -377,20 +377,12 @@ class GmailService:
 
     @staticmethod
     def _check_query(query: str) -> None:
-        supported = {"from", "to", "cc", "subject", "after", "before", "newer", "older",
-                     "newer_than", "older_than", "in", "is", "label"}
-        unknown = set(re.findall(r"\b([A-Za-z_]+):", query)) - supported
-        # The old local matcher ignores several Gmail operators. Reject those
-        # forms instead of silently broadening or narrowing a live query.
-        unsupported_values = any(
-            (kind == "is" and value.lower() not in {"read", "unread", "starred"})
-            or (kind == "in" and value.lower() not in {"sent", "inbox", "anywhere", "all", "trash", "bin", "archive", "archived", "starred"})
-            for kind, value in re.findall(r"\b(is|in):([^\s(){}]+)", query)
-        )
-        if unknown or unsupported_values or re.search(r"\bAROUND\b|[()]|(?:^|\s)\+", query):
-            raise ValueError("Search syntax is unavailable for this mailbox view: " + ", ".join(sorted(unknown)))
+        # Validate the same grammar used by local matching. Operators mentioned
+        # inside quotes are literal text, not unsupported query syntax.
+        parse_query(query, strict=True)
 
     async def _search(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        matcher = parse_query(arguments.get("query", ""), strict=True)
         locals_ = self._locals()
         if not locals_:
             return await self._read_remote("search_threads", arguments)
@@ -402,9 +394,6 @@ class GmailService:
             if not saved or saved[0] != key_args:
                 raise ValueError("Invalid or expired page token.")
             return self._search_page(key_args, saved[1], saved[2], size, saved[3])
-        query = arguments.get("query", "")
-        self._check_query(query)
-        matcher = parse_query(query)
         world = load_world()
         match_ctx = MatchContext(user_addresses=self.ctx.mailbox.user_addresses, now=world.now,
                                  unread=lambda e: "UNREAD" in self._local_labels(e, {}))
