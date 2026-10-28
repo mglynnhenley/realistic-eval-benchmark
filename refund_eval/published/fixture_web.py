@@ -55,7 +55,7 @@ def policy_page_text(org: Org) -> str:
     sources: dict[str, list[str]] = {}
     for fact in dossier.get("facts", []):
         if quote := fact.get("quote", "").strip():
-            sources.setdefault(fact.get("source", ""), []).append(quote)
+            sources.setdefault(fact.get("url") or fact.get("source", ""), []).append(quote)
     sections = []
     for source, raw_quotes in sources.items():
         quotes = list(dict.fromkeys(raw_quotes))

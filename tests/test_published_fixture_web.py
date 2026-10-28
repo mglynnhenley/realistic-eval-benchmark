@@ -62,9 +62,9 @@ def test_policy_excerpts_keep_separate_source_context(monkeypatch):
     monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda _: {"dossier": {
         "summary": "Research analysis should not be published as policy.",
         "facts": [
-            {"source": general, "quote": "Use the portal to complain about a rail provider."},
-            {"source": own_service, "quote": "You can raise a formal complaint by email or in writing."},
-            {"source": own_service, "quote": "Email complaints@disputes.example.test."},
+            {"url": general, "quote": "Use the portal to complain about a rail provider."},
+            {"url": own_service, "quote": "You can raise a formal complaint by email or in writing."},
+            {"url": own_service, "quote": "Email complaints@disputes.example.test."},
         ],
     }})
     assert policy_page_text(org) == (
@@ -72,6 +72,16 @@ def test_policy_excerpts_keep_separate_source_context(monkeypatch):
         "Complaints about service\n" + own_service + "\n\n"
         "You can raise a formal complaint by email or in writing.\n\nEmail complaints@disputes.example.test."
     )
+
+
+def test_saved_ombudsman_policy_preserves_service_complaint_scope():
+    from refund_eval.published.fixture_web import policy_page_text
+
+    text = policy_page_text(load_scenario("train_refund").org("rail_ombudsman"))
+    assert "https://www.railombudsman.org/en/faq" in text
+    service = text.split("Complaints about service\nhttps://www.railombudsman.org/en/complaints-about-service\n\n")[1]
+    assert "you can raise a formal complaint by email or in writing." in service
+    assert "complaints@railombudsman.org" in service
 
 
 @pytest.fixture
