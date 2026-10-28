@@ -215,3 +215,26 @@ async def test_failed_exec_transport_still_signals_exact_worker_before_download(
                                flush_seconds=.02, collect_seconds=.04, stop=True)
     assert env.events.index("stop") < env.events.index("kill") < env.events.index("native")
     assert time.monotonic() - start < .15
+
+
+@pytest.mark.parametrize("opt_in", [False, True])
+def test_preparation_cli_prints_supported_route_for_its_policy(tmp_path, monkeypatch, capsys, opt_in):
+    import sys
+
+    from refund_eval.harbor import __main__ as cli
+
+    monkeypatch.setattr(cli, "prepare", lambda destination, **kwargs: destination / "job.json")
+    argv = ["prepare", "--output", str(tmp_path / "prepared"), "--model", "openrouter/example/offline",
+            "--scenario", "train_refund"]
+    if opt_in:
+        argv += ["--trial-deadline-policy", "bounded-lifecycle-v1"]
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    output = capsys.readouterr().out
+    if opt_in:
+        assert "--run-bounded-job" in output and "reviewed realism measure coordinator" in output
+        assert "4020s soft / 4200s hard" in output
+        assert "argv alone does not supply" in output
+        assert "scripts/harbor harbor run -c" not in output
+    else:
+        assert f"Run with: scripts/harbor harbor run -c {tmp_path}/prepared/job.json" in output

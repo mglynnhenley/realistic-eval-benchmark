@@ -20,6 +20,9 @@ For a sample time limit of 1800 seconds, the phase allowances are:
 
 Worker hard execution is 2040 seconds and agent execution is 2160. The parent
 soft bound is 4020; its 180-second termination interval is inside the 4200 total.
+An earlier cancellation caps the first stop at the earlier of the original hard
+bound and cancellation time plus 180 seconds. Unused sample time does not become
+extra termination grace.
 The sandbox's existing independently finite lifetime becomes 4800, as a last
 resort ceiling, not an additional phase allowance or proof of teardown. These
 allowances are engineering bounds, not measured guarantees of artifact recovery.

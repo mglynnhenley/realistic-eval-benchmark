@@ -331,7 +331,16 @@ def main() -> None:
     )
     print(json.dumps({"config": str(config), "trials_per_model": args.trials,
                       "total_trials": args.trials * len(args.model), "concurrency": args.concurrency}))
-    print(f"Run with: scripts/harbor harbor run -c {config}")
+    if settings.trial_deadlines is None:
+        print(f"Run with: scripts/harbor harbor run -c {config}")
+    else:
+        bounds = settings.trial_deadlines
+        print("Run via the reviewed realism measure coordinator with "
+              f"--trial-deadline-policy {bounds['version']}; "
+              f"it supplies the native {bounds['command_soft_seconds']}s soft / "
+              f"{bounds['command_hard_seconds']}s hard parent guard.")
+        print(f"Internal coordinator argv: scripts/harbor python -m refund_eval.harbor --run-bounded-job {config}")
+        print("The internal argv alone does not supply the coordinator's host hard-stop guard.")
 
 
 if __name__ == "__main__":

@@ -329,6 +329,10 @@ class JobContext:
                 primary = exc
                 raise
             finally:
+                # Freeze the first stop bound too: an early cancellation gets
+                # only the termination allowance, never the unused sample time.
+                stop_deadline = (min(hard_deadline, time.monotonic() + termination_grace)
+                                 if hard_deadline is not None else None)
                 # Repeated external stops must not interrupt or reset native grace.
                 previous = {}
                 if hard_deadline is not None:
@@ -340,7 +344,7 @@ class JobContext:
                     elif primary is not None or self.child.poll() is None:
                         # A launcher may have exited after a signal, while owned
                         # descendants are still collecting artifacts.
-                        self._stop_child(hard_deadline=hard_deadline, force_group=primary is not None)
+                        self._stop_child(hard_deadline=stop_deadline, force_group=primary is not None)
                 finally:
                     self.child = None
                     for signum, handler in previous.items():
