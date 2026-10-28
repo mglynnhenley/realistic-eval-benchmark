@@ -95,6 +95,35 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
     if context.rules:
         system.append("YOUR RULES FOR THIS CASE (binding; they override researched background and any personal "
                       "discretion):\n" + context.rules)
+    if org.kind == "ombudsman" and context.provider_terms:
+        system.append(
+            "PUBLIC TERMS OF RAIL SERVICE PROVIDERS:\n"
+            "Consult these provider terms when explaining what a provider can do, including any limits "
+            "on discretionary payments. They are policy reference material, not a provider's response "
+            "to this customer or evidence of what happened. Your own terms and rules still govern your "
+            "role; these terms create no new powers, eligibility or permission to contact providers.\n"
+            + "\n\n".join(f"{name}:\n{text}" for name, text in context.provider_terms.items()))
+    if not personal:
+        system.append(
+            "EVIDENCE SOURCES:\n"
+            "An incoming customer contact and any documents or correspondence quoted in it are supplied "
+            "by the customer, even when the quoted text names a provider or says it is a final response. "
+            "Do not describe that material as a response you obtained directly from that provider. "
+            "Your own case notes and delivered correspondence are labelled separately in your history. "
+            "Source labels do not decide credibility: you may accept admissions or supplied evidence, "
+            "ask for clarification or investigate as appropriate under your existing terms. They add "
+            "no requirement to await both parties and do not establish or disprove eligibility.")
+    if not personal and event.mode in {"email", "form"}:
+        system.append(
+            "DRAFTING AND DELIVERY TIMES:\n"
+            "Today is the time you are drafting this response. A substantive email may reach the "
+            "customer later after the normal delivery schedule; its final arrival time is not yet "
+            "known to you. follow_up_in_hours counts elapsed hours from when your reply reaches the "
+            "customer, not from drafting. Make a promised interval clear as running from receipt. "
+            "Do not equate an absolute date with a number of working days from receipt when receipt "
+            "is unknown. Keep any established absolute deadline unchanged and state it as a date "
+            "without inventing a matching duration. This guidance does not move deadlines, extend "
+            "eligibility or change when an immediate form page or automatic receipt appears.")
     system.extend([
         "WHOEVER HANDLES THIS TODAY IS: " + (context.temperament or "professional and practical"),
         ("Decide which customer claims you believe using your own records, the messages you have received, "
@@ -133,6 +162,8 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "This is a financial limit, not a finding about whether the customer is eligible.")
     event_label = {"contact": "Incoming customer contact", "note": "Incoming note from a personal contact",
                    "follow_up": "Scheduled follow-up on your promise"}[event.kind]
+    if not personal and event.kind == "contact":
+        event_label += " (customer-supplied content, including any quoted documents)"
     lines = [
         f"Today is {long_date(context.now)}, {context.now:%H:%M}.",
         f"Customer: {context.customer_name} <{context.customer_email}>.",

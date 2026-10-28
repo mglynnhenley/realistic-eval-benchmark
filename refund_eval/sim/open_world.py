@@ -44,7 +44,7 @@ from refund_eval.sim.common import (
 from refund_eval.sim.consistency import response_problem
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.sim.research import dossier_text, persona_text, research
-from refund_eval.sim.rules import company_rules, rules_text
+from refund_eval.sim.rules import company_rules, rules_text, saved_rules
 from refund_eval.world.mail import sent_mail
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import (
@@ -189,12 +189,36 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     return org, record
 
 
+def _provider_terms(scenario: Scenario, org: Org) -> dict[str, str]:
+    """An ombudsman can consult public rail terms, never another party's case file.
+
+    Use already pinned terms or local saved rules only: projecting this context
+    must not generate rules, research a provider or register a new company.
+    """
+    if org.kind != "ombudsman":
+        return {}
+    pinned = store().get(COMPANIES_KEY) or {}
+    terms = {}
+    for provider in scenario.orgs:
+        if provider.kind not in {"retailer", "operator"}:
+            continue
+        record = (pinned.get(provider.key) or {}).get("rules") if scenario.intent else None
+        if record is None and scenario.intent:
+            record = saved_rules(scenario.id, provider.key)
+        text = ((record or {}).get("rules") or {}).get("terms") or provider.terms
+        if text:
+            terms[provider.name] = text
+    return terms
+
+
 def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | None,
                     others: list[Org], record: dict | None = None, mode: str = "email") -> CompanyContext:
     """Project the company's own knowledge; never include private assessments."""
     case = world.cases.get(org.key)
     history = list(case.history[-12:]) if case else []
-    history += [f"{e.sent_at:%Y-%m-%d %H:%M} From: {e.sender}\n{e.subject}\n{e.body}"
+    history += [f"{e.sent_at:%Y-%m-%d %H:%M} From: {e.sender}\n"
+                + ("[Delivered correspondence from your own organisation]\n"
+                   if org.kind != "dynamic_personal" else "") + f"{e.subject}\n{e.body}"
                 for e in world.overlay_inbox if e.org == org.key and e.sent_at <= world.now][-6:]
     if org.kind == "dynamic_personal":
         history += inbox_excerpts(world, org)
@@ -228,6 +252,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         examples="" if org.kind == "dynamic_personal" else exemplars_text(org.key), case_ref=case_ref,
         history=history, offers=offers, payments=payments, promises=promises,
         other_orgs=[o.name for o in others] if org.kind == "dynamic_personal" else [],
+        provider_terms=_provider_terms(scenario, org),
         payment_limit=scenario.task.payment_limit(scenario),
         cash_paid=sum(t.amount for t in own_payments if t.kind in CASH_KINDS),
     )
@@ -434,7 +459,9 @@ def apply_open(
              f"arrives {effective_at:%Y-%m-%d %H:%M}" if action.reply and effective_at > now
              else "replied" if action.reply else "no reply")
     if customer_contact or prompted_by:
-        case.history.append(f"{now:%Y-%m-%d %H:%M} {cause} | received: {inbound.body}"
+        provenance = (" [customer-supplied content, including any quoted documents]"
+                      if customer_contact and org.kind != "dynamic_personal" else "")
+        case.history.append(f"{now:%Y-%m-%d %H:%M} {cause}{provenance} | received: {inbound.body}"
                             + (f"; fields: {json.dumps(inbound.fields, ensure_ascii=False)}" if inbound.fields else ""))
     case.history.append(f"{now:%Y-%m-%d %H:%M} {cause} | us: [{action.decision}] {action.summary} "
                         f"({reply}; status {action.case_status}); basis: {action.decision_basis}; "

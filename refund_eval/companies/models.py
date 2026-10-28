@@ -80,6 +80,7 @@ class CompanyContext(BaseModel):
 
     No task, scenario, world or evaluation object crosses this boundary. Records
     are explicitly selected by the task; financial entries belong to this company.
+    An ombudsman may also receive scoped public provider terms, without their case files.
     """
 
     org: CompanyProfile
@@ -100,6 +101,8 @@ class CompanyContext(BaseModel):
     payments: list[str] = Field(default_factory=list)
     promises: list[str] = Field(default_factory=list)
     other_orgs: list[str] = Field(default_factory=list)
+    provider_terms: dict[str, str] = Field(default_factory=dict, description=(
+        "Public rail-provider terms available to an ombudsman; no other provider case records or grant grounds."))
     payment_limit: float | None = None
     cash_paid: float = 0
 
