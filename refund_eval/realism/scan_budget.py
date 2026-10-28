@@ -80,7 +80,7 @@ def _price(pricing: dict, field: str, *, required: bool = True) -> float:
 
 
 def bounded_tells_config(max_tokens: int):
-    """The fixed text/answer-tool protocol covered by this reservation planner."""
+    """Bounded generation settings; the judge's SDK constructor also needs max_retries=0."""
     from inspect_ai.model import GenerateConfig
 
     if type(max_tokens) is not int or max_tokens <= 0 or max_tokens > OUTPUT_CAP:
@@ -146,7 +146,8 @@ async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
                single_attempt: bool = False) -> dict:
     """Bound actual logs for the same fixed protocol as ``bounded_tells_config``.
 
-    Caller must use that config, an exact supported base model, and the bounded
+    Caller must bind that config directly to the judge model, disable its SDK
+    constructor retries, use an exact supported base model, and use the bounded
     tells scanner with no additional tools. Legacy/unbounded scans are refused.
     """
     if not logs or len(set(logs)) != len(logs):

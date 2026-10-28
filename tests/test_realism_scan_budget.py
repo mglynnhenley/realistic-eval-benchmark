@@ -202,6 +202,7 @@ def runner(monkeypatch):
 @pytest.mark.parametrize("cap", [None, 8192])
 def test_scout_optional_cap_preserves_default_and_applies_when_supplied(runner, monkeypatch, tmp_path, cap):
     calls = []
+    monkeypatch.setattr(runner, "get_model", lambda *a, **kw: pytest.fail("unbounded model construction must stay unchanged"))
     monkeypatch.setattr(runner, "scan", lambda **kw: calls.append(kw) or NS(location="scan", complete=True))
     args = ["synthetic.eval", "--judges", "mockllm/judge", "--scans", str(tmp_path / "scans"), "--yes"]
     if cap is not None:
@@ -209,6 +210,8 @@ def test_scout_optional_cap_preserves_default_and_applies_when_supplied(runner, 
     runner.main(args)
     assert calls[0]["model_config"].max_tokens == cap
     assert calls[0]["model_config"].cache_prompt is False
+    assert calls[0]["model_config"].max_retries is None
+    assert calls[0]["model_roles"] == {"judge": "mockllm/judge"}
 
 
 @pytest.mark.parametrize("cap", ["0", "-1", "bad"])
@@ -243,6 +246,9 @@ def test_bounded_tells_disables_answer_refusal_and_api_retries(runner, monkeypat
     assert scans[0]["model_config"].max_retries == 0
     assert scans[0]["model_config"].max_tokens == 8192
     assert scans[0]["model_config"].extra_body == {"plugins": []}
+    judge = scans[0]["model_roles"]["judge"]
+    assert judge.model_args["max_retries"] == 0
+    assert judge.config == scans[0]["model_config"]
 
 
 @pytest.mark.parametrize("extra", [[], ["--max-tokens", "8193", "--scanners", "tells"], ["--max-tokens", "8192"]])

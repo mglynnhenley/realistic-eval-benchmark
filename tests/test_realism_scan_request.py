@@ -43,6 +43,7 @@ async def test_bounded_tells_wire_request_never_enables_web_search(slug):
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(completion)) as client:
         model = get_model("openrouter/" + slug, api_key="synthetic-offline-only", http_client=client,
                           base_url="https://openrouter.ai/api/v1", memoize=False, stream=False,
+                          max_retries=0,
                           config=scan_budget.bounded_tells_config(8192))
         scanner = scanners.tells_scanner(model=model, bounded=True)
         result = await scanner(Transcript(transcript_id="synthetic", messages=[

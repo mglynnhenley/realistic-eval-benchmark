@@ -19,7 +19,7 @@ import httpx
 import pandas as pd
 import scanners as scout_scanners  # scout/scanners.py (this script's directory is on sys.path)
 from dotenv import load_dotenv
-from inspect_ai.model import GenerateConfig
+from inspect_ai.model import GenerateConfig, get_model
 from inspect_scout import (
     TranscriptContent,
     messages_as_str,
@@ -233,12 +233,18 @@ def main(argv: list[str] | None = None) -> None:
 
     locations = {}
     for judge in args.judges:
+        # Scout's global model_config does not configure a named judge role.
+        # Bind the bounded generation policy directly to that role's model.
+        # SDK retries are separate from Inspect's GenerateConfig.max_retries.
+        judge_model = (get_model(judge, config=bounded_tells_config(args.max_tokens),
+                                 max_retries=0, memoize=False)
+                       if args.bounded_tells else judge)
         status = scan(
             scanners={name: (getattr(scout_scanners, name)(bounded=True) if args.bounded_tells else getattr(scout_scanners, name)())
                       for name in args.scanners},
             transcripts=transcripts_from(args.logs),
             scans=str(scan_dirs[judge]),
-            model_roles={"judge": judge},
+            model_roles={"judge": judge_model},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
             model_config=(bounded_tells_config(args.max_tokens) if args.bounded_tells else
                           GenerateConfig(cache_prompt=False,

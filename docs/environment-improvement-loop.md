@@ -269,6 +269,9 @@ plugins and declares only the structured answer tool. Its published optional
 `web_search` tariff is preserved with an explicit inapplicability reason rather
 than treated as a per-request fee. Other unsupported charges and unknown tariff
 fields still stop planning; published cache rates are covered conservatively.
+The bounded judge model receives its generation settings directly; both Inspect
+and the underlying SDK have retries disabled. Scout's global scan config alone
+does not configure a named model role or disable the SDK's separate retry loop.
 Each arm checks the judge's public metadata before reserving or launching trials,
 then renders the actual saved transcripts and rechecks their complete cost bound
 before scanning. This free check cannot guarantee that future logs fit the scan
