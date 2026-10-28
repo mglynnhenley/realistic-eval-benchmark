@@ -14,10 +14,13 @@ bundle into `.context/realism/input/`; keep its hashes and source information.
 For reusable baseline evidence, transfer the entire exported `evidence/`
 directory, not just its manifest or score. Keep private evidence out of Git.
 
-Use Python 3.12 or newer and install `uv` if it is not available. Install and
-check the local tooling without launching trials:
+Use a compatible Python 3.12–3.14 and install `uv` if it is not available. The
+locked Modal SDK rejects Python 3.15. Set `UV_PYTHON` for the whole session so
+fresh runner and Harbor environments use the same compatible interpreter.
+Install and check the local tooling without launching trials:
 
 ```sh
+export UV_PYTHON=3.14
 uv sync --frozen
 scripts/harbor harbor --version
 uv run python -m refund_eval.realism measure --help
@@ -31,7 +34,7 @@ credentials removed and dotenv loading disabled, for example:
 
 ```sh
 env -u OPENROUTER_API_KEY -u MODAL_TOKEN_ID -u MODAL_TOKEN_SECRET \
-  PYTHON_DOTENV_DISABLED=1 uv run pytest -q
+  PYTHON_DOTENV_DISABLED=1 MODAL_CONFIG_PATH=/dev/null uv run --frozen pytest -q
 ```
 
 This keeps credentials out of ordinary test environments; the coding agent and
@@ -164,6 +167,10 @@ A new use of baseline evidence revalidates the complete exported bundle. If a
 process stops, inspect original outputs, held reservations and remote Modal jobs.
 Cancel/confirm those jobs separately from the coding agent. Saved cleanup evidence
 may report unresolved jobs; do not treat killing a local process as remote cleanup.
+Unreadable trial configurations appear in `discovery_errors` with
+`remote_state: unknown`, even when cleanup succeeds for other known sessions.
+Missing, unreadable or timed-out cleanup receipts also leave sessions unresolved;
+an earlier successful receipt is not reused.
 
 Cloud workspace sleep/lifetime limits can stop processes. V1 supports a bounded
 session and manual recovery, not guaranteed continuous operation. Keep source,

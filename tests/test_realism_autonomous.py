@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -234,6 +235,72 @@ def test_cleanup_targets_require_own_native_config(context):
     config["trials_dir"] = "/different/job"
     (trial / "config.json").write_text(json.dumps(config))
     assert loop._cleanup_targets(context.directory) == []
+
+
+@pytest.mark.parametrize("broken", ["{", "null", "[]", '{"environment": null}', '{"trial_name": 12}'])
+def test_cleanup_continues_past_invalid_config_and_records_remote_uncertainty(context, broken):
+    jobs = context.directory / "batches/r1/trials/jobs/run"
+    valid = jobs / "task__own"
+    invalid = jobs / "task__broken"
+    valid.mkdir(parents=True)
+    invalid.mkdir()
+    (valid / "config.json").write_text(json.dumps({
+        "trial_name": valid.name, "trials_dir": str(jobs), "environment": {"type": "modal"}}))
+    (invalid / "config.json").write_text(broken)
+    calls = []
+
+    def command(argv, **kwargs):
+        # The local adapter records the selection and simulates successful
+        # cleanup of the known session; no Modal SDK or network is involved.
+        targets = json.loads(Path(argv[-2]).read_text())
+        calls.append(targets["sessions"])
+        Path(argv[-1]).write_text(json.dumps({
+            "sessions": targets["sessions"], "terminated": ["synthetic-sandbox"], "unresolved": []}))
+        return {"returncode": 0}
+
+    context.command = command
+    result = loop.cleanup_job(context)
+    assert calls == [["task__own__env"]]
+    assert result["terminated"] == ["synthetic-sandbox"]
+    assert result["remote_state"] == "unknown"
+    assert result["discovery_errors"] == [{"config": str((invalid / "config.json").relative_to(context.directory)),
+                                           "reason": "Invalid or unreadable native trial configuration"}]
+    assert json.loads((context.directory / "modal-cleanup.json").read_text()) == result
+
+
+def test_cleanup_with_only_unreadable_config_does_not_claim_remote_cleanup(context):
+    trial = context.directory / "batches/r1/trials/jobs/run/task__broken"
+    trial.mkdir(parents=True)
+    (trial / "config.json").write_text("{")
+    result = loop.cleanup_job(context)
+    assert result["sessions"] == []
+    assert result["remote_state"] == "unknown"
+    assert len(result["discovery_errors"]) == 1
+
+
+@pytest.mark.parametrize("failure", ["no_output", "truncated_output", "exception"])
+def test_cleanup_cannot_reuse_old_success_when_current_cleanup_is_unknown(context, failure):
+    trial = context.directory / "batches/r1/trials/jobs/run/task__own"
+    trial.mkdir(parents=True)
+    (trial / "config.json").write_text(json.dumps({
+        "trial_name": trial.name, "trials_dir": str(trial.parent), "environment": {"type": "modal"}}))
+    output = context.directory / "modal-cleanup.json"
+    output.write_text(json.dumps({"sessions": ["task__own__env"], "terminated": ["old-sandbox"], "unresolved": []}))
+
+    def command(argv, **kwargs):
+        if failure == "exception":
+            raise TimeoutError("synthetic provider body must not be exposed")
+        if failure == "truncated_output":
+            Path(argv[-1]).write_text("{")
+        return {"returncode": 0}
+
+    context.command = command
+    result = loop.cleanup_job(context)
+    assert result["sessions"] == result["unresolved"] == ["task__own__env"]
+    assert result["terminated"] == []
+    assert result["remote_state"] == "unknown"
+    assert "provider body" not in json.dumps(result)
+    assert json.loads(output.read_text()) == result
 
 
 def test_saved_findings_skip_diagnostic_but_not_fresh_control(context, adapters):

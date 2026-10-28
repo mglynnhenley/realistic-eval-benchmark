@@ -60,6 +60,26 @@ async def test_unsupported_or_underbounded_scans_stop_without_paid_calls(planned
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["prompt", "completion", "input_cache_write", "request"])
+@pytest.mark.parametrize("price", [None, "", False, True])
+async def test_unknown_published_prices_cannot_be_treated_as_free(planned, field, price):
+    metadata, _ = planned
+    metadata["pricing"][field] = price
+    with pytest.raises(ValueError, match="pricing"):
+        await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", [0, 0.0, "0"])
+async def test_explicit_zero_tariffs_remain_supported(planned, price):
+    metadata, _ = planned
+    metadata["pricing"]["completion"] = price
+    result = await scan_budget.plan(["a.eval"], JUDGE, single_attempt=True)
+    assert result["output_price"] == 0
+    assert result["required_usd"] > 0
+
+
+@pytest.mark.asyncio
 async def test_legacy_retries_and_unknown_judge_are_not_given_one_call_reservation(planned):
     with pytest.raises(ValueError, match="single-attempt"):
         await scan_budget.plan(["a.eval"], JUDGE)

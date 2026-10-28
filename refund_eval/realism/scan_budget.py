@@ -61,10 +61,17 @@ async def rendered_inputs(logs: list[str]) -> list[dict]:
 
 
 def _price(pricing: dict, field: str, *, required: bool = True) -> float:
-    if required and field not in pricing:
-        raise ValueError(f"Judge pricing lacks {field}")
+    if field not in pricing:
+        if required:
+            raise ValueError(f"Judge pricing lacks {field}")
+        return 0.0
+    value = pricing[field]
+    # An absent optional tariff is allowed; an explicitly unknown tariff is
+    # not a published zero. Never turn null/empty/boolean metadata into a bound.
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"Invalid judge {field} pricing")
     try:
-        price = float(pricing.get(field, 0) or 0)
+        price = float(value)
     except (ValueError, TypeError) as error:
         raise ValueError(f"Invalid judge {field} pricing") from error
     if not math.isfinite(price) or price < 0:

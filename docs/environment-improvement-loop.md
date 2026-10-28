@@ -116,6 +116,13 @@ when their exact commits and protocol match. An interrupted or unknown paid stag
 stops for reconciliation; restarting the agent never means launching it again.
 Manual recovery is acceptable for this first version.
 
+Cleanup continues past unreadable or invalid native trial configurations so
+known sessions can still be terminated. Its report records `discovery_errors`
+and `remote_state: unknown` for configurations it could not safely identify.
+Only a fresh readable cleanup receipt confirms the current attempt; a missing
+receipt or timeout leaves the known sessions unresolved. Inspect these fields
+alongside held model reservations before deciding that remote work has stopped.
+
 The standalone `measure` command uses `stages.py`, `cycle.py`, coverage checks and
 the existing Modal helpers. It accepts reviewed commits without invoking the
 legacy API repair actor. Preparation is the default; `--execute` explicitly
@@ -253,6 +260,10 @@ a scan cannot be bounded, or budget is insufficient, the job stops and preserves
 its evidence. No automatic paid retry or unclear-result rerun occurs. Unknown
 charges keep their reservation; reservations are conservative estimates, not
 provider-enforced billing ceilings. Modal compute is billed separately.
+
+Published tariffs must contain explicit finite prices for prompt, completion and
+cache writes. Null, empty or boolean prices are unknown and stop scan planning;
+they are never interpreted as free. Explicit numeric zero remains valid.
 
 `realism_start` returns a `job_id`. Pass it to `realism_status` for progress and
 spend, `realism_results` for saved results, or `realism_cancel` to stop that job.

@@ -376,15 +376,27 @@ def run_job(context):
     return result
 
 
-def _cleanup_targets(directory):
+def _cleanup_targets(directory, *, discovery_errors=None):
     sessions = set()
     for path in (directory / "batches").glob("*/trials/jobs/*/*/config.json"):
-        config = json.loads(path.read_text())
-        name = config.get("trial_name", "")
-        if (name != path.parent.name or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", name)
-                or config.get("environment", {}).get("type") != "modal"):
-            continue
-        if Path(config.get("trials_dir", "")).resolve() != path.parent.parent.resolve():
+        try:
+            config = json.loads(path.read_text())
+            if not isinstance(config, dict):
+                raise TypeError("Invalid configuration")
+            name, environment = config.get("trial_name"), config.get("environment")
+            trials_dir = config.get("trials_dir")
+            if (not isinstance(name, str) or name != path.parent.name
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", name)
+                    or not isinstance(environment, dict) or environment.get("type") != "modal"
+                    or not isinstance(trials_dir, str)
+                    or Path(trials_dir).resolve() != path.parent.parent.resolve()):
+                raise ValueError("Invalid configuration")
+        except (OSError, ValueError, TypeError, RuntimeError):
+            # One partially written native file must not prevent cleanup of
+            # other known sessions. Do not invent a session for an invalid file.
+            if discovery_errors is not None:
+                discovery_errors.append({"config": str(path.relative_to(directory)),
+                                         "reason": "Invalid or unreadable native trial configuration"})
             continue
         sessions.add(f"{name}__env")
     return sorted(sessions)
@@ -392,20 +404,35 @@ def _cleanup_targets(directory):
 
 def cleanup_job(context):
     """Terminate only Modal sandboxes tagged for native trials inside this job."""
-    targets = _cleanup_targets(context.directory)
+    discovery_errors = []
+    targets = _cleanup_targets(context.directory, discovery_errors=discovery_errors)
     output = context.directory / "modal-cleanup.json"
     if not targets:
         result = {"sessions": [], "terminated": [], "unresolved": []}
-        atomic_json(output, result)
-        return result
-    path = context.directory / "modal-cleanup-targets.json"
-    atomic_json(path, {"sessions": targets})
-    response = context.command(["scripts/harbor", "python", "-m", "refund_eval.realism.autonomous",
-                                "--cleanup-modal", str(path), str(output)], name="modal-cleanup", timeout=35,
-                               allow_cancelled=True)
-    if response["returncode"] or not output.exists():
-        return {"sessions": targets, "terminated": [], "unresolved": targets}
-    return json.loads(output.read_text())
+    else:
+        path = context.directory / "modal-cleanup-targets.json"
+        atomic_json(path, {"sessions": targets})
+        result = {"sessions": targets, "terminated": [], "unresolved": targets, "remote_state": "unknown"}
+        # The subprocess must produce a new receipt. A previous successful
+        # cleanup says nothing about the outcome of this attempt.
+        output.unlink(missing_ok=True)
+        try:
+            response = context.command(["scripts/harbor", "python", "-m", "refund_eval.realism.autonomous",
+                                        "--cleanup-modal", str(path), str(output)], name="modal-cleanup", timeout=35,
+                                       allow_cancelled=True)
+            if not response["returncode"]:
+                current = json.loads(output.read_text())
+                if (not isinstance(current, dict) or current.get("sessions") != targets
+                        or not isinstance(current.get("terminated"), list)
+                        or not isinstance(current.get("unresolved"), list)):
+                    raise ValueError("Invalid cleanup receipt")
+                result = current
+        except Exception as error:  # noqa: BLE001 -- retain uncertainty without exposing provider text
+            result["error_type"] = type(error).__name__
+    if discovery_errors:
+        result.update(discovery_errors=discovery_errors, remote_state="unknown")
+    atomic_json(output, result)
+    return result
 
 
 def _cleanup_modal(targets, output):
