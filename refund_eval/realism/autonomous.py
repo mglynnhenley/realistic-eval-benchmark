@@ -154,13 +154,19 @@ def _prepared_trials(protocol, out):
 
         bounds = validate_deadlines(protocol["trial_deadlines"], protocol["time_limit"])
         task = tomllib.loads((out / "task/task.toml").read_text())
+        # Harbor serializes optional phase overrides as null. Each inherits the
+        # global multiplier; null is not a second multiplier or a conflict.
+        global_multiplier = job.get("timeout_multiplier", 1)
+        multipliers = [global_multiplier] + [
+            global_multiplier if job.get(key) is None else job[key]
+            for key in ("agent_timeout_multiplier", "verifier_timeout_multiplier",
+                        "environment_build_timeout_multiplier", "agent_setup_timeout_multiplier")]
         if (job.get("n_concurrent_trials") != protocol["trials"]
                 or task["agent"]["timeout_sec"] != bounds["agent_seconds"]
                 or task["environment"]["build_timeout_sec"] != bounds["setup_seconds"]
                 or task["verifier"]["timeout_sec"] != bounds["verify_seconds"]
                 or job["environment"].get("kwargs", {}).get("sandbox_timeout_secs") != bounds["sandbox_seconds"]
-                or any(job.get(k, 1) != 1 for k in ("timeout_multiplier", "agent_timeout_multiplier",
-                    "verifier_timeout_multiplier", "environment_build_timeout_multiplier", "agent_setup_timeout_multiplier"))
+                or any(type(value) not in (int, float) or value != 1 for value in multipliers)
                 or any(agent.get(k) is not None for k in ("override_timeout_sec", "override_setup_timeout_sec", "max_timeout_sec"))):
             raise ValueError("Prepared lifecycle ordering, waves or actual bounds mismatch")
     source = json.loads((out / "task/environment/source/refund_eval/_source_manifest.json").read_text())
