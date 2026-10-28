@@ -52,7 +52,8 @@ def test_resolve_org_by_address_domain_url_phone_and_name() -> None:
     assert resolve_org(SC, "someone@example.org") is None
 
 
-async def test_email_reply_obeys_the_organisations_configured_minimum(sim: MockSim) -> None:
+async def test_email_reply_obeys_the_organisations_configured_minimum(sim: MockSim, monkeypatch) -> None:
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda low, *_: low)
     sim.open_actions.append({"reply_after_hours": 9, "body": "We are investigating."})
     result = await dispatch(inbound("email", OPERATOR.contact_emails[0], subject="Refund"))
     assert result.reply_scheduled and result.kind == "ack"

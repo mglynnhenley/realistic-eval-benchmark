@@ -118,14 +118,14 @@ def test_fixture_hides_mail_after_now():
     assert all(as_aware(e.sent_at) <= early for e in src.search("", now=early, limit=50))
 
 
-def test_authored_follow_on_mail_arrives_over_the_simulation_without_changing_starting_mail():
+def test_rescheduled_existing_mail_is_hidden_initially_and_arrives_over_the_simulation():
     src = _fixture()
     starting = {e.id for e in src.search("", now=START, limit=100)}
     end = START + timedelta(days=21)
     later = {e.id for e in src.search("", now=end, limit=100)}
-    assert len(starting) == 39
+    assert len(starting) == 36
     future = [e for e in src.emails if e.id in later - starting]
-    assert len(future) == 6
+    assert len(future) == 3
     for email in future:
         before = as_aware(email.sent_at) - timedelta(microseconds=1)
         assert email.id not in {e.id for e in src.search("", now=before, limit=100)}
@@ -427,7 +427,7 @@ def test_future_fixture_visibility_across_clock_change(start):
     source = FixtureMailSource().for_scenario(scenario)
     world = World(start_time=scenario.start_time, now=scenario.start_time)
     source.schedule_future(world)
-    assert len(world.pending) == 6
+    assert len(world.pending) == 3
     for pending in world.pending:
         email = pending.email
         # Use UTC on either side of the boundary, including dates after BST ends.

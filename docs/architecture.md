@@ -150,7 +150,9 @@ The command-line kill switch stops at a tool or turn boundary. Dashboard batch c
 
 Public sites may reject automated access, model responses vary, and a permitted page read is not proof that the remote service has no side effects. The audit exposes what was observed and which isolation checks passed. Snapshots, transcripts and logs may contain private mail and must remain unpublished. Shared output validation requires ignored, untracked destinations for dashboard data, prepared Harbor jobs, browser artifacts and Scout wrapper results inside a Git checkout; paths outside Git are supported. Symlinks are resolved before checking. `.gitignore` also excludes the default private directories, inbox exports and evaluation/audit files.
 
-The authored fixture inbox includes sparse unrelated follow-on messages. The selected
+Three unrelated messages from the existing fixture inbox are scheduled after the
+scenario start rather than appearing in the initial inbox. Their identities and
+content are retained. The selected
 fixture is personalised to the scenario and its future incoming messages are queued
 on the simulated clock, so arrivals wake the agent and appear once in mail searches.
 Outgoing fixture mail does not trigger an inbox notification. Restoring a checkpoint

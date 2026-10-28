@@ -103,7 +103,8 @@ def contact(address="help@records.example.test"):
                    body="My record is ready.", interception_id="example-contact")
 
 
-async def test_alternative_company_handles_contact_and_follow_up_without_task_gates(example):
+async def test_alternative_company_handles_contact_and_follow_up_without_task_gates(example, monkeypatch):
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda low, *_: low)
     scenario, company, mock = example
     mock.assessments = [{"primary_intent": "update_record", "findings": [{
         "claim": "My record is ready.", "verdict": "contradicted", "evidence": ["facts.ready is false"],
