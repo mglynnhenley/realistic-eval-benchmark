@@ -329,12 +329,11 @@ def extract_urls(text: str) -> list[str]:
     return out
 
 
-def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = False) -> GuardResult:
-    """Decide whether a GET of `url` is safe. `from_email` means the URL (by host
-    and path) appeared in an email body, which applies the stricter rule.
-    `hashed_path_ok` skips only the token-like path segment rule, for callers that
-    have established the URL is a passive page asset (content-hashed file names
-    such as app.0123456789abcdef0123.css look like one-time tokens)."""
+def check_destination(url: str) -> GuardResult:
+    """Classify an HTTP destination without applying read-only action guards.
+
+    This is syntactic classification, not a DNS lookup or proof of reachability.
+    """
     raw = (url or "").strip()
     try:
         parts = urlsplit(raw)
@@ -355,6 +354,21 @@ def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = Fals
         return _refuse("unreachable", "private or local host", raw, host)
     if port is not None and port not in (80, 443):
         return _refuse("unreachable", f"non-standard port {port}", raw, host)
+    return GuardResult(True)
+
+
+def check_url(url: str, *, from_email: bool = False, hashed_path_ok: bool = False) -> GuardResult:
+    """Decide whether a GET of `url` is safe. `from_email` means the URL (by host
+    and path) appeared in an email body, which applies the stricter rule.
+    `hashed_path_ok` skips only the token-like path segment rule, for callers that
+    have established the URL is a passive page asset (content-hashed file names
+    such as app.0123456789abcdef0123.css look like one-time tokens)."""
+    destination = check_destination(url)
+    if not destination.allowed:
+        return destination
+    raw = (url or "").strip()
+    parts = urlsplit(raw)
+    host = (parts.hostname or "").lower().rstrip(".")
 
     if _is_tracking_host(host):
         return _refuse("redirect", "email tracking or redirect host", raw, host)

@@ -187,6 +187,8 @@ Inspect writes `.eval` files under `logs/` by default. Open them with `uv run in
 
 Browser evidence distinguishes verified Docker/network-namespace isolation from a subprocess sharing its worker's network. A startup canary tests interception independently. Shared-network containment is recorded as unverified; review the recorded manifest when interpreting results. Browser and worker share the trial filesystem in subprocess mode.
 
+The browser broker rejects syntactically local/private destinations, numeric aliases and nonstandard ports before form simulation or cached-page reuse. Encoded authorities and IDNA hostnames receive the same checks, so a refused local form cannot manufacture a successful acknowledgement or a reloadable page. Public form actions and tokens remain available to the simulator. This destination classification performs no DNS lookup and does not establish that a public-looking name exists; actual public reads separately validate DNS answers at the socket connector. This check does not establish general browser or sandbox containment.
+
 The dashboard's **World → Company interactions** section shows the company's exact input, model attempts, validation failures, final decision and linked scheduled effects. These structured records distinguish intentional silence from a failed company call. Older runs retain their original case histories.
 
 ## Rerunning one company decision
