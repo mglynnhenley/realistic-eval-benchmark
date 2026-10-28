@@ -62,7 +62,8 @@ async def test_old_tool_output_is_cleared_before_any_message_is_dropped():
     prefix, older, recent = history()
     messages = [*prefix, *older, *recent]
     cleared, count = harness.clear_old_tool_results(messages)
-    threshold = await model.count_tokens(cleared) + 100
+    # cleared, the window sits below the warning band, so nothing needs trimming
+    threshold = int((await model.count_tokens(cleared) + 100) / harness.MEMORY_WARNING_SHARE)
     assert await model.count_tokens(messages) > threshold
 
     compacted, appended = await compaction(harness.HistoryWindow(threshold), prefix=prefix,
@@ -93,12 +94,13 @@ async def test_trims_after_clearing_when_still_too_large_without_splitting_tool_
     model = get_model("mockllm/model")
     prefix, older, recent = history()
     messages = [*prefix, *older, *recent]
-    threshold = await model.count_tokens([*prefix, *recent[-3:]]) + 100
+    threshold = int((await model.count_tokens([*prefix, *recent[-3:]]) + 100) / harness.MEMORY_WARNING_SHARE)
 
     compacted, _ = await compaction(harness.HistoryWindow(threshold), prefix=prefix,
                                     model=model).compact_input(messages)
 
-    assert await model.count_tokens(compacted) <= threshold and pairs_intact(compacted)
+    assert await model.count_tokens(compacted) <= harness.MEMORY_WARNING_SHARE * threshold
+    assert pairs_intact(compacted)
     assert [m.id for m in compacted] == [*(m.id for m in prefix), *(m.id for m in recent[-3:])]
     [record] = harness.store().get(harness.HISTORY_COMPACTIONS_KEY)
     assert record["messages_dropped"] == len(messages) - len(compacted)
@@ -130,3 +132,24 @@ def test_recent_rounds_count_turns_not_individual_calls():
 def test_mail_and_memory_results_are_protected():
     assert {"memory", "search_threads", "get_thread", "get_message", "list_labels",
             "send_message", "reply"} == harness.PROTECTED_TOOLS
+
+
+async def test_clearing_into_the_warning_band_also_trims():
+    """Cleared to just under the threshold, the next turn would warn and compact again."""
+    model = get_model("mockllm/model")
+    prefix, older, recent = history()
+    messages = [*prefix, *older, *recent]
+    cleared, _ = harness.clear_old_tool_results(messages)
+    threshold = await model.count_tokens(cleared) + 100
+
+    compacted, _ = await compaction(harness.HistoryWindow(threshold), prefix=prefix,
+                                    model=model).compact_input(messages)
+
+    assert await model.count_tokens(compacted) <= harness.MEMORY_WARNING_SHARE * threshold
+    assert len(compacted) < len(messages) and pairs_intact(compacted)
+
+
+def test_fewer_rounds_than_kept_are_all_untouched():
+    prefix, _, _ = history()
+    messages = [*prefix, *round_(0, ("browser_snapshot", SNAPSHOT)), *round_(1, ("browser_snapshot", SNAPSHOT))]
+    assert harness.clear_old_tool_results(messages) == (messages, 0)

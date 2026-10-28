@@ -247,7 +247,8 @@ def test_trimming_shrinks_model_input_but_keeps_full_history(tmp_path):
     # ...while the sample keeps every message, so scorers and the dashboard see it all
     assert sum(isinstance(m, ChatMessageAssistant) for m in sample.messages) == 60
     assert [m.text for m in wakeup_messages(sample)] == [w.text for w in world.wakeups]
-    assert [m.text for m in sample.messages if isinstance(m, ChatMessageUser) and m not in wakeup_messages(sample)] == [task]
+    assert [m.text for m in sample.messages if isinstance(m, ChatMessageUser) and m not in wakeup_messages(sample)
+            and not (m.metadata or {}).get("harness")] == [task]
     assert len(sample.messages) > max(len(i) for i in script.inputs)
 
     # Inspect's coding-oriented memory warning never reaches the model;
