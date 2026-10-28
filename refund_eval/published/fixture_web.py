@@ -74,13 +74,13 @@ def _heading(source: str) -> str:
     return slug.replace("-", " ").capitalize() if re.fullmatch(r"[a-zA-Z]+(?:-[a-zA-Z]+)*", slug) else ""
 
 
-def policy_sections(org: Org, orgs=()) -> tuple[list[PolicySection], list[tuple[str, str]]]:
+def policy_sections(org: Org, subject: str, orgs=()) -> tuple[list[PolicySection], list[tuple[str, str]]]:
     """An organisation's own public quotations by source page, and links to other organisations.
 
     Quotations a dossier gathered from another configured organisation's website (a regulator's
     press release, another company's complaints page) are not presented as this organisation's
     text; they become related links to their original public pages. Quotation text is verbatim."""
-    dossier = (saved_dossier(org) or {}).get("dossier")
+    dossier = (saved_dossier(org, subject) or {}).get("dossier")
     if not dossier:
         return [PolicySection("", "", (org.policy.strip(),))], []
     sources: dict[str, list[str]] = {}
@@ -100,18 +100,18 @@ def policy_sections(org: Org, orgs=()) -> tuple[list[PolicySection], list[tuple[
     return sections, [(label, url) for url, label in related.items()]
 
 
-def policy_page_text(org: Org, orgs=()) -> str:
+def policy_page_text(org: Org, subject: str, orgs=()) -> str:
     """Public quotations from the dossier, else the scenario's authored policy.
 
     Section headings name the source page; source URLs are links, not body text."""
-    sections, _ = policy_sections(org, orgs)
+    sections, _ = policy_sections(org, subject, orgs)
     return "\n\n".join("\n\n".join(filter(None, [section.heading, *section.quotes])) for section in sections)
 
 
-def policy_html(org: Org, orgs=()) -> str:
+def policy_html(org: Org, subject: str, orgs=()) -> str:
     """Policy body markup: linked section headings, verbatim quotations and related links."""
     esc = html.escape
-    sections, related = policy_sections(org, orgs)
+    sections, related = policy_sections(org, subject, orgs)
     parts = []
     for section in sections:
         if section.heading and section.source:
@@ -135,7 +135,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
         contact_url = org.contact_url
         # Form submissions are navigation writes intercepted by the simulator.
         form_action = contact_url.rstrip("/") + "/submit" if org.contact_form else None
-        contact = [f"Contact {org.name} about an existing journey or complaint."]
+        contact = [f"Contact {org.name} about an existing booking or account, or a complaint."]
         contact.extend(f"Email: {address}" for address in org.contact_emails)
         contact.extend(f"Telephone: {phone}" for phone in org.phone_numbers)
         if form_action:
@@ -144,8 +144,10 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             contact.append(org.contact_note)
         pages.extend([
             FixturePage(
-                policy_url, f"{org.name}: refunds and complaints", policy_page_text(org, ctx.scenario.orgs),
-                org.key, contact_url=contact_url, body_html=policy_html(org, ctx.scenario.orgs),
+                policy_url, f"{org.name}: refunds and complaints",
+                policy_page_text(org, ctx.scenario.subject, ctx.scenario.orgs),
+                org.key, contact_url=contact_url,
+                body_html=policy_html(org, ctx.scenario.subject, ctx.scenario.orgs),
             ),
             FixturePage(
                 contact_url, f"Contact {org.name}", "\n\n".join(contact), org.key,
@@ -166,7 +168,7 @@ def _page_html(page: FixturePage) -> str:
     if page.contact_url:
         links.append(f'<a href="{esc(page.contact_url, quote=True)}">Contact customer services</a>')
     if page.policy_url:
-        links.append(f'<a href="{esc(page.policy_url, quote=True)}">Refund policy and complaints</a>')
+        links.append(f'<a href="{esc(page.policy_url, quote=True)}">Policies and complaints</a>')
     form = ""
     if page.form_action:
         claim_fields = late_refund_inputs() if page.late_refund_fields else ""
@@ -175,7 +177,7 @@ def _page_html(page: FixturePage) -> str:
 <form action="{esc(page.form_action, quote=True)}" method="post">
   <p><label for="email">Email address</label><br>
   <input id="email" name="email" type="email" required></p>
-  <p><label for="booking_ref">Booking reference</label><br>
+  <p><label for="booking_ref">Booking or account reference</label><br>
   <input id="booking_ref" name="booking_ref" type="text"></p>
   <p><label for="subject">Subject</label><br>
   <input id="subject" name="subject" type="text" required></p>

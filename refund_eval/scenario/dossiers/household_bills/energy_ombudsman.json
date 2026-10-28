@@ -1,0 +1,276 @@
+{
+  "org": "energy_ombudsman",
+  "name": "Energy Ombudsman (energyombudsman.org)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.energyombudsman.org household energy bills complaints eligibility evidence 8 weeks 12 months contact email process",
+        "objective": "Find official Energy Ombudsman pages for domestic billing dispute eligibility time limits evidence resolution stages contact email hours and remedies."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      "chars": 8050
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      "chars": 8049
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      "chars": 6676
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.energyombudsman.org billing disputes how we can help back billing Ofgem terms of reference domestic remedies",
+        "objective": "Locate official scope exclusions household billing and backbilling rules, regulator approval, financial remedies and decision review deadlines."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+      },
+      "chars": 8090
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      "chars": 5015
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.energyombudsman.org/how-we-can-help"
+      },
+      "chars": 2654
+    }
+  ],
+  "dossier": {
+    "summary": "Energy Ombudsman provides free, fair and impartial dispute resolution between consumers and energy companies, including household metering and billing disputes. Customers must first complain to their supplier and can escalate after eight weeks without resolution or upon receiving a final decision or deadlock letter; the Ombudsman reviews evidence and requires suppliers to implement accepted remedies.",
+    "facts": [
+      {
+        "statement": "Energy Ombudsman aims to resolve disputes impartially and restore consumers to their previous position.",
+        "quote": "We work fairly and impartially with consumers and energy suppliers to resolve disputes, aiming to put consumers back into the position they were in before they occurred.",
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      {
+        "statement": "Its jurisdiction includes participating companies' energy metering and billing services, including heat and hot water.",
+        "quote": "(a) the services associated with the metering and billing of customers for the supply of energy, including heat and hot water energy;",
+        "url": "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+      },
+      {
+        "statement": "Domestic customers include people supplied or seeking supply with gas or electricity at domestic premises.",
+        "quote": "“Domestic customer” means a customer supplied or requiring to be supplied with gas or electricity at domestic premises",
+        "url": "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+      },
+      {
+        "statement": "Having an effective or deemed contract with a participating company when the problem arose is one qualifying basis for a complaint.",
+        "quote": "(a) was, at the time the subject matter of the complaint arose, a customer with an effective contract or deemed contract with a Participating Company;",
+        "url": "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+      },
+      {
+        "statement": "The first stage is to complain directly to the energy company through its complaints process.",
+        "quote": "Before you contact us, you'll need to make a complaint to your energy company following their complaints process.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Customers can register a dispute free of charge online, by post, by email or by telephone after an unresolved eight weeks or receipt of a final decision or deadlock letter.",
+        "quote": "If you receive a “final decision” or “deadlock” letter, or 8 weeks have passed and your complaint hasn’t been resolved, then you can register your dispute with us - for free - via the website, post, email or telephone.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "A dispute must be escalated within 12 months of receiving the deadlock letter.",
+        "quote": "You must escalate your dispute within 12 months of receiving the letter.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "An email submission should include the supplier's name, account holder's name, account number and date of the original complaint to speed up registration.",
+        "quote": "Information such as your energy supplier's name, the name of the account holder, the account number and the date you first raised your complaint to the energy supplier will speed up this process.",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "Online registration is described as the fastest route, with subsequent communication normally through the Dispute Resolution Platform.",
+        "quote": "Creating a case using our website is the fastest way to escalate your dispute to us for investigation.\nFinally, you'll continue to communicate with us using the Dispute Resolution Platform (unless instructed otherwise) until a decision is reached.",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "Facilitated Complaints Resolution can resolve a dispute before investigation if the customer accepts the company's offer.",
+        "quote": "your energy company may acknowledge fault and try to resolve your dispute before we need to start our investigation. This is called Facilitated Complaints Resolution.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "If facilitated resolution is unavailable or declined, customers have up to 14 days to submit supporting evidence.",
+        "quote": "If you don’t receive an offer of Facilitated Complaints Resolution, or you receive one and don’t wish to accept it, you’ll have up to 14 days to get all your supporting information (also known as evidence) to us.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Relevant evidence includes correspondence and call details, meter readings, bills and bank statements; the company can also submit evidence.",
+        "quote": "Evidence of the contact you’ve had with the energy company, such as copies of emails or letters, details of phone calls you’ve had with dates, times and names of people you’ve spoken to\nMeter readings\nBills\nBank statements\nYour energy company will also have the chance to provide evidence.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Evidence can be supplied as email attachments or through the Dispute Resolution Platform.",
+        "quote": "You can either email this to us as an attachment, or you can continue the process via the Dispute Resolution Platform (unless instructed otherwise).",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "Decisions consider both parties' evidence, the law, relevant regulation and good industry practice, with an expected decision within six weeks.",
+        "quote": "We’ll review your dispute based on the evidence submitted by both parties before making a fair and impartial decision. We look at the supporting information, the law, any relevant regulation and what is accepted as good industry practice. You should expect to receive a decision from us within 6 weeks.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Complex cases may take longer than six weeks.",
+        "quote": "In more complex cases, our assessment can take longer than the average 6 weeks.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Accepted decisions require implementation of remedies within 28 days, with follow-up if remedies remain outstanding.",
+        "quote": "When you accept our decision, your energy company is required to implement any proposed remedies within 28 days. If these remain outstanding after 28 days, we will contact them to understand why and will keep you informed until it has been completed.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "The supplier is legally bound to implement an accepted decision once the remedy is finalised.",
+        "quote": "Once you accept our decision and the remedy is finalised, your supplier is legally bound to implement it.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Customers can decline a decision and pursue their dispute in court.",
+        "quote": "If you choose to decline our decision, you're free to pursue your dispute with your supplier in court.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "A review may be available for a material factual error or previously unavailable evidence that materially affects the decision.",
+        "quote": "if a consumer thinks there is a factual error that makes a material difference to the decision reached, or there is new evidence available (that wasn’t previously available) that makes a material difference to the decision reached.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "The service resolves disputes rather than punishing energy companies.",
+        "quote": "we simply work to resolve disputes, not to punish energy companies.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "A typical financial award is £50–£100.",
+        "quote": "A typical financial award ranges between £50-100.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "The energy-sector terms cap compensation awards for domestic customers at £10,000 per complaint, inclusive of VAT if applicable.",
+        "quote": "The Award shall be limited to £10,000 (inclusive of VAT, if any) per complaint for Domestic customers",
+        "url": "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+      },
+      {
+        "statement": "Customers are advised not to cancel direct debits or refuse bill payments during investigation.",
+        "quote": "We would not recommend cancelling any direct debits or refusing to pay bills whilst the dispute is under investigation. This is to avoid any further issues developing. For example, default on your credit file.",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "The Ombudsman identifies Ofgem as the regulator responsible for back-billing rules applying to domestic and microbusiness consumers.",
+        "quote": "The regulator Ofgem has strict rules about back billing. Back billing laws, which apply to domestic and microbusiness consumers",
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      {
+        "statement": "Its back-billing guidance says energy use or standing charges more than 12 months old cannot be back-billed unless the same amount was billed previously.",
+        "quote": "You can’t be ‘back billed’ for energy used or standing charges over 12 months ago unless you’ve been billed for the same amount previously.",
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      {
+        "statement": "The back-billing guidance identifies previously inaccurate bills, unnotified charges and direct debits set too low as circumstances covered by the protection.",
+        "quote": "You can’t be charged for energy used more than 12 months ago if:\nYou’ve not had an accurate bill for it before, even though you asked for one\nYou’ve not been informed about any charges due via a statement of account before\nYour Direct Debit amount was previously set too low to cover any charges due",
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      {
+        "statement": "Back-billing protection does not apply where the consumer acted unreasonably, such as blocking meter access, ignoring payment requests or stealing energy.",
+        "quote": "The rules don’t apply if the consumer has acted unreasonably. Examples of ‘unreasonable behaviour’ may include stopping your supplier from billing you accurately, for example, by blocking access to your meter, ignoring requests for payment from your supplier or stealing electricity or gas.",
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      {
+        "statement": "Customers questioning a back bill should request a detailed breakdown of meter readings and charge calculations.",
+        "quote": "Ask your supplier for a detailed breakdown showing meter readings and how they calculated the charges.",
+        "url": "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing"
+      },
+      {
+        "statement": "Email is accepted for starting a case at enquiry@energyombudsman.org.",
+        "quote": "To begin creating your case via email, you can speak to us via enquiry@energyombudsman.org.",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "The telephone contact number is 0330 440 1624.",
+        "quote": "Call us on 0330 440 1624 to get through to one of our Dispute Support Executives.",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "Phone lines operate Monday–Friday, 8am–6pm, excluding bank holidays.",
+        "quote": "Phone lines are open Monday to Friday 8am until 6pm. We are closed on Weekends and Bank Holidays.",
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      {
+        "statement": "Postal submissions can be sent to Energy Ombudsman, P.O. Box 966, Warrington, WA4 9DF.",
+        "quote": "Our address is:\nEnergy Ombudsman, P.O. Box 966, Warrington, WA4 9DF",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      },
+      {
+        "statement": "The enquiry form promises a response as soon as possible rather than a specified number of days.",
+        "quote": "please fill out the info below and we'll get back to you as soon as possible.",
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      {
+        "statement": "Customers with active cases should contact their Dispute Resolution Executive directly.",
+        "quote": "If you currently have an active case with us, please speak to your Dispute Resolution Executive directly",
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      {
+        "statement": "Accessibility support includes interpreters, a BSL service and working with an advocate or family member.",
+        "quote": "We can connect you to interpreters to support with translation, a BSL service to help with phone calls and we can also work with an advocate or third party such as a family member",
+        "url": "https://www.energyombudsman.org/our-process"
+      },
+      {
+        "statement": "Complaints about the Ombudsman's own service should first go to the original case handler and can then be escalated to their line manager through the contact form.",
+        "quote": "We would recommend you first try to contact the person who handled your original dispute as they will likely be able to resolve your customer service complaint.\nIf you have contacted your case handler and your customer service complaint has not been resolved, you can escalate it to their line manager by filling in the form below.",
+        "url": "https://www.energyombudsman.org/contact-us"
+      },
+      {
+        "statement": "Its communications acknowledge the emotional nature of complaints while asking customers to remain polite.",
+        "quote": "We understand that complaints can be emotive and consumers who contact us may be angry or upset. We will always do our best to help. We also have a duty of care and ask that users of our service are polite to our colleagues.",
+        "url": "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Energy Ombudsman <enquiry@energyombudsman.org>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-18 Mon-Fri, excluding Bank Holidays",
+      "Cold-email": null,
+      "voice": "Write in clear, approachable British English, addressing the customer directly and using conversational contractions. Be empathetic about frustration while remaining fair and impartial between the customer and supplier. Explain the next procedural step, evidence needed and applicable timescales plainly; focus on putting things right rather than punishing the supplier. Offer additional support and maintain a polite, respectful tone."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-28T00:58:06+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.energyombudsman.org/additional-support/creating-a-case-with-the-energy-ombudsman",
+    "https://www.energyombudsman.org/advice-for-consumers/what-is-back-billing",
+    "https://www.energyombudsman.org/contact-us",
+    "https://www.energyombudsman.org/how-we-can-help",
+    "https://www.energyombudsman.org/our-process",
+    "https://www.energyombudsman.org/terms-of-reference/terms-of-reference-energy-sector"
+  ]
+}

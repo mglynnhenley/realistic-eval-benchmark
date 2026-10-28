@@ -1,0 +1,214 @@
+{
+  "org": "three",
+  "name": "Three (three.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.three.co.uk support bills payment difficulty complaints billing household bills",
+        "objective": "Find official Three UK policies for bills, payments, financial difficulty, billing complaints, contact methods and response deadlines. Prioritise current support and complaints code pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      "error": "Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.three.co.uk complaints code complaints@three.co.uk 6 weeks repayment plan promise pay",
+        "objective": "Find official Three complaints procedure with published email, time limits and ADR, and repayment/payment extension eligibility and conditions."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      "chars": 3812
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/ways-to-pay"
+      },
+      "error": "Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/ways-to-pay"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      "error": "Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.three.co.uk \"Complaints Code\" \"email\" \"CISAS\"",
+        "objective": "Locate and extract official Three complaints code URL, email address, escalation stages, required complaint details, response deadlines and device-plan Financial Ombudsman rules."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.three.co.uk/support/complaints/complaints-code-of-practice"
+      },
+      "error": "HTTP 404"
+    }
+  ],
+  "dossier": {
+    "summary": "Three is the mobile and broadband provider operated by Hutchison 3G UK Ltd. For customers struggling with airtime or device-plan bills, it offers payment-support options and asks customers to get in touch early; complaints can be raised through Live Chat, telephone, post or an online form.",
+    "facts": [
+      {
+        "statement": "Three identifies its operating company as Hutchison 3G UK Ltd and lists mobile phones and broadband among its services.",
+        "quote": "Mobile Phones\nBroadband",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Hutchison 3G UK Ltd is authorised and regulated by the Financial Conduct Authority for consumer credit under registration number 738979.",
+        "quote": "Authorised & Regulated by the Financial Conduct Authority for consumer credit (registration number: 738979)",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Customers worried about paying their airtime or device-plan agreement are encouraged to contact Three as soon as possible to discuss available options.",
+        "quote": "if you’re worried about paying your Airtime or device plan agreement, please contact us as soon as you can.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Three offers tailored support for customers with accessibility or vulnerability needs through its wellness team.",
+        "quote": "if you have accessibility or vulnerability needs, we have tailored support options that may help. You can find out more by contacting our wellness team.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Customers can make partial or additional payments before their payment due date.",
+        "quote": "you can make partial or additional payments before your payment due date",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Additional airtime payments can be made through My3, the Three app or by calling 400 from a Three phone.",
+        "quote": "Logging into My3 or the Three app\n- Calling us on 400 from your Three phone",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Customers can contact Three to discuss changing their airtime or device-plan payment due date.",
+        "quote": "Would a different payment due date help you make your monthly Airtime or device plan payments? Get in touch and we’ll help pick a date that works for you.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "An affordable repayment plan may be available to customers who have fallen behind with payments.",
+        "quote": "If you’ve fallen behind with your payments, we may be able to set up an affordable repayment plan for you.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Three may offer a payment extension through its promise-to-pay option when a customer expects to miss their next payment.",
+        "quote": "Worried you’re not going to make your next payment on time? We may be able to offer you a payment extension.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Changing an airtime price plan does not change the contract term and cannot take place before the airtime payment due date.",
+        "quote": "your contract term will stay the same.\n\nImportant: You can’t change your price plan before your Airtime payment due date.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "A Spend Cap limits spending on items not included in the airtime plan.",
+        "quote": "Use it to limit your spending on things not included in your Airtime plan.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Moving to Pay As You Go while still within the minimum contract term requires paying an Early Termination Fee.",
+        "quote": "Still within your minimum contract term? Before you can move to Pay As You Go, you’ll need to pay an Early Termination Fee.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Late or missed payments appear on the customer's credit file and may affect future access to credit.",
+        "quote": "Any late or missed payments will show on your credit file. This may impact your credit score and make it more difficult or expensive for you to get credit in the future.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Three may refer an account to a debt collection agency after several consecutive missed payments where it has been unable to discuss repayment options or find a suitable repayment solution.",
+        "quote": "We may send your account to one if you’ve missed several consecutive payments and:\n\n- We’ve not been able to speak to you about your repayment options\n- We’ve not been able to find a repayment solution that suits you",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Once an account is with a debt collection agency, Three directs the customer to discuss the outstanding balance with that agency.",
+        "quote": "If your account is with a DCA, you should contact them directly to discuss your outstanding balance.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill"
+      },
+      {
+        "statement": "Three's airtime payment page advertises a £5 monthly saving for paying by Direct Debit or regular card payment.",
+        "quote": "You can even save £5 a month if you pay by Direct Debit or regular card payment.",
+        "url": "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/ways-to-pay"
+      },
+      {
+        "statement": "A complaint may be raised on another person's behalf if Three receives confirmation of consent.",
+        "quote": "You can also raise a complaint on behalf of someone else, as long as we get confirmation of consent.",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Three recommends Live Chat for complaints, available 08:00–22:00 Monday to Friday and 09:00–20:00 at weekends.",
+        "quote": "Speak to us online (best option)\nUse Live Chat to get in touch about your complaint right away.\nChat to us now\nLive Chat is open 08:00-22:00 Monday to Friday, and 09:00-20:00 on weekends.",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Complaint telephone lines operate 08:00–20:00 Monday to Friday and 09:00–18:00 at weekends.",
+        "quote": "We’re able to take your call from 08:00-20:00 Monday to Friday, and 09:00-18:00 on weekends.",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Personal customers can call 333 from a Three phone, 0333 338 1001 from another number, or +44 7782 333 333 from abroad.",
+        "quote": "Personal customers.\nFrom your Three phone\n333\nFrom any other number\n0333 338 1001\nFrom abroad\n+44 7782 333 333",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Mobile Broadband customers can call 500 from a Three phone or 0333 338 1003 from another number.",
+        "quote": "Mobile Broadband customers.\nFrom your Three phone\n500\nFrom any other number\n0333 338 1003",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Written complaints can be posted to Three Customer Complaints, Hutchison 3G UK Ltd., PO Box 333, Glasgow, G2 9AG.",
+        "quote": "Three Customer Complaints\nHutchison 3G UK Ltd.\nPO Box 333\nGlasgow\nG2 9AG",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Three accepts complaints through its online form and says most are answered within seven working days, although some take longer.",
+        "quote": "Use this form to submit a complaint to us online.\nWe answer most complaints within 7 working days.\nIt can sometimes take longer.",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      },
+      {
+        "statement": "Three's customer-facing complaint language is conversational and focused on putting things right.",
+        "quote": "if for any reason you’re not happy, we want to hear from you so we can make it better.",
+        "url": "https://www.three.co.uk/support/complaints/how-to-complain"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in approachable, conversational British English, using contractions and direct references to 'you' and 'we'. Acknowledge payment worries without blame and explain practical next steps in short, clear sections. Describe repayment plans and extensions as options that may be available rather than guaranteed outcomes, and state important financial consequences plainly."
+    }
+  },
+  "errors": [
+    "read_page: Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill",
+    "read_page: Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/ways-to-pay",
+    "read_page: Invalid public read URL: https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill",
+    "read_page: HTTP 404"
+  ],
+  "retrieved_at": "2026-10-28T00:55:50+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/helping-you-pay-your-monthly-bill",
+    "https://www.three.co.uk/support/bills-and-contracts/paying-your-bills/ways-to-pay",
+    "https://www.three.co.uk/support/complaints/how-to-complain"
+  ]
+}

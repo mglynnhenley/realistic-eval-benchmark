@@ -1,0 +1,211 @@
+{
+  "org": "admiral",
+  "name": "Admiral (admiral.com)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.admiral.com home insurance household bills financial difficulty payments contact complaints",
+        "objective": "Prioritise Admiral official pages about household/home insurance bills, payment difficulties eligibility payment procedures contact complaints response times."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      "chars": 8065
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      "chars": 8067
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.admiral.com \"money worries\" \"payments\" home insurance household bills",
+        "objective": "Find official Admiral financial difficulty support policies for insurance monthly payments including eligibility evidence, missed payments time limits direct debit date and contact methods."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.admiral.com/home-insurance/FAQs"
+      },
+      "chars": 8050
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.admiral.com home insurance \"payment\" \"email\" \"Direct Debit\" contact financial difficulty",
+        "objective": "Find official email address for home insurance payment support and specific missed-payment conditions and deadlines. Prefer contact pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.admiral.com/contact-us"
+      },
+      "chars": 5379
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.admiral.com/help-support-hub/money-worries/income-shock"
+      },
+      "chars": 7720
+    }
+  ],
+  "dossier": {
+    "summary": "Admiral is an insurance brand of EUI Limited, an Admiral Group subsidiary regulated by the Financial Conduct Authority. For household-bill pressures affecting home-insurance payments, it asks customers to get in touch early and may adjust payment dates or cover according to their circumstances; it also publishes debt-support guidance and a complaints escalation process.",
+    "facts": [
+      {
+        "statement": "Admiral is a trading name of EUI Limited, an Admiral Group subsidiary authorised and regulated by the FCA under reference 309378.",
+        "quote": "Admiral is a trading name of EUI Limited. (Reg No: 02686904). EUI Limited is a subsidiary of Admiral Group plc and is authorised and regulated by the Financial Conduct Authority (Firm reference number: 309378).",
+        "url": "https://www.admiral.com/contact-us"
+      },
+      {
+        "statement": "Home-insurance customers struggling with monthly Direct Debit payments should contact Admiral as soon as possible, using phone, Messaging or email.",
+        "quote": "If you’re struggling to make your monthly Direct Debit payments, please let us know as soon as possible. Choose one of the options on the contact us page (phone, Messaging or email).",
+        "url": "https://www.admiral.com/home-insurance/FAQs"
+      },
+      {
+        "statement": "Potential payment-support options include changing or postponing the due date and removing unnecessary optional extras or policy upgrades.",
+        "quote": "There are different ways we might be able to help, like:\nchanging the payment due date\npostponing the payment due date\nremoving optional extras or policy upgrades you no longer need",
+        "url": "https://www.admiral.com/home-insurance/FAQs"
+      },
+      {
+        "statement": "Admiral also lists updating policy details for changed circumstances or cancelling the policy where appropriate as possible responses to payment difficulties.",
+        "quote": "changing your policy details to reflect any new circumstances (e.g. reduced mileage or fewer named drivers)\ncancelling your policy (if appropriate)",
+        "url": "https://www.admiral.com/home-insurance/FAQs"
+      },
+      {
+        "statement": "Admiral requires the customer's permission before speaking to someone else on their behalf.",
+        "quote": "We can also speak to somebody else on your behalf if you prefer. We’ll need your permission.",
+        "url": "https://www.admiral.com/home-insurance/FAQs"
+      },
+      {
+        "statement": "Customers experiencing an income shock or worried about future payments can seek support based on their circumstances.",
+        "quote": "if you're experiencing income shock and/or worrying about future payments, let us know by getting in touch as soon as possible. We can offer help and support based on your circumstances.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/income-shock"
+      },
+      {
+        "statement": "Admiral offers to explain how missed payments are handled and the steps needed to resolve them.",
+        "quote": "We can help walk you through how missed payments are handled and the steps to take to resolve them.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Its debt guidance recommends calculating what is owed and to whom before discussing the debt.",
+        "quote": "before speaking to anyone about your debt, it’s best to calculate what you owe and who you owe.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Admiral signposts National Debtline, Citizens Advice and Money Wellness for independent debt support.",
+        "quote": "You can also check out some other online resources for debt struggles:\nNational Debtline\nCitizens Advice\nMoney Wellness",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Customers can manage payment details through MyAccount.",
+        "quote": "In MyAccount you can:",
+        "url": "https://www.admiral.com/contact-us"
+      },
+      {
+        "statement": "Managing payment details is one of the listed MyAccount functions.",
+        "quote": "manage your payment details",
+        "url": "https://www.admiral.com/contact-us"
+      },
+      {
+        "statement": "The debt-support page publishes telephone support on 0333 220 2000, Monday–Friday 08:00–18:00, Saturday 09:00–16:00 and Sunday 10:00–16:00.",
+        "quote": "0333 220 2000\nMonday to Friday: 8:00am to 6:00pm\nSaturday: 9:00am to 4:00pm\nSunday: 10:00am to 4:00pm",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Customer-service Messaging hours are Monday–Friday 07:00–20:30 and Saturday–Sunday 09:00–17:30, with bank-holiday hours subject to change.",
+        "quote": "Monday to Friday: 7:00am - 8:30pm\nSaturday to Sunday: 9:00am - 5:30pm\nBank holidays, including Christmas and New Year's Day, are subject to change.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "The debt-support page accepts postal correspondence at Admiral Group, David Street, Cardiff, CF10 2EH.",
+        "quote": "You can write to us at:\nAdmiral Group\nDavid Street\nCardiff\nCF10 2EH",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Customers with hearing or speech difficulties can use Relay UK confidentially.",
+        "quote": "If you have hearing or speech difficulties, you can use the national text relay service, Relay UK, to act on your behalf. Everything is completely confidential, including the details you share for identification and verification questions.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Requests for adjusted documents require the requested format, customer name, policy number and delivery address.",
+        "quote": "All you need to do is fill out a form and tell us which format you need, along with your name, policy number and the address to send it to.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      },
+      {
+        "statement": "Complaints are accepted by telephone, email or letter.",
+        "quote": "You can make your complaint over the phone, by email or in a letter.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Admiral promises an acknowledgement or full reply within five days of receiving a complaint.",
+        "quote": "You'll hear back from us within five days of us receiving your complaint. In some cases this will be in the form of an acknowledgement letter but in others it may be a full reply.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "A complaint acknowledgement identifies the handler and next contact date, followed by a full investigation and written findings.",
+        "quote": "If you receive an acknowledgment letter it will tell you:\nWho's dealing with your complaint\nWhen we'll contact you again.\nOnce you receive this your complaint will be investigated fully and we will write to you with our findings.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Admiral promises progress updates for complex complaints and a response within eight weeks.",
+        "quote": "In complex cases we may need to spend a little longer investigating but we will keep you up to date with our progress. In all cases we'll respond to your complaint within eight weeks in line with the deadline set by the Financial Conduct Authority.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Customers dissatisfied with complaint handling can request a higher-level review.",
+        "quote": "If you're unhappy with the way your complaint is handled, you can ask for it to be reviewed at a higher level.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Customers can refer their complaint to the Financial Ombudsman Service if dissatisfied with Admiral's response or if the complaint remains unresolved after eight weeks.",
+        "quote": "if you're still unhappy with our response to your complaint, or if we've not resolved it eight weeks after you first told us about it, you have the right to refer your complaint to the Financial Ombudsman Service.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Referral to the Financial Ombudsman Service must be made within six months of Admiral's final response.",
+        "quote": "you must refer it to them within six months of the date of our final response to you.",
+        "url": "https://www.admiral.com/contact-us/complaint-information.php"
+      },
+      {
+        "statement": "Admiral's debt-support communications use reassuring language and encourage early contact without guaranteeing a particular solution.",
+        "quote": "If you think you'll miss a payment, don't worry - there's support available.\nReaching out early can help us find a solution for you, such as changing your payment schedule or looking for extra support.",
+        "url": "https://www.admiral.com/help-support-hub/money-worries/debt-support"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in plain, approachable British English, using direct address and natural contractions. Be reassuring and non-judgmental about financial difficulties, encouraging early contact and explaining practical next steps. Present payment adjustments as possibilities based on the customer's circumstances rather than guaranteed entitlements. Handle complaints calmly and fairly, explaining the investigation and when the customer will hear back."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-28T00:56:39+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.admiral.com/contact-us",
+    "https://www.admiral.com/contact-us/complaint-information.php",
+    "https://www.admiral.com/help-support-hub/money-worries/debt-support",
+    "https://www.admiral.com/help-support-hub/money-worries/income-shock",
+    "https://www.admiral.com/home-insurance/FAQs"
+  ]
+}

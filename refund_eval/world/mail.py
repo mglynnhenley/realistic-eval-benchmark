@@ -41,6 +41,7 @@ from refund_eval.world.timeutil import as_aware, as_utc, epoch_seconds, to_londo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE_PATH = Path(__file__).resolve().parents[1] / "scenario" / "inbox.json"
+INBOXES_DIR = DEFAULT_FIXTURE_PATH.parent / "inboxes"
 SECRETS_DIR = PROJECT_ROOT / ".secrets"
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SCOPES = [GMAIL_READONLY_SCOPE]
@@ -421,15 +422,20 @@ def parse_gmail_message(msg: dict[str, Any]) -> Email:
 # --------------------------------------------------------------------------- factory
 
 
-def make_mail_source(kind: str) -> MailSource:
-    """'fixture' (the bundled inbox), 'fixture:<path>', or 'gmail' (read-only real Gmail).
+def scenario_inbox_path(scenario: Scenario | None = None) -> Path:
+    """The scenario's own background inbox (`inbox:`), else the shared bundled one."""
+    return INBOXES_DIR / scenario.inbox if scenario is not None and scenario.inbox else DEFAULT_FIXTURE_PATH
+
+
+def make_mail_source(kind: str, scenario: Scenario | None = None) -> MailSource:
+    """'fixture' (the scenario's bundled inbox), 'fixture:<path>', or 'gmail' (read-only real Gmail).
 
     Gmail paths default to .secrets/gmail_credentials.json and .secrets/gmail_token.json
     and can be overridden with REFUND_EVAL_GMAIL_CREDENTIALS / REFUND_EVAL_GMAIL_TOKEN.
     """
     k = (kind or "").strip()
     if k == "fixture":
-        return FixtureMailSource(DEFAULT_FIXTURE_PATH)
+        return FixtureMailSource(scenario_inbox_path(scenario))
     if k.startswith("fixture:"):
         return FixtureMailSource(k.split(":", 1)[1])
     if k == "gmail":

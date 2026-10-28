@@ -1,0 +1,243 @@
+{
+  "org": "lewisham_council",
+  "name": "Lewisham Council (lewisham.gov.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.lewisham.gov.uk household bills help council tax energy water bills support complaints",
+        "objective": "Find official Lewisham Council pages about help with household bills, council tax payment difficulty reduction evidence eligibility deadlines, and customer complaint procedure contacts."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://lewisham.gov.uk/myservices/cost-of-living-crisis"
+      },
+      "error": "Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      },
+      "error": "Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      "error": "Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.lewisham.gov.uk complaints procedure stage 1 stage 2 council tax email response working days",
+        "objective": "Find official Lewisham complaint stages deadlines escalation Ombudsman email contacts and Council Tax billing payment contact procedures."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      "error": "Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      "error": "Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints"
+      },
+      "error": "Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+    }
+  ],
+  "dossier": {
+    "summary": "Lewisham Council supports residents with household bills through council tax support, financial-crisis assistance and referrals for energy, water and communications costs. It assesses financial circumstances for support and publishes council tax service standards and a two-stage corporate complaints process.",
+    "facts": [
+      {
+        "statement": "The Council provides household-bill support and signposts residents to other assistance.",
+        "quote": "The Council is supporting households as well as signposting people to other support you could be eligible for.",
+        "url": "https://lewisham.gov.uk/myservices/cost-of-living-crisis"
+      },
+      {
+        "statement": "Residents can obtain energy advice and support through South East London Community Energy.",
+        "quote": "get energy advice and support from our partners at South East London Community Energy (SELCE)",
+        "url": "https://lewisham.gov.uk/myservices/cost-of-living-crisis"
+      },
+      {
+        "statement": "The Council directs residents to CCW for help reducing and paying water bills.",
+        "quote": "get help and support in reducing and paying your water bill on CCW",
+        "url": "https://lewisham.gov.uk/myservices/cost-of-living-crisis"
+      },
+      {
+        "statement": "Households containing someone claiming Universal Credit are directed to Ofcom information about cheaper broadband or phone packages.",
+        "quote": "if you or someone in your household claims Universal Credit you could switch to cheaper broadband or phone packages from OFCOM",
+        "url": "https://lewisham.gov.uk/myservices/cost-of-living-crisis"
+      },
+      {
+        "statement": "Council tax support is assessed using income, savings and household circumstances, and the applicant must be responsible for paying the council tax.",
+        "quote": "To see if you are eligible we will look at your income, savings and household circumstances. You must be the person responsible for paying the council tax to apply for this benefit.",
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      },
+      {
+        "statement": "A single person sharing their home with a low-income adult who pays no rent may qualify for a second adult rebate.",
+        "quote": "If you're single but share your home with another adult who is on a low income and does not pay rent, you may be able to claim a second adult rebate as part of your application.",
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      },
+      {
+        "statement": "Council tax support applications can be made online.",
+        "quote": "you can apply online for council tax support.",
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      },
+      {
+        "statement": "Residents struggling with bills can contact Advice Lewisham on 0800 231 5453 for benefits, debt and other advice.",
+        "quote": "Advice Lewisham can be reached on 0800 231 5453 for enquiries about benefits, housing, debt, employment, immigration, family and consumer issues",
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      },
+      {
+        "statement": "The Crisis and Resilience Fund provides government-funded assistance for low-income Lewisham residents experiencing financial hardship.",
+        "quote": "The Crisis and Resilience Fund (CRF) is government funding given to Lewisham Council to help residents on low incomes who are facing financial hardship.",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "Any Lewisham resident can apply for Crisis Payments, but applications are assessed individually and cash payments are means-tested.",
+        "quote": "Any Lewisham resident can apply for Crisis Payments and we’ll look at what support is available to you.\n\nApplications are assessed individually and cash payments are means-tested.",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "The usual Crisis Payment conditions include Lewisham residence, low income and savings of £1,000 or less after housing costs and essential bills.",
+        "quote": "you live in the London Borough of Lewisham\n- you are on a low income and have £1,000 or less in savings after housing costs and essential bills",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "The usual Crisis Payment conditions require a sudden, unexpected event within the last four weeks and essential costs that cannot be met through income, savings or other support.",
+        "quote": "something sudden and unexpected has happened in the last four weeks\n- you need help with essential living costs or household items\n- you can’t meet the cost from your income, savings or other support",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "Applicants are usually required to provide assessment evidence and must not have received a CRF award in the previous 12 months.",
+        "quote": "you can provide the evidence needed to assess your application\n- you haven’t received a CRF award in the previous 12 months",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "Crisis and Resilience Fund support is usually a direct cash payment but is not restricted to cash.",
+        "quote": "Support is usually given as a direct cash payment (but is not cash only)",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "The Council says the Single Support Grant is no longer available and its eligibility criteria are included in the new Crisis Scheme available from 24 September 2026.",
+        "quote": "The Single Support Grant is no longer available. The eligibility criteria for this grant has been included in the new Crisis Scheme available from Thursday 24 September 2026.",
+        "url": "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund"
+      },
+      {
+        "statement": "The council tax team can be reached on 020 8690 9666, Monday to Friday, 9am–3pm.",
+        "quote": "Our phone lines are open on Monday to Friday from 9am-3pm. Please call us on 020 8690 9666.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints"
+      },
+      {
+        "statement": "Council tax account changes have a target of 10 working days after receipt of all necessary information.",
+        "quote": "we aim to process changes to accounts within 10 working days of receiving all necessary information",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints"
+      },
+      {
+        "statement": "Council tax discounts and exemptions are processed within 10 working days after receipt of all necessary evidence.",
+        "quote": "we process applications for discounts and exemptions within 10 working days of receiving all necessary evidence",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints"
+      },
+      {
+        "statement": "The council tax service publishes standards of 10 working days for enquiries and full complaint responses, and 15 seconds for answering calls.",
+        "quote": "we respond to all enquiries within 10 working days\n- we provide a full response to complaints within 10 working days\n- we answer telephone calls within 15 seconds",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints"
+      },
+      {
+        "statement": "Customers should first contact the service and ask it to put matters right before submitting a corporate complaint.",
+        "quote": "Before making a complaint using the link below, please ensure you have already contacted the service and asked them to put matters right.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "Complaints are accepted online, through a complaints form, by email, telephone, post or in person.",
+        "quote": "You can make a complaint online, by completing a complaints form, or by email, telephone, p ost, or in person.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/comments--complaints-and-compliments-frequently-asked-questions"
+      },
+      {
+        "statement": "The corporate complaints procedure has two stages and aims to acknowledge complaints or escalation requests within five working days.",
+        "quote": "Our complaints procedure has two stages. We aim to acknowledge your complaint or escalation request within five working days of receiving it",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "At stage 1, a service manager investigates and aims to respond within 10 working days of acknowledgement.",
+        "quote": "A service manager will investigate and will aim to send you a response within 10 working days of acknowledgement.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "A dissatisfied customer can request stage 2 review using the address supplied in the stage 1 response.",
+        "quote": "If you want to escalate your complaint to stage 2, please contact the address provided in our stage 1 response.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "At stage 2, the Corporate Complaints Team or relevant Head of Service aims to issue a decision within 20 working days of acknowledgement.",
+        "quote": "The Corporate Complaints Team or the Head of the relevant service will aim to write to you with their decision within 20 working days of acknowledgement.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "The Council says it will write to the complainant if it cannot meet the complaint response timescales.",
+        "quote": "If we cannot meet these timescales, we will write to you and let you know.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/comments--complaints-and-compliments-frequently-asked-questions"
+      },
+      {
+        "statement": "Customers who disagree with the complaint decision or consider the Council too slow can contact the Local Government and Social Care Ombudsman.",
+        "quote": "If you disagree with our decision, or think we are taking too long, you can contact the Local Government and Social Care Ombudsman.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "The Ombudsman is free and impartial, and the usual referral limit is 12 months from first knowing about the matter complained of.",
+        "quote": "It investigates matters fairly and impartially and is free to use.\n\nYou usually have up to 12 months in which to contact the Ombudsman, starting from the date you first knew about the matter you complained about.",
+        "url": "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure"
+      },
+      {
+        "statement": "The Council uses supportive, direct language when addressing residents having difficulty paying.",
+        "quote": "We want to help residents keep up to date with their council tax payments.\n\n If you're having trouble paying your council tax, talk to us.",
+        "url": "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in plain, supportive English, addressing the resident as “you” and the Council as “we”. Acknowledge difficulty paying without judgement and invite the resident to discuss support. Give practical next steps, distinguish eligibility assessments from guaranteed awards, and state response targets clearly."
+    }
+  },
+  "errors": [
+    "read_page: Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host www.lewisham.gov.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1010)')]"
+  ],
+  "retrieved_at": "2026-10-28T00:57:27+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/comments--complaints-and-compliments-frequently-asked-questions",
+    "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/corporate-complaints-procedure",
+    "https://lewisham.gov.uk/mayorandcouncil/complaints-and-feedback/council-tax-complaints",
+    "https://lewisham.gov.uk/myservices/benefits/crisis-and-resilience-fund",
+    "https://lewisham.gov.uk/myservices/cost-of-living-crisis",
+    "https://lewisham.gov.uk/myservices/counciltax/problems-paying-your-council-tax/council-tax-support"
+  ]
+}

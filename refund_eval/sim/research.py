@@ -8,10 +8,11 @@ directives (reply-from address, sign-off, greeting, case-reference format, phone
 hours) in the form sim.common.persona_directive already parses. Companies use the
 dossier for policy context and house style; explicit scenario terms take precedence.
 
-Dossiers can be committed (scenario/dossiers/<key>.json, written by the CLI below) so
-model comparisons see the same facts. The sample store key `research_mode` chooses:
-`saved` never searches, `live` always researches, `auto` (default) uses a saved file
-when it is fresh and researches otherwise. Live research needs live web data; fixture
+Dossiers can be committed (scenario/dossiers/<subject slug>/<key>.json, written by the CLI
+below) so model comparisons see the same facts; a file is only used for the task subject
+it was researched for. The sample store key `research_mode` chooses: `saved` never
+searches, `live` always researches, `auto` (default) uses a saved file when it is fresh
+and researches otherwise. Live research needs live web data; fixture
 runs stay offline. People are not researched on the web: a light profile is drawn
 from the user's mailbox. Records are cached per trial in the sample store, so they are
 in the log; the agent never sees them.
@@ -47,7 +48,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
 from refund_eval.model_io import completion_json
 from refund_eval.published.network import public_read, validate_public_url
-from refund_eval.scenario.schema import DOSSIER_DIR, Org, load_scenario, saved_dossier
+from refund_eval.scenario.schema import (
+    DOSSIER_DIR,
+    Org,
+    load_scenario,
+    saved_dossier,
+    subject_slug,
+)
 from refund_eval.world.orgs import host_of, parse_address
 
 logger = logging.getLogger(__name__)
@@ -159,8 +166,8 @@ def fresh(record: dict[str, Any]) -> bool:
     return datetime.now(UTC) - retrieved < timedelta(days=FRESH_DAYS)
 
 
-def saved_record(org: Org) -> dict[str, Any] | None:
-    data = saved_dossier(org)
+def saved_record(org: Org, subject: str) -> dict[str, Any] | None:
+    data = saved_dossier(org, subject)
     if not data:
         return None
     try:
@@ -375,7 +382,7 @@ async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
     if org.kind == "dynamic_personal":
         record = None if mode == "saved" else await profile_person(org, inbox_excerpts or [])
     else:
-        saved = saved_record(org)
+        saved = saved_record(org, subject)
         if mode == "saved" or not live_web() or (mode == "auto" and saved and fresh(saved)):
             record = saved
         else:
@@ -434,22 +441,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m refund_eval.sim.research",
                                      description="Research an organisation live and print its dossier.")
     parser.add_argument("subject", help="scenario organisation key (e.g. trainline) or a web domain")
-    parser.add_argument("--save", action="store_true", help="write refund_eval/scenario/dossiers/<key>.json")
+    parser.add_argument("--save", action="store_true", help="write refund_eval/scenario/dossiers/<subject slug>/<key>.json")
     parser.add_argument("--scenario", default="train_refund", help="scenario supplying the organisation and task subject")
     parser.add_argument("--model", default=DEFAULT_ROLE_MODEL, help="Inspect model for the simulator role")
     args = parser.parse_args(argv)
     load_dotenv()
     init_model_roles({"simulator": get_model(args.model)})
     org = subject_org(args.subject, args.scenario)
-    record = asyncio.run(research_live(org, subject=load_scenario(args.scenario).subject))
+    subject = load_scenario(args.scenario).subject
+    record = asyncio.run(research_live(org, subject=subject))
     record["model"] = args.model
     record["sources"] = sorted({c["arguments"]["url"] for c in record["tool_calls"]
                                 if c["tool"] == "read_page" and "error" not in c}
                                | {f["url"] for f in (record["dossier"] or {}).get("facts", [])})
     text = json.dumps(record, indent=2, ensure_ascii=False)
     if args.save and record["dossier"]:
-        DOSSIER_DIR.mkdir(exist_ok=True)
-        path = DOSSIER_DIR / f"{org.key}.json"
+        path = DOSSIER_DIR / subject_slug(subject) / f"{org.key}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text + "\n")
         print(f"Saved {path}", file=sys.stderr)
     print(text)

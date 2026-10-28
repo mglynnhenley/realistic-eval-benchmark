@@ -1,0 +1,276 @@
+{
+  "org": "virgin_media",
+  "name": "Virgin Media (virginmedia.com)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.virginmedia.com help billing payments bill struggling pay complaint code practice Virgin Media",
+        "objective": "Prioritise official Virgin Media billing payment difficulties, bill disputes and complaints code pages. Find conditions time limits evidence contact channels and complaint response times relevant to household broadband TV phone bills."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      "chars": 8075
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support"
+      },
+      "chars": 7860
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.virginmedia.com complaints code practice email resolution 8 weeks 6 weeks CISAS billing",
+        "objective": "Find official Virgin Media complaints code with stages acknowledgement resolution times referral deadline contact email telephone postal channels and regulator."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      "chars": 8084
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.virginmedia.com essential broadband eligibility evidence benefits check complaints email opening hours",
+        "objective": "Find official Essential broadband tariff application eligibility evidence and contract conditions and Virgin Media complaints contact page confirming whether email accepted and telephone hours."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      "chars": 5098
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      "chars": 8050
+    }
+  ],
+  "dossier": {
+    "summary": "Virgin Media provides household broadband, TV and phone services, with billing support for missing payments, arrears and financial difficulty. It offers payment assistance and benefit-linked Essential broadband tariffs subject to eligibility conditions, while billing complaints follow its customer-service and escalation process, with independent adjudication through CISAS.",
+    "facts": [
+      {
+        "statement": "Virgin Media Ltd provides household phone, broadband and TV services covered by its complaints code.",
+        "quote": "It covers the phone, broadband and TV service provided to you by Virgin Media Ltd",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      {
+        "statement": "To trace a missing payment, Virgin Media requires the customer's name, address, account number, payment date and amount.",
+        "quote": "Name\nAddress\nAccount number\nDate of payment\nPayment amount",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Missing bank-transfer payments require a bank statement showing the transaction and the destination account number and sort code.",
+        "quote": "A bank statement showing the transaction\nThe account number and sort code you sent payment to",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Late payment may attract a £7.50 fee and restrictions on services.",
+        "quote": "If your payment is late, we may need to charge you a late payment fee of £7.50. You might also find your Virgin Media services restricted.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Continued non-payment can lead to disconnection or debt collection, with written notice before referral to a collection agency.",
+        "quote": "we may have to disconnect your services completely. If you’re not making any regular payments to us, unfortunately we may place your debt with a debt collection agency – but we’ll always let you know in writing before we do this.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "After the outstanding amount is cleared, Virgin Media aims to restore services within three hours of receiving payment.",
+        "quote": "All you need to do is make a payment to clear the outstanding amount. When we receive your payment, we'll aim to restore your services within 3 hours.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Card payments should arrive almost immediately, whereas bank transfers and cheques may take several days to clear.",
+        "quote": "If you've used a credit or debit card, we should receive your payment pretty much immediately. However, bank transfers or cheques may take a few days to clear.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Customers not paying by Direct Debit can split their bill into online card payments, but must pay the full outstanding amount by the due date.",
+        "quote": "So long as you don't pay by Direct Debit, you’ll be able to pay your bill online using a credit or debit card. This way, you’ll be able to choose how much you pay, meaning you can break the bill into more manageable chunks.\nRemember, you’ll need to pay the outstanding amount on or before the payment due date.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Virgin Media's automated payment service is available on 0800 064 3777.",
+        "quote": "Make a payment using our dedicated automated payment service on\n0800 064 3777",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Financial-difficulty assistance can include extra time to pay or a reduced service for up to six months while repaying arrears.",
+        "quote": "They vary from giving a few extra days to pay your bill, to offering you a reduced service for up to six months so that you can stay with us while paying back what you owe in an affordable way.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Virgin Media may review a struggling customer's package or arrange a payment plan.",
+        "quote": "providing a customer a few extra days to pay their bill, reviewing their package or creating a payment plan with us",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support"
+      },
+      {
+        "statement": "Virgin Media directs customers to free, independent financial advice, including StepChange Debt Charity.",
+        "quote": "StepChange Debt Charity\n:\nA charity offering free debt advice, with expert advisors offering practical help and debt solutions.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Essential broadband is available to new or existing customers receiving specified income-related benefits, Pension Credit or Universal Credit.",
+        "quote": "New or Existing Virgin Media customers in receipt of any of the following:\nIncome-based Employment Support Allowance (I-ESA)\nIncome-based Jobseeker’s Allowance (I-JSA)\nIncome Support (IS)\nPension Credit (PC)\nUniversal Credit",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Essential broadband costs £12.50 monthly, Essential broadband plus costs £20 monthly, and adding Flex to plus requires a £20 one-off payment; applications use Live Chat.",
+        "quote": "a) Essential broadband at £12.50 per month; b) Essential broadband plus at £20 per month; or c) Essential broadband plus with Flex at £20 per month & additional one-off £20 payment for Flex by contacting Virgin Media and requesting an Essential broadband plan through the Live Chat function found on the Virgin Media website.",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Customers currently in arrears or on a scheduled repayment plan are ineligible to apply for Essential broadband or upgrade to its plus options.",
+        "quote": "Customers applying for Essential broadband, or upgrading to Essential broadband plus or Essential broadband plus with Flex, will not be eligible if they are currently in arrears or on a scheduled repayment plan.",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Eligibility is confirmed directly with DWP using the applicant's consent and their first name, last name, date of birth and postcode.",
+        "quote": "By applying for an Essential broadband plan, you consent to us sharing your first  name, last name, date of birth and postcode with DWP. DWP will only confirm whether you are the recipient of your stated Benefit, no other information will be shared with us by DWP.",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Moving to Essential broadband terminates existing Virgin Media TV and landline services, requiring another way to make calls.",
+        "quote": "If you currently receive TV or landline services from us, these services will be terminated if and when you transfer to an Essential broadband plan. You’ll need to ensure you have an alternative method of making calls, such as a mobile.",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Essential broadband is not a qualifying product for Volt benefits.",
+        "quote": "Our Essential broadband plans are not a qualifying product for Volt benefits.",
+        "url": "https://www.virginmedia.com/legal/essential-broadband"
+      },
+      {
+        "statement": "Essential broadband has no fixed-term contract and its price remains unchanged while qualifying support payments are received.",
+        "quote": "The plan has no fixed term contract length and no price changes while support payments are being received.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support"
+      },
+      {
+        "statement": "Talk Protected offers fixed-price landline-only service with inclusive evening and weekend calls for customers over 65 or with additional accessibility needs.",
+        "quote": "a Talk Protected landline service which provides inclusive evening and weekend calls and keeps prices fixed for phone-only customers who are over the age of 65 or those who have additional accessibility needs",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support"
+      },
+      {
+        "statement": "Virgin Media sends end-of-contract information about current charges and available deals, followed by annual best-deal notifications for customers remaining out of contract.",
+        "quote": "We write to everyone at the end of their contract letting them know what they’re paying and providing information about deals available to them. For customers who chose to remain out of contract, every year we remind them they are out of contract and send them our best deals.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support"
+      },
+      {
+        "statement": "Complaint submissions should include the account number, address and contact number.",
+        "quote": "Please remember to give us your details, including your account number, address and contact number",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      {
+        "statement": "Household-service customers can complain on 150 from a Virgin Media landline or 0345 454 1111 from another phone, Monday–Friday 08:00–21:00 and weekends 08:00–18:00.",
+        "quote": "150\nfrom your Virgin Media landline. Or 0345 454 1111* from any other phone. Our team is available Monday until Friday, 8am until 9pm and Saturday until Sunday, 8am until 6pm.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Complaints web chat operates daily from 08:00 to 22:00.",
+        "quote": "Our web chat team is available available Monday until Sunday, 8am until 10pm.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Web-form complaints have a seven-day response and resolution aim, although the complaints code allows up to 28 days in some cases.",
+        "quote": "We always aim to resolve complaints in the first instance and respond within 7 days, but this isn’t as quick as calling us\nIn some cases, it can take up to 28 days.",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      {
+        "statement": "Postal complaints go to Complaints, Virgin Media, Sunderland, SR43 4AA, with acknowledgement within 48 hours of receipt and a 28-day resolution aim.",
+        "quote": "Complaints, Virgin Media, Sunderland, SR43 4AA Your letter will be acknowledged within 48 hours of receipt, and we aim to resolve all written complaints within 28 days once we’ve received them",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      {
+        "statement": "Broadband, TV and landline customers can track complaints in My Virgin Media's My Cases dashboard, where the help page states a 48-hour acknowledgement and 25-day resolution aim.",
+        "quote": "you can track the progress of your complaint on\nMy Virgin Media\nby going to the\nMy Cases\ndashboard. You’ll get an acknowledgement your complaint within 48 hours, and we aim to have your complaint resolved within 25 days.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Advisers attempt resolution first and escalate to a manager when needed, with an immediate discussion or callback.",
+        "quote": "Our advisors will do all that they can to resolve your complaint but will escalate your call to their manager if needed. A manager may be available to talk to you immediately or they may call you back at a time that suits you.",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      },
+      {
+        "statement": "The published complaint-intake channels are phone, online and post.",
+        "quote": "You can let us know of any complaints you have online, over the phone or by mail.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Virgin Media may email the complaint outcome if it cannot reach the customer by telephone, or send a letter if email is unavailable.",
+        "quote": "If we still can’t reach you, we’ll email you instead, so keep an eye on your inbox. Or, if for some reason we can't email, we’ll write to your home address.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "After a proposed resolution, the case remains open for 28 days and silence is treated as acceptance before closure.",
+        "quote": "Your case will then remain open for 28 days after we have contacted you with our proposed resolution.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Virgin Media treats no response within 28 days of its proposed resolution as confirmation that the customer is satisfied.",
+        "quote": "If we don’t hear from you within 28 days of the contact date, we’ll take this as confirmation that you’re happy with the resolution.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "The published complaints policy offers free independent adjudication, normally after eight unresolved weeks or earlier when Virgin Media agrees the dispute cannot be resolved.",
+        "quote": "you can refer your complaint, free of charge, for independent consideration through Alternative Dispute Resolution.\nThis will usually happen if we’re unable to find a solution within 8 weeks of receiving your complaint but can happen before that if we agree that the complaint cannot be resolved to your satisfaction.",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "CISAS handles TV, broadband, phone and mobile disputes and can be contacted on 020 7520 3814 or cisas@cedr.com.",
+        "quote": "TV, broadband, phone or mobile complaints\nCISAS – Communications & Internet Services Adjudication Scheme\nPhone: 020 7520 3814\nWeb:\nwww.cedr.com/consumer/cisas/overview/\nEmail:\ncisas@cedr.com",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Ofcom is the telecommunications regulator but does not investigate individual customer complaints.",
+        "quote": "Ofcom is the telecommunications regulator, which means they oversee certain policies and processes in place for customers. Ofcom doesn’t investigate individual complaints from customers",
+        "url": "https://www.virginmedia.com/help/complaints"
+      },
+      {
+        "statement": "Virgin Media's billing-support language is reassuring and focused on practical assistance.",
+        "quote": "If your circumstances have changed, don’t worry – we’re here to support you. We have options to help, depending on what situation you’re in.",
+        "url": "https://www.virginmedia.com/help/billing-and-payments/payment-issues"
+      },
+      {
+        "statement": "Its complaints language emphasises putting things right and using feedback to improve service.",
+        "quote": "We’d love to work with you to put things right and we’ll always try to use your feedback to improve things for other customers as well.",
+        "url": "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-21 Mon-Fri, 8-18 Sat-Sun",
+      "Cold-email": null,
+      "voice": "Use friendly, conversational British English, contractions and direct references to 'we' and 'you'. Reassure customers facing financial difficulty and move promptly to practical options and clear next steps. Emphasise working together to put things right, while stating payment conditions plainly and describing service targets as aims rather than guarantees."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-28T00:56:39+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.virginmedia.com/help/billing-and-payments/cost-of-living-support",
+    "https://www.virginmedia.com/help/billing-and-payments/payment-issues",
+    "https://www.virginmedia.com/help/complaints",
+    "https://www.virginmedia.com/legal/consumer-complaint-resolution-code-practice",
+    "https://www.virginmedia.com/legal/essential-broadband"
+  ]
+}

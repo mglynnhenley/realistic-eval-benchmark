@@ -24,8 +24,9 @@ from refund_eval.runtime.snapshots import (
     final_snapshot,
     write_snapshot,
 )
+from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import impossible_refund
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
+from refund_eval.world.mail import scenario_inbox_path
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ def run_worker(run_dir: str | Path) -> int:
                 impossible_refund,
                 task_args={
                     "trials": 1,
-                    "mail_source": f"fixture:{DEFAULT_FIXTURE_PATH}",
+                    "mail_source": f"fixture:{scenario_inbox_path(load_scenario(config['scenario']))}",
                     "max_turns": config["max_turns"],
                     "history_tokens": config["history_tokens"],
                     "cost_limit": config["cost_limit"],

@@ -37,8 +37,9 @@ AVANTI_CONTACT_URL = "https://www.railhelp.co.uk/avantiwestcoast"
 def test_policy_page_uses_public_quotes_instead_of_research_analysis(monkeypatch):
     from refund_eval.published.fixture_web import policy_page_text
 
-    org = load_scenario("train_refund").org("trainline")
-    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda _: {"dossier": {
+    scenario = load_scenario("train_refund")
+    org = scenario.org("trainline")
+    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda *_: {"dossier": {
         "summary": "An analyst's private description of this company's style.",
         "facts": [
             {"statement": "An analyst's interpretation.", "quote": "Please have your booking reference ready."},
@@ -48,7 +49,7 @@ def test_policy_page_uses_public_quotes_instead_of_research_analysis(monkeypatch
             {"statement": "A separate policy.", "quote": "Use our contact form for help."},
         ],
     }})
-    assert policy_page_text(org) == (
+    assert policy_page_text(org, scenario.subject) == (
         "Please have your booking reference ready.\n\nUse our contact form for help."
     )
 
@@ -56,10 +57,11 @@ def test_policy_page_uses_public_quotes_instead_of_research_analysis(monkeypatch
 def test_policy_excerpts_keep_separate_source_context(monkeypatch):
     from refund_eval.published.fixture_web import policy_page_text
 
-    org = load_scenario("train_refund").org("trainline")
+    scenario = load_scenario("train_refund")
+    org = scenario.org("trainline")
     general = "https://disputes.example.test/rail-complaints"
     own_service = "https://disputes.example.test/complaints-about-service"
-    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda _: {"dossier": {
+    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda *_: {"dossier": {
         "summary": "Research analysis should not be published as policy.",
         "facts": [
             {"url": general, "quote": "Use the portal to complain about a rail provider."},
@@ -67,14 +69,14 @@ def test_policy_excerpts_keep_separate_source_context(monkeypatch):
             {"url": own_service, "quote": "Email complaints@disputes.example.test."},
         ],
     }})
-    assert policy_page_text(org) == (
+    assert policy_page_text(org, scenario.subject) == (
         "Rail complaints\n\nUse the portal to complain about a rail provider.\n\n"
         "Complaints about service\n\n"
         "You can raise a formal complaint by email or in writing.\n\nEmail complaints@disputes.example.test."
     )
     from refund_eval.published.fixture_web import policy_html
 
-    markup = policy_html(org)
+    markup = policy_html(org, scenario.subject)
     assert f'<h2><a href="{general}">Rail complaints</a></h2>' in markup
     assert f'<h2><a href="{own_service}">Complaints about service</a></h2>' in markup
     assert f"<p>{general}</p>" not in markup and f"<p>{own_service}</p>" not in markup
@@ -85,8 +87,8 @@ def test_saved_ombudsman_policy_preserves_service_complaint_scope():
 
     scenario = load_scenario("train_refund")
     org = scenario.org("rail_ombudsman")
-    text = policy_page_text(org, scenario.orgs)
-    assert "https://www.railombudsman.org/en/faq" in policy_html(org, scenario.orgs)
+    text = policy_page_text(org, scenario.subject, scenario.orgs)
+    assert "https://www.railombudsman.org/en/faq" in policy_html(org, scenario.subject, scenario.orgs)
     assert not any(line.startswith("https://") for line in text.splitlines())
     service = text.split("Complaints about service\n\n")[1]
     assert "you can raise a formal complaint by email or in writing." in service
@@ -102,10 +104,10 @@ def test_other_organisations_quotations_become_related_links_not_page_text():
 
     scenario = load_scenario("train_refund_late")
     org = scenario.org("trainline")
-    sections, related = policy_sections(org, scenario.orgs)
+    sections, related = policy_sections(org, scenario.subject, scenario.orgs)
     assert sections and all("thetrainline.com" in section.source for section in sections)
-    text = policy_page_text(org, scenario.orgs)
-    markup = policy_html(org, scenario.orgs)
+    text = policy_page_text(org, scenario.subject, scenario.orgs)
+    markup = policy_html(org, scenario.subject, scenario.orgs)
     for body in (text, markup):
         assert "By joining the Rail Ombudsman scheme" not in body
         assert "You can appeal to the Rail Ombudsman if" not in body

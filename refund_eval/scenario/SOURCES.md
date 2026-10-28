@@ -1,10 +1,12 @@
 # Sources for `train_refund.yaml`
 
+For the household bills scenario (`bills_price_rise.yaml`), see [sources/bills_price_rise.md](sources/bills_price_rise.md).
+
 Researched 23 September 2026 from public pages only (nothing submitted). "UNVERIFIED" means we could not confirm the detail from a primary source.
 
 ## Where the policy facts come from
 
-Each organisation's published policy, contact routes, response times, ombudsman membership and voice come from its research dossier in `dossiers/<key>.json`, written by `python -m refund_eval.sim.research <key> --save`. The simulator model searches the web and reads the organisation's own pages, and every fact in a dossier carries a verbatim quote and the URL it was read on. Dossiers are dated; with live web data, `research_mode=auto` researches an organisation again when its file is older than 30 days, and `live` always does.
+Each organisation's published policy, contact routes, response times, ombudsman membership and voice come from its research dossier in `dossiers/<subject slug>/<key>.json`, written by `python -m refund_eval.sim.research <key> --save`. The simulator model searches the web and reads the organisation's own pages, and every fact in a dossier carries a verbatim quote and the URL it was read on. Dossiers are dated; with live web data, `research_mode=auto` researches an organisation again when its file is older than 30 days, and `live` always does.
 
 The YAML keeps only what research cannot produce: keys, kinds, domains, phone numbers, reply-delay ranges, the seed mail, and persona directives (Reply-from, Sign-off, Case-ref-format, Reply-subject, Greeting, Cold-email, Phone-hours, Auto-ack) used when a dossier leaves one unfilled. Reply-subject and Auto-ack are only ever set here.
 

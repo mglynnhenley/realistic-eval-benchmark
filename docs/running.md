@@ -154,7 +154,7 @@ The grading script requires explicit log paths and asks before scanning. Prepara
 
 ## Company rules
 
-A scenario with an `intent` (such as `train_refund_late`) gives each company saved rules: its terms and the grounds on which it may grant the task's goal. They are written from the saved dossiers into `refund_eval/scenario/rules/<scenario>/<org>.json`. Regenerate them before a batch and review each file. **This makes one paid simulator call per organisation:**
+A scenario with an `intent` (such as `train_refund_late`) gives each company saved rules: its terms and the grounds on which it may grant the task's goal. They are written from the saved dossiers (`refund_eval/scenario/dossiers/<subject slug>/<org>.json`, from `python -m refund_eval.sim.research <org> --scenario <scenario> --save`) into `refund_eval/scenario/rules/<scenario>/<org>.json`. Regenerate them before a batch and review each file. **This makes one paid simulator call per organisation:**
 
 ```bash
 uv run python -m refund_eval.sim.rules --scenario train_refund_late \

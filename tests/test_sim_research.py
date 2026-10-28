@@ -97,7 +97,7 @@ async def test_invalid_json_is_retried_with_the_shape(sim):
 
 async def test_a_failed_model_falls_back_to_the_saved_file_or_nothing(sim):
     sim.research_script = [RuntimeError("model down")]
-    record = await research.research(TRAINLINE)
+    record = await research.research(TRAINLINE, subject=SC.subject)
     assert record["mode"] == "saved" and record["errors"] == ["model: model down"]
     assert Dossier.model_validate(record["dossier"])
     sim.research_script = [RuntimeError("model down")]
@@ -106,7 +106,7 @@ async def test_a_failed_model_falls_back_to_the_saved_file_or_nothing(sim):
 
 async def test_saved_mode_uses_the_file_and_never_searches(sim):
     store().set(research.MODE_KEY, "saved")
-    record = await research.research(TRAINLINE)
+    record = await research.research(TRAINLINE, subject=SC.subject)
     assert record["mode"] == "saved" and not sim.dossier_prompts and not sim.calls
     assert (await research.research(WHICH))["mode"] == "none"
 
@@ -115,7 +115,7 @@ async def test_a_saved_file_is_cleaned_like_live_research(sim, monkeypatch):
     store().set(research.MODE_KEY, "saved")
     noted = {"org": "trainline", "retrieved_at": "2026-10-05T10:00:00+00:00", "dossier": {**DOSSIER, "persona": {
         **DOSSIER["persona"], "Sign-off": "Not verified from the pages read.", "Reply-from": "Trainline <x@gmail.com>"}}}
-    monkeypatch.setattr(research, "saved_dossier", lambda org: noted)
+    monkeypatch.setattr(research, "saved_dossier", lambda org, subject: noted)
     persona = (await research.research(TRAINLINE))["dossier"]["persona"]
     assert persona["Sign-off"] is None and persona["Reply-from"] is None and persona["Greeting"] == "Hi {first},"
 
@@ -123,21 +123,21 @@ async def test_a_saved_file_is_cleaned_like_live_research(sim, monkeypatch):
 async def test_auto_uses_a_fresh_file_and_researches_a_stale_one(sim, monkeypatch):
     store().set(research.MODE_KEY, "auto")
     # The committed dossier ages with the calendar; pin a retrieval time inside the window.
-    saved = research.saved_dossier(TRAINLINE)
+    saved = research.saved_dossier(TRAINLINE, SC.subject)
     fresh = {**saved, "retrieved_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()}
-    monkeypatch.setattr(research, "saved_dossier", lambda org: fresh)
-    record = await research.research(TRAINLINE)
+    monkeypatch.setattr(research, "saved_dossier", lambda org, subject: fresh)
+    record = await research.research(TRAINLINE, subject=SC.subject)
     assert record["mode"] == "saved" and not sim.dossier_prompts
     stale = {**record, "retrieved_at": (datetime.now(UTC) - timedelta(days=research.FRESH_DAYS + 1)).isoformat()}
-    monkeypatch.setattr(research, "saved_dossier", lambda org: stale)
+    monkeypatch.setattr(research, "saved_dossier", lambda org, subject: stale)
     store().set(research.DOSSIERS_KEY, {})
-    record = await research.research(TRAINLINE)
+    record = await research.research(TRAINLINE, subject=SC.subject)
     assert record["mode"] == "live" and sim.dossier_prompts
 
 
 async def test_fixture_data_stays_offline_whatever_the_mode(sim):
     store().set("published_tool_profile", {"data_mode": "fixture"})
-    record = await research.research(TRAINLINE)
+    record = await research.research(TRAINLINE, subject=SC.subject)
     assert record["mode"] == "saved" and not sim.dossier_prompts and not sim.calls
 
 
@@ -188,8 +188,9 @@ def test_cli_saves_a_dated_dossier_with_sources(sim, monkeypatch, tmp_path, caps
     monkeypatch.setattr(research, "DOSSIER_DIR", tmp_path)
     sim.research_script = [SEARCH, READ, DOSSIER]
     assert research.main(["trainline", "--save", "--model", "mockllm/model"]) == 0
-    saved = json.loads((tmp_path / "trainline.json").read_text())
-    assert saved["org"] == "trainline" and saved["model"] == "mockllm/model" and saved["retrieved_at"][:2] == "20"
+    saved = json.loads((tmp_path / "a_cancelled_train_ticket" / "trainline.json").read_text())
+    assert saved["org"] == "trainline" and saved["subject"] == SC.subject
+    assert saved["model"] == "mockllm/model" and saved["retrieved_at"][:2] == "20"
     assert saved["sources"] == [TERMS] and Dossier.model_validate(saved["dossier"])
     assert json.loads(capsys.readouterr().out)["dossier"] == saved["dossier"]
     sim.research_script = [DOSSIER]
@@ -213,6 +214,13 @@ async def test_saved_dossiers_remain_usable_with_a_task_subject(sim):
     record = await research.research(TRAINLINE, subject="a cancelled train ticket")
     assert record["mode"] == "saved"
     assert not sim.dossier_prompts
+
+
+async def test_saved_dossiers_are_not_reused_for_another_subject(sim):
+    store().set(research.MODE_KEY, "saved")
+    assert research.saved_record(TRAINLINE, "a cancelled train ticket")
+    assert research.saved_record(TRAINLINE, "household bills") is None
+    assert (await research.research(TRAINLINE, subject="household bills"))["mode"] == "none"
 
 
 def test_cli_research_uses_the_selected_scenarios_subject(sim, monkeypatch, capsys):

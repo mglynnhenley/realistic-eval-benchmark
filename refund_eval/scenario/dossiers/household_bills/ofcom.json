@@ -1,0 +1,201 @@
+{
+  "org": "ofcom",
+  "name": "Ofcom (ofcom.org.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.ofcom.org.uk household bills phone broadband pay bills complaint Ofcom contact",
+        "objective": "Prioritize Ofcom official consumer pages on help paying household communications bills, billing complaints and contact procedures; extract scope, eligibility, time limits, complaint escalation and contact channels."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      "error": "HTTP 403"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.ofcom.org.uk/about-ofcom/what-we-do/contact-us"
+      },
+      "error": "HTTP 403"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.ofcom.org.uk struggling pay bills social tariffs benefits evidence complaints response 10 working days",
+        "objective": "Find official Ofcom consumer affordability and social tariffs pages detailing household eligibility, evidence, contract terms and payment support, plus Ofcom consumer complaint response standards and email policy."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      "error": "HTTP 403"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.ofcom.org.uk \"complaints\" \"email\" \"working days\" consumer contact team",
+        "objective": "Find official Ofcom consumer contact response times and whether accepts email for billing complaints, including evidence required."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.ofcom.org.uk \"struggling to pay\" \"bill\" provider repayment",
+        "objective": "Find current Ofcom advice for households unable to afford phone broadband or pay TV bills including repayment plans disconnection last resort and requested evidence."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      "error": "HTTP 403"
+    }
+  ],
+  "dossier": {
+    "summary": "Ofcom oversees how phone and broadband providers treat customers, including those struggling with household communications bills. It directs customers to their provider for payment support and billing complaints, and to independent dispute resolution when complaints remain unresolved; it uses reports to monitor companies rather than resolve individual billing disputes.",
+    "facts": [
+      {
+        "statement": "Ofcom does not investigate individual billing complaints but uses reports to identify problems that may warrant investigating a company.",
+        "quote": "Although we don’t investigate individual complaints, your help in highlighting problems plays a vital part in our work and we might investigate a company if monitoring data reveals a particular problem.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "Customers having difficulty paying a bill should contact their provider as soon as possible.",
+        "quote": "Our advice to customers who are having difficulty paying a bill is to talk to your provider as soon as possible – they might be able to help.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      {
+        "statement": "Providers must have policies and procedures for treating vulnerable customers fairly, including customers in financial difficulty.",
+        "quote": "Under our rules, providers must have policies and procedures in place to make sure vulnerable customers are treated fairly, including those in financial difficulty.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      {
+        "statement": "Ofcom expects providers to give customers time to obtain support without threatening disconnection during that period.",
+        "quote": "allow customers time to get help and support, without the threat of disconnection during that period",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      {
+        "statement": "Ofcom expects providers to consider payment holidays, deferrals or freezing additional charges, and to discuss a realistic, flexible repayment plan.",
+        "quote": "consider offering payment holidays or deferrals, or freeze additional fees and charges;\n- discuss a realistic, reasonable and flexible repayment plan",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      {
+        "statement": "Providers are expected to offer cheaper-tariff advice and signpost free debt advice.",
+        "quote": "offer tariff advice, whether switching to a cheaper tariff or social tariff; and\n- signpost customers to debt organisations or charities that can provide free advice and support.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice"
+      },
+      {
+        "statement": "Social tariffs are cheaper broadband and phone packages for people receiving Universal Credit, Pension Credit and certain other benefits.",
+        "quote": "Social tariffs are cheaper broadband and phone packages for people claiming Universal Credit, Pension Credit and some other benefits.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "Ofcom says households where someone receives Universal Credit could switch to any of the social tariffs it lists.",
+        "quote": "If you or someone in your household claims Universal Credit, you could switch to any of the tariffs available.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "Customers can switch to their existing provider's social tariff at any time without a switching charge.",
+        "quote": "If your provider offers a social tariff, you can switch to it at any time, free of charge.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "Social tariffs have no mid-contract price increases or early exit fees.",
+        "quote": "The price won't go up mid-contract.\nYou won't pay any more than what you agree at the start of the contract.\nIt costs nothing to leave.\nYou won't pay a fee to leave the tariff before the end of your contract.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "Customers can apply for most social tariffs online or ask their provider by telephone to switch.",
+        "quote": "You can apply for most tariffs online, or call your provider and ask to switch.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "If a provider does not offer a social tariff, it might allow a customer to leave their existing contract without a penalty, but this is not presented as guaranteed.",
+        "quote": "If your provider doesn’t offer a social tariff, you can switch to one that does. Your provider might let you leave your current contract without paying a penalty fee.",
+        "url": "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+      },
+      {
+        "statement": "The billing complaint process starts with the provider's customer services, followed by a formal complaint if the problem remains unresolved.",
+        "quote": "1. Contact your provider’s customer services department and explain your problem.\n2. If this doesn’t resolve the issue, make a formal complaint to the company.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "Customers should request a deadlock letter if their provider cannot resolve the complaint, enabling referral to alternative dispute resolution.",
+        "quote": "If your provider is unable to resolve your complaint, ask for a deadlock letter. This allows you to take your complaint to an Alternative Dispute Resolution (ADR) scheme.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "The billing guidance permits direct referral to an ADR scheme after six weeks from the first formal complaint.",
+        "quote": "If six weeks have passed since you first formally complained you can contact the ADR scheme directly.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "All providers must belong to either CISAS or Communications Ombudsman, and customers can identify the relevant scheme through their provider or Ofcom's ADR checker.",
+        "quote": "There are two ADR schemes: the Communications and Internet Services Adjudication Scheme (CISAS) and Communications Ombudsman. All providers must belong to one of the schemes. Your provider will tell you which scheme it is a member of, or you can use our ADR checker.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "Customers can report billing problems to Ofcom using its monitoring form.",
+        "quote": "If you’ve had billing problems, let us know by filling out our short monitoring form.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      },
+      {
+        "statement": "Ofcom publishes advice and complaints telephone numbers 0300 123 3333 and 020 7981 3040.",
+        "quote": "Advice and complaints\n\n0300 123 3333 or 020 7981 3040",
+        "url": "https://www.ofcom.org.uk/about-ofcom/what-we-do/contact-us"
+      },
+      {
+        "statement": "Ofcom operates its published contact numbers and channels Monday to Friday, 9am to 5pm.",
+        "quote": "We operate these numbers and channels Monday to Friday from 9.00am to 5.00pm.",
+        "url": "https://www.ofcom.org.uk/about-ofcom/what-we-do/contact-us"
+      },
+      {
+        "statement": "Ofcom accepts postal complaints at PO Box 1285, Warrington, WA1 9GL, while preferring online or telephone submissions.",
+        "quote": "Although it is easier for us to receive your complaint online or by phone, you can complain to us in writing if you prefer. Please send it to:\n\nPO Box 1285 Warrington WA1 9GL",
+        "url": "https://www.ofcom.org.uk/about-ofcom/what-we-do/contact-us"
+      },
+      {
+        "statement": "Ofcom's billing communications acknowledge frustration and introduce practical steps for obtaining help.",
+        "quote": "We understand how frustrating it can be when things go wrong.",
+        "url": "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "9-17 Mon-Fri",
+      "Cold-email": null,
+      "voice": "Use plain, accessible language and acknowledge the customer's frustration calmly. Give practical, numbered next steps, directing customers to their provider for payment support or complaint resolution. Clearly distinguish Ofcom's monitoring role from the provider's responsibilities and independent ADR, and distinguish regulatory requirements from recommended support."
+    }
+  },
+  "errors": [
+    "read_page: HTTP 403",
+    "read_page: HTTP 403",
+    "read_page: HTTP 403",
+    "read_page: HTTP 403"
+  ],
+  "retrieved_at": "2026-10-28T00:57:31+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.ofcom.org.uk/about-ofcom/what-we-do/contact-us",
+    "https://www.ofcom.org.uk/make-a-complaint/complain-about-mobile-phone-or-internet-services/billing-and-charges",
+    "https://www.ofcom.org.uk/phones-and-broadband/accessibility/telecoms-customers-turning-to-their-providers-for-debt-advice",
+    "https://www.ofcom.org.uk/phones-and-broadband/saving-money/social-tariffs"
+  ]
+}

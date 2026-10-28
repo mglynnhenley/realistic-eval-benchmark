@@ -1,0 +1,227 @@
+{
+  "org": "octopus",
+  "name": "Octopus Energy (octopus.energy)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:octopus.energy household bills payment meter readings back billing struggling pay complaints contact hello email",
+        "objective": "Prioritise official Octopus Energy domestic billing terms, bill payment support, complaints procedure and customer contact pages; identify eligibility evidence deadlines and communications tone."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://octopus.energy/contact-us/"
+      },
+      "chars": 3044
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://octopus.energy/payment-support/"
+      },
+      "chars": 8046
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:octopus.energy complaints procedure domestic terms conditions back billing 12 months Octo Assist apply income expenditure",
+        "objective": "Find official domestic terms, complaints stages response times Ombudsman and Octo Assist eligibility evidence. Prioritise exact Octopus pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:octopus.energy \"unhappy\" \"8 weeks\" complaints \"12 months\" billing",
+        "objective": "Locate official full complaints procedure URL and quote stages deadlines Energy Ombudsman; also official back-billing rules, exceptions and payment due dates in domestic terms."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://octopus.energy/unhappy/"
+      },
+      "chars": 6351
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://octopus.energy/policies/terms-and-conditions/"
+      },
+      "chars": 8057
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://octopus.energy/help-and-faqs/articles/apply-to-octo-assist/"
+      },
+      "chars": 1390
+    }
+  ],
+  "dossier": {
+    "summary": "Octopus Energy Limited supplies energy to domestic customers and handles household billing through online accounts, its app, email and telephone support. Its published guidance covers meter-based statements, payment changes, credit refunds and financial-support applications, with a complaints process that includes specialist review and independent Energy Ombudsman investigation.",
+    "facts": [
+      {
+        "statement": "Octopus Energy Limited publishes general energy-supply terms specifically for domestic customers.",
+        "quote": "Octopus Energy Limited - General Terms and Conditions for energy supply for Domestic Customers",
+        "url": "https://octopus.energy/quote/terms-and-conditions/"
+      },
+      {
+        "statement": "The terms identify Ofgem as the regulator of gas and electricity markets in Great Britain.",
+        "quote": "the Gas and Electricity Markets Authority, which regulates the gas and electricity markets in Great Britain.",
+        "url": "https://octopus.energy/quote/terms-and-conditions/"
+      },
+      {
+        "statement": "Customers must provide readings at least every 90 days or when reasonably requested, or allow automatic smart-meter readings; Octopus may estimate usage without a valid reading.",
+        "quote": "provide us with meter readings at least every 90 days, or at our reasonable request, or allow us to take readings automatically through your Smart Meter so that we can provide you with an accurate bill. We will always try to ensure your next bill or statement takes account of any meter reading you give us, but if we don't have a valid meter reading, we may use an estimate instead;",
+        "url": "https://octopus.energy/quote/terms-and-conditions/"
+      },
+      {
+        "statement": "Smart-meter customers receive monthly statements and can contact Octopus to change their statement date.",
+        "quote": "If you have a smart meter, you’ll receive a statement every month. If you’d like to change the date you receive your statements, get in touch to let us know.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "For non-smart meters, submitted readings produce a statement within a few days, while absence of readings leads to estimated bills every three months.",
+        "quote": "you can send us your readings and we’ll send you a statement within a few days. If you don’t send us readings, we’ll send you an estimated bill every three months.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Customers can set up or change their monthly Direct Debit through their online dashboard, but paying below the recommendation can build debt.",
+        "quote": "To set up or change your Direct Debit amount, head to your online dashboard\n**.\n**There you'll be able to see what you're currently paying each month as well as our recommendation to help keep your account healthy.\nIt's your choice how much you decide to pay each month – just remember that lowering your payments below the amount we've recommended can lead to a build up of debt further down the line.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Customers can request variable Direct Debit to pay the full bill after each statement rather than a fixed monthly amount.",
+        "quote": "contact us and say you’d prefer to pay by a variable Direct Debit.\nWith a variable Direct Debit you don't pay a set amount each month. Instead, we'll take a payment for your full bill shortly after issuing each energy statement.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "The Balance Forecast tool is intended for customers paying by Direct Debit on a Fixed or Flexible tariff.",
+        "quote": "If you pay by Direct Debit on a Fixed or Flexible tariff, our Balance Forecast tool's built for you.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Credit refunds can be requested through the online account or app, may require a meter reading or discussion, and require a balance above £5 without putting the account into debt.",
+        "quote": "If you’ve built up credit and want a refund, it’s easy to sort through your online account or app. Sometimes we might ask for a quick meter reading or a chat with our team, but ultimately you’re in control – you can refund as much as you like, as long as your balance is above £5 and it won't cause your account to dip into debt.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Customers can make a one-off account payment through the website's Make a payment option.",
+        "quote": "Head to Make a payment on our website and pop in the amount you'd like to pay to top up your account.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Fuel Direct takes payments from benefits, and customers must contact Octopus to arrange it.",
+        "quote": "Fuel Direct payments come directly out of your benefit payments, so you can cover your usage in smaller amounts. To set up Fuel Direct, you’ll need to get in touch with us.",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Octo Assist applications start with a budget form detailing household income and expenditure.",
+        "quote": "Applying is straightforward, and it all starts with filling out a quick budget form here. To figure out how best to help, we just need a clear picture of what's coming in and going out of your household.",
+        "url": "https://octopus.energy/help-and-faqs/articles/apply-to-octo-assist/"
+      },
+      {
+        "statement": "Octo Assist financial details are submitted through Paylink, kept confidential and assessed before someone contacts the applicant with next steps.",
+        "quote": "You'll do this through Paylink, which will securely pass the details over to us. We know it isn't always easy sharing financial details, but please rest assured that everything is kept strictly confidential.\nWe only use this to unlock the right level of support for you. Once you've finished, we'll work out how we can give you the best support and someone will get in touch to let you know the next steps.",
+        "url": "https://octopus.energy/help-and-faqs/articles/apply-to-octo-assist/"
+      },
+      {
+        "statement": "Domestic customer support accepts email at hello@octopus.energy seven days a week.",
+        "quote": "Email us\nWe're available 7 days/week\nhello@octopus.energy",
+        "url": "https://octopus.energy/contact-us/"
+      },
+      {
+        "statement": "The domestic customer-service telephone number is 0808 164 1088 and is free from UK mobiles and landlines.",
+        "quote": "Our 0808 number is free to call for all UK mobiles and landlines\n0808 164 1088",
+        "url": "https://octopus.energy/contact-us/"
+      },
+      {
+        "statement": "Complaint contact channels include issueresolution@octopus.energy, free telephone calls Monday–Thursday 9am–5pm and Friday 9am–4pm, and post.",
+        "quote": "You can email us anytime at issueresolution@octopus.energy, or free call us between 9am-5pm Monday-Thursday and 9am-4pm Friday.\nIf you prefer, you can write to us: Octopus Energy Ltd, UK House, 5th floor, 164-182 Oxford Street, London, W1D 1NN.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "A complaint should include contact details or an account number, background, its impact and the customer's preferred resolution.",
+        "quote": "Your contact details or account number - we may have to contact you in order to get more information in order to resolve your issue.\nBackground information on the issue.\nThe impact the issue is having on you.\nYour preferred resolution.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "Octopus records the complaint on the account and tries to fix it immediately; otherwise it provides a timeframe for addressing it.",
+        "quote": "Using this information, we will raise a complaint on your account and if we can fix this immediately we will. If we cannot resolve it right away, then we will give you a time frame in which we will work to get your issue fixed.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "The specialist who raises the complaint remains responsible for the customer's complaint journey.",
+        "quote": "The specialist who raises your complaint will be responsible for your journey with us from beginning to end",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "Customers dissatisfied with the offered resolution can ask for review by a dedicated complaints and customer happiness specialist.",
+        "quote": "If you wish to take your complaint further, our Energy Specialist can pass the information on to a dedicated complaints & customer happiness specialist.\nThey will review your complaint in full, and advise if there's anything else we're able to do.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "The published second stage describes deadlock when no resolution is reached or a complaint remains open for eight weeks, followed by a written final offer and a formal deadlock letter if that offer is declined.",
+        "quote": "If we're not able to reach a resolution - or if your complaint is open for 8 weeks - we may reach a position called 'deadlock'. In this case, we'll write to you explaining everything from our view, and make a final offer of resolution. If you decline this offer, we'll issue a formal deadlock letter which you can take to the Ombudsman for independent investigation.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "The Energy Ombudsman can be contacted on 0330 440 1624 or at enquiry@energyombudsman.org.",
+        "quote": "You can get in touch with the Energy Ombudsman by phone on 0330 440 1624, by email enquiry@energyombudsman.org",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "The Energy Ombudsman's service is free and independent, and its decision binds Octopus but not the customer.",
+        "quote": "It is a free and independent service and they will undertake a full review of your concerns and of the actions that Octopus Energy took in order to try to get to a resolution. If the Ombudsman finds that Octopus Energy have not acted correctly, then they will tell us what we are required to do in order to put things right.This can include an explanation and/or an apology. It can also include actions that we have to take, which may include compensation. Their decision is binding on us, but not on you.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "After raising a complaint, customers may contact the chief executive at greg@octopus.energy with their account number, contact details including address, and background.",
+        "quote": "You are free at any point after you have raised your complaint to contact Chief Executive, greg@octopus.energy, and Greg himself, or one of our managers will do everything in their power to resolve your issue. Please let him know your account number, contact details (including address) and the background to the problem.",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "Octopus's billing communication style emphasises simple explanations without unnecessary jargon.",
+        "quote": "We do our best to keep them simple, avoiding unnecessary jargon and complicated calculations",
+        "url": "https://octopus.energy/payment-support/"
+      },
+      {
+        "statement": "Its complaints communications apologise, thank customers for raising issues and promise progress updates.",
+        "quote": "We're sorry to hear that and we're really keen to sort it out. Thank you for taking the time to talk to us",
+        "url": "https://octopus.energy/unhappy/"
+      },
+      {
+        "statement": "Octopus promises to explain complaint handling and keep customers updated.",
+        "quote": "We'll keep you updated along the way and let you know what we are doing to fix your issue.",
+        "url": "https://octopus.energy/unhappy/"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Octopus Energy <hello@octopus.energy>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "9-17 Mon-Thu; 9-16 Fri",
+      "Cold-email": null,
+      "voice": "Write warmly and directly, using plain English, contractions and minimal energy jargon. Acknowledge the customer's difficulty, apologise when something has gone wrong and thank them for raising it. Take ownership, ask what resolution they would prefer, and explain the action being taken and what happens next."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-28T00:56:39+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://octopus.energy/contact-us/",
+    "https://octopus.energy/help-and-faqs/articles/apply-to-octo-assist/",
+    "https://octopus.energy/payment-support/",
+    "https://octopus.energy/policies/terms-and-conditions/",
+    "https://octopus.energy/quote/terms-and-conditions/",
+    "https://octopus.energy/unhappy/"
+  ]
+}

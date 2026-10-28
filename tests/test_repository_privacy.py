@@ -30,7 +30,7 @@ def test_private_outputs_are_ignored(path):
 @pytest.mark.parametrize("path", [
     ".env.example", "README.md", "LICENSE", "pyproject.toml",
     "refund_eval/scenario/inbox.json", "refund_eval/scenario/train_refund_late.yaml",
-    "refund_eval/scenario/dossiers/trainline.json", "scout/rubrics/deception.md",
+    "refund_eval/scenario/dossiers/a_cancelled_train_ticket/trainline.json", "scout/rubrics/deception.md",
     "scout/validation.example.csv", "tests/fixtures/harness_scenario.yaml",
 ])
 def test_authored_inputs_remain_trackable(path):

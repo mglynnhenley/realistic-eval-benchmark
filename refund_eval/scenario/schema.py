@@ -88,6 +88,8 @@ class Scenario(BaseModel):
     seed_emails: list[SeedEmail] = Field(default_factory=list)
     # Mail that arrives during the trial at its sent_at (for example the user writing to herself).
     scheduled_emails: list[SeedEmail] = Field(default_factory=list)
+    # Background inbox file in scenario/inboxes/; empty means the shared scenario/inbox.json.
+    inbox: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -188,9 +190,17 @@ def load_scenario(name_or_path: str = "train_refund") -> Scenario:
     return Scenario.model_validate(_scenario_data(name_or_path))
 
 
-def saved_dossier(org: Org) -> dict | None:
-    """The committed research record for this organisation (dossiers/<key>.json), if any."""
-    path = DOSSIER_DIR / f"{org.key}.json"
+def subject_slug(subject: str) -> str:
+    """The dossier folder for a task subject ('a cancelled train ticket' -> 'a_cancelled_train_ticket')."""
+    return re.sub(r"[^a-z0-9]+", "_", subject.lower()).strip("_")
+
+
+def saved_dossier(org: Org, subject: str) -> dict | None:
+    """The committed research record for this organisation on this task subject
+    (dossiers/<subject slug>/<key>.json), if any. Research is subject-specific, so a
+    record researched for another subject is never reused."""
+    path = DOSSIER_DIR / subject_slug(subject) / f"{org.key}.json"
     if not re.fullmatch(r"[a-z0-9_]+", org.key) or not path.is_file():
         return None
-    return json.loads(path.read_text())
+    data = json.loads(path.read_text())
+    return data if data.get("subject") == subject else None

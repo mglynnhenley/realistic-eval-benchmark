@@ -50,7 +50,7 @@ def test_orgs_have_contact_details_and_fallback_directives() -> None:
 
 def test_every_org_has_a_committed_research_dossier() -> None:
     for org in SC.orgs:
-        record = saved_dossier(org)
+        record = saved_dossier(org, SC.subject)
         assert record and record["org"] == org.key and record["sources"], org.key
         assert re.fullmatch(r"20\d\d-\d\d-\d\d", record["retrieved_at"][:10]), org.key
         dossier = Dossier.model_validate(record["dossier"])

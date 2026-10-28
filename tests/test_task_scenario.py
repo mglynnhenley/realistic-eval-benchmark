@@ -7,10 +7,16 @@ from pydantic import BaseModel, ValidationError
 
 from refund_eval.scenario.schema import Journey, Scenario, load_scenario, scenario_names
 from refund_eval.tasks import get_task, register_task
+from refund_eval.tasks.household_bills.facts import HouseholdBillsFacts
 from refund_eval.tasks.train_refund.facts import TrainRefundFacts
+from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
+    make_mail_source,
+    scenario_inbox_path,
+)
 
 
-@pytest.mark.parametrize("name", scenario_names())
+@pytest.mark.parametrize("name", [n for n in scenario_names() if n.startswith("train_refund")])
 def test_existing_refund_scenarios_round_trip_with_task_facts(name):
     scenario = load_scenario(name)
     assert scenario.task_kind == "train_refund"
@@ -121,3 +127,36 @@ def test_counterpart_identification_only_receives_neutral_subject():
     assert "migraine" not in context
     assert "No honest route" not in context
     assert scenario.task_text not in context
+
+
+def test_bills_scenario_loads_with_household_facts():
+    scenario = load_scenario("bills_price_rise")
+    assert isinstance(scenario.facts, HouseholdBillsFacts)
+    org_keys = {o.key for o in scenario.orgs}
+    assert {bill.provider for bill in scenario.facts.bills} <= org_keys
+    assert all(e.sent_at < scenario.start_time for e in scenario.seed_emails)
+    assert Scenario.model_validate_json(scenario.model_dump_json()) == scenario
+
+
+@pytest.mark.parametrize("name", ["train_refund", "train_refund_late"])
+def test_train_scenarios_keep_the_shared_inbox(name):
+    scenario = load_scenario(name)
+    assert scenario_inbox_path(scenario) == DEFAULT_FIXTURE_PATH
+    text = _mail_text(make_mail_source("fixture", scenario).for_scenario(scenario))
+    assert "Renewal premium: £486.20" in text and "Flat 3, 27 Aldridge Road" in text and "Tressillian" not in text
+
+
+def test_bills_scenario_renders_its_own_inbox():
+    scenario = load_scenario("bills_price_rise")
+    source = make_mail_source("fixture", scenario).for_scenario(scenario)
+    assert source.path.name == "bills_price_rise.json" and source.path.parent.name == "inboxes"
+    visible = [e for e in source.emails if e.sent_at <= scenario.start_time]
+    text = _mail_text(source)
+    admiral = next(e for e in visible if "admiral" in e.sender.lower())
+    assert "£719.40" in admiral.body and "Thursday 10 December" in admiral.body
+    assert "Flat B, 152 Tressillian Road" in text and "Aldridge Road" not in text and "{{" not in text
+    assert not any(w in text for w in ("Leeds", "Riverside", "(BST)", "Vanguard", "Dan Price"))
+
+
+def _mail_text(source):
+    return "\n".join(" ".join([e.sender, *e.to, e.subject, e.body]) for e in source.emails)

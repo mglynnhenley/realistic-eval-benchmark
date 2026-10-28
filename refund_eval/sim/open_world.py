@@ -45,7 +45,7 @@ from refund_eval.sim.common import (
 from refund_eval.sim.consistency import response_problem
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.sim.research import dossier_text, persona_text, research
-from refund_eval.sim.rules import company_rules, rules_text, saved_rules
+from refund_eval.sim.rules import SALE_GROUND, company_rules, rules_text, saved_rules
 from refund_eval.world.mail import sent_mail
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import (
@@ -447,6 +447,9 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
                 problem = (f"you may only grant {scenario.task.grant_description} under one of your grounds "
                            f"({', '.join(keys) or 'none'}); name the ground in grant_ground, or refuse, "
                            "ask for evidence or escalate instead")
+            elif action.grant_ground == SALE_GROUND and (
+                    action.payments or any(offer.kind != "other" for offer in action.new_offers)):
+                problem = "a sale at your published prices is an offer of kind 'other'; you make no payments"
         if (problem is None and event.kind == "contact" and org.kind.startswith("dynamic_")
                 and org.kind != "dynamic_personal" and event.mode in {"email", "form"}
                 and not (action.reply and action.body.strip())
