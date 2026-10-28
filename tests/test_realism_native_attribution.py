@@ -184,3 +184,15 @@ def test_unknown_or_invalid_individual_native_cost_rejects_accounting(monkeypatc
     extra = next(e for e in sample.events if e.event == "model" and e.role == "simulator")
     extra.output.usage.total_cost = cost
     assert native.analyze([str(path)])["status"] == "unknown"
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_incomplete_error_or_pending_native_call_keeps_cost_unknown(monkeypatch, tmp_path, pending):
+    sample, path = native_sample(monkeypatch, tmp_path)
+    extra = next(e for e in sample.events if e.event == "model" and e.role == "simulator").model_copy(deep=True)
+    extra.uuid = "unresolved-native-provider-call"
+    extra.output.usage = None
+    extra.pending = pending
+    extra.error = None if pending else "Synthetic provider error with unknown bill"
+    sample.events.append(extra)
+    assert native.analyze([str(path)])["status"] == "unknown"

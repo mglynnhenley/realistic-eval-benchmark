@@ -113,8 +113,8 @@ def analyze(logs):
                 require(bool(targets), "Target boundary is missing")
                 usage = reconcile(targets, sample.store["world"]["token_ledger"])
                 billed = [event for event in events if event.output.usage is not None]
-                require(bool(billed) and all(event.pending or event.error or event.output.usage is not None
-                                            for event in events), "Native generation usage is missing")
+                require(bool(billed) and all(event.output.usage is not None for event in events),
+                        "Native generation usage is missing; pending/error charges remain unknown")
                 require(all(type(event.output.usage.total_cost) in (int, float)
                             and math.isfinite(event.output.usage.total_cost)
                             and event.output.usage.total_cost >= 0 for event in billed),
