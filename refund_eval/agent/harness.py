@@ -770,8 +770,18 @@ def refund_agent(
             _record_stop(STOP_CONTEXT_WINDOW)
         finally:
             if budgeted:
-                state.messages.append(runtime_notice(load_world(), final=True,
-                                                     session_end=sim_deadline(load_world(), sim_weeks)))
+                final_world = load_world()
+                notice = runtime_notice(final_world, final=True,
+                                        session_end=sim_deadline(final_world, sim_weeks))
+                if final_world.stop_reason == "cost_limit":
+                    # Keep the native limit error and accounting intact. This
+                    # explains the terminal session boundary without inventing
+                    # a mail-server failure or undoing other completed tools.
+                    notice.content += (
+                        " The assistant session has ended because its spending limit was reached."
+                        " Completion of the interrupted operation is not confirmed."
+                    )
+                state.messages.append(notice)
             emit_snapshot(state.messages, phase="grading")
 
         # react() can also end on its own (context overflow, repeated refusals).
