@@ -62,7 +62,11 @@ async def test_structured_source_dates_and_dates_in_urls_are_preserved():
     record = {"publishedDate": "2026-10-27", "url": "https://news.example/2026-10-27",
               "text": "Claims must reach us by 5 October 2026."}
     raw = {"content": [{"type": "text", "text": json.dumps(record)}], "structuredContent": record}
+    original = copy.deepcopy(raw)
     [tool] = await adapter.inspect_tools(Source(raw), source="exa", live_web=True)
-    [part] = await tool.tool(query="policy", objective="Read the source")
+    part, provenance = await tool.tool(query="policy", objective="Read the source")
     assert json.loads(part.text) == record
-    assert store().get(adapter.AUDIT_KEY)[-1]["result"] == raw
+    assert provenance.text == adapter.PUBLIC_SEARCH_PROVENANCE
+    assert raw == original
+    event = next(e for e in store().get(adapter.AUDIT_KEY) if e["event"] == "result")
+    assert event["result"] == original
