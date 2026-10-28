@@ -70,15 +70,28 @@ progress. A separate hosted controller service is deferred.
 
 | Step | Executor | Result |
 |---|---|---|
-| Read saved findings, search source, fix one issue and run tests | Primary cloud coding agent | Clean candidate commit and regression evidence |
+| Triage saved findings, investigate causes, select verified proposals, implement and test | Primary cloud coding agent | Clean candidate commit and evidence for the selected changes |
 | Check the exact diff, tests and benchmark semantics | Fresh reviewer session | Approve or reject that candidate |
 | Run three baseline and three candidate Modal trials | Measurement command | Frozen configurations and native logs |
 | Scan transcripts and compare scores | Direct model APIs plus deterministic scoring | Results, spend and correctness/realism decisions |
 | Explain the outcome and select another bounded round | Primary agent | Report and saved next action |
 
 Use coding agents for work requiring exploration and tool use; use direct model
-calls for structured judgments. Keep initial automation to one focused repair and
-one matched comparison, then report the candidate without automatic merging.
+calls for structured judgments. Preserve the existing selection process:
+
+1. Group findings by factor and organisation. Rank clusters by explicitly noticed
+   tells, then high-impact tells, then occurrence count.
+2. Investigate the top clusters, split distinct issues, trace actual source and
+   research realistic behaviour. Reuse existing notes and prior decisions.
+3. Propose code changes or prompt/memory notes. Independently accept, revise or
+   reject each proposal, preserving scenario intent and terms.
+4. Select a bounded set of verified proposals, implement them and run their
+   targeted checks before producing the candidate commit.
+
+Batch size is a budget/configuration choice; three trials per arm does not mean
+one fix. One iteration measures the selected candidate as a whole, so its A/B
+score does not establish each individual change's contribution. Start with one
+matched comparison, then report the candidate without automatic merging.
 Unsupported proposals become `no_candidate` or
 `needs_scope_change` results. They do not trigger unbounded repair attempts or
 repeat experiments.

@@ -22,8 +22,9 @@ retry a paid job automatically. Without MCP, use the documented server command;
 requires its own compatible runtime and cannot run in plain Node.
 
 Interpret the invocation's `key=value` settings or equivalent plain English.
-Defaults: three trials per environment, 1,000,000 target tokens, one focused fix,
-one improvement round. Honour explicit shorter checkpoints or different limits.
+Defaults: three trials per environment, 1,000,000 target tokens and one
+improvement round. Keep triage, investigation and verification before selecting
+a bounded batch of changes; trial count does not set the number of fixes. Honour explicit shorter checkpoints or different limits.
 Record the model, simulator/judge, scenario, token/time/turn limits and web mode;
 use the same protocol for the reference and candidate. Historical full-length
 scores are not a matching reference for short trials.
