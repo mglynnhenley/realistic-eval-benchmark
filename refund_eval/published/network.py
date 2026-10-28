@@ -544,8 +544,18 @@ class BrowserBoundary:
                 failure_text=SUBMISSION_FAILED_TEXT, tool_call_id=call_id,
             )
             ok = result is not None and result.kind != "error"
+            # This client redirects every successful lookup using an orderExchangeToken.
+            # Free-form page text cannot supply that contract. Keep its actual text,
+            # but use the client's service-error path rather than minting a booking
+            # token or sending it to an undefined order route.
+            unsupported_booking_contract = (
+                parts.scheme == "https" and parts.hostname.lower() in {"thetrainline.com", "www.thetrainline.com"}
+                and parts.path == "/my-account/api/booking/find-booking" and method == "POST"
+            )
+            ok = ok and not unsupported_booking_contract
             return done("simulated", response(200 if ok else 503, json.dumps({"ok": ok, "message": shown}),
-                                              content_type="application/json"), reason="background_form")
+                                              content_type="application/json"),
+                        reason="background_form_contract_unavailable" if unsupported_booking_contract else "background_form")
         org = resolve_org(self.ctx.scenario, url)
         write = navigation_write_reason(payload)
         if write is None:
