@@ -222,7 +222,7 @@ class MailQuery:
     def uses_state(self) -> bool:
         """Whether the query depends on mailbox state (stars, labels, bin, read)."""
         return any(
-            (p.kind in ("in", "label") and p.value.lower() not in ("sent", "inbox", "anywhere", "all"))
+            (p.kind in ("in", "label") and p.value.lower() not in ("sent", "anywhere", "all"))
             or (p.kind == "is" and p.value.lower() in ("starred", "unread", "read"))
             for p in self.preds
         )

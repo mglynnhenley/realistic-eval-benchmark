@@ -520,11 +520,9 @@ class Mailbox:
         )
 
     def _visible(self, e: Email, q: MailQuery, state: InboxState) -> bool:
-        if e.id in state.trashed and not q.includes_trash:
-            return False
-        if q.wants("in", "inbox") and e.id in state.archived:
-            return False
-        return not (q.wants("is", "unread") and not state.is_unread(e))
+        # Default bin exclusion is separate from Boolean query evaluation. A
+        # positive inbox/unread leaf in an OR branch is not a requirement.
+        return e.id not in state.trashed or q.includes_trash
 
     def search(self, world: World, query: str, *, limit: int = 20, state: InboxState | None = None) -> list[Email]:
         state = state or InboxState.from_world(world)
@@ -537,10 +535,12 @@ class Mailbox:
             if q.matches(e, ctx) and self._visible(e, q, state):
                 found.setdefault(e.id, e)
 
-        if not q.includes_trash or q.wants("in", "anywhere", "all"):
-            for e in self.source.search(query, now=world.now, limit=limit):
-                if as_aware(e.sent_at) <= now and self._visible(e, q, state):
-                    found.setdefault(e.id, e)
+        # A trash alternative can still match ordinary source mail. Keep one
+        # bounded source search, then apply the effective local state; source
+        # search alone cannot account for changes made in this simulated view.
+        for e in self.source.search(query, now=world.now, limit=limit):
+            if as_aware(e.sent_at) <= now and q.matches(e, ctx) and self._visible(e, q, state):
+                found.setdefault(e.id, e)
 
         if q.uses_state:
             for eid in state.touched - set(found):
