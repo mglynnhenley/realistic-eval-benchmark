@@ -111,6 +111,13 @@ def analyze(logs):
                 targets = selected(sample.events, evaluation.eval.model)
                 require(bool(targets), "Target boundary is missing")
                 usage = reconcile(targets, sample.store["world"]["token_ledger"])
+                billed = [event for event in events if event.output.usage is not None]
+                require(bool(billed) and all(event.pending or event.error or event.output.usage is not None
+                                            for event in events), "Native generation usage is missing")
+                require(set(sample.model_usage or {}) == {event.model for event in billed},
+                        "Native model aggregate coverage differs from raw events")
+                require(set(sample.role_usage or {}) == {event.role for event in billed if event.role is not None},
+                        "Native named-role aggregate coverage differs from raw events")
                 for name, aggregate in (sample.model_usage or {}).items():
                     same_usage(total(event.output.usage for event in events
                                      if event.model == name and event.output.usage), aggregate)

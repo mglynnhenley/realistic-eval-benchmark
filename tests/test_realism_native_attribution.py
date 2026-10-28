@@ -5,6 +5,7 @@ import subprocess
 import sys
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from inspect_ai.event import ModelEvent, SpanBeginEvent
@@ -16,6 +17,7 @@ from inspect_ai.model import (
     ModelUsage,
 )
 
+from refund_eval.realism import native_attribution as native
 from refund_eval.realism.native_attribution import (
     AttributionValidationError,
     exact_tool_occurrences,
@@ -116,3 +118,45 @@ def test_mandatory_guards_survive_optimized_python(optimization):
         text=True, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "23 200"
+
+
+mixed_example = run
+
+def native_sample(monkeypatch, tmp_path):
+    witness = mixed_example()
+    from inspect_ai.event import SpanBeginEvent
+    events = [(SpanBeginEvent if value['event'] == 'span_begin' else ModelEvent).model_validate(value) for value in witness['events']]
+    model_events = [event for event in events if event.event == 'model']
+    sample = SimpleNamespace(id='synthetic', uuid='synthetic-uuid', epoch=1, events=events, store={'world': {'token_ledger': deepcopy(witness['target_ledger'])}}, model_usage={SHARED: ModelUsage(**native.total(e.output.usage for e in model_events))}, role_usage={role: ModelUsage(**native.total(e.output.usage for e in model_events if e.role == role)) for role in ('simulator', 'judge')})
+    evaluation = SimpleNamespace(eval=SimpleNamespace(model=SHARED, eval_id='synthetic-eval'), samples=[sample])
+    monkeypatch.setattr(native, 'read_eval_log', lambda *a, **k: evaluation)
+    path = tmp_path / 'synthetic.eval'
+    path.write_bytes(b'synthetic native storage; parser mocked only')
+    return (sample, path)
+
+def test_complete_mixed_native_accounting_positive_control(monkeypatch, tmp_path):
+    _sample, path = native_sample(monkeypatch, tmp_path)
+    result = native.analyze([str(path)])
+    assert result['status'] == 'verified'
+    assert result['logs'][0]['samples'][0]['target_usage']['total_tokens'] == 200
+
+@pytest.mark.parametrize('kind', ['missing_model_map', 'missing_named_role', 'unlisted_model_event', 'unlisted_named_role'])
+def test_incomplete_all_event_accounting_stays_unknown(monkeypatch, tmp_path, kind):
+    sample, path = native_sample(monkeypatch, tmp_path)
+    if kind == 'missing_model_map':
+        sample.model_usage = {}
+    elif kind == 'missing_named_role':
+        sample.role_usage.pop('simulator')
+    else:
+        extra = next(e for e in sample.events if e.event == 'model' and e.role == 'simulator').model_copy(deep=True)
+        extra.uuid = 'unlisted-synthetic-billed-event'
+        if kind == 'unlisted_model_event':
+            extra.model = 'openrouter/other/synthetic-model'
+            extra.output.model = extra.model
+            extra.role = None
+        else:
+            extra.role = 'unexpected_native_role'
+            sample.model_usage[SHARED] = ModelUsage(**native.total([e.output.usage for e in sample.events if e.event == 'model'] + [extra.output.usage]))
+        sample.events.append(extra)
+    result = native.analyze([str(path)])
+    assert result['status'] == 'unknown', result

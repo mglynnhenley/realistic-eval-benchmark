@@ -64,6 +64,9 @@ def inventory(directory):
 def verify_prepared(protocol, directory, repo, candidate):
     source = directory / "task/environment/source"
     prepared = autonomous._prepared_trials(protocol, directory)
+    kwargs = read(directory / "job.json")["agents"][0].get("kwargs", {})
+    require(kwargs.get("history_tokens") == protocol["history_tokens"]
+            and kwargs.get("budget_notice") == protocol["budget_notice"], "Prepared memory/notice settings differ")
     require(prepared.get("commit") == candidate and prepared.get("dirty") is False,
             "Prepared source must match the exact clean candidate")
     aggregate = hashlib.sha256()
@@ -154,6 +157,7 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
         selected = {"model": "openrouter/anthropic/claude-sonnet-5.5", "time_limit": 1800,
                     "trial_wallclock_limit": 1800, **settings}
         protocol = autonomous._protocol(selected)
+        protocol.update(history_tokens=60000, budget_notice="every_step")
         require(type(budget) in (int, float) and 0 < budget < float("inf"), "Invalid total budget")
         require(type(selected["trial_wallclock_limit"]) is int and selected["trial_wallclock_limit"] > 0,
                 "Invalid trial wallclock limit")
@@ -187,7 +191,11 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             manifest, marker = run_dir / "request.json", run_dir / "execution-started.json"
             if manifest.exists():
-                require(read(manifest).get("fingerprint") == fingerprint, "Immutable loop request changed")
+                saved_request = read(manifest)
+                saved_fingerprint = saved_request.pop("fingerprint", None)
+                require(saved_fingerprint == fingerprint
+                        and measurement._json_hash(saved_request) == fingerprint
+                        and saved_request == request, "Immutable loop request changed")
             else:
                 atomic_json(manifest, {**request, "fingerprint": fingerprint})
             if marker.exists():
@@ -240,7 +248,8 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             try:
                 with measurement._interruptible():
                     batch = autonomous._batch(context, protocol, changed, autonomous._hashes(context.worktree),
-                                              tag, cwd=context.worktree, trial_reserve=trial_reserve, scan_reserve=scan_reserve)
+                                              tag, cwd=context.worktree, trial_reserve=trial_reserve, scan_reserve=scan_reserve,
+                                              prepared_trials={**read(preparation), "directory": str(prepared_dir)})
                     batch["evidence"] = measurement._export(batch, hashes)
                     attribution = analyze(batch["logs"])
                     atomic_json(run_dir / "native-attribution.json", attribution)

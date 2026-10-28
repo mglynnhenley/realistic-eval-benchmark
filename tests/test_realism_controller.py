@@ -1,5 +1,6 @@
 """Candidate-only dispatch and durable boundaries, with every paid call offline."""
 import hashlib
+import json
 import shutil
 
 import pytest
@@ -46,6 +47,7 @@ def loop(job, monkeypatch):
         fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
                   "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
                   "research_mode": "research_mode", "data_mode": "data_mode",
+                  "history_tokens": "history_tokens", "budget_notice": "budget_notice",
                   "simulator_model": "simulator_model", "consistency_model": "grader_model"}
         atomic_json(out / "job.json", {"n_attempts": protocol["trials"], "retry": {"max_retries": 0},
                     "environment": {"type": "modal"}, "agents": [{"model_name": protocol["model"],
@@ -55,6 +57,10 @@ def loop(job, monkeypatch):
 
     def batch(context, protocol, commit, hashes, tag, **kwargs):
         calls["batch"].append((tag, commit, context.ledger))
+        frozen = kwargs["prepared_trials"]
+        copied = context.directory / "synthetic-execution-copy"
+        autonomous._frozen_trials(protocol, copied, frozen)
+        assert controller.inventory(copied) == frozen["artifacts"]
         stages.reserve(context.ledger, 10, tag + "-trials", "trials", 1)
         stages.finish(context.ledger, 10, tag + "-trials", "complete", .2)
         stages.reserve(context.ledger, 10, tag + "-tells", "tells", 1)
@@ -152,3 +158,31 @@ def test_orphan_stage_is_not_replayed(loop):
     stages.reserve(options["ledger"], 10, f"loop-{plan['fingerprint'][:16]}-candidate-trials", "trials", 1)
     result = controller.run_candidate(**options, execute=True, execution_review=execution_review(options, plan))
     assert result["status"] == "rejected" and not calls["batch"]
+
+
+@pytest.mark.parametrize("field", ["protocol", "budget_usd"])
+def test_saved_request_body_must_recompute_to_reviewed_fingerprint(loop, field):
+    options, calls = loop
+    plan = controller.run_candidate(**options)
+    approval = execution_review(options, plan)
+    path = options["run_dir"] / "request.json"
+    saved = json.loads(path.read_text())
+    if field == "protocol":
+        saved["protocol"]["model"] = "unapproved-model"
+    else:
+        saved[field] = 1000
+    atomic_json(path, saved)
+    result = controller.run_candidate(**options, execute=True, execution_review=approval)
+    assert result["status"] == "rejected" and not calls["batch"]
+
+
+def test_frozen_job_copy_rejects_mutation_without_repreparation_or_payment(loop, monkeypatch):
+    options, calls = loop
+    plan = controller.run_candidate(**options)
+    freeze = controller.read(options["run_dir"] / "preparation.json")
+    original = options["run_dir"] / "prepared-trials"
+    (original / "job.json").write_text("mutated reviewed job")
+    monkeypatch.setattr(autonomous, "_prepare_trials", lambda *a: pytest.fail("Frozen jobs are not rebuilt"))
+    with pytest.raises(ValueError, match="artifact bytes changed"):
+        autonomous._frozen_trials(plan["protocol"], options["run_dir"] / "copy", {**freeze, "directory": str(original)})
+    assert len(calls["prepare"]) == 1 and not calls["batch"]

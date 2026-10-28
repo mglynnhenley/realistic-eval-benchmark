@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -127,6 +128,23 @@ def _prepared_trials(protocol, out):
     return {**source, "job_sha256": hashlib.sha256(job_bytes).hexdigest()}
 
 
+def _frozen_trials(protocol, out, frozen):
+    """Copy the exact reviewed job once; never rebuild it at paid dispatch."""
+    shutil.copytree(frozen["directory"], out, symlinks=True)
+    artifacts = {}
+    for path in out.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Reviewed preparation contains a link")
+        if path.is_file():
+            artifacts[str(path.relative_to(out))] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if artifacts != frozen["artifacts"]:
+        raise ValueError("Reviewed preparation artifact bytes changed")
+    prepared = _prepared_trials(protocol, out)
+    if prepared != frozen["source"]:
+        raise ValueError("Reviewed preparation source identity changed")
+    return prepared
+
+
 def _run_trials(context, protocol, out, cwd, tag):
     result = context.command(_trial_commands(protocol, out)[1], name=f"{tag}-trials", cwd=cwd,
                              timeout=context.settings.get("trial_wallclock_limit", protocol["time_limit"] + 1200))
@@ -213,7 +231,7 @@ def _preflight(context, required):
         raise BudgetStop(f"Declared remaining stages require ${required:.3f}; ${remaining:.3f} remains")
 
 
-def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_reserve):
+def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_reserve, prepared_trials=None):
     context.check_cancelled()
     _assert_source(context, commit, hashes, cwd=cwd, tag=tag)
     _preflight(context, trial_reserve + scan_reserve)
@@ -225,7 +243,8 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
                                        "measurement_hashes": getattr(context, "measurement_hashes", hashes),
                                        "trial_reserve_usd": trial_reserve, "scan_reserve_usd": scan_reserve})
     context.update(f"{tag}: running {protocol['trials']} short trials", source_commit=commit)
-    prepared = _prepare_trials(context, protocol, out / "trials", cwd, tag)
+    prepared = (_frozen_trials(protocol, out / "trials", prepared_trials) if prepared_trials is not None
+                else _prepare_trials(context, protocol, out / "trials", cwd, tag))
     if prepared.get("commit") != commit or prepared.get("dirty") is not False:
         raise ValueError("Frozen Harbor source differs from the exact clean trial commit")
     atomic_json(out / "prepared-source.json", prepared)
