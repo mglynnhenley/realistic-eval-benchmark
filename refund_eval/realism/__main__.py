@@ -24,6 +24,10 @@ def _open(args) -> int:
     from scout.scanners import load_tells
 
     found = (load_tells(args.scans, judge=args.judge) if args.scans else []) + load_probes(args.probe)
+    if args.awareness:
+        from refund_eval.awareness.findings import findings, load_awareness
+
+        found += findings(load_awareness(args.awareness))
     clusters = open_clusters(load_memory(args.scenario), found, top=args.top)
     print(json.dumps(clusters, indent=2, ensure_ascii=False, default=str))
     return 0
@@ -136,7 +140,8 @@ def _trials(args) -> int:
         commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
                                   environment=args.environment, scenario=args.scenario,
                                   token_budget=args.token_budget, max_turns=args.max_turns,
-                                  time_limit=args.time_limit)
+                                  time_limit=args.time_limit, reasoning=args.reasoning,
+                                  history_tokens=args.history_tokens)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
@@ -169,7 +174,7 @@ def _score(args) -> int:
                 raise ValueError("Source map must be a JSON object mapping nonempty source strings to log paths")
             options["source_aliases"] = aliases
         result = json.dumps(score(args.logs, args.scans, expected_trials=args.expected_trials,
-                                  judge=args.judge, **options), indent=2)
+                                  judge=args.judge, awareness=args.awareness, **options), indent=2)
     except (ValueError, OSError) as error:
         print(f"Cannot score trials: {error}", file=sys.stderr)
         return 1
@@ -206,14 +211,19 @@ def _measure(args) -> int:
 def _compare(args) -> int:
     from refund_eval.realism.cycle import compare
 
+    field = "per_trial_awareness" if args.metric == "awareness" else "per_trial"
+
     def pooled(paths):
         trials = []
         for path in paths:
             with open(path) as file:
-                trials += json.load(file)["per_trial"]
-        return trials
+                trials += json.load(file)[field]
+        return [value for value in trials if value is not None]
 
-    print(json.dumps(compare(pooled(args.a), pooled(args.b), margin=args.margin), indent=2))
+    result = compare(pooled(args.a), pooled(args.b), margin=args.margin)
+    if args.metric == "awareness":  # probe means cross zero, so a relative change is meaningless
+        result["relative"] = None
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -234,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     opened.add_argument("--probe", nargs="*", default=[], help="probe.json files from trials or `realism probe --out`")
     opened.add_argument("--top", type=int, default=5, help="number of clusters")
     opened.add_argument("--judge", help="judge whose results are used (default: the first)")
+    opened.add_argument("--awareness", nargs="*", default=[], metavar="FILE", help="awareness.json files from the probe")
     opened.set_defaults(handler=_open)
     probing = commands.add_parser("probe", parents=[common], help="report what this sandbox and its browser reveal")
     probing.add_argument("--out", help="also save the raw facts here (a probe.json)")
@@ -283,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     trials.add_argument("--time-limit", type=int, default=36000, help="wall-clock seconds per Harbor trial")
     trials.add_argument("--prepare-only", action="store_true", help="prepare frozen config without launching paid trials")
     trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
+    trials.add_argument("--history-tokens", type=int, default=60000, help="agent history kept per turn")
+    trials.add_argument("--reasoning", action="store_true", help="return the target's reasoning (OpenRouter models)")
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
     measure = commands.add_parser("measure", parents=[common],
@@ -311,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     scoring.add_argument("--judge", help="select one judge when the scans directory contains several")
     scoring.add_argument("--out", help="also write the score JSON here")
     scoring.add_argument("--source-map", help="JSON mapping original scan sources to relocated log paths")
+    scoring.add_argument("--awareness", nargs="+", metavar="FILE", help="awareness.json files: add per-trial probe means")
     scoring.set_defaults(handler=_score)
     comparing = commands.add_parser(
         "compare", help="bootstrap candidate minus champion tells per trial",
@@ -320,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     comparing.add_argument("--a", nargs="+", required=True, metavar="FILE", help="champion score files")
     comparing.add_argument("--b", nargs="+", required=True, metavar="FILE", help="candidate score files")
     comparing.add_argument("--margin", type=float, default=0, help="tells per trial the interval must clear")
+    comparing.add_argument("--metric", choices=["tells", "awareness"], default="tells",
+                           help="pool per_trial (tells) or per_trial_awareness (probe means, nulls dropped)")
     comparing.set_defaults(handler=_compare)
 
     args = parser.parse_args(argv)

@@ -100,6 +100,7 @@ Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and
 | `refund_eval/published/` | Mail, search, browser tools and network boundary |
 | `refund_eval/claims/` | Saved claim checklists, frozen evidence and offline factual assessment |
 | `refund_eval/grading/`, `scout/` | Code checks and post-run behaviour grading |
+| `refund_eval/awareness/` | Optional [eval-awareness probe](docs/awareness.md) over saved transcripts |
 | `refund_eval/dashboard/`, `harbor/` | Local UI and isolated batch execution |
 | `scripts/`, `integrations/harbor/` | Preparation helpers and separate Harbor environment |
 | `tests/`, `docs/` | Tests, [architecture](docs/architecture.md) and run guides |

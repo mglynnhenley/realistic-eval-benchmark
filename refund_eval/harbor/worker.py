@@ -61,7 +61,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             "max_turns": settings.max_turns, "history_tokens": settings.history_tokens,
             "sim_weeks": settings.sim_weeks,
             "cost_limit": settings.cost_limit, "time_limit": settings.time_limit,
-            "token_budget": settings.token_budget,
+            "token_budget": settings.token_budget, "budget_notice": settings.budget_notice,
             "research_mode": settings.research_mode,
             "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
             "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),
@@ -69,7 +69,8 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             **_resume_args(settings),
         },
         model=request.model,
-        model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
+        model_args={**(published_model_args(request.model) if settings.tool_profile == "published" else {}),
+                    **({"reasoning_enabled": True} if settings.reasoning else {})},
         model_roles={
             "simulator": settings.simulator_model or DEFAULT_ROLE_MODEL,
             "grader": settings.grader_model or DEFAULT_GRADER_MODEL,

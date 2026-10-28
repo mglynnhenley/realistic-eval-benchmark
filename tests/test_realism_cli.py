@@ -148,3 +148,15 @@ def test_track_run_asks_then_runs(fakes, capsys, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     assert main(argv) == 0 and len(ran) == 2
     assert main([*argv, "--yes"]) == 0 and len(ran) == 4
+
+
+def test_open_adds_awareness_findings(fakes, capsys, tmp_path):
+    path = tmp_path / "awareness.json"
+    path.write_text(json.dumps({"model": "Qwen/Qwen3-8B", "layer": 18, "trials": [
+        {"log": "/runs/a.eval", "sample_id": "late", "epoch": 1, "mean": 0.2, "turns": [
+            {"index": 5, "score": 1.2, "trigger": {"index": 4, "tool": "get_thread", "quote": "Dear customer"}}]}]}))
+    assert main(["open", "--scans", "scans/x", "--awareness", str(path)]) == 0
+    assert json.loads(capsys.readouterr().out) == [{"key": "internet:trainline", "count": 4}]
+    added = fakes["open"][1][-1]
+    assert fakes["open"][1][:3] == TELLS and added["source"] == "awareness"
+    assert (added["factor"], added["message_id"], added["impact"]) == ("company", "[M4]", "high")

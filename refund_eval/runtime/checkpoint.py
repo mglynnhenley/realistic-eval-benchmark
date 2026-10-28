@@ -123,13 +123,15 @@ async def resume_checkpoint(
     source: Mapping[str, Any],
     record_revision: Callable[..., None] | None = None,
     rebuild_memory: bool = False,
+    memory_seed: Mapping[str, str] | None = None,
 ) -> list[ChatMessage]:
     """The common resume pipeline used after either file format is adapted.
 
     Only historical snapshots lacking notes replay local memory-tool mutations;
     external actions are never retried. The source file and checkpoint object
     remain unchanged. The caller supplies revision handling to keep this module
-    independent of any company implementation.
+    independent of any company implementation. Replay starts from `memory_seed`
+    when the saved system prompt names a seeded file, as the original trial did.
     """
     if checkpoint.world is None or not checkpoint.messages:
         raise ValueError("No trial to resume in checkpoint")
@@ -139,7 +141,9 @@ async def resume_checkpoint(
     if rebuild:
         from inspect_ai.tool import ToolError, memory
 
-        notes = memory()
+        system = messages[0].text if messages and messages[0].role == "system" else ""
+        seed = {path: text for path, text in (memory_seed or {}).items() if path in system}
+        notes = memory(initial_data=seed or None)
         for message in messages:
             for call in getattr(message, "tool_calls", None) or []:
                 if call.function == "memory" and call.arguments.get("command") != "view":
