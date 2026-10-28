@@ -49,7 +49,8 @@ def loop(job, monkeypatch):
                   "research_mode": "research_mode", "data_mode": "data_mode",
                   "history_tokens": "history_tokens", "budget_notice": "budget_notice",
                   "simulator_model": "simulator_model", "consistency_model": "grader_model"}
-        atomic_json(out / "job.json", {"n_attempts": protocol["trials"], "retry": {"max_retries": 0},
+        atomic_json(out / "job.json", {"jobs_dir": str(out / "jobs"), "tasks": [{"path": str(out / "task")}],
+                    "n_attempts": protocol["trials"], "retry": {"max_retries": 0},
                     "environment": {"type": "modal"}, "agents": [{"model_name": protocol["model"],
                     "kwargs": {key: protocol[name] for name, key in fields.items()}}]})
         calls["prepare"].append(str(out))
@@ -58,9 +59,23 @@ def loop(job, monkeypatch):
     def batch(context, protocol, commit, hashes, tag, **kwargs):
         calls["batch"].append((tag, commit, context.ledger))
         frozen = kwargs["prepared_trials"]
-        copied = context.directory / "synthetic-execution-copy"
+        copied = context.directory / "batches" / tag / "trials"
         autonomous._frozen_trials(protocol, copied, frozen)
-        assert controller.inventory(copied) == frozen["artifacts"]
+        execution = controller.inventory(copied)
+        assert {k: v for k, v in execution.items() if k != "job.json"} == {k: v for k, v in frozen["artifacts"].items() if k != "job.json"}
+        job = controller.read(copied / "job.json")
+        assert job["jobs_dir"] == str(copied / "jobs") and job["tasks"][0]["path"] == str(copied / "task")
+        relocation = controller.read(copied.parent / "preparation-relocation.json")
+        assert relocation["original_job_sha256"] == frozen["artifacts"]["job.json"]
+        assert relocation["execution_job_sha256"] == execution["job.json"]
+        original_job = controller.read(frozen["directory"] + "/job.json")
+        job["jobs_dir"] = original_job["jobs_dir"]
+        job["tasks"][0]["path"] = original_job["tasks"][0]["path"]
+        assert job == original_job
+        trial = copied / "jobs/refund-inspect/task__synthetic"
+        trial.mkdir(parents=True)
+        atomic_json(trial / "config.json", {"trial_name": "task__synthetic", "trials_dir": str(trial.parent), "environment": {"type": "modal"}})
+        assert autonomous._cleanup_targets(context.directory) == ["task__synthetic__env"]
         stages.reserve(context.ledger, 10, tag + "-trials", "trials", 1)
         stages.finish(context.ledger, 10, tag + "-trials", "complete", .2)
         stages.reserve(context.ledger, 10, tag + "-tells", "tells", 1)

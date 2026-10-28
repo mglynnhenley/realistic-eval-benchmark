@@ -142,7 +142,27 @@ def _frozen_trials(protocol, out, frozen):
     prepared = _prepared_trials(protocol, out)
     if prepared != frozen["source"]:
         raise ValueError("Reviewed preparation source identity changed")
-    return prepared
+    # Harbor preparation embeds absolute paths. Relocate only its task and
+    # output roots after verifying the original, before reservation/launch.
+    original = Path(frozen["directory"]).resolve()
+    job_path = out / "job.json"
+    job = json.loads(job_path.read_text())
+    if (job.get("jobs_dir") != str(original / "jobs")
+            or len(job.get("tasks", [])) != 1
+            or job["tasks"][0].get("path") != str(original / "task")):
+        raise ValueError("Reviewed job destinations differ from its preparation")
+    destinations = {"jobs_dir": {"original": job["jobs_dir"], "execution": str(out / "jobs")},
+                    "tasks[0].path": {"original": job["tasks"][0]["path"], "execution": str(out / "task")}}
+    job["jobs_dir"] = str(out / "jobs")
+    job["tasks"][0]["path"] = str(out / "task")
+    atomic_json(job_path, job)
+    relocated = _prepared_trials(protocol, out)
+    atomic_json(out.parent / "preparation-relocation.json", {
+        "original_directory": str(original), "execution_directory": str(out),
+        "original_job_sha256": prepared["job_sha256"],
+        "execution_job_sha256": relocated["job_sha256"], "destinations": destinations,
+        "unchanged_artifacts": {name: digest for name, digest in artifacts.items() if name != "job.json"}})
+    return relocated
 
 
 def _run_trials(context, protocol, out, cwd, tag):
