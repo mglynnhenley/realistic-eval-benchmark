@@ -23,6 +23,8 @@ def message(identifier, subject="Invoice", *, minutes=1, sender="billing@example
 class TrackedFixture:
     """Exercise real source-side matching while recording bounded reads."""
 
+    local_state_is_complete = True
+
     def __init__(self, tmp_path, emails):
         path = tmp_path / "mail.json"
         path.write_text(json.dumps({"emails": [email.model_dump(mode="json") for email in emails]}))

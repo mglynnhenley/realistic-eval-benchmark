@@ -30,6 +30,7 @@ from refund_eval.scenario.schema import Scenario, UserProfile
 from refund_eval.world.mailquery import (
     MailQuery,
     MatchContext,
+    Pred,
     parse_query,
     resolve_relative_dates,
 )
@@ -46,7 +47,7 @@ GMAIL_SCOPES = [GMAIL_READONLY_SCOPE]
 
 @runtime_checkable
 class MailSource(Protocol):
-    """Read-only access to the user's own mail."""
+    """Read-only mail; sources may opt into `local_state_is_complete` matching."""
 
     def search(self, query: str, *, now: datetime, limit: int = 20) -> list[Email]:
         """Gmail-style search. Returns newest first, only mail sent at or before `now`."""
@@ -78,6 +79,8 @@ class FixtureMailSource:
     `for_scenario()` personalises it to the scenario's user and moves all dates by
     whole weeks so the newest mail sits just before the scenario start.
     """
+
+    local_state_is_complete = True
 
     def __init__(
         self,
@@ -201,6 +204,8 @@ class GmailMailSource:
     for trials) a missing or unusable token is an error rather than a browser
     consent prompt; run `uv run python -m refund_eval.world.mail authorize` first.
     """
+
+    local_state_is_complete = False
 
     def __init__(
         self,
@@ -524,6 +529,51 @@ class Mailbox:
         # positive inbox/unread leaf in an OR branch is not a requirement.
         return e.id not in state.trashed or q.includes_trash
 
+    def _source_matches(
+        self, e: Email, q: MailQuery, ctx: MatchContext, state: InboxState, *, source_matched: bool,
+    ) -> bool:
+        if getattr(self.source, "local_state_is_complete", False):
+            return q.matches(e, ctx)
+
+        def known(p: Pred) -> bool | None:
+            kind, value = p.kind, p.value.lower()
+            if kind == "label" and value in {"inbox", "sent", "trash", "starred", "unread"}:
+                kind = "is" if value == "unread" else "in"
+            result = None
+            if kind == "in" and value in {"inbox", "archive", "archived"}:
+                if e.id in state.archived:
+                    result = value != "inbox"
+            elif kind == "in" and value in {"trash", "bin"}:
+                if e.id in state.trashed:
+                    result = True
+            elif kind in {"in", "is"} and value == "starred":
+                if e.id in state.starred:
+                    result = True
+            elif kind == "is" and value in {"read", "unread"}:
+                if e.id in state.marked_unread:
+                    result = value == "unread"
+                elif e.id in state.marked_read or e.id in state.opened:
+                    result = value == "read"
+            elif kind == "label":
+                labels = {label.replace("-", " ") for label in state.labels.get(e.id, set())}
+                if value.replace("-", " ") in labels:
+                    result = True
+            elif not source_matched:
+                # Recovery may use represented message fields. Returned native
+                # matches remain authoritative even for unrepresented text.
+                if kind == "bcc":
+                    return None
+                result = p.test(e, ctx)
+                # Text found in represented fields is known; absent text may
+                # still be indexed in a native attachment not held in Email.
+                return None if kind in {"text", "phrase"} and result == p.neg else result
+            return None if result is None else (not result if p.neg else result)
+
+        result = q.evaluate_known(known)
+        # Missing native flags cannot negate a native match or establish a new
+        # one. Only facts known locally can justify either decision.
+        return result is not False if source_matched else result is True
+
     def search(self, world: World, query: str, *, limit: int = 20, state: InboxState | None = None) -> list[Email]:
         state = state or InboxState.from_world(world)
         q = parse_query(query)
@@ -539,13 +589,16 @@ class Mailbox:
         # bounded source search, then apply the effective local state; source
         # search alone cannot account for changes made in this simulated view.
         for e in self.source.search(query, now=world.now, limit=limit):
-            if as_aware(e.sent_at) <= now and q.matches(e, ctx) and self._visible(e, q, state):
+            if (as_aware(e.sent_at) <= now and self._source_matches(e, q, ctx, state, source_matched=True)
+                    and self._visible(e, q, state)):
                 found.setdefault(e.id, e)
 
         if q.uses_state:
             for eid in state.touched - set(found):
                 e = self.source.read(eid)
-                if e and as_aware(e.sent_at) <= now and q.matches(e, ctx) and self._visible(e, q, state):
+                if (e and as_aware(e.sent_at) <= now
+                        and self._source_matches(e, q, ctx, state, source_matched=False)
+                        and self._visible(e, q, state)):
                     found[eid] = e
 
         return sorted(found.values(), key=lambda e: as_aware(e.sent_at), reverse=True)[:limit]
