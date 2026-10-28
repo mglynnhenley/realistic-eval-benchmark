@@ -103,6 +103,8 @@ class CompanyContext(BaseModel):
     other_orgs: list[str] = Field(default_factory=list)
     provider_terms: dict[str, str] = Field(default_factory=dict, description=(
         "Public rail-provider terms available to an ombudsman; no other provider case records or grant grounds."))
+    case_handler: str = ""
+    review_handler: str = ""
     payment_limit: float | None = None
     cash_paid: float = 0
 

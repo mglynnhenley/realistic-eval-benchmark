@@ -12,9 +12,9 @@ generation's tool calls have run). Here it:
 3. stops the trial if the kill switch is on, the task has succeeded,
    the turn cap is reached, or the next event is past the simulated-time
    cap (world.stop_reason says which);
-4. otherwise, when the model stopped calling tools, advances to the earlier
-   of its requested wake-up and pending mail, or the next 09:00 check-in
-   when neither is pending.
+4. otherwise, when the model stopped calling tools, announces any incoming mail
+   delivered during its work, then advances on a later pause to its requested
+   wake-up, pending mail, or the next 09:00 check-in when neither is pending.
 
 With a target token budget, BudgetedModel adds a runtime notice before each
 generation and records provider usage before tools run. It stops immediately
@@ -74,10 +74,11 @@ from refund_eval.agent.schedule import (
     CHECKIN_HOURS,
     LONDON,
     aware,
-    new_mail_count,
+    new_mail_ids,
     next_checkin,
     next_event,
     sim_deadline,
+    unannounced_mail_ids,
     wakeup_text,
 )
 from refund_eval.config import BUDGET_NOTICES, RunConfig
@@ -434,14 +435,19 @@ def wake(
     if when > deadline:
         return None
     arrived = _advance(world, when)
-    if kind == "new_mail" and not arrived:
+    ids = new_mail_ids(world, since, when, arrived) | unannounced_mail_ids(world)
+    if kind == "new_mail" and not ids:
         # A reply was due but nothing was delivered; wait for the next check-in.
         when, kind = next_checkin(world.now, checkin_hours), "scheduled_checkin"
         if when > deadline:
             return None
         arrived += _advance(world, when)
-    count = new_mail_count(world, since, when, arrived)
-    wakeup = Wakeup(time=when, kind=kind, text=wakeup_text(kind, when, count))
+        ids = new_mail_ids(world, since, when, arrived) | unannounced_mail_ids(world)
+    announced = set(ids)
+    if world.wakeups and aware(world.wakeups[-1].time) == aware(when):
+        announced.update(world.wakeups[-1].announced_mail_ids or [])
+    wakeup = Wakeup(time=when, kind=kind, text=wakeup_text(kind, when, len(ids)),
+                    announced_mail_ids=sorted(announced))
     world.wakeups.append(wakeup)
     return wakeup
 
@@ -586,8 +592,11 @@ def make_on_continue(
             # falling back to the next morning only when neither is pending.
             await _follow_ups_before_wake(sim_weeks, checkin_hours)
             with world_tx() as world:
+                catching_up = bool(unannounced_mail_ids(world))
                 wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
-                world.requested_wakeup = None
+                if (not catching_up or (world.requested_wakeup is not None
+                        and aware(world.requested_wakeup) <= aware(world.now))):
+                    world.requested_wakeup = None
                 if wakeup is None or aware(world.now) >= sim_deadline(world, sim_weeks):
                     world.stop_reason = STOP_SIM_TIME_CAP
                 stop_reason = world.stop_reason

@@ -211,6 +211,17 @@ def _provider_terms(scenario: Scenario, org: Org) -> dict[str, str]:
     return terms
 
 
+def _correspondence_handlers(org: Org, world: World, mode: str) -> tuple[str, str]:
+    """Stable fictional staff for this case, without consuming the timing RNG."""
+    if org.kind == "dynamic_personal" or mode not in {"email", "form"}:
+        return "", ""
+    names = ("Sam Patel", "Jordan Reed", "Taylor Hughes", "Jamie Clarke",
+             "Morgan Ellis", "Riley Shaw", "Chris Ward", "Robin Davis")
+    rng = random.Random(f"correspondence-handlers|{org.key}|{world.start_time.isoformat()}")
+    handler, reviewer = rng.sample(names, 2)
+    return handler, reviewer
+
+
 def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | None,
                     others: list[Org], record: dict | None = None, mode: str = "email") -> CompanyContext:
     """Project the company's own knowledge; never include private assessments."""
@@ -241,6 +252,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
     realism = notes_text(scenario.id, org.key, "personal" if org.kind == "dynamic_personal" else "company")
     if mode == "form":
         realism = "\n".join(filter(None, [realism, notes_text(scenario.id, org.key, "internet")]))
+    handler, reviewer = _correspondence_handlers(org, world, mode)
     return CompanyContext(
         org=CompanyProfile(key=org.key, name=org.name, kind=org.kind, policy=org.policy, terms=terms),
         subject=scenario.subject, customer_name=scenario.user.name,
@@ -253,6 +265,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         history=history, offers=offers, payments=payments, promises=promises,
         other_orgs=[o.name for o in others] if org.kind == "dynamic_personal" else [],
         provider_terms=_provider_terms(scenario, org),
+        case_handler=handler, review_handler=reviewer,
         payment_limit=scenario.task.payment_limit(scenario),
         cash_paid=sum(t.amount for t in own_payments if t.kind in CASH_KINDS),
     )

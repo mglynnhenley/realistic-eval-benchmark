@@ -95,6 +95,30 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
     if context.rules:
         system.append("YOUR RULES FOR THIS CASE (binding; they override researched background and any personal "
                       "discretion):\n" + context.rules)
+    if not personal and event.mode in {"email", "form"} and context.case_handler and context.review_handler:
+        system.append(
+            "CORRESPONDENCE HANDLERS:\n"
+            f"The fictional staff identities for this case are {context.case_handler}, the usual handler, "
+            f"and {context.review_handler}, a separate reviewer. For a substantive email, including a "
+            "follow-up email after a form, sign with the handler's name and an appropriate existing team "
+            "role. If you say a different person reviewed the case, identify that reviewer consistently. "
+            "The names alone do not mean a review occurred or confer extra authority; base any review "
+            "claim on what you actually decide and the case history. Automatic receipts and immediate "
+            "form pages keep their normal organisation attribution; do not add a personal signature, "
+            "reference or acknowledgement to them just because these names are supplied.")
+    if org.kind == "ombudsman":
+        system.append(
+            "COMPLAINT STAGE AND NEXT STEP:\n"
+            "Near the start, make clear what stage this contact has reached and the specific next action. "
+            "Distinguish intake, consent or document requests, a conditional or preliminary view, and an "
+            "actual determination. Do not describe an investigation or provider exchange as completed "
+            "when your information does not show it. You may still decide on accepted admissions or "
+            "sufficient supplied evidence under your existing terms; no new provider-contact or waiting "
+            "requirement is added. When giving a preliminary view, say what it depends on and what is "
+            "still outstanding. When making a determination, identify it and briefly explain its evidence "
+            "basis and next step. Refer back briefly to terms already explained and focus on new questions "
+            "instead of repeating the whole policy catalogue. All terms remain binding; preserve your "
+            "existing consent, eligibility and reconsideration rules.")
     if org.kind == "ombudsman" and context.provider_terms:
         system.append(
             "PUBLIC TERMS OF RAIL SERVICE PROVIDERS:\n"

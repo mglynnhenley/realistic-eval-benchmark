@@ -454,3 +454,28 @@ def test_request_replacement_and_resume(tmp_path):
     after = world_of(second.samples[0])
     assert after.requested_wakeup is None
     assert after.wakeups[0].kind == "requested" and after.now == before.requested_wakeup
+
+
+def test_catchup_preserves_future_requested_wake_until_it_is_used(tmp_path):
+    from refund_eval.world.state import Email, load_world, world_tx
+
+    def delivered_during_active_work(n):
+        if n == 2:
+            with world_tx() as world:
+                world.now += timedelta(minutes=10)
+                world.overlay_inbox.append(Email(
+                    id="active-arrival", sender="service@example.test", to=["user@example.test"],
+                    subject="Update", body="An update.", sent_at=world.now - timedelta(minutes=5)))
+        if n == 3:
+            world = load_world()
+            assert world.requested_wakeup == world.start_time + timedelta(hours=3)
+            assert world.now == world.start_time + timedelta(minutes=10)
+
+    sample = run(harness_task(max_turns=4, history_tokens=0), PlannedTurns(
+        request_wakeup("2026-09-23 12:00"), hook=delivered_during_active_work), tmp_path).samples[0]
+    world = world_of(sample)
+    first, second = world.wakeups
+    assert first.kind == "new_mail" and first.time == world.start_time + timedelta(minutes=10)
+    assert first.announced_mail_ids == ["active-arrival"]
+    assert second.kind == "requested" and second.time == world.start_time + timedelta(hours=3)
+    assert world.requested_wakeup is None

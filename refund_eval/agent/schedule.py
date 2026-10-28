@@ -3,6 +3,7 @@
 Pure functions over the World, so they can be tested without Inspect.
 
 After ending a turn, the agent is woken by whichever comes first:
+- a catch-up notice now for incoming mail delivered during active work, or
 - its requested wake-up time (a "requested" wake-up), or
 - the earliest pending incoming email (a "new_mail" wake-up).
 Only when neither exists is it woken at the next CHECKIN_HOURS UK time (a
@@ -65,8 +66,10 @@ def next_checkin(now: datetime, hours: tuple[int, ...] = CHECKIN_HOURS) -> datet
 
 def next_event(world: World, hours: tuple[int, ...] = CHECKIN_HOURS) -> tuple[datetime, WakeupKind]:
     """When the agent should next be woken, and why: the earliest pending reply or
-    requested wake-up, else the next check-in."""
+    requested wake-up, with a notice now for mail delivered during active work."""
     now = aware(world.now)
+    if unannounced_mail_ids(world):
+        return now, "new_mail"
     events: list[tuple[datetime, WakeupKind]] = []
     if world.pending:
         earliest = min(aware(p.due_at) for p in world.pending)
@@ -89,6 +92,11 @@ def new_mail_count(
 ) -> int:
     """Incoming mail that arrived after `since` and by `until`: what was just
     delivered, plus anything that came in while the agent was working."""
+    return len(new_mail_ids(world, since, until, arrived))
+
+
+def new_mail_ids(world: World, since: datetime, until: datetime, arrived: Iterable[Email]) -> set[str]:
+    """IDs underlying a notice, without counting the same arrival twice."""
     lo, hi = aware(since), aware(until)
     ids = {e.id for e in arrived}
     ids.update(
@@ -96,7 +104,26 @@ def new_mail_count(
         for e in world.overlay_inbox
         if e.source in {"counterparty", "real"} and lo < aware(e.sent_at) <= hi
     )
-    return len(ids)
+    return ids
+
+
+def unannounced_mail_ids(world: World) -> set[str]:
+    """Arrivals during active work that have not yet had a wake notice.
+
+    Old unread inbox mail is not an event. For new checkpoints, recording IDs
+    also distinguishes a new arrival at the exact time of the previous notice.
+    """
+    previous = world.wakeups[-1] if world.wakeups else None
+    since = aware(previous.time if previous else world.start_time)
+    until = aware(world.now)
+    announced = set(previous.announced_mail_ids or []) if previous else set()
+    inclusive = previous is not None and previous.announced_mail_ids is not None
+    return {
+        email.id for email in world.overlay_inbox
+        if email.source in {"counterparty", "real"}
+        and (since <= aware(email.sent_at) if inclusive else since < aware(email.sent_at))
+        and aware(email.sent_at) <= until and email.id not in announced
+    }
 
 
 def wakeup_text(kind: WakeupKind, when: datetime, new_emails: int) -> str:

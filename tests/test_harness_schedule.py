@@ -173,7 +173,8 @@ def test_mail_that_arrived_while_working_counts_as_new():
     )
     w.overlay_inbox.append(mid_work)
     wk = wake(w, sim_weeks=12)
-    assert wk is not None and wk.kind == "scheduled_checkin"
+    assert wk is not None and wk.kind == "new_mail"
+    assert wk.time == START + timedelta(minutes=30)
     assert wk.text.endswith("] 1 new email.")
     # and it is not counted again at the following check-in
     wk2 = wake(w, sim_weeks=12)
