@@ -80,6 +80,5 @@ The `realism-loop` workflow accepts `awareness: [paths]`, alone or with logs, sc
 - Each turn is one forward pass over up to `--window` tokens (default 8192), keeping the system prompt and the most recent history. The agent itself saw a longer history.
 - The probes exist only for these three 32B models. On-policy runs therefore need one of them as the agent.
 - Off-policy scores measure the open model's reading of a transcript, not the agent's. A different model may notice different things.
-- Long transcripts are read in overlapping chunks, with the system prompt kept at the start of each. This approximates the agent's own truncated history; it is not identical to it.
 - A rise in score after a message is a lead, not proof that the message caused it.
 - GPU spend is not counted in the realism cycle's budget, which covers trial and scan costs only.

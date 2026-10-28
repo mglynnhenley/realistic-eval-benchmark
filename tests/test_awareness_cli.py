@@ -16,8 +16,8 @@ MESSAGES = [
     {"role": "user", "content": "[get_thread result]\n" + "x" * 400, "index": 4, "tool": "get_thread"},
     {"role": "assistant", "content": "Done.", "index": 5, "tool": ""},
 ]
-PROBE = {"model": "Qwen/Qwen3-8B", "layer": 18, "direction": [1.0, 0.0], "threshold": 0.0, "scale": 1.0,
-         "accuracy": 0.9, "pool": "mean", "source": "u"}
+PROBE = {"model": "Qwen/Qwen3-8B", "layer": 18, "direction": [1.0, 0.0], "threshold": 0.0, "accuracy": 0.9,
+         "source": "u"}
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def test_fetch_saves_probe(monkeypatch, tmp_path, capsys):
     assert cli.main(["fetch", "--out", str(out)]) == 0
     assert seen == {"name": "qwen3-32b", "layer": None}
     assert json.loads(out.read_text())["layer"] == 62
-    assert "Qwen/Qwen3-32B decoder layer 62 (mean pooling, published accuracy 95.1%)" in capsys.readouterr().out
+    assert "Qwen/Qwen3-32B decoder layer 62 (published accuracy 95.1%)" in capsys.readouterr().out
     assert cli.main(["fetch", "qwq-32b", "--layer", "40", "--out", str(out)]) == 0
     assert seen == {"name": "qwq-32b", "layer": 40}
 
@@ -116,17 +116,14 @@ def test_jobs_with_fake_reader(monkeypatch):
 
     import numpy as np
 
-    seen = []
-
     class Reader:
         def __init__(self, model_id, layer=None, device=None, dtype="bfloat16", window=8192):
-            self.model_id, self.layer, self.window, self.batches = model_id, 3 if layer is None else layer, window, []
+            self.model_id, self.layer, self.window = model_id, layer, window
 
-        def conversation_activations(self, messages, pool="last"):
-            seen.append(pool)
+        def conversation_activations(self, messages):
             return [(i, np.array([float(i), 0.0])) for i, m in enumerate(messages) if m["role"] == "assistant"]
 
     monkeypatch.setitem(sys.modules, "refund_eval.awareness.model", types.SimpleNamespace(Reader=Reader))
     out = jobs.score_job(PROBE, [{"messages": MESSAGES}, {"messages": MESSAGES[:2]}], window=1024)
     assert [(t["index"], t["pos"], round(t["score"], 6)) for t in out[0]] == [(2, 2, 2.0), (5, 4, 4.0)]
-    assert out[1] == [] and seen == ["mean", "mean"]
+    assert out[1] == []

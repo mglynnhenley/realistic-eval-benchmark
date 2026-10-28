@@ -33,8 +33,8 @@ def convert(weight, bias, *, model: str, hidden_index: int, accuracy: float | No
     if hidden_index < 1:
         raise ValueError("hidden state 0 is the embeddings, not a decoder layer")
     weight, bias = np.asarray(weight, dtype=np.float64), np.asarray(bias, dtype=np.float64)
-    return Probe(model, hidden_index - 1, weight[1] - weight[0], float(bias[0] - bias[1]), 1.0,
-                 accuracy=accuracy, pool="mean", source=source)
+    return Probe(model, hidden_index - 1, weight[1] - weight[0], float(bias[0] - bias[1]),
+                 accuracy=accuracy, source=source)
 
 
 def fetch(name: str = DEFAULT, layer: int | None = None) -> Probe:

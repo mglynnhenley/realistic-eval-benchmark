@@ -8,7 +8,7 @@ from refund_eval.awareness.probe import Probe
 
 
 def score_job(probe: dict, conversations: list[dict], *, window: int = 8192, device=None) -> list[list[dict]]:
-    """Per conversation, `[{"index", "pos", "score"}]` for each assistant message the reader located."""
+    """Per conversation, `[{"index", "pos", "score"}]` for each assistant message."""
     from refund_eval.awareness.model import Reader
 
     p = Probe.from_dict(probe)
@@ -16,7 +16,7 @@ def score_job(probe: dict, conversations: list[dict], *, window: int = 8192, dev
     out: list[list[dict]] = []
     for conv in conversations:
         messages = conv["messages"]
-        pairs = reader.conversation_activations(messages, pool=p.pool)
+        pairs = reader.conversation_activations(messages)
         scores = p.score(np.stack([vec for _, vec in pairs])) if pairs else []
         out.append([{"index": messages[pos]["index"], "pos": pos, "score": float(s)}
                     for (pos, _), s in zip(pairs, scores)])
