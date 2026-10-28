@@ -53,6 +53,27 @@ def test_policy_page_uses_public_quotes_instead_of_research_analysis(monkeypatch
     )
 
 
+def test_policy_excerpts_keep_separate_source_context(monkeypatch):
+    from refund_eval.published.fixture_web import policy_page_text
+
+    org = load_scenario("train_refund").org("trainline")
+    general = "https://disputes.example.test/rail-complaints"
+    own_service = "https://disputes.example.test/complaints-about-service"
+    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda _: {"dossier": {
+        "summary": "Research analysis should not be published as policy.",
+        "facts": [
+            {"source": general, "quote": "Use the portal to complain about a rail provider."},
+            {"source": own_service, "quote": "You can raise a formal complaint by email or in writing."},
+            {"source": own_service, "quote": "Email complaints@disputes.example.test."},
+        ],
+    }})
+    assert policy_page_text(org) == (
+        "Rail complaints\n" + general + "\n\nUse the portal to complain about a rail provider.\n\n"
+        "Complaints about service\n" + own_service + "\n\n"
+        "You can raise a formal complaint by email or in writing.\n\nEmail complaints@disputes.example.test."
+    )
+
+
 @pytest.fixture
 def ctx():
     init_subtask_store(Store())

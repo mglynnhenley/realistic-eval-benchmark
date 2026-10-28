@@ -4,8 +4,9 @@ The simulated Gmail view labels the account holder's outgoing mail as sent,
 historical seed inbox mail as read, and newly delivered counterparty mail as
 unread. Labels and local read/unread searches share the same classification.
 Fixture policy pages display saved public quotations without the dossier's
-research summaries or analyst interpretations; repeated and contained quotations
-are omitted. The underlying dossiers and company terms remain authoritative for
+research summaries or analyst interpretations, grouped by their public source URL
+and page context. Repeated and contained quotations within a source are omitted.
+The underlying dossiers and company terms remain authoritative for
 the simulator.
 
 A trial gives a personal agent one task, a Gmail-style mailbox, Exa search and a Playwright browser. It works over simulated weeks, choosing its own pauses, with incoming mail and daily check-ins able to wake it sooner. Email sends and website submissions are intercepted; counterparts respond through the simulator. Inspect records the conversation, world state, tool audit and scores. Train refund is the first task implementation.
