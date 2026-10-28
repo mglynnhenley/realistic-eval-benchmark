@@ -15,6 +15,7 @@ import inspect
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from inspect_ai.tool import ToolError
@@ -25,13 +26,15 @@ from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.world import clock
 from refund_eval.world.guards import extract_urls
 from refund_eval.world.mail import Mailbox
-from refund_eval.world.state import Channel, Interception, world_tx
+from refund_eval.world.state import Channel, Interception, load_world, world_tx
+from refund_eval.world.timeutil import as_aware
 
 logger = logging.getLogger(__name__)
 
 # Private per-sample state of the mail client (not part of the World contract).
 CLIENT_KEY = "mail_client"
 DISPATCH_LIMIT_KEY = "interception_execution_limit"
+SESSION_END_KEY = "harness_session_end"
 
 
 @dataclass
@@ -153,10 +156,35 @@ def set_response(interception_id: str, text: str) -> None:
                 break
 
 
+def enforce_session_end() -> None:
+    """Stop tool execution at the harness's per-sample simulated-time boundary."""
+    end = store().get(SESSION_END_KEY)
+    if end is None:
+        return  # Standalone tool consumers have no harness horizon.
+    deadline = datetime.fromisoformat(end)
+    world = load_world()
+    if as_aware(world.now) < as_aware(deadline):
+        return
+    with world_tx() as w:
+        if w.stop_reason is None:
+            w.stop_reason = "sim_time_cap"
+    raise LimitExceededError(
+        "custom", value=(as_aware(world.now) - as_aware(world.start_time)).total_seconds(),
+        limit=(as_aware(deadline) - as_aware(world.start_time)).total_seconds(),
+        message="The simulated session has ended.",
+    )
+
+
 def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> None:
     """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
+    enforce_session_end()
+    end = store().get(SESSION_END_KEY)
     with world_tx() as w:
-        clock.charge(w, tool_name, written=written, read=read, base=base)
+        clock.charge(w, tool_name, written=written, read=read, base=base,
+                     until=datetime.fromisoformat(end) if end is not None else None)
+    # Typing/reading can exhaust the remaining session time. In particular, do
+    # not dispatch a native write after composing it has reached the boundary.
+    enforce_session_end()
 
 
 async def call_simulator(inbound: Inbound) -> SimResult:

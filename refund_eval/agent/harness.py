@@ -81,7 +81,11 @@ from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
 from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
-from refund_eval.world.interception import DISPATCH_LIMIT_KEY
+from refund_eval.world.interception import (
+    DISPATCH_LIMIT_KEY,
+    SESSION_END_KEY,
+    enforce_session_end,
+)
 from refund_eval.world.mail import seed_emails
 from refund_eval.world.state import (
     WORLD_KEY,
@@ -269,6 +273,7 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
             reason = kill_reason()
             if reason is not None:
                 raise _kill_error(reason)
+            enforce_session_end()
             return await inner(*args, **kwargs)
         except LimitExceededError as ex:
             # Inspect represents tool limits as ordinary tool errors. Retain
@@ -370,7 +375,7 @@ async def _follow_ups_before_wake(sim_weeks: float, checkin_hours: tuple[int, ..
         if item is None:
             return
         when = next_event(world, checkin_hours)[0]
-        if aware(item.due_at) > min(when, sim_deadline(world, sim_weeks)):
+        if aware(item.due_at) >= sim_deadline(world, sim_weeks) or aware(item.due_at) > when:
             return
         with world_tx() as w:
             _advance(w, max(aware(item.due_at), aware(w.now)))
@@ -450,6 +455,8 @@ def make_on_continue(
                 # Only success reached before this turn began: the agent has had
                 # a whole turn to see it and write a status report about it.
                 world.stop_reason = task.success_stop_reason
+            elif aware(world.now) >= sim_deadline(world, sim_weeks):
+                world.stop_reason = STOP_SIM_TIME_CAP
             elif world.turn >= max_turns:
                 world.stop_reason = STOP_MAX_TURNS
             stop_reason = world.stop_reason
@@ -462,7 +469,7 @@ def make_on_continue(
             with world_tx() as world:
                 wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
                 world.requested_wakeup = None
-                if wakeup is None:
+                if wakeup is None or aware(world.now) >= sim_deadline(world, sim_weeks):
                     world.stop_reason = STOP_SIM_TIME_CAP
                 stop_reason = world.stop_reason
 
@@ -546,6 +553,7 @@ def refund_agent(
                               else await restore_trial(resume_log, scenario))
         init_world(scenario)
         budgeted = prepare_ledger(token_budget)
+        store().set(SESSION_END_KEY, sim_deadline(load_world(), sim_weeks).isoformat())
         store().set(RESEARCH_MODE_KEY, research_mode)
         store().set(COMPANY_SIMULATOR_KEY, company_simulator)
         emit_snapshot(state.messages, phase="running")
@@ -582,6 +590,9 @@ def refund_agent(
             )
 
         try:
+            if aware(load_world().now) >= sim_deadline(load_world(), sim_weeks):
+                _record_stop(STOP_SIM_TIME_CAP)
+                return state
             async with adapters.tool_scope(scenario, mail_source_kind, profile=tool_profile,
                                            published_data=published_data,
                                            **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
