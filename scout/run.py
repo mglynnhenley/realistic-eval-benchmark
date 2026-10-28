@@ -193,6 +193,12 @@ def report(df: pd.DataFrame, validation: list[dict[str, str]] | None = None) -> 
 
 
 def main(argv: list[str] | None = None) -> None:
+    def positive_int(value: str) -> int:
+        parsed = int(value)
+        if parsed <= 0:
+            raise argparse.ArgumentTypeError("must be a positive integer")
+        return parsed
+
     parser = argparse.ArgumentParser(description="Grade saved .eval logs with the Scout scanners and both judges.")
     parser.add_argument("logs", nargs="+", help="Inspect .eval logs to grade")
     parser.add_argument("--judges", nargs="+", default=JUDGES, help="Judge models, one scan each")
@@ -200,8 +206,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--validation", type=Path, help="Optional private validation CSV (log,behaviour,op,value,note)")
     parser.add_argument("--scanners", nargs="+", default=SCANNERS, choices=SCANNERS, help="Scanners to run (default: all)")
     parser.add_argument("--limit", type=int, help="Scan only the first N transcripts")
+    parser.add_argument("--max-tokens", type=positive_int, help="Explicit maximum output tokens per scanner call (default unchanged)")
+    parser.add_argument("--bounded-tells", action="store_true", help="Tells only: one answer attempt, no refusal/API retries; requires explicit --max-tokens <=8192")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
     args = parser.parse_args(argv)
+    if args.bounded_tells and (args.scanners != ["tells"] or args.max_tokens is None or args.max_tokens > 8192):
+        parser.error("--bounded-tells requires --scanners tells and explicit --max-tokens between 1 and 8192")
     try:
         scans = validate_private_output(args.scans)
         scan_dirs = {judge: validate_private_output(scans / short(judge)) for judge in args.judges}
@@ -223,12 +233,15 @@ def main(argv: list[str] | None = None) -> None:
     locations = {}
     for judge in args.judges:
         status = scan(
-            scanners={name: getattr(scout_scanners, name)() for name in args.scanners},
+            scanners={name: (getattr(scout_scanners, name)(bounded=True) if args.bounded_tells else getattr(scout_scanners, name)())
+                      for name in args.scanners},
             transcripts=transcripts_from(args.logs),
             scans=str(scan_dirs[judge]),
             model_roles={"judge": judge},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
-            model_config=GenerateConfig(cache_prompt=False),
+            model_config=GenerateConfig(cache_prompt=False,
+                **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}),
+                **({"max_retries": 0} if args.bounded_tells else {})),
             limit=args.limit,
         )
         locations[judge] = status.location

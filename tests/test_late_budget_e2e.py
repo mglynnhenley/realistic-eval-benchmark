@@ -181,16 +181,17 @@ def test_company_approval_after_long_wait_pays_once_with_exact_target_ledger(
     assert world.interactions[2].action.decision_basis
 
 
-def test_company_requests_evidence_and_unproductive_continuations_exhaust_budget(tmp_path, monkeypatch):
+def test_company_requests_evidence_and_unscheduled_pauses_still_account_budget(tmp_path, monkeypatch):
     script, sample, world = run_agent(tmp_path, monkeypatch, None, {}, budget=3000, reply_hours=24)
     assert script.saw_replies_before_payment
     assert not world.outcome.transfers
     assert world.stop_reason == "token_budget"
     assert world.token_ledger.used == script.calls * 210 == 3150
     assert world.token_ledger.overrun == 150
-    continues = [w for w in world.wakeups if w.kind == "continue"]
-    assert len(continues) >= 2
-    assert len({w.time for w in continues}) == 1
+    checkins = [w for w in world.wakeups if w.kind == "scheduled_checkin"]
+    assert len(checkins) >= 2
+    assert len({w.time for w in checkins}) == len(checkins)
+    assert not any(w.kind == "continue" for w in world.wakeups)
     notices = [m for m in sample.messages if (m.metadata or {}).get("harness") == "runtime_notice"]
     assert notices[-1].metadata["tokens_used"] == world.token_ledger.used
     assert notices[-1].metadata["tokens_remaining"] == 0

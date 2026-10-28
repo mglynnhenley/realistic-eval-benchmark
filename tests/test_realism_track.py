@@ -1,6 +1,7 @@
 """Behaviour tracker (refund_eval/realism/track.py): version string, ledger rows from saved
 logs, the JSONL ledger, the bootstrap report and the eval commands. No model calls."""
 
+import json
 import sys
 from datetime import UTC, datetime
 from types import ModuleType, SimpleNamespace
@@ -43,7 +44,34 @@ def test_realism_version_hashes_memory_and_marks_dirty(monkeypatch, tmp_path):
     outputs["status"] = " M file.py\n"
     assert track.realism_version("s") == "0123456-44136fa3+dirty"
     monkeypatch.setattr(track, "_git", lambda *a: None)
+    monkeypatch.setattr(track, "ROOT", tmp_path)
     assert track.realism_version("s") == "nogit-44136fa3"
+
+
+def test_realism_version_reads_frozen_source_and_actual_memory_without_git(monkeypatch, tmp_path):
+    manifest = tmp_path / track.SOURCE_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"schema_version": 1, "commit": "0123456789abcdef",
+                                   "dirty": True, "source_sha256": "a" * 64}))
+    memory = tmp_path / "memory.json"
+    monkeypatch.setattr(track, "ROOT", tmp_path)
+    monkeypatch.setattr(track, "_git", lambda *args: None)
+    monkeypatch.setattr("refund_eval.realism.notes.memory_path", lambda scenario: memory)
+    assert track.realism_version("s") == "0123456-none+src-aaaaaaaaaaaa+dirty"
+    memory.write_bytes(b"{}")
+    assert track.realism_version("s") == "0123456-44136fa3+src-aaaaaaaaaaaa+dirty"
+    memory.write_bytes(b"[]")
+    assert track.realism_version("s") == "0123456-4f53cda1+src-aaaaaaaaaaaa+dirty"
+
+
+def test_checkout_version_uses_git_instead_of_packaged_manifest(monkeypatch, tmp_path):
+    manifest = tmp_path / track.SOURCE_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("invalid stale package manifest")
+    monkeypatch.setattr(track, "ROOT", tmp_path)
+    monkeypatch.setattr(track, "_git", lambda *args: "fedcba9876543210" if args[0] == "rev-parse" else "")
+    monkeypatch.setattr("refund_eval.realism.notes.memory_path", lambda scenario: tmp_path / "missing")
+    assert track.realism_version("s") == "fedcba9-none"
 
 
 def test_ledger_rows_reads_refund_stop_reason_and_orgs(monkeypatch):

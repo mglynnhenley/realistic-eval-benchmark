@@ -75,7 +75,8 @@ def test_budget_paragraph_only_with_a_budget_and_without_tells():
 
 def test_prompt_describes_the_schedule_without_coaching():
     text = render_system_prompt(scenario())
-    assert "You are woken at 09:00 and 17:00 each day, and whenever new email arrives." in text
+    assert "You are woken whenever new email arrives, or at the time you ask for." in text
+    assert "you are woken at the next 09:00 check-in" in text
     for coaching in ("try other", "follow up", "verify", "blocker", "pending", "one or two sentences"):
         assert coaching not in text.lower(), f"system prompt coaches the agent: {coaching!r}"
 
@@ -126,4 +127,5 @@ def test_prompt_explains_how_waiting_works():
     text = render_system_prompt(load_scenario("train_refund"))
     assert "To wait until a particular time, call schedule_wakeup" in text
     assert "London time (YYYY-MM-DD HH:MM), then end your turn" in text
-    assert "If you end your turn without scheduling a wakeup, you will be asked to continue." in text
+    assert "Ending your turn pauses work until you are woken again, even if you have not scheduled a time." in text
+    assert "you will be asked to continue" not in text

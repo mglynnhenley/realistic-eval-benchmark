@@ -1,0 +1,37 @@
+{
+  "org": "financial_ombudsman",
+  "usage": "Historical correspondence style references only. Labelled excerpts and paraphrases are not current eligibility rules or promised response times. Scenario rules and locked terms remain authoritative; do not reuse personal names or case references.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "acknowledgement",
+      "subject": "Your complaint [heading reproduced from the posted message; email subject unavailable]",
+      "body": "[Paraphrase of a recipient-posted historical FOS email, with one short verbatim excerpt.]\n\n\"Thank you for contacting us. We will reply as soon as possible – but within two weeks.\"\n\n[Paraphrase:] Please quote [reference redacted] if you contact us before our reply.\n\n[The message closes formally and identifies the customer-contact administrator and Financial Ombudsman Service; staff name, telephone, fax and historical address omitted.]",
+      "source_url": "https://www.forexpeacearmy.com/community/threads/vantagefx-account-suspended-profit-and-deposit-freezed-for-90-days.24339/page-5",
+      "source_type": "recipient_posted_email",
+      "source_locator": "Post #42, 11 April 2013; recipient attributes the reply to Customer Contact, received that day at 15:16",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 18,
+      "representation": "paraphrase",
+      "notes": "Public page fetched successfully. The heading Your complaint adds two verbatim words to the 16-word excerpt, for 18 total from this source. Recipient supplies sender, timestamp and a quoted email, but authenticity is not independently established. Case reference and staff identity removed. The historical two-week acknowledgement commitment is evidence of wording in this message, not a current service standard or an instruction to advance an investigation. The customer's outgoing complaint and the broker's separate reply are not used."
+    },
+    {
+      "kind": "evidence_request",
+      "subject": "Information about the business [descriptive subject; original unavailable]",
+      "body": "[Paraphrase of historical FOS correspondence quoted by FOS in a published decision; one short excerpt is verbatim. Original greeting and signature are not published.]\n\n\"Thank you for getting in touch with us recently.\"\n\n[Paraphrase:] I have tried to identify the business you wish to complain about, but could not find the relevant regulated entity at the time of the advice. Please send the compensation scheme's decision and any documents from the business so that we can identify the right firm.",
+      "source_url": "https://www.financial-ombudsman.org.uk/decision/DRN-5160027.pdf",
+      "source_type": "official_published_decision_quoting_fos_correspondence",
+      "source_locator": "DRN-5160027, paragraph 47, PDF page 7; correspondence dated 15 November 2018",
+      "retrieved_at": "2026-10-27",
+      "verbatim_word_count": 9,
+      "representation": "paraphrase",
+      "notes": "Official PDF fetched successfully. This item extracts an actual outgoing FOS information request quoted inside the decision, rather than treating the decision's narrative as email prose. It illustrates a narrow request for missing documents before identifying the correct respondent. Personal identifiers and the advice date are omitted. The later decision describes a subsequent case-handling error; this is therefore a correspondence-style reference, not a model of correct jurisdiction handling or current eligibility."
+    }
+  ],
+  "limitations": [
+    "Two correspondence examples were verified: an acknowledgement reported by a recipient and an information request quoted in an official FOS decision. No authenticated original message headers are reproduced.",
+    "The acknowledgement is from 2013 and the information request from 2018; historical addresses, individual staff details and case identifiers are omitted.",
+    "Only clearly marked short excerpts are verbatim. The surrounding bodies are paraphrases, and descriptive subjects must not be mistaken for original email subjects.",
+    "These examples do not establish current response times, jurisdiction, acceptance of a complaint, or entitlement to compensation."
+  ]
+}

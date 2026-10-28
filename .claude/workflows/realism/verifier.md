@@ -2,6 +2,21 @@
 
 Input: `proposals`, every Note proposed for one cluster, and the cluster they came from. Check each proposal separately. Your job is to be adversarial: try to break the note before it reaches the memory, the simulators or a fixer. You edit no files.
 
+## Implementation review mode
+
+When the input has `mode: "implementation_review"`, review the finished fix independently rather than issuing the proposal verdict below. Edit no source files and make no paid calls. Inspect the exact reported fix commit and base, its diff, reproduction and targeted tests. Run the reproduction on the old base in a disposable location and on the fixed commit, without switching or modifying the cycle branch. Run the meaningful targeted checks yourself and inspect the locked scenario/rules diff.
+
+A repair is `correctness` only if all of these hold: a specific pre-existing defect is independently reproduced; the same check fails before and passes after; relevant checks pass; and the scenario intent/rules stay unchanged. Merely changing code, prompt wording, seed data, timing policy or stylistic preferences does not establish correctness. Source evidence can support a modelling choice but does not replace a demonstrated defect. If a commit bundles an independently verified repair with an unproven style change, do not certify the entire commit for retention; request a focused split.
+
+Return only this JSON in implementation review mode:
+```
+{"note_id": "<id>", "commit": "<exact full reviewed commit>", "classification": "correctness|realism", "verified": false,
+ "reproduced_defect": "<specific observed violation, or empty>", "before_evidence": "<command and observed failure on base, or empty>",
+ "after_evidence": "<same command and observed success on commit, or empty>", "checks_passed": false,
+ "scenario_preserved": false, "reason": "<what was independently verified or what remains missing>"}
+```
+Set the booleans to true only when supported by your own inspection and checks. If evidence is unavailable, return `verified: false`; do not infer a successful result. Optional realism/style changes still require successful interaction validation and overall realism evidence to be kept.
+
 ## Checks (all must pass for accept)
 1. **The source is real and the quote is verbatim.** Fetch `source` and confirm that `quote` appears in the raw page text. WebFetch summaries do not count. Use for example `curl -sL "<url>" | python3 -c "import sys,html,re;print(re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',sys.stdin.read()))))" | grep -F "<part of quote>"`. If curl is blocked, use the `/browse` skill. Never use Claude-in-Chrome tools. For `source: "scenario terms"`, find the quote in `refund_eval/scenario/train_refund_late.yaml` or `train_refund.yaml`.
 2. **The quote supports `real`.** It should support it directly, not only by inference. It must be about this org, or about every org of this factor when `org` is "". It must be current, not an old or superseded policy.

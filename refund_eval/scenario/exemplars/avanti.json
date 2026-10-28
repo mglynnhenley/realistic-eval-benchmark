@@ -1,0 +1,42 @@
+{
+  "org": "avanti",
+  "purpose": "Style references from publicly posted customer correspondence. Historical offers, processes and technical claims are not scenario rules or current company terms.",
+  "retrieved_at": "2026-10-27",
+  "examples": [
+    {
+      "kind": "appeal_redirection",
+      "subject": "(original subject not published)",
+      "body": "[Paraphrased reconstruction of a recipient-published email; not a verbatim email.]\n\nThanks for writing about your Delay Repay claim [claim reference redacted].\n\nI'm sorry your trip was disrupted and for the inconvenience you experienced. If you disagree with the compensation decision, please use the appeal instructions in your decision message.\n\nChoose the option labelled Other and explain the particular reason for challenging the result. Include the route actually travelled, your approximate arrival time and any evidence supporting the delay you experienced.\n\nThe review depends on the details supplied with the appeal; the team won't contact you separately to fill in gaps. They will assess the appeal and respond once it has been reviewed.",
+      "source_url": "https://forums.moneysavingexpert.com/discussion/6677229/avantis-scam-claim-delay-repay",
+      "source_type": "recipient_posted_email",
+      "representation": "paraphrase",
+      "retrieved_at": "2026-10-27",
+      "text_status": "paraphrased_reconstruction",
+      "notes": "Car1980 introduces the quoted reply as the response to their emailed complaint. The source already replaces the claim reference with Xs. Greeting and signature were not supplied and are not invented here. The reconstruction preserves apology followed by procedural redirection, not exact wording. This is evidence of one reported reply, not independent authentication or a current policy source."
+    },
+    {
+      "kind": "goodwill_offer",
+      "subject": "(original subject not published)",
+      "body": "[Paraphrased reconstruction of a recipient-published email; not a verbatim email.]\n\nDear [recipient omitted in source],\n\nThank you for contacting Avanti West Coast.\n\nWe're sorry for the distress and discomfort during your trip and understand how frustrating the wait for another service was.\n\nWe would like to offer a half-price future journey. The offer described in this reply covers Avanti Advance fares for the following twelve months, with up to four uses.\n\nTo redeem it, search for an eligible service on our website and enter the supplied code at checkout. Other promotions, including Railcards, cannot be combined with this offer. If the price stays the same, check that the fare qualifies.\n\nWe hope to see you travelling with us again.\n\nYours sincerely,\nCustomer Resolutions Advisor\nAvanti West Coast",
+      "source_url": "https://www.railforums.co.uk/threads/unsatisfactory-response-from-avanti-having-been-stranded-overnight.248000/page-2#post-6210105",
+      "source_type": "recipient_posted_email",
+      "representation": "paraphrase",
+      "retrieved_at": "2026-10-27",
+      "source_posted_at": "2023-05-09",
+      "text_status": "paraphrased_reconstruction",
+      "notes": "RailUK member gray1404 explicitly says this was received by email, then pastes it in post #33. Name, reference suffix and discount code are absent in that published text; no missing values have been fabricated. The original contains a much longer redemption template. This shortened reconstruction retains fewer than 25 words of quoted greeting/signature wording. Its historical offer is style evidence only and cannot authorize compensation."
+    },
+    {
+      "kind": "troubleshooting_reply",
+      "subject": "(original subject not published)",
+      "body": "[Verbatim published excerpt, quoted by Reddit user u/Boop0p as an Avanti support reply. Greeting and signature were not published.]\n\n> When a customer has contacted in the past, these few trouble shooting steps have cleared the issue, and they have been able to log into their account:\n> -Clear your cache, cookies, stored passwords and restarting the browser\n> -Check if the device needs an update\n> -Website best works with Chrome, so check if you experience the same on this browser\n> -Make sure the log in details are correct, as this is case sensitive\n> You also mentioned that you were using Firefox at the end there, so maybe try Chrome and see if this makes a difference.\n\nSource: [u/Boop0p's published correspondence](https://www.reddit.com/r/uktrains/comments/1ukferi/comment/pdd3y62/).",
+      "source_url": "https://www.reddit.com/r/uktrains/comments/1ukferi/comment/pdd3y62/",
+      "source_type": "recipient_posted_support_correspondence_excerpt",
+      "representation": "verbatim_excerpt",
+      "retrieved_at": "2026-10-27",
+      "source_posted_at": "2026-10-02",
+      "text_status": "verbatim_excerpt",
+      "notes": "The recipient quotes this reply and a subsequent apology separately; only the first reply is included, without silently stitching the two together. Original spelling and grammar are preserved. The visible post identifies Avanti complaint/support correspondence but supplies no email headers, so its delivery channel cannot be independently verified. No personal details occur in this excerpt. Its technical suggestions are historical style evidence, not verified advice."
+    }
+  ]
+}

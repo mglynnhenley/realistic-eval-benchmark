@@ -110,6 +110,9 @@ def prepare(
         target = source / filename
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, target)
+    from refund_eval.realism.track import freeze_source_manifest
+
+    freeze_source_manifest(source)
     if inbox is not None:
         # Only the mail data travels; no Gmail token or connection is uploaded.
         shutil.copyfile(inbox, source / SNAPSHOT_IN_IMAGE)
