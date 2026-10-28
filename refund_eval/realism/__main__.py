@@ -131,25 +131,37 @@ def _track(args) -> int:
 def _trials(args) -> int:
     from refund_eval.realism.cycle import collect, trial_commands
 
-    commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
-                              environment=args.environment)
-    for command in commands:
+    try:
+        commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
+                                  environment=args.environment, scenario=args.scenario,
+                                  token_budget=args.token_budget, max_turns=args.max_turns,
+                                  time_limit=args.time_limit)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    for command in commands[:1] if args.prepare_only else commands:
         print(shlex.join(command))
-    if not args.yes and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes"):
+    if (not args.prepare_only and not args.yes
+            and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes")):
         print("Not run.")
         return 1
     prepared = subprocess.run(commands[0], check=False).returncode
-    if prepared:
+    if prepared or args.prepare_only:
         return prepared
     code = subprocess.run(commands[1], check=False).returncode
-    print(json.dumps(collect(args.out, args.trials), indent=2))
-    return code
+    result = collect(args.out, args.trials)
+    print(json.dumps(result, indent=2))
+    return code or int(bool(result["failed"]))
 
 
 def _score(args) -> int:
     from refund_eval.realism.cycle import score
 
-    result = json.dumps(score(args.logs, args.scans), indent=2)
+    try:
+        result = json.dumps(score(args.logs, args.scans, expected_trials=args.expected_trials, judge=args.judge), indent=2)
+    except (ValueError, OSError) as error:
+        print(f"Cannot score trials: {error}", file=sys.stderr)
+        return 1
     if args.out:
         with open(args.out, "w") as file:
             file.write(result + "\n")
@@ -225,18 +237,25 @@ def main(argv: list[str] | None = None) -> int:
     running.add_argument("--yes", action="store_true", help="run without asking")
     tracking.set_defaults(handler=_track)
 
-    trials = commands.add_parser("trials", help="prepare and run one Harbor batch from the working tree")
+    trials = commands.add_parser("trials", parents=[common], help="prepare and run one Harbor batch from the working tree")
     trials.add_argument("--model", required=True, help="target model")
     trials.add_argument("--trials", type=int, required=True, help="trials, all run concurrently")
     trials.add_argument("--cost-limit", type=float, required=True, help="USD cap per trial")
     trials.add_argument("--out", required=True, help="new Git-ignored output directory")
     trials.add_argument("--sim-weeks", type=float, default=3, help="simulated weeks per trial")
+    trials.add_argument("--token-budget", type=int, default=1_000_000,
+                        help="target tokens including cached input (default: 1000000 for a short screen)")
+    trials.add_argument("--max-turns", type=int, default=10000, help="maximum target turns per trial")
+    trials.add_argument("--time-limit", type=int, default=36000, help="wall-clock seconds per Harbor trial")
+    trials.add_argument("--prepare-only", action="store_true", help="prepare frozen config without launching paid trials")
     trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
     scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
     scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")
     scoring.add_argument("--scans", required=True, help="Scout results directory with the tells scanner")
+    scoring.add_argument("--expected-trials", type=int, help="require exactly this many successful trial/scan pairs")
+    scoring.add_argument("--judge", help="select one judge when the scans directory contains several")
     scoring.add_argument("--out", help="also write the score JSON here")
     scoring.set_defaults(handler=_score)
     comparing = commands.add_parser(

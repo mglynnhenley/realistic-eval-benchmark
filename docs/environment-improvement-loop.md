@@ -59,15 +59,100 @@ All commands are run as `uv run python -m refund_eval.realism <command> [--scena
 
 The `realism-loop` workflow runs one iteration from mining to a report in `.context/realism/iterations/`. Mining is paid; pass existing scans to skip it. The `realism-track` workflow runs or adds trials to the behaviour ledger, then writes an analysis to `.context/realism/tracking/`. Only `notes merge` and `check --note` write the memory.
 
-### Realism cycle
+### Autonomous background worker (MCP)
 
-The `realism-cycle` workflow repeats test and improve. It keeps the champion environment and tests a candidate built from the working tree. A regression is reverted. When the result is unclear, both environments are run again as an A/B comparison:
+The `refund-realism` MCP server exposes `realism_start`, `realism_status`,
+`realism_results` and `realism_cancel`. The server starts a detached Python worker;
+it continues after the MCP client or coding-agent session disconnects. It calls
+model APIs directly for repairs and independent review, and Harbor for Modal
+trials. It does not require a running Claude Code or Codex session. The Mac must
+remain awake and connected; this is a local worker, not a hosted scheduler.
+
+Start the server with the repository's installed Python environment:
+
+```sh
+.venv/bin/python -m refund_eval.realism.loop_mcp --repo "$PWD" --backend refund_eval.realism.autonomous:run_job
+```
+
+Register that command, with absolute paths and the repository as its working
+directory, in your MCP client. Runtime credentials are loaded from the repository
+`.env`; they are never copied to candidate worktrees. For Codex, registration is:
+
+```sh
+codex mcp add refund-realism -- uv --directory "$PWD" run --frozen python -m refund_eval.realism.loop_mcp --repo "$PWD" --backend refund_eval.realism.autonomous:run_job
+```
+
+Call the `realism_start` tool, for example:
+
+```json
+{
+  "request_key": "short-ab-three-001",
+  "budget_usd": 10.8,
+  "source": "HEAD",
+  "trials": 3,
+  "token_budget": 200000,
+  "max_rounds": 1,
+  "per_trial_cost": 0.5,
+  "scan_reserve": 2,
+  "repair_budget": 2,
+  "skip_diagnostic": true,
+  "findings": [".context/realism/saved-findings.json"]
+}
+```
+
+The example budget is an additional invocation limit, not a reset of any existing
+session cap. Choose a limit within the remaining authorised allowance. A token
+budget counts the target's tokens including cached input, not just new output.
+These short trials give exploratory evidence; they do not replace a full-length
+behaviour assessment.
+
+With `skip_diagnostic: true`, saved findings inform the repair and are excluded
+from comparison scores. The worker proposes one focused repair, requests an
+independent synthetic regression test, checks failure before and success after,
+runs the local suite and Ruff, then requests independent review of the exact
+diff. A supported candidate gets **three fresh control trials and three fresh
+candidate trials** on Modal. The fixed judge scans both arms under the same
+protocol; bootstrap comparison reports `better`, `worse` or `unclear`. With no
+supplied findings, the default first runs a diagnostic batch, adding three more
+trials. Higher `max_rounds` repeats this process only when the declared budget
+covers all requested rounds.
+
+Each paid stage receives a durable reservation before launch. Current public
+pricing, rendered transcript size, a bounded judge output and disabled scanner
+retries are checked before judging. If a candidate is unsupported, a check fails,
+a scan cannot be bounded, or budget is insufficient, the job stops and preserves
+its evidence. No automatic paid retry or unclear-result rerun occurs. Unknown
+charges keep their reservation; reservations are conservative estimates, not
+provider-enforced billing ceilings. Modal compute is billed separately.
+
+`realism_start` returns a `job_id`. Pass it to `realism_status` for progress and
+spend, `realism_results` for saved results, or `realism_cancel` to stop that job.
+Reuse the same `request_key` and identical arguments after a lost response: it
+returns the original job without starting another. Changed settings require a
+new key. Only one job may be active in this repository. Cancellation preserves
+artifacts and attempts cleanup of that job's own Modal sandboxes.
+
+Artifacts live under `.context/realism/background/<job_id>/`: `settings.json`,
+`state.json`, `plan.json`, the stage ledger, model responses, command logs,
+regression evidence, frozen batch configurations, scan outputs and decisions.
+Verified correctness fixes can be retained despite inconclusive realism scores;
+style-only changes need positive realism evidence. Candidate commits remain in
+private Git worktrees with named refs for review. The worker never merges into
+or switches the user's current checkout. Interrupted paid stages are not resumed
+automatically; inspect original outputs before doing further paid work.
+
+The repository's `$realism-loop` skill and `/realism-loop` slash command are
+convenient agent entry points. The older `.claude/workflows/realism-cycle.js`
+requires a compatible workflow runtime and remains available for interactive
+operation. It is not the detached worker.
+
+### Measurement commands
 
 | Command | Purpose |
 |---|---|
-| `trials --model M --trials N --cost-limit USD --out DIR [--sim-weeks 3] [--environment modal] [--yes]` | Prepare and run one Harbor `train_refund_late` batch from the working tree (saved research, all trials concurrent). After asking, it prints the trials' `.eval` logs and `probe.json` files, and the number of trials without a log |
-| `score LOGS... --scans DIR [--out FILE]` | Tells per trial, matched by log, sample and epoch: the mean with a 95% bootstrap interval, `yes` tells, the mean per factor, the model cost and the per-trial counts |
-| `compare --a FILE... --b FILE... [--margin 0]` | Pool the per-trial counts of the champion (A) and candidate (B) score files and bootstrap B - A. The candidate is `better` if the interval is entirely below `-margin`, `worse` if it is entirely above `margin`, and `unclear` otherwise |
+| `trials --model M --trials N --cost-limit USD --out DIR [--token-budget 1000000] [--sim-weeks 3] [--environment modal] [--prepare-only] [--yes]` | Prepare a frozen Harbor batch; `--prepare-only` never launches trials. All trial attempts run concurrently, with no automatic retries. |
+| `score LOGS... --scans DIR [--judge M] [--expected-trials N] [--out FILE]` | Strictly validate complete native samples and matching successful scans, then report tells per trial and factors. A missing scan is unknown, never zero. |
+| `compare --a FILE... --b FILE... [--margin 0]` | Bootstrap B minus A; report better, worse or unclear. Compare only identical trial and judging protocols. |
 
 ## Preserve reproducibility
 
