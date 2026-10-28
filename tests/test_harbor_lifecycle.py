@@ -174,7 +174,9 @@ def test_preparation_binds_actual_task_job_and_policy_bytes(tmp_path, monkeypatc
 
     from refund_eval.harbor.__main__ import prepare
     from refund_eval.harbor.config import TrialSettings
+    from refund_eval.realism import autonomous
 
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
     original = subprocess.check_output
 
     def selected_source(argv, **kwargs):
@@ -183,8 +185,14 @@ def test_preparation_binds_actual_task_job_and_policy_bytes(tmp_path, monkeypatc
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "check_output", selected_source)
-    settings = TrialSettings(scenario="train_refund", time_limit=1800,
-                             trial_deadlines=trial_deadlines(1800))
+    protocol = autonomous._protocol({"scenario": "train_refund", "model": "openrouter/example/offline",
+                                     "time_limit": 1800, "trial_deadline_policy": "bounded-lifecycle-v1"})
+    settings = TrialSettings(scenario=protocol["scenario"], time_limit=protocol["time_limit"],
+                             token_budget=protocol["token_budget"], max_turns=protocol["max_turns"],
+                             sim_weeks=protocol["sim_weeks"], cost_limit=protocol["cost_limit"],
+                             research_mode=protocol["research_mode"], data_mode=protocol["data_mode"],
+                             simulator_model=protocol["simulator_model"], grader_model=protocol["consistency_model"],
+                             trial_deadlines=protocol["trial_deadlines"])
     output = tmp_path / "prepared"
     job = json.loads(prepare(output, settings=settings, model="openrouter/example/offline",
                              trials=3, concurrency=3).read_text())
@@ -196,6 +204,25 @@ def test_preparation_binds_actual_task_job_and_policy_bytes(tmp_path, monkeypatc
     assert job["environment"]["kwargs"]["sandbox_timeout_secs"] == 4800
     assert job["agents"][0]["kwargs"]["trial_deadlines"] == trial_deadlines(1800)
     assert job["retry"]["max_retries"] == 0
+    overrides = ("agent_timeout_multiplier", "verifier_timeout_multiplier",
+                 "environment_build_timeout_multiplier", "agent_setup_timeout_multiplier")
+    assert job["timeout_multiplier"] == 1.0
+    assert all(job[key] is None for key in overrides)
+    # Genuine installed serialization, fed back through production validation.
+    assert autonomous._prepared_trials(protocol, output)["job_sha256"]
+    for key in ("timeout_multiplier", *overrides):
+        for value in (1, 1.0, 2, 0, False, True, "1"):
+            changed = {**job, key: value}
+            (output / "job.json").write_text(json.dumps(changed))
+            if type(value) in (int, float) and value == 1:
+                assert autonomous._prepared_trials(protocol, output)["job_sha256"]
+            else:
+                with pytest.raises(ValueError, match="bounds mismatch"):
+                    autonomous._prepared_trials(protocol, output)
+    (output / "job.json").write_text(json.dumps({**job, "timeout_multiplier": None}))
+    with pytest.raises(ValueError, match="bounds mismatch"):
+        autonomous._prepared_trials(protocol, output)
+    (output / "job.json").write_text(json.dumps(job))
     with pytest.raises(ValueError, match="concurrent wave"):
         prepare(tmp_path / "waves", settings=settings, model="openrouter/example/offline", trials=3, concurrency=2)
 
