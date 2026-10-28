@@ -27,6 +27,8 @@ For long horizons the model sees a rolling window of recent history
 (`history_tokens`), trimmed by Inspect's compaction, plus a memory tool for
 notes, as Vending-Bench does. Compaction changes only the model's input: the
 sample's messages, which the dashboard and scorers read, keep the full history.
+Shortly before a trim, the hook adds a harness message asking the agent to save
+notes; it stays in the history so graders see what the model saw.
 """
 
 from __future__ import annotations
@@ -36,15 +38,19 @@ import logging
 from asyncio import CancelledError
 from datetime import datetime
 from typing import Any, get_type_hints
+from uuid import uuid4
 
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
 from inspect_ai.model import (
     ChatMessage,
+    ChatMessageAssistant,
+    ChatMessageTool,
     ChatMessageUser,
     CompactionTrim,
     Model,
     get_model,
 )
+from inspect_ai.model._compaction.memory import MEMORY_TOOL, clear_memory_content
 from inspect_ai.tool import (
     Tool,
     ToolDef,
@@ -74,8 +80,9 @@ from refund_eval.agent.schedule import (
     sim_deadline,
     wakeup_text,
 )
-from refund_eval.config import RunConfig
+from refund_eval.config import BUDGET_NOTICES, RunConfig
 from refund_eval.killswitch import kill_reason
+from refund_eval.published.mail import SUPPORTED_TOOLS as MAIL_TOOLS
 from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
 from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
@@ -114,26 +121,102 @@ WAKEUP_METADATA = "wakeup"
 
 # Share of the non-prefix history kept by each trim; Vending-Bench 2 keeps about 61%.
 HISTORY_PRESERVE = 0.6
+# Before trimming, results of tool rounds older than the latest few are replaced
+# with a placeholder. Mail results (message bodies, send confirmations) and notes
+# are never cleared; what remains is mostly page snapshots and search results.
+KEEP_TOOL_ROUNDS = 3
+CLEARED_TOOL_OUTPUT = "[Earlier tool output removed to save space]"
+PROTECTED_TOOLS = frozenset({MEMORY_TOOL, *MAIL_TOOLS})
+# One record per compaction, in the sample store.
+HISTORY_COMPACTIONS_KEY = "history_compactions"
+
+
+def clear_old_tool_results(messages: list[ChatMessage]) -> tuple[list[ChatMessage], int]:
+    """Replace the output of older, unprotected tool results; calls and pairs stay as they are.
+
+    Returns the messages and how many results were newly cleared."""
+    rounds = [m for m in messages if isinstance(m, ChatMessageAssistant) and m.tool_calls]
+    functions = {tc.id: tc.function for m in rounds for tc in m.tool_calls or []}
+    recent = {tc.id for m in rounds[-KEEP_TOOL_ROUNDS:] for tc in m.tool_calls or []}
+    result: list[ChatMessage] = []
+    cleared = 0
+    for message in messages:
+        if (isinstance(message, ChatMessageTool) and message.tool_call_id not in recent
+                and (message.function or functions.get(message.tool_call_id or "")) not in PROTECTED_TOOLS
+                and message.text != CLEARED_TOOL_OUTPUT):
+            message = message.model_copy(update={"id": uuid4().hex, "content": CLEARED_TOOL_OUTPUT})
+            cleared += 1
+        result.append(message)
+    return result, cleared
+
+
+# Notes file the memory tool starts with: empty headings only, the same for every
+# task kind, so it suggests what to record but not what to do. Inspect seeds it on
+# the first memory call of a trial; a resumed trial restores the seeded flag with
+# the rest of the store, so it never re-seeds over (or resurrects) the agent's notes.
+MEMORY_NOTES_PATH = "/memories/case.md"
+MEMORY_TEMPLATE = """## Contacts
+
+## Messages sent
+
+## Replies received
+
+## Open promises and deadlines
+
+## Reference numbers
+
+## Next steps
+"""
+
+# Before the window is trimmed the agent is told once, as Inspect's memory integration
+# does, but in words that fit an assistant's errands. A compaction cycle is the number
+# of compactions recorded so far; the store keeps the cycle last warned in.
+MEMORY_WARNING_SHARE = 0.9
+MEMORY_WARNING_CYCLE_KEY = "history_warning_cycle"
+MEMORY_WARNING_TEXT = (
+    "Older messages will soon be removed from your view. Use memory to save anything you "
+    "will need later: who you have contacted and when, what each has replied, anything "
+    "promised by you or to you, reference numbers, and your next steps."
+)
 
 
 class HistoryWindow(CompactionTrim):
-    """CompactionTrim that keeps trimming, down to the latest turn, until the window fits.
+    """Clears older tool output, then trims the oldest messages until the window fits
+    below the warning band (90% of the threshold).
 
-    Inspect retries a strategy three times and then fails the sample, which a run
-    of large page snapshots can cause well before the real context window is full."""
+    Trimming keeps going, down to the latest turn: Inspect retries a strategy three
+    times and then fails the sample, which a run of large page snapshots can cause
+    well before the real context window is full. Inspect's own pre-compaction
+    memory warning is off (memory=False); memory tool content is still cleared."""
 
     def __init__(self, tokens: int):
-        super().__init__(threshold=tokens, memory=True, preserve=HISTORY_PRESERVE)
+        super().__init__(threshold=tokens, memory=False, preserve=HISTORY_PRESERVE)
 
     async def compact(self, model: Model, messages: list[ChatMessage],
                       tools: list[ToolInfo]) -> tuple[list[ChatMessage], ChatMessageUser | None]:
-        budget = int(self.threshold) - await model.count_tool_tokens(tools)
-        trimmed, _ = await super().compact(model, messages, tools)
-        while await model.count_tokens(trimmed) > budget:
-            shorter, _ = await super().compact(model, trimmed, tools)
-            if len(shorter) >= len(trimmed):
-                break
-            trimmed = shorter
+        tool_tokens = await model.count_tool_tokens(tools)
+        # Leave the window below the warning band, so that a window cleared to just
+        # under the threshold doesn't bring a warning and a compaction every turn.
+        target = int(MEMORY_WARNING_SHARE * self.threshold) - tool_tokens
+        before = await model.count_tokens(messages)
+        trimmed, cleared = clear_old_tool_results(messages)
+        tokens = await model.count_tokens(trimmed)
+        if tokens > target:
+            trimmed, _ = await super().compact(model, trimmed, tools)
+            while (tokens := await model.count_tokens(trimmed)) > target:
+                shorter, _ = await super().compact(model, trimmed, tools)
+                if len(shorter) >= len(trimmed):
+                    break
+                trimmed = shorter
+        trimmed = clear_memory_content(trimmed)
+        world = store().get(WORLD_KEY)
+        store().set(HISTORY_COMPACTIONS_KEY, [*(store().get(HISTORY_COMPACTIONS_KEY) or []), {
+            "sim_time": load_world().now.isoformat() if world is not None else None,
+            "tokens_before": before + tool_tokens,
+            "tokens_after": await model.count_tokens(trimmed) + tool_tokens,
+            "messages_dropped": len(messages) - len(trimmed),
+            "tool_results_cleared": cleared,
+        }])
         return trimmed, None
 
 
@@ -192,6 +275,7 @@ async def restore_snapshot(snapshot_path: str, scenario: Scenario | None = None)
         source={"snapshot": str(snapshot_path), "previous_phase": snapshot.get("phase")},
         record_revision=record_revision,
         rebuild_memory="MemoryStore:files" not in (snapshot.get("resume_state") or {}),
+        memory_seed={MEMORY_NOTES_PATH: MEMORY_TEMPLATE},
     )
 
 
@@ -396,6 +480,38 @@ def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
     )
 
 
+async def visible_tokens(state: AgentState) -> int | None:
+    """The window the next generation would see, before any trimming.
+
+    Like Inspect's compaction estimate: the last generation's input as the provider
+    counted it (cached input included), plus the messages added since."""
+    usage = state.output.usage if state.output.choices else None
+    if usage is None:
+        return None
+    last = max((i for i, m in enumerate(state.messages) if isinstance(m, ChatMessageAssistant)), default=None)
+    added = state.messages[last:] if last is not None else []
+    return (usage.input_tokens + (usage.input_tokens_cache_read or 0) + (usage.input_tokens_cache_write or 0)
+            + (await get_model().count_tokens(added) if added else 0))
+
+
+async def memory_warning(state: AgentState, history_tokens: int, now: datetime) -> ChatMessageUser | None:
+    """The pre-trim warning, at most once per compaction cycle.
+
+    Only between 90% of the window and the window itself, as in Inspect: past it,
+    the window is trimmed before the agent could act on a warning."""
+    cycle = len(store().get(HISTORY_COMPACTIONS_KEY) or [])
+    if store().get(MEMORY_WARNING_CYCLE_KEY) == cycle:
+        return None
+    tokens = await visible_tokens(state)
+    if tokens is None or not MEMORY_WARNING_SHARE * history_tokens < tokens <= history_tokens:
+        return None
+    store().set(MEMORY_WARNING_CYCLE_KEY, cycle)
+    return ChatMessageUser(content=MEMORY_WARNING_TEXT, metadata={
+        HARNESS_METADATA: "memory_warning", "sim_time": now.isoformat(),
+        "tokens": tokens, "history_tokens": history_tokens, "compaction_cycle": cycle,
+    })
+
+
 def make_on_continue(
     *,
     max_turns: int,
@@ -403,8 +519,11 @@ def make_on_continue(
     scenario: Scenario | None = None,
     fare: float | None = None,
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
+    history_tokens: int = 0,
 ):
-    """Build the task's `on_continue` hook; `fare` supports legacy refund callers."""
+    """Build the task's `on_continue` hook; `fare` supports legacy refund callers.
+
+    With `history_tokens`, the hook also gives the pre-trim memory warning."""
     if scenario is not None:
         task = scenario.task
 
@@ -472,6 +591,11 @@ def make_on_continue(
             raise error
         if wakeup is not None and stop_reason is None:
             state.messages.append(wakeup_message(wakeup))
+        if history_tokens and stop_reason is None:
+            # Appended in place, so it reaches the next generation on either return path.
+            warning = await memory_warning(state, history_tokens, load_world().now)
+            if warning is not None:
+                state.messages.append(warning)
         emit_snapshot(state.messages, phase="running")
         if stop_reason is not None:
             return False
@@ -512,6 +636,7 @@ def refund_agent(
     artifact_dir: str | None = None,
     resume_log: str | None = None,
     token_budget: int | None = None,
+    budget_notice: str = RunConfig.model_fields["budget_notice"].default,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -531,6 +656,9 @@ def refund_agent(
         on where it stopped.
       token_budget: Target input (including cached) plus output tokens for the
         whole trial, preserved on resume. None disables budgeting for new trials.
+      budget_notice: With a token budget, when the runtime notice of time and tokens left
+        is shown: "every_step", "daily" (first step of each simulated day) or "low"
+        (only when under 20% of the tokens or time remains).
     """
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
@@ -539,6 +667,8 @@ def refund_agent(
     if token_budget is not None and (isinstance(token_budget, bool)
                                     or not isinstance(token_budget, int) or token_budget <= 0):
         raise ValueError("token_budget must be a positive integer or None")
+    if budget_notice not in BUDGET_NOTICES:
+        raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}")
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
@@ -558,10 +688,12 @@ def refund_agent(
 
         def make_inner(tools):
             # Notes and scheduling cost no simulated time and do not deliver mail.
-            local = [schedule_wakeup(), *([memory()] if history_tokens else [])]
+            local = [schedule_wakeup(),
+                     *([memory(initial_data={MEMORY_NOTES_PATH: MEMORY_TEMPLATE})] if history_tokens else [])]
             ledger = load_world().token_ledger if budgeted else None
             instructions = render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
-                                                token_budget=ledger.budget if ledger else None)
+                                                token_budget=ledger.budget if ledger else None,
+                                                budget_notice=budget_notice)
             return react(
                 prompt=AgentPrompt(
                     instructions=instructions,
@@ -572,12 +704,14 @@ def refund_agent(
                 tools=[guard_tool(t) for t in [*tools, *local]],
                 submit=False,
                 compaction=HistoryWindow(history_tokens) if history_tokens else None,
-                model=BudgetedModel(get_model(), state, sim_deadline(load_world(), sim_weeks)) if budgeted else None,
+                model=BudgetedModel(get_model(), state, sim_deadline(load_world(), sim_weeks),
+                                    budget_notice=budget_notice) if budgeted else None,
                 on_continue=make_on_continue(
                     scenario=scenario,
                     max_turns=max_turns,
                     sim_weeks=sim_weeks,
                     checkin_hours=checkin_hours,
+                    history_tokens=history_tokens,
                 ),
             )
 

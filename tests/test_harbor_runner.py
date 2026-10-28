@@ -115,15 +115,19 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
     assert published_settings().history_tokens == 60_000
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
                                       "--model", "openrouter/example/model", "--history-tokens", "0",
+                                      "--budget-notice", "low",
                                       "--scenario", "train_refund"])
     main()
     job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
     assert job.agents[0].kwargs["history_tokens"] == 0
+    assert job.agents[0].kwargs["budget_notice"] == "low"
     assert job.agents[0].kwargs["scenario"] == "train_refund"
     assert "daily_allowance" not in job.agents[0].kwargs
     assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund").task_text.strip()
     with pytest.raises(ValueError):
         published_settings(history_tokens=-1)
+    with pytest.raises(ValueError):
+        published_settings(budget_notice="hourly")
 
 
 def test_paid_config_uses_named_secrets_without_values(tmp_path):

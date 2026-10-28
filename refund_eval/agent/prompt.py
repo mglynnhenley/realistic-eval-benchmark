@@ -17,6 +17,12 @@ from refund_eval.scenario.schema import Scenario
 
 PROMPT_PATH = Path(__file__).parent / "system_prompt.md"
 DEADLINE_DAYS = 7  # the stated deadline when the trial's length is not given
+# How the Budget section introduces the runtime notice under each budget_notice mode.
+NOTICE_TIMING = {
+    "every_step": "Before each step, a system notice shows",
+    "daily": "At the start of each day, a system notice shows",
+    "low": "Once less than 20% of your time or tokens remain, a system notice before each step shows",
+}
 
 
 def _profile_lines(scenario: Scenario) -> str:
@@ -48,8 +54,9 @@ def _times(hours: tuple[int, ...]) -> str:
 
 def render_system_prompt(scenario: Scenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
                          history_tokens: int = RunConfig.model_fields["history_tokens"].default,
-                         sim_weeks: float | None = None, token_budget: int | None = None) -> str:
-    text = PROMPT_PATH.read_text()
+                         sim_weeks: float | None = None, token_budget: int | None = None,
+                         budget_notice: str = RunConfig.model_fields["budget_notice"].default) -> str:
+    text = PROMPT_PATH.read_text().replace(NOTICE_TIMING["every_step"], NOTICE_TIMING[budget_notice])
     if not history_tokens:  # full history visible: drop the paragraph about trimming and notes
         text = "\n\n".join(p for p in text.split("\n\n") if "$history_tokens" not in p)
     if token_budget is None:  # no budget: drop the paragraph about it and its notices

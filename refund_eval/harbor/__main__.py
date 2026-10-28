@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from refund_eval.config import (
+    BUDGET_NOTICES,
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     HYBRID_EXA_KEY_ENV,
@@ -179,6 +180,9 @@ def main() -> None:
     parser.add_argument("--sim-weeks", type=float, default=TrialSettings.model_fields["sim_weeks"].default)
     parser.add_argument("--token-budget", type=int, default=argparse.SUPPRESS,
                         help="Target tokens including cached input; late-refund defaults to 40000000")
+    parser.add_argument("--budget-notice", choices=list(BUDGET_NOTICES),
+                        default=TrialSettings.model_fields["budget_notice"].default,
+                        help="With a token budget, show the runtime notice every step, daily, or when low")
     parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
                         help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
     parser.add_argument("--time-limit", type=int, default=1800)
