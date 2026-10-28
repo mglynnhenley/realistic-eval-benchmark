@@ -50,7 +50,7 @@ All commands are run as `uv run python -m refund_eval.realism <command> [--scena
 
 | Command | Purpose |
 |---|---|
-| `open [--scans DIR] [--probe FILE...]` | The largest clusters of findings, with their existing notes |
+| `open [--scans DIR] [--probe FILE...] [--awareness FILE...]` | The largest clusters of findings, with their existing notes |
 | `probe [--out FILE]` | What this sandbox, its browser and its web requests reveal, with the checks that fail |
 | `notes show` / `notes merge FILE` | Print the memory, or merge a JSON list of notes into it |
 | `check LOG --interaction ID [--note ID]` | Rerun one interaction with the notes and judge it |
@@ -280,9 +280,13 @@ operation. It is not the detached worker.
 | Command | Purpose |
 |---|---|
 | `measure --base COMMIT --candidate COMMIT --review FILE --out DIR --budget USD [--baseline-evidence FILE] [--execute]` | Prepare a reviewed comparison by default; explicit execution reserves and runs only required paid stages. Use `--budget 0` for unpaid planning. |
-| `trials --model M --trials N --cost-limit USD --out DIR [--token-budget 1000000] [--sim-weeks 3] [--environment modal] [--prepare-only] [--yes]` | Prepare a frozen Harbor batch; `--prepare-only` never launches trials. All trial attempts run concurrently, with no automatic retries. |
-| `score LOGS... --scans DIR [--judge M] [--expected-trials N] [--source-map FILE] [--out FILE]` | Strictly validate complete native samples and matching successful scans, then report tells per trial and factors. Source maps preserve provenance when logs move. A missing scan is unknown, never zero. |
-| `compare --a FILE... --b FILE... [--margin 0]` | Bootstrap B minus A; report better, worse or unclear. Compare only identical trial and judging protocols. |
+| `trials --model M --trials N --cost-limit USD --out DIR [--token-budget 1000000] [--sim-weeks 3] [--environment modal] [--history-tokens 60000] [--reasoning] [--prepare-only] [--yes]` | Prepare a frozen Harbor batch; `--prepare-only` never launches trials. All trial attempts run concurrently, with no automatic retries. `--reasoning` asks OpenRouter to return the target's reasoning. |
+| `score LOGS... --scans DIR [--judge M] [--expected-trials N] [--source-map FILE] [--awareness FILE...] [--out FILE]` | Strictly validate complete native samples and matching successful scans, then report tells per trial and factors. Source maps preserve provenance when logs move. A missing scan is unknown, never zero. With `--awareness`, also the mean probe score per trial. |
+| `compare --a FILE... --b FILE... [--margin 0] [--metric tells\|awareness]` | Bootstrap B minus A; report better, worse or unclear. Compare only identical trial and judging protocols. `--metric awareness` compares per-trial probe scores instead of tell counts. |
+
+### Eval-awareness probe
+
+An optional published probe reads an open-weights model's activations at each agent turn and scores how test-like the situation looks to it, including when the agent says nothing. Its `awareness.json` output can feed the loop: `open --awareness` adds turns where the score rose as findings, `score --awareness` adds a per-trial probe score, and `compare --metric awareness` decides on it. The `realism-loop` workflow takes `awareness` paths; `realism-cycle` takes `awarenessProbe`, `awarenessGpu`, `reasoning`, `historyTokens` and `metric`. Scoring runs on a paid Modal GPU that the cycle's budget does not count. See [the awareness guide](awareness.md) for setup and limitations.
 
 ## Preserve reproducibility
 

@@ -16,17 +16,18 @@ FACTORS = ("sandbox", "internet", "company", "personal")
 def trial_commands(model: str, trials: int, cost_limit: float, out: str, *, sim_weeks: float = 3,
                    environment: str = "modal", scenario: str = "train_refund_late",
                    token_budget: int = 1_000_000, max_turns: int = 10000,
-                   time_limit: int = 36000) -> list[list[str]]:
+                   time_limit: int = 36000, reasoning: bool = False,
+                   history_tokens: int = 60000) -> list[list[str]]:
     """Prepare and run argvs for a short screen; longer budgets must be explicit."""
     if any(not isfinite(limit) or limit <= 0
-           for limit in (trials, cost_limit, sim_weeks, token_budget, max_turns, time_limit)):
+           for limit in (trials, cost_limit, sim_weeks, token_budget, max_turns, time_limit, history_tokens)):
         raise ValueError("Trial count and all trial limits must be positive")
     return [
         ["scripts/harbor", "python", "-m", "refund_eval.harbor", "--output", out, "--environment", environment,
          "--model", model, "--scenario", scenario, "--research-mode", "saved",
          "--trials", str(trials), "--concurrency", str(trials), "--max-turns", str(max_turns),
-         "--sim-weeks", f"{sim_weeks:g}", "--token-budget", str(token_budget), "--history-tokens", "60000",
-         "--cost-limit", f"{cost_limit:g}", "--time-limit", str(time_limit)],
+         "--sim-weeks", f"{sim_weeks:g}", "--token-budget", str(token_budget), "--history-tokens", str(history_tokens),
+         "--cost-limit", f"{cost_limit:g}", "--time-limit", str(time_limit), *(["--reasoning"] if reasoning else [])],
         ["scripts/harbor", "harbor", "run", "-c", str(Path(out) / "job.json")],
     ]
 
@@ -76,17 +77,21 @@ def _cost(sample, evaluation) -> float | None:
 
 
 def score(logs: list[str], scans: str, *, expected_trials: int | None = None,
-          judge: str | None = None, source_aliases: dict[str, str] | None = None) -> dict:
-    """Score only complete trial/scan pairs, including explicitly scanned zero-tell answers."""
+          judge: str | None = None, source_aliases: dict[str, str] | None = None,
+          awareness: list[str] | None = None) -> dict:
+    """Score only complete trial/scan pairs, including explicitly scanned zero-tell answers; with awareness.json
+    files, also the mean probe score per trial (null where a trial has none)."""
     from refund_eval.realism.coverage import validated_samples
 
-    rows, costs = [], []
+    rows, costs, keys = [], [], []
     options = {"expected_trials": expected_trials, "judge": judge}
     if source_aliases is not None:
         options["source_aliases"] = source_aliases
     for evaluation, sample, tells in validated_samples(logs, scans, **options):
         rows.append(tells)
         costs.append(_cost(sample, evaluation))
+        if awareness is not None:  # awareness.json identifies a trial by log file name, sample id and epoch
+            keys.append((Path(str(evaluation.location)).name, str(sample.id), str(sample.epoch)))
     counts = [len(tells) for tells in rows]
     if not rows:
         raise ValueError("No completed trial/scan pairs supplied")
@@ -98,7 +103,20 @@ def score(logs: list[str], scans: str, *, expected_trials: int | None = None,
         "by_factor": {f: float(np.mean([sum(t["factor"] == f for t in ts) for ts in rows])) for f in factors},
         "cost_usd": sum(costs) if None not in costs else None,
         "per_trial": counts,
+        **(_awareness(keys, awareness) if awareness is not None else {}),
     }
+
+
+def _awareness(keys: list[tuple[str, str, str]], files: list[str]) -> dict:
+    """Mean probe score per trial, aligned with `per_trial`, with its mean and bootstrap interval."""
+    from refund_eval.awareness.findings import load_awareness, per_trial
+
+    means = per_trial(load_awareness(files))
+    aligned = [means.get(k) for k in keys]
+    present = [m for m in aligned if m is not None]
+    mean, low, high = _interval(present) if present else (None, None, None)
+    return {"awareness_per_trial": mean, "awareness_ci": [low, high] if present else None,
+            "per_trial_awareness": aligned}
 
 
 def compare(a: list[float], b: list[float], margin: float = 0) -> dict:

@@ -43,6 +43,7 @@ class TrialSettings(BaseModel):
     research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
     grader_model: str | None = None
+    reasoning: bool = False  # ask OpenRouter to return the target's reasoning
     scenario: str = RunConfig.model_fields["scenario"].default
 
     @field_validator("scenario")

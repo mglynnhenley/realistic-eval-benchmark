@@ -187,7 +187,7 @@ def logs(monkeypatch):
                                   SimpleNamespace(id="late", epoch=2, model_usage=usage(0.5))],
                "/runs/2/b.eval": [SimpleNamespace(id="late", epoch=1, model_usage={})]}
     monkeypatch.setattr("inspect_ai.log.read_eval_log", lambda path: SimpleNamespace(
-        samples=samples[path], stats=SimpleNamespace(model_usage=usage(2.0))))
+        samples=samples[path], stats=SimpleNamespace(model_usage=usage(2.0)), location=path))
     tells = [{"log": "file:///runs/1/a.eval", "sample_id": "late", "epoch": 1, "factor": "internet", "noticed": "yes"},
              {"log": "file:///runs/1/a.eval", "sample_id": "late", "epoch": 1, "factor": "company", "noticed": "possible"},
              {"log": "/runs/2/b.eval", "sample_id": "late", "epoch": 1, "factor": "internet", "noticed": "possible"},
@@ -264,3 +264,36 @@ def test_compare_cli_pools_files(monkeypatch, capsys, tmp_path):
     assert main(["compare", "--a", str(paths[0]), str(paths[1]), "--b", str(paths[2])]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["delta"] == pytest.approx(1 - 5) and result["decision"] == "better"
+
+
+def test_score_adds_aligned_awareness(logs, tmp_path):
+    path = tmp_path / "awareness.json"
+    path.write_text(json.dumps({"model": "Qwen/Qwen3-8B", "layer": 18, "trials": [
+        {"log": "/elsewhere/a.eval", "sample_id": "late", "epoch": 2, "mean": 0.5, "turns": []},
+        {"log": "/runs/2/b.eval", "sample_id": "late", "epoch": 1, "mean": -0.5, "turns": []},
+        {"log": "/runs/9/other.eval", "sample_id": "late", "epoch": 1, "mean": 9.0, "turns": []}]}))
+    plain = cycle.score(logs, "scans")
+    result = cycle.score(logs, "scans", awareness=[str(path)])
+    assert result["per_trial_awareness"] == [None, 0.5, -0.5] and result["awareness_per_trial"] == 0.0
+    assert result["awareness_ci"][0] <= 0.0 <= result["awareness_ci"][1]
+    assert {k: v for k, v in result.items() if "awareness" not in k} == plain
+    assert "per_trial_awareness" not in plain
+
+
+def test_compare_cli_awareness_metric_drops_nulls(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text(json.dumps({"per_trial": [0, 0], "per_trial_awareness": [1.0, None, 0.8]}))
+    b.write_text(json.dumps({"per_trial": [5, 5], "per_trial_awareness": [-0.5, -0.7, None]}))
+    assert main(["compare", "--a", str(a), "--b", str(b), "--metric", "awareness"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["delta"] == pytest.approx(-0.6 - 0.9) and result["decision"] == "better"
+    assert main(["compare", "--a", str(a), "--b", str(b)]) == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "worse"
+
+
+def test_trial_commands_can_ask_for_reasoning():
+    prepare, _ = cycle.trial_commands("openrouter/qwen/qwen3-32b", 2, 4.0, "out", reasoning=True,
+                                      history_tokens=24000)
+    assert prepare[-1] == "--reasoning" and prepare[prepare.index("--history-tokens") + 1] == "24000"
+    assert "--reasoning" not in cycle.trial_commands("m", 2, 4.0, "out")[0]
