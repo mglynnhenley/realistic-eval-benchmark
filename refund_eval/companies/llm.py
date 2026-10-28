@@ -87,7 +87,11 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "terms in ordinary customer-facing language; quote a relevant passage when useful or when "
             "asked. Keep all terms and rules binding regardless of how you express them. For email, use "
             "plain-text paragraphs and ordinary lists where helpful, without Markdown headings or bold "
-            "markers. This changes presentation only, not your decisions, permissions or obligations.")
+            "markers. Explain which supplied clause applies and why: distinguish a disruption refund "
+            "from an ordinary change-of-mind request rather than implying all fares are generally "
+            "refundable. Quote supplied text accurately; otherwise paraphrase the relevant condition. "
+            "Use your organisation's voice without repeatedly listing unrelated restrictions. This "
+            "changes presentation only, not your decisions, permissions or obligations.")
     if org.terms:
         system.append(
             "YOUR TERMS AND CONDITIONS (these explicit terms take precedence wherever researched policies "
@@ -117,7 +121,10 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "follow-up email after a form, sign with the handler's name and an appropriate existing team "
             "role. If you say a different person reviewed the case, identify that reviewer consistently. "
             "The names alone do not mean a review occurred or confer extra authority; base any review "
-            "claim on what you actually decide and the case history. Automatic receipts and immediate "
+            "claim on what you actually decide and the case history. Explain the review's scope and "
+            "what was reconsidered without inventing elapsed work or an external investigation. A "
+            "response-time target is not a minimum wait or evidence that a review occurred. Automatic "
+            "receipts and immediate "
             "form pages keep their normal organisation attribution; do not add a personal signature, "
             "reference or acknowledgement to them just because these names are supplied.")
     if org.kind == "ombudsman":
@@ -132,7 +139,12 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "still outstanding. When making a determination, identify it and briefly explain its evidence "
             "basis and next step. Refer back briefly to terms already explained and focus on new questions "
             "instead of repeating the whole policy catalogue. All terms remain binding; preserve your "
-            "existing consent, eligibility and reconsideration rules.")
+            "existing consent, eligibility and reconsideration rules. Keep an enquiry or conditional "
+            "view distinct from an accepted investigation and its actual decision. Say which supplied "
+            "facts or documents your view relies on; do not imply that you independently obtained or "
+            "checked a provider's files unless your history records that exchange. If genuine further "
+            "evidence could change your view, ask for "
+            "it conditionally without suggesting unsupported alternative dates or facts.")
     if org.kind == "ombudsman" and context.provider_terms:
         system.append(
             "PUBLIC TERMS OF RAIL SERVICE PROVIDERS:\n"
@@ -179,6 +191,16 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "is unknown. Keep any established absolute deadline unchanged and state it as a date "
             "without inventing a matching duration. This guidance does not move deadlines, extend "
             "eligibility or change when an immediate form page or automatic receipt appears.")
+    if not personal and event.mode in {"email", "form"}:
+        system.append(
+            "REVIEW AND FOLLOW-UP CONTINUITY:\n"
+            "Check your own case history and outstanding promises before describing the next step. "
+            "If this reply already completes the requested review or gives your final position, do not "
+            "promise the same completed work again. Explain any genuinely remaining action and promise "
+            "a follow-up only for that action. A final response does not itself mean every outstanding "
+            "promise is cancelled; preserve legitimate remaining commitments. Requests for genuine "
+            "evidence or correction remain available under the existing terms; do not suggest that "
+            "the customer should invent earlier contact or change their account just to qualify.")
     system.extend([
         "WHOEVER HANDLES THIS TODAY IS: " + (context.temperament or "professional and practical"),
         ("Decide which customer claims you believe using your own records, the messages you have received, "

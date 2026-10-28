@@ -211,15 +211,39 @@ def _provider_terms(scenario: Scenario, org: Org) -> dict[str, str]:
     return terms
 
 
-def _correspondence_handlers(org: Org, world: World, mode: str) -> tuple[str, str]:
-    """Stable fictional staff for this case, without consuming the timing RNG."""
+def _correspondence_handlers(org: Org, world: World, mode: str, *,
+                             organisation_keys: list[str] | None = None) -> tuple[str, str]:
+    """Allocate distinct fictional staff across the fixed public organisation roster.
+
+    Recompute from public keys and the case start, without registering a company,
+    consulting anyone's case history or drawing from the timing RNG.
+    """
     if org.kind == "dynamic_personal" or mode not in {"email", "form"}:
         return "", ""
-    names = ("Sam Patel", "Jordan Reed", "Taylor Hughes", "Jamie Clarke",
-             "Morgan Ellis", "Riley Shaw", "Chris Ward", "Robin Davis")
-    rng = random.Random(f"correspondence-handlers|{org.key}|{world.start_time.isoformat()}")
-    handler, reviewer = rng.sample(names, 2)
-    return handler, reviewer
+    if organisation_keys is None:
+        from refund_eval.sim.common import current_scenario
+
+        organisation_keys = [o.key for o in current_scenario().orgs if o.kind != "dynamic_personal"]
+    keys = sorted(set(organisation_keys))
+    if org.key not in keys:
+        # A newly discovered company cannot reshuffle the configured roster.
+        keys.append(org.key)
+    first_names = ("Sam", "Jordan", "Taylor", "Jamie", "Morgan", "Riley", "Chris", "Robin",
+                   "Alex", "Casey", "Drew", "Ellis", "Cameron", "Rowan", "Blair", "Jesse")
+    surnames = ("Patel", "Reed", "Hughes", "Clarke", "Ellis", "Shaw", "Ward", "Davis",
+                "Bennett", "Cooper", "Lewis", "Brooks", "Turner", "Price", "Foster", "Hayes")
+    names = [f"{first} {last}" for first in first_names for last in surnames]
+    # Larger custom scenarios can use a middle initial rather than reusing staff.
+    if len(keys) * 2 > len(names):
+        names = [f"{first} {initial}. {last}" for first in first_names
+                 for initial in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for last in surnames]
+    for key in keys:
+        rng = random.Random(f"correspondence-handlers|{key}|{world.start_time.isoformat()}")
+        pair = rng.sample(names, 2)
+        if key == org.key:
+            return pair[0], pair[1]
+        names = [name for name in names if name not in pair]
+    raise ValueError("Organisation missing from the correspondence roster")
 
 
 def _correspondence_senders(org: Org, world: World, record: dict | None, mode: str) -> tuple[str, list[str]]:
@@ -267,7 +291,8 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
     realism = notes_text(scenario.id, org.key, "personal" if org.kind == "dynamic_personal" else "company")
     if mode == "form":
         realism = "\n".join(filter(None, [realism, notes_text(scenario.id, org.key, "internet")]))
-    handler, reviewer = _correspondence_handlers(org, world, mode)
+    handler, reviewer = _correspondence_handlers(
+        org, world, mode, organisation_keys=[o.key for o in scenario.orgs if o.kind != "dynamic_personal"])
     configured_sender, previous_senders = _correspondence_senders(org, world, record, mode)
     return CompanyContext(
         org=CompanyProfile(key=org.key, name=org.name, kind=org.kind, policy=org.policy, terms=terms),
