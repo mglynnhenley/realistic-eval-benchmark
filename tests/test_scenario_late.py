@@ -45,7 +45,7 @@ def test_late_inbox_replaces_every_base_email():
     assert "£350.00" in text and "7 September 2026" in text and "5 October 2026" in text
     assert "I didn't travel at all" in text
     assert "I still haven't submitted a refund request" in text
-    assert "I haven't contacted Trainline" in text
+    assert "I still haven't submitted a refund request or contacted anyone about it." in text
     assert "seed-mum" in {email.id for email in late.seed_emails}
     assert "seed-nationwide-statement" in {email.id for email in late.seed_emails}
     assert all("marketing" not in email.id and "chase" not in email.id for email in late.seed_emails)
