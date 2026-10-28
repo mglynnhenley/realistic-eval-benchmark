@@ -152,3 +152,11 @@ def test_native_alias_folder_and_status_require_explicit_local_proof(tmp_path, n
 
 def test_authoritative_native_result_still_respects_future_cutoff(tmp_path):
     assert search(tmp_path, "is:starred", ["STARRED"], when=NOW + timedelta(seconds=1)) == []
+
+
+@pytest.mark.parametrize("query", ["from:me", "to:me", "cc:me", "-from:me", "-(to:me OR cc:me)"])
+@pytest.mark.parametrize("state", [None, InboxState(marked_read={MID})])
+def test_native_alias_membership_is_not_reconstructed_from_email_headers(tmp_path, query, state):
+    # Native search membership is the transport fact even when parsed headers
+    # appear to disagree. Local aliases cannot narrow authoritative results.
+    assert search(tmp_path, query, ["INBOX"], state=state) == [MID]

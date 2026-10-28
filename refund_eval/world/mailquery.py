@@ -77,6 +77,9 @@ class Pred:
             hay = " ".join([e.sender, " ".join(e.to), " ".join(e.cc), e.subject, e.body]).lower()
             return " ".join(v.split()) in " ".join(hay.split())
         if k in _FIELD_OPS:
+            if v == "me" and k in ("from", "to", "cc"):
+                addresses = ([e.sender] if k == "from" else e.to + e.cc if k == "to" else e.cc)
+                return any(parse_address(address) in ctx.user_addresses for address in addresses)
             hay = (e.sender if k == "from" else e.subject if k == "subject" else
                    " ".join(e.to + e.cc if k == "to" else e.cc)).lower()
             return (" ".join(v.split()) in " ".join(hay.split()) if self.quoted else
