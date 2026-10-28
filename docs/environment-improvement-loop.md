@@ -9,6 +9,11 @@ Use deterministic tests and private trial evidence to distinguish environment de
 3. Make the smallest implementation change that addresses that example. Test the affected path and then run the full suite.
 4. Record the resulting behaviour, configuration requirements and limitations in the public documentation. Keep original evidence and operational notes private.
 
+Evaluate correctness repairs separately from the aggregate realism score. An
+inconclusive tells comparison does not by itself invalidate a repair verified by
+targeted tests. Record the correctness and realism decisions separately, and
+preserve the frozen versions used in each comparison.
+
 For a surprising company decision, [rerun that recorded interaction](running.md#rerunning-one-company-decision) against a chosen company model or implementation. This compares responses without applying effects or changing the original trial. Use [offline claim evaluation](running.md#evaluating-saved-claims) to inspect factual contradictions separately from company belief.
 
 ## Realism loop
@@ -32,6 +37,14 @@ override scenario rules, company terms, eligibility or configured reply timing.
 Personal contacts receive no organisation examples. A recipient's public post
 does not independently authenticate the original sender, and descriptive subjects
 are marked when the original subject was unavailable.
+
+Company history labels future email as a timestamped draft until delivery.
+Non-personal company replies are queued behind that organisation's earlier pending
+replies, with a ten-minute gap. This organisation-wide ordering is a modelling
+convention and can extend the sampled reply delay. A dynamically discovered company
+may remain silent while its own reply is pending; this does not merge new material
+into the queued draft or guarantee that generated prose describes its status
+correctly. Personal contacts retain independent reply timing.
 
 All commands are run as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late]`:
 
