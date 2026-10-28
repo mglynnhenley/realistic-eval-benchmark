@@ -59,64 +59,77 @@ All commands are run as `uv run python -m refund_eval.realism <command> [--scena
 
 The `realism-loop` workflow runs one iteration from mining to a report in `.context/realism/iterations/`. Mining is paid; pass existing scans to skip it. The `realism-track` workflow runs or adds trials to the behaviour ledger, then writes an analysis to `.context/realism/tracking/`. Only `notes merge` and `check --note` write the memory.
 
-### Hybrid architecture: hosted coding agents and direct APIs
+### Simple hybrid design: one cloud workspace
 
-The recommended next architecture uses Conductor Cloud for investigation, code
-changes and independent review, and direct model APIs for structured scanning and
-judging. A deterministic controller owns experimental budgets, frozen source,
-Modal launches, evidence validation and acceptance. This is the migration design;
-the current Python backend below still uses the experimental direct-API repair
-implementation. A Conductor repair adapter has not yet been integrated.
+The recommended first version is **one Conductor cloud workspace, one primary
+coding agent, a short independent review session, and one measurement command**.
+The coding agent investigates and edits; ordinary Python code handles repeated
+trial launches, API scans, accounting and comparison. The measurement controller
+is a script in that workspace. Saved files, rather than the conversation, record
+progress. A separate hosted controller service is deferred.
 
-| Work | Executor | Required output |
+| Step | Executor | Result |
 |---|---|---|
-| Investigate a finding, follow imports, search source, propose a tested fix | Conductor cloud coding agent | Base commit, candidate commit and evidence manifest |
-| Independent correctness/semantic review | Separate coding-agent session or workspace | Review of the exact candidate diff; independent synthetic reproduction where appropriate |
-| Scan transcripts and judge recorded interactions | Direct model APIs | Structured results under a frozen rubric/model/protocol |
-| Reserve spend, launch matched trials, validate results and decide retention | Deterministic experiment controller | Durable stage records, exact-source scores and final decision |
+| Read saved findings, search source, fix one issue and run tests | Primary cloud coding agent | Clean candidate commit and regression evidence |
+| Check the exact diff, tests and benchmark semantics | Fresh reviewer session | Approve or reject that candidate |
+| Run three baseline and three candidate Modal trials | Measurement command | Frozen configurations and native logs |
+| Scan transcripts and compare scores | Direct model APIs plus deterministic scoring | Results, spend and correctness/realism decisions |
+| Explain the outcome and select another bounded round | Primary agent | Report and saved next action |
 
-Read access and acceptance permission are different. Coding agents should inspect
-relevant tracked implementation, scenario data, rules and tests. They edit an
-isolated candidate branch. The controller independently validates the returned
-commit and protected semantics before applying a candidate to an experiment.
-A suggestion that needs protected changes is saved for separate review; it is not
-permission to alter rules, grading or budget enforcement. Keep trial/judge keys
-outside the coding workspace. Execute controller and scorer checks from trusted
-source, rather than allowing a candidate to replace its own acceptance tests.
+Use coding agents for work requiring exploration and tool use; use direct model
+calls for structured judgments. Keep initial automation to one focused repair and
+one matched comparison, then report the candidate without automatic merging.
+Unsupported proposals become `no_candidate` or
+`needs_scope_change` results. They do not trigger unbounded repair attempts or
+repeat experiments.
 
-The first live custom-worker attempt failed before Modal because the same Python
-allowlist controlled both reading and writing. It hid the actual scenario-data
-origin of the selected finding. The two-request actor had no source-search or
-follow-up read loop and invented a replacement for an unseen file. Its expected
-proposal rejection escaped as a generic backend error. Broad source discovery,
-structured proposal/rejection outcomes and a reviewed commit handoff are the
-necessary corrections; unrestricted auto-application is not.
+Agents should read relevant tracked code, scenario data, rules and tests, and edit
+an isolated candidate branch. Validate the diff against protected benchmark rules.
+Run measurement and scoring from a clean, fixed baseline checkout; candidate code
+must not replace its own scorer, budget checks or protocol. A reviewer operates on
+the exact commit later measured. Verified correctness and aggregate realism remain
+separate decisions; three trials per arm provide exploratory evidence. The current
+whole-scenario-file locks remain conservative: a cosmetic YAML change needs an
+explicitly reviewed field-level exception or an eligible alternative first fix.
 
-Conductor's documented [API](https://www.conductor.build/docs/api) and
-[hosted MCP server](https://www.conductor.build/docs/api/mcp) can create workspaces,
-send prompts, read status/transcripts and cancel sessions. Persist external
-workspace/session/message IDs. Workspace creation is not idempotent: reconcile a
-lost response instead of blindly creating another. Prompt delivery supports a
-stable client message ID. Initial idle status alone does not establish that a
-new task finished. Stop/cancel of an agent does not establish Modal cleanup.
+Persist run ID, baseline/candidate commits, protocol, stage status, external job
+IDs, ledger and artifact paths under one private run directory. Reserve spend
+before a paid launch and record actual usage promptly. Reuse completed stages only
+when their exact commits and protocol match. An interrupted or unknown paid stage
+stops for reconciliation; restarting the agent never means launching it again.
+Manual recovery is acceptable for this first version.
 
-Keep authoritative state outside the coding session. Cloud sandboxes sleep after
-20 minutes without agent/terminal activity and stop after 23 hours 50 minutes,
-even when active; files and chat survive but processes do not. Export the proposal
-before measurement starts. See [cloud workspace lifecycle](https://www.conductor.build/docs/cloud/working-with-cloud-workspaces).
+Reuse `stages.py`, `cycle.py`, coverage checks and the existing Modal commands.
+A small refactor is still required: `autonomous.py` hardwires the two-call API
+repair actor, runs scoring from candidate source, and does not expose a standalone
+measurement command. The ledger CLI alone does not execute, wait for and reconcile
+a paid command. The proposed cloud workflow is **not integrated yet**.
 
-Cloud coding billing is separate from trial/judge API usage. The public Conductor
-API does not document a per-session dollar cap or usable cost reconciliation
-contract. Do not claim our existing ledger caps cloud coding spend. Establish its
-subscription/credit allowance separately before a paid pilot; a wall-clock timeout
-is not a dollar limit. See [pricing](https://www.conductor.build/pricing).
+The first live custom worker hid the actual scenario-data origin of a finding by
+using its write allowlist for reading. Its two-call actor could not follow imports
+or request more source, invented a replacement for an unread file, and surfaced
+the rejection as a generic error. A normal cloud coding harness and structured
+outcomes address these failures without building another coding-agent runtime.
 
-Start with one cloud workspace and one repair, not a fleet or recurring routine.
-Explicitly transfer a selected private findings bundle with hashes: this Mac's
-unpushed commits and gitignored `.context` files do not appear in a cloud checkout.
-Require a clean candidate commit plus test evidence. Dry-run no-candidate,
-rejection, accepted proposal, duplicate delivery and controller restart paths
-before spending on a fresh three-control/three-candidate Modal comparison.
+Transfer the selected private findings bundle explicitly: unpushed source and
+this Mac's gitignored `.context` files are absent from a cloud checkout. Start
+with one existing workspace and a manual launch. Defer provider abstraction,
+automated workspace creation, recurring routines, fleet management and automatic
+multi-round recovery until one repair and one comparison succeed.
+
+Conductor cloud machines have sleep/lifetime limits; saved files can survive while
+processes stop. Use short pilot checkpoints and explicit wall-clock limits; the
+current ten-hour-per-arm defaults leave little lifetime margin for other work.
+This first version runs unattended within a session and supports
+manual restart, rather than guaranteeing continuous operation. Later, add a small
+supervisor only if automatic wake/recovery is needed. See [workspace lifecycle](https://www.conductor.build/docs/cloud/working-with-cloud-workspaces).
+
+Conductor coding charges and trial/judge API spending require separate accounting;
+the current ledger cannot enforce a Conductor session dollar cap. Hosting the
+agent and measurement command together also means they share workspace privileges:
+file checks are correctness guards, not credential isolation. Configure only the
+credentials needed for the pilot. See [API](https://www.conductor.build/docs/api),
+[hosted MCP](https://www.conductor.build/docs/api/mcp) and [pricing](https://www.conductor.build/pricing).
 
 ### Autonomous background worker (MCP)
 
