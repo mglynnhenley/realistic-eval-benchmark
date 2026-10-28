@@ -325,6 +325,14 @@ def _body_from_payload(payload: dict[str, Any]) -> str:
     html: list[str] = []
 
     def walk(part: dict[str, Any]) -> None:
+        # Gmail filename identifies an attachment even when its disposition is
+        # inline. Skip attached containers before visiting their nested text.
+        if part.get("filename") or any(
+            h.get("name", "").casefold() == "content-disposition"
+            and h.get("value", "").split(";", 1)[0].strip().casefold() == "attachment"
+            for h in part.get("headers", []) or []
+        ):
+            return
         mime = part.get("mimeType", "")
         data = (part.get("body") or {}).get("data")
         if data and mime == "text/plain":

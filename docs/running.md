@@ -168,6 +168,8 @@ The first export opens a browser for `gmail.readonly` consent and saves the toke
 
 Drafts, spam, trash and chats are excluded; attachments are not exported. Exports default to 300 messages and 20,000 characters per body. The bundled model-comparison pressure thread is included unless `--no-pressure-thread` is set. Loading an inbox personalises it to the scenario user and rebases dates by whole weeks.
 
+Native Gmail reads and snapshot exports exclude named attachment parts and explicit `Content-Disposition: attachment` subtrees from message-body extraction. Ordinary unnamed inline plain text and HTML alternatives remain available, and text attachments cannot displace the inline message body. Attachment data is not fetched.
+
 Snapshots and run logs contain your mail. Save custom inboxes under `.secrets/inboxes/` or with the `*.inbox.json` suffix; these and the default output directories are gitignored and should not be published. Selected mail is sent to the model providers; batch runs also copy the inbox into the trial image. No Gmail credential is needed inside a trial. Profiles record the inbox file name and SHA-256.
 
 ## Stopping and logs
@@ -187,6 +189,8 @@ Inspect writes `.eval` files under `logs/` by default. Open them with `uv run in
 ## Boundaries and evidence
 
 Browser evidence distinguishes verified Docker/network-namespace isolation from a subprocess sharing its worker's network. A startup canary tests interception independently. Shared-network containment is recorded as unverified; review the recorded manifest when interpreting results. Browser and worker share the trial filesystem in subprocess mode.
+
+The browser broker rejects syntactically local/private destinations, numeric aliases and nonstandard ports before form simulation or cached-page reuse. Encoded authorities and IDNA hostnames receive the same checks, so a refused local form cannot manufacture a successful acknowledgement or a reloadable page. Public form actions and tokens remain available to the simulator. This destination classification performs no DNS lookup and does not establish that a public-looking name exists; actual public reads separately validate DNS answers at the socket connector. This check does not establish general browser or sandbox containment.
 
 The dashboard's **World → Company interactions** section shows the company's exact input, model attempts, validation failures, final decision and linked scheduled effects. These structured records distinguish intentional silence from a failed company call. Older runs retain their original case histories.
 

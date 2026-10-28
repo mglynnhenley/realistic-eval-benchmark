@@ -20,7 +20,7 @@ import re
 import socket
 from collections.abc import Callable
 from typing import Literal
-from urllib.parse import parse_qsl, unquote_plus, urlsplit
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit, urlunsplit
 
 import aiohttp
 from aiohttp.abc import AbstractResolver
@@ -29,7 +29,7 @@ from refund_eval.killswitch import kill_requested
 from refund_eval.published.adapter import audit
 from refund_eval.published.refund_form import late_refund_form
 from refund_eval.scenario.schema import Scenario
-from refund_eval.world.guards import check_url
+from refund_eval.world.guards import check_destination, check_url
 from refund_eval.world.interception import ToolContext, intercept, log_interception
 from refund_eval.world.orgs import resolve_org
 from refund_eval.world.state import Disclosure, world_tx
@@ -272,11 +272,7 @@ def simulated_page(text: str, *, refund_form_action: str | None = None) -> str:
     return f"<!doctype html><title>Request status</title><main>{body}{form}</main>"
 
 
-def validate_public_url(url: str, *, static_asset: bool = False) -> None:
-    """`static_asset` admits content-hashed file names; every other check stays."""
-    if not check_url(url, hashed_path_ok=static_asset).allowed or urlsplit(url).fragment:
-        raise ValueError(f"Invalid public read URL: {url}")
-    host = urlsplit(url).hostname or ""
+def _validate_numeric_host(host: str, url: str) -> None:
     try:
         canonical_v4 = socket.inet_ntoa(socket.inet_aton(host))
     except OSError:
@@ -293,6 +289,45 @@ def validate_public_url(url: str, *, static_asset: bool = False) -> None:
             raise ValueError(f"Invalid public read URL: {url}") from exc
         if not address.is_global:
             raise ValueError(f"Invalid public read URL: {url}")
+
+
+def validate_public_destination(url: str) -> None:
+    """Reject syntactically nonpublic destinations, without DNS or read guards.
+
+    Host encodings and IDNA are checked before writes and overlay reuse too.
+    A public-looking name is not proof of public DNS or an existing service;
+    actual public reads still validate DNS answers at the socket connector.
+    """
+    if re.search(r"[\x00-\x1f\x7f\\]", url):
+        raise ValueError("Invalid HTTP destination")
+    parts = urlsplit(url)
+    authority = parts.netloc
+    for _ in range(5):
+        candidate = urlsplit(urlunsplit((parts.scheme, authority, "/", "", "")))
+        if candidate.netloc != authority or candidate.path != "/" or candidate.query or candidate.fragment:
+            raise ValueError("Invalid HTTP destination")
+        if not check_destination(candidate.geturl()).allowed:
+            raise ValueError("Nonpublic HTTP destination")
+        host = (candidate.hostname or "").encode("idna").decode("ascii")
+        port = f":{candidate.port}" if candidate.port is not None else ""
+        normalized = urlunsplit((parts.scheme, (f"[{host}]" if ":" in host else host) + port, "/", "", ""))
+        if not check_destination(normalized).allowed:
+            raise ValueError("Nonpublic HTTP destination")
+        _validate_numeric_host(host, url)
+        if "%" not in authority:
+            return
+        decoded = unquote(authority)
+        if decoded == authority:
+            break
+        authority = decoded
+    raise ValueError("Invalid encoded HTTP destination")
+
+
+def validate_public_url(url: str, *, static_asset: bool = False) -> None:
+    """`static_asset` admits content-hashed file names; every other check stays."""
+    if not check_url(url, hashed_path_ok=static_asset).allowed or urlsplit(url).fragment:
+        raise ValueError(f"Invalid public read URL: {url}")
+    validate_public_destination(url)
 
 
 class PublicResolver(AbstractResolver):
@@ -436,6 +471,11 @@ class BrowserBoundary:
                 raise ValueError("Body too large")
         except (ValueError, TypeError):
             return done("blocked", response(400, NAVIGATION_BLOCKED_PAGE if navigation else "Bad request"))
+        try:
+            validate_public_destination(url)
+        except (ValueError, TypeError, OSError, UnicodeError):
+            return done("blocked", response(403, NAVIGATION_BLOCKED_PAGE if navigation else "Forbidden"),
+                        reason="url_guard")
         if method in {"GET", "HEAD"} and not body:
             if url in self.fixtures:
                 return done("fixture", self.fixtures[url])
