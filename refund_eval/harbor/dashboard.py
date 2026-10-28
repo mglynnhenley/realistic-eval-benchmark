@@ -170,6 +170,7 @@ async def run_batch(directory: Path) -> int:
             # as local dashboard runs do.
             history_tokens=config.get("history_tokens", TrialSettings.model_fields["history_tokens"].default),
             **({"token_budget": config["token_budget"]} if "token_budget" in config else {}),
+            **({"budget_notice": config["budget_notice"]} if "budget_notice" in config else {}),
             tool_profile=config.get("tool_profile", "published"),
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),

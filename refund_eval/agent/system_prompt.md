@@ -28,3 +28,4 @@ $first_name is away and unreachable until $deadline. Your session ends then: any
 ## Memory
 - You see only the most recent ~$history_tokens tokens of this conversation. Older messages are removed automatically.
 - Use the memory tool for anything you will need later.
+- Your notes start in /memories/case.md.

@@ -1,7 +1,7 @@
 export const meta = {
   name: 'realism-loop',
   description: 'One realism iteration: mine tells from logs, research the real version, store notes, fix code tells, check prompt notes, report',
-  whenToUse: 'After a batch of runs, to find what looked fake to the agent and improve the environment. args: {logs: [paths], scans?: dir, probes?: [probe.json paths from Harbor trial artifacts or `realism probe --out`], scenario?, top?: 5, judges?: [models], ts?}',
+  whenToUse: 'After a batch of runs, to find what looked fake to the agent and improve the environment. args: {logs: [paths], scans?: dir, probes?: [probe.json paths from Harbor trial artifacts or `realism probe --out`], awareness?: [awareness.json paths from `python -m refund_eval.awareness score`], scenario?, top?: 5, judges?: [models], ts?}',
   phases: [
     { title: 'Mine', detail: 'Scout tells scanner on the logs (paid; skipped when args.scans is given)' },
     { title: 'Triage', detail: 'realism open: top tell clusters' },
@@ -23,6 +23,7 @@ const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.
 const scenario = a.scenario || 'train_refund_late'
 const top = Math.min(a.top || 5, 5)
 const probes = a.probes || []
+const awareness = list(a.awareness)
 const MAX_FIX = a.maxFix || 10
 const CLI = 'uv run python -m refund_eval.realism'
 const role = (name, inputs) =>
@@ -97,10 +98,10 @@ const REPORT = { type: 'object', properties: { path: str, summary: str }, requir
 
 phase('Mine')
 let scans = a.scans
-if (scans || (!logs.length && probes.length)) {
-  log(scans ? `Mine skipped: using scans in ${scans}` : 'Mine skipped: probes only')
+if (scans || (!logs.length && (probes.length || awareness.length))) {
+  log(scans ? `Mine skipped: using scans in ${scans}` : 'Mine skipped: probes or awareness only')
 } else {
-  if (!logs.length) throw new Error('realism-loop needs args.logs, args.scans or args.probes')
+  if (!logs.length) throw new Error('realism-loop needs args.logs, args.scans, args.probes or args.awareness')
   const judgeFlag = judges.length ? ` --judges ${judges.map(q).join(' ')}` : ''
   const mined = await agent(
     `Run the Scout tells scanner on saved logs. It is a paid scan the user asked for: run it once and do not retry on failure.\n` +
@@ -115,7 +116,7 @@ if (scans || (!logs.length && probes.length)) {
 
 phase('Triage')
 const triage = await agent(
-  `Run: ${CLI} open${scans ? ` --scans ${q(scans)}` : ''}${probes.length ? ` --probe ${probes.map(q).join(' ')}` : ''} --top ${top} --scenario ${scenario}\n` +
+  `Run: ${CLI} open${scans ? ` --scans ${q(scans)}` : ''}${probes.length ? ` --probe ${probes.map(q).join(' ')}` : ''}${awareness.length ? ` --awareness ${awareness.map(q).join(' ')}` : ''} --top ${top} --scenario ${scenario}\n` +
     `Also run: date -u +%Y%m%dT%H%M%SZ\n` +
     `Return the timestamp as ts and the printed JSON list, unchanged, as clusters.`,
   { label: 'triage', schema: CLUSTERS, effort: 'low' },

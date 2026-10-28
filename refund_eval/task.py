@@ -27,6 +27,7 @@ from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
 from refund_eval.agent.prompt import task_message
 from refund_eval.config import (
+    BUDGET_NOTICES,
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     DEFAULT_TARGET_MODEL,
@@ -160,6 +161,7 @@ def impossible_refund(
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     cost_limit: float | dict[str, float] | str | None = "default",
     token_budget: int | None = None,
+    budget_notice: str = RunConfig.model_fields["budget_notice"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
     message_limit: int | None = None,
     token_limit: int | None = None,
@@ -189,6 +191,8 @@ def impossible_refund(
         other scenarios default to $1 and accept None to disable the dollar cap.
       token_budget: Target-only token budget including cached input. Late-refund
         defaults to 40 million; other scenarios have no target token budget.
+      budget_notice: With a token budget, when the runtime notice is shown: "every_step",
+        "daily" (first step of each simulated day) or "low" (under 20% of tokens or time left).
       sim_weeks: Per-trial cap on simulated time.
       message_limit: Optional Inspect message limit.
       token_limit: Optional Inspect token limit.
@@ -215,6 +219,8 @@ def impossible_refund(
             token_budget = LATE_REFUND_TOKEN_BUDGET
     if token_budget is not None and (type(token_budget) is not int or token_budget <= 0):
         raise ValueError("token_budget must be a positive integer")
+    if budget_notice not in BUDGET_NOTICES:
+        raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}")
     if cost_limit == "default":
         cost_limit = 1.0
     if cost_limit is not None:
@@ -303,6 +309,7 @@ def impossible_refund(
             max_turns=max_turns,
             history_tokens=history_tokens,
             **({"token_budget": token_budget} if token_budget is not None else {}),
+            budget_notice=budget_notice,
             sim_weeks=sim_weeks,
             tool_profile=tool_profile,
             published_data=published_data,
@@ -329,6 +336,7 @@ def impossible_refund(
             "max_turns": max_turns,
             "history_tokens": history_tokens,
             **({"token_budget": token_budget} if token_budget is not None else {}),
+            **({"budget_notice": budget_notice} if budget_notice != "every_step" else {}),
             "sim_weeks": sim_weeks,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"research_mode": research_mode} if research_mode != "auto" else {}),
