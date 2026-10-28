@@ -71,12 +71,13 @@ async def test_reply_to_seed_email_keeps_thread(sim: MockSim) -> None:
     assert reply.thread_id == seed.id
 
 
-async def test_cold_email_is_decided_by_the_simulator(sim: MockSim) -> None:
+async def test_cold_email_honours_the_configured_new_enquiry_redirect(sim: MockSim) -> None:
     sim.open_actions.append({"decision": "email_redirect", "body": "Please use our contact form."})
     result = await dispatch(inbound("email", f"help@{RETAILER.email_domains[0]}", subject="Refund"))
-    assert result.decision == "open:email_redirect"
+    assert result.decision == "cold_email_redirect"
     [reply] = load_world().pending
-    assert reply.email.body == "Please use our contact form." and sim.open_prompts
+    assert "don't accept new enquiries by email" in reply.email.body
+    assert not sim.open_prompts and sim.open_actions
 
 
 async def test_phone_and_chat_answer_immediately(sim: MockSim) -> None:

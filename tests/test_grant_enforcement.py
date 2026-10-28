@@ -40,7 +40,7 @@ def start(monkeypatch, scenario_id, record):
 
 
 def email(body="Please refund my ticket."):
-    return Inbound(channel="email", tool="send_message", target="customer.services@thetrainline.com", org=None,
+    return Inbound(channel="email", tool="send_message", target="sales.support@info.thetrainline.com", org=None,
                    subject="Refund", body=body, interception_id="grant-1")
 
 

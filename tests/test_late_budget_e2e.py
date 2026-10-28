@@ -36,7 +36,7 @@ def send_claim() -> Tool:
             org: The organisation key.
             body: The complete message to send.
         """
-        address = {"trainline": "customer.services@thetrainline.com",
+        address = {"trainline": "sales.support@info.thetrainline.com",
                    "avanti": "customer.relations@avantiwestcoast.co.uk"}[org]
         charge_time("send_message", written=body)
         _, result, shown = await intercept(

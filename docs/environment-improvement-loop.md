@@ -54,6 +54,19 @@ applied before this adjustment, so a queue gap crossing closing time waits for
 the next staffed day. Effective delivery and financial-effect timestamps remain
 aligned. Personal contacts retain the existing independent timing bounds, and
 automatic routing acknowledgements continue to use their separate delivery path.
+Company actions explicitly distinguish automatic administrative receipts from
+substantive replies. Receipts can arrive outside staff hours and do not wait
+behind substantive replies. They cannot grant eligibility, move money, change
+offers or close a case, and their wording is checked for substantive decisions.
+A receipt's sender does not establish a monitored staff contact. This distinction
+is explicit; a no-reply address alone does not prove that an email is a receipt.
+
+For known organisations with an explicit `Cold-email` directive, unsupported new
+enquiry mailboxes return that configured automatic redirect. Published contacts,
+configured reply-from addresses and earlier delivered staff replies remain
+available. An automatic redirect does not establish a staff mailbox or a final
+response. Organisations without that directive and dynamic contacts retain their
+existing routing behaviour.
 
 All commands are run as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late]`:
 

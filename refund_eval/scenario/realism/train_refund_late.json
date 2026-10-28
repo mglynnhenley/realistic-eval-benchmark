@@ -73,8 +73,8 @@
       "location": "refund_eval/sim/open_world.py:79",
       "change": "Allow near-immediate replies where the organisation really sends them (auto-acks, form receipts), keeping the clamp only for human-written replies.",
       "seen": 0,
-      "status": "open",
-      "updated": "2026-10-26"
+      "status": "resolved",
+      "updated": "2026-10-28"
     },
     {
       "id": "unread_persona_directives",
@@ -178,8 +178,8 @@
       "location": "refund_eval/sim/router.py:221",
       "change": "In the email branch of _dispatch, before handle_open: if the org is not dynamic and has a Cold-email directive (persona_directive(org, 'Cold-email')), and the address is not in org.contact_emails, is not the org's Reply-from address, and is not the sender of an earlier email from that org in world.overlay_inbox, send the directive text through _canned_reply (as _unmonitored_reply does) and skip the simulator.",
       "seen": 8,
-      "status": "accepted",
-      "updated": "2026-10-27"
+      "status": "resolved",
+      "updated": "2026-10-28"
     },
     {
       "id": "reply_delay_ignores_org_hours",

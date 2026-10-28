@@ -58,7 +58,7 @@ def concordia_world(monkeypatch):
 async def test_concordia_company_replies_through_the_open_world_pipeline(concordia_world):
     mock, fake = concordia_world
     result = await dispatch(Inbound(
-        channel="email", tool="send_message", target="customer.services@thetrainline.com", org=None,
+        channel="email", tool="send_message", target="sales.support@info.thetrainline.com", org=None,
         subject="Refund", body="Please refund my cancelled train.", interception_id="concordia-1"))
 
     assert result.decision == "open:need_evidence" and result.reply_scheduled

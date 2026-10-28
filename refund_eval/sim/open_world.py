@@ -245,7 +245,8 @@ class PreparedCompanyAction:
 def _pending_due(world: World, org: Org) -> datetime | None:
     """When this organisation's last pending reply reaches the customer, if any."""
     return max((p.due_at for p in world.pending
-                if p.email.org == org.key and p.email.source == "counterparty"), key=as_aware, default=None)
+                if p.email.org == org.key and p.email.source == "counterparty" and not p.email.automatic),
+               key=as_aware, default=None)
 
 
 def _staffed_email_time(org: Org, due: datetime) -> datetime:
@@ -267,7 +268,8 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
     if event.kind == "note":
         action.notes_to_others = []  # Referrals never create another referral.
     if event.mode in {"email", "form"} and action.reply:
-        minimum, maximum = ((MIN_REPLY_HOURS, MAX_REPLY_HOURS) if org.kind == "dynamic_personal"
+        minimum, maximum = ((0, MAX_REPLY_HOURS) if action.reply_kind == "automatic" else
+                            (MIN_REPLY_HOURS, MAX_REPLY_HOURS) if org.kind == "dynamic_personal"
                             else org.reply_delay_hours)
         action.reply_after_hours = min(
             max(action.reply_after_hours * random.uniform(0.8, 1.2), minimum), maximum,
@@ -276,7 +278,7 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
     effective_at = world.now
     if event.mode in {"email", "form"} and action.reply and sender:
         effective_at = as_aware(world.now).astimezone(UTC) + timedelta(hours=action.reply_after_hours)
-        if org.kind != "dynamic_personal":
+        if org.kind != "dynamic_personal" and action.reply_kind != "automatic":
             # Keep a later reply behind any earlier one still on its way.
             pending_due = _pending_due(world, org)
             if pending_due is not None and as_aware(pending_due) >= as_aware(effective_at):
@@ -314,6 +316,12 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         attempt.finalized_action = action.model_copy(deep=True)
         attempt.effective_at = prepared.effective_at
         problem = money_problem(action, world, org, scenario.task.payment_limit(scenario))
+        if problem is None and action.reply_kind == "automatic" and (
+            action.payments or action.new_offers or action.accept_offer or action.withdraw_offers
+            or action.grant_ground or action.notes_to_others
+            or action.case_status not in {"open", "investigating"}
+        ):
+            problem = "automatic receipts cannot decide claims, move money, change offers or close the case"
         if problem is None and scenario.intent and scenario.task.grants(action):
             rules = (store().get(COMPANIES_KEY) or {}).get(org.key, {}).get("rules") or {}
             keys = [ground["key"] for ground in rules.get("rules", {}).get("grounds", [])]
@@ -491,7 +499,8 @@ def _email_for(org: Org, action: OpenAction, *, eid: str, thread_id: str, subjec
                to: str, due: datetime, sender: str) -> Email:
     return Email(id=eid, thread_id=thread_id, sender=sender, to=[to],
                  subject=action.subject.strip() or (f"Re: {subject}" if subject else "Your enquiry"),
-                 body=action.body, sent_at=due, source="counterparty", org=org.key)
+                 body=action.body, sent_at=due, source="counterparty", org=org.key,
+                 automatic=action.reply_kind == "automatic")
 
 
 @dataclass

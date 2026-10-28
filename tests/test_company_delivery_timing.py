@@ -17,9 +17,10 @@ def company(**updates):
                reply_delay_hours=(48, 200), persona="Phone-hours: 8-18 Mon-Fri").model_copy(update=updates)
 
 
-def prepare(org, now, hours, pending=()):
+def prepare(org, now, hours, pending=(), *, reply_kind="substantive"):
     world = World(start_time=now, now=now, pending=list(pending))
-    action = CompanyAction(decision="reviewing", reply=True, reply_after_hours=hours, body="We are reviewing your enquiry.")
+    action = CompanyAction(decision="reviewing", reply=True, reply_kind=reply_kind,
+                           reply_after_hours=hours, body="We are reviewing your enquiry.")
     event = CompanyEvent(kind="contact", mode="email", incoming="A synthetic enquiry.")
     return _prepare_action(action, event, world, org, None, "help@example.test")
 
@@ -83,3 +84,54 @@ def test_follow_up_hours_are_elapsed_time_across_clock_change():
     _schedule_follow_up(world, org, action, promised_at=now, thread=(None, None))
     [follow] = world.follow_ups
     assert follow.due_at.astimezone(UTC) - now.astimezone(UTC) == timedelta(days=14)
+
+
+def test_automatic_receipt_arrives_outside_staff_hours_without_waiting_for_staff(monkeypatch):
+    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    now = datetime(2026, 10, 16, 23, tzinfo=LONDON)
+    due = now + timedelta(days=3)
+    pending = ScheduledEmail(due_at=due, email=Email(
+        id="staff-reply", sender="help@example.test", to=["customer@example.test"],
+        subject="A staff reply", body="An answer.", sent_at=due, org="synthetic",
+    ))
+    receipt = prepare(company(), now, 0, [pending], reply_kind="automatic")
+    assert receipt.effective_at == now
+
+
+def test_a_scheduled_automatic_receipt_does_not_delay_substantive_staff_mail(monkeypatch):
+    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    now = datetime(2026, 10, 12, 9, tzinfo=LONDON)
+    due = now + timedelta(days=7)
+    pending = ScheduledEmail(due_at=due, email=Email(
+        id="receipt", sender="help@example.test", to=["customer@example.test"],
+        subject="A receipt", body="Your enquiry was received.", sent_at=due, org="synthetic", automatic=True,
+    ))
+    result = prepare(company(), now, 48, [pending])
+    assert result.effective_at == now + timedelta(hours=48)
+
+
+@pytest.mark.parametrize("effects", [
+    {"payments": [{"kind": "cash_refund", "amount": 10, "via": "card"}]},
+    {"new_offers": [{"kind": "voucher", "amount": 10}]},
+    {"withdraw_offers": True},
+    {"case_status": "final_response"},
+])
+async def test_automatic_receipts_cannot_apply_substantive_effects(effects):
+    from fixtures.simulator import MockSim, install_mock_models, start_sample
+
+    from refund_eval.scenario.schema import load_scenario
+    from refund_eval.sim.open_world import choose_action
+    from refund_eval.world.state import load_world
+
+    mock = MockSim()
+    install_mock_models(mock)
+    start_sample()
+    scenario = load_scenario("train_refund")
+    mock.open_actions = [
+        {"reply_kind": "automatic", "case_status": "open", "body": "Your enquiry was received.", **effects},
+        {"reply_kind": "substantive", "body": "We are reviewing your enquiry."},
+    ]
+    result = await choose_action(scenario, load_world(), scenario.org("trainline"), "An enquiry", "email", None, [])
+    assert result.reply_kind == "substantive"
+    assert len(mock.open_prompts) == 2
+    assert "automatic receipts cannot" in mock.open_prompts[-1]
