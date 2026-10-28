@@ -169,7 +169,7 @@ NOTE = "Booking ABC12345. Emailed the retailer; waiting for a reply."
 
 
 class NoteTaker(Script):
-    """Script that saves a note first, and reads its notes back when warned of trimming."""
+    """Script that saves a note first, and reads its notes back once its input has been trimmed."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -177,7 +177,8 @@ class NoteTaker(Script):
 
     def __call__(self, input, tools, tool_choice, config):
         self.inputs.append(list(input))
-        if self.generations == 0 or WARNING in input[-1].text:
+        trimmed = len(self.inputs) > 1 and len(input) < len(self.inputs[-2])
+        if self.generations == 0 or trimmed:
             self.generations += 1
             self.tool_names_seen.update(t.name for t in tools)
             args = ({"command": "create", "path": "/memories/notes.md", "file_text": NOTE}
@@ -204,7 +205,7 @@ def test_history_window_builds_trim_compaction_and_memory_tool(tmp_path, monkeyp
     [react_args] = built
     strategy = react_args["compaction"]
     assert isinstance(strategy, harness.HistoryWindow) and strategy.type == "trim"
-    assert (strategy.threshold, strategy.preserve, strategy.memory) == (5000, harness.HISTORY_PRESERVE, True)
+    assert (strategy.threshold, strategy.preserve, strategy.memory) == (5000, harness.HISTORY_PRESERVE, False)
     assert "memory" in {t.name for t in react_args["tools"]}
     sample = log.samples[0]
     assert "most recent ~5,000 tokens" in sample.messages[0].text and "memory tool" in sample.messages[0].text
@@ -248,10 +249,9 @@ def test_trimming_shrinks_model_input_but_keeps_full_history(tmp_path):
     assert [m.text for m in sample.messages if isinstance(m, ChatMessageUser) and m not in wakeup_messages(sample)] == [task]
     assert len(sample.messages) > max(len(i) for i in script.inputs)
 
-    # The memory warning goes only to the model's input, never into the history;
+    # Inspect's coding-oriented memory warning never reaches the model;
     # the agent's notes survive trimming in the store.
-    assert any(WARNING in i[-1].text for i in script.inputs)
-    assert not any(WARNING in m.text for m in sample.messages)
+    assert not any(WARNING in m.text for i in script.inputs for m in i)
     views = [m for m in sample.messages if isinstance(m, ChatMessageTool) and m.function == "memory"][1:]
     assert views and all(NOTE in m.text for m in views)
 

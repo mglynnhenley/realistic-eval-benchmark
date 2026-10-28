@@ -36,15 +36,19 @@ import logging
 from asyncio import CancelledError
 from datetime import datetime
 from typing import Any, get_type_hints
+from uuid import uuid4
 
 from inspect_ai.agent import Agent, AgentPrompt, AgentState, agent, react
 from inspect_ai.model import (
     ChatMessage,
+    ChatMessageAssistant,
+    ChatMessageTool,
     ChatMessageUser,
     CompactionTrim,
     Model,
     get_model,
 )
+from inspect_ai.model._compaction.memory import MEMORY_TOOL, clear_memory_content
 from inspect_ai.tool import (
     Tool,
     ToolDef,
@@ -76,6 +80,7 @@ from refund_eval.agent.schedule import (
 )
 from refund_eval.config import RunConfig
 from refund_eval.killswitch import kill_reason
+from refund_eval.published.mail import SUPPORTED_TOOLS as MAIL_TOOLS
 from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
 from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
@@ -114,26 +119,69 @@ WAKEUP_METADATA = "wakeup"
 
 # Share of the non-prefix history kept by each trim; Vending-Bench 2 keeps about 61%.
 HISTORY_PRESERVE = 0.6
+# Before trimming, results of tool rounds older than the latest few are replaced
+# with a placeholder. Mail results (message bodies, send confirmations) and notes
+# are never cleared; what remains is mostly page snapshots and search results.
+KEEP_TOOL_ROUNDS = 3
+CLEARED_TOOL_OUTPUT = "[Earlier tool output removed to save space]"
+PROTECTED_TOOLS = frozenset({MEMORY_TOOL, *MAIL_TOOLS})
+# One record per compaction, in the sample store.
+HISTORY_COMPACTIONS_KEY = "history_compactions"
+
+
+def clear_old_tool_results(messages: list[ChatMessage]) -> tuple[list[ChatMessage], int]:
+    """Replace the output of older, unprotected tool results; calls and pairs stay as they are.
+
+    Returns the messages and how many results were newly cleared."""
+    rounds = [m for m in messages if isinstance(m, ChatMessageAssistant) and m.tool_calls]
+    functions = {tc.id: tc.function for m in rounds for tc in m.tool_calls or []}
+    recent = {tc.id for m in rounds[len(rounds) - KEEP_TOOL_ROUNDS:] for tc in m.tool_calls or []}
+    result: list[ChatMessage] = []
+    cleared = 0
+    for message in messages:
+        if (isinstance(message, ChatMessageTool) and message.tool_call_id not in recent
+                and (message.function or functions.get(message.tool_call_id or "")) not in PROTECTED_TOOLS
+                and message.text != CLEARED_TOOL_OUTPUT):
+            message = message.model_copy(update={"id": uuid4().hex, "content": CLEARED_TOOL_OUTPUT})
+            cleared += 1
+        result.append(message)
+    return result, cleared
 
 
 class HistoryWindow(CompactionTrim):
-    """CompactionTrim that keeps trimming, down to the latest turn, until the window fits.
+    """Clears older tool output, then trims the oldest messages until the window fits.
 
-    Inspect retries a strategy three times and then fails the sample, which a run
-    of large page snapshots can cause well before the real context window is full."""
+    Trimming keeps going, down to the latest turn: Inspect retries a strategy three
+    times and then fails the sample, which a run of large page snapshots can cause
+    well before the real context window is full. Inspect's own pre-compaction
+    memory warning is off (memory=False); memory tool content is still cleared."""
 
     def __init__(self, tokens: int):
-        super().__init__(threshold=tokens, memory=True, preserve=HISTORY_PRESERVE)
+        super().__init__(threshold=tokens, memory=False, preserve=HISTORY_PRESERVE)
 
     async def compact(self, model: Model, messages: list[ChatMessage],
                       tools: list[ToolInfo]) -> tuple[list[ChatMessage], ChatMessageUser | None]:
-        budget = int(self.threshold) - await model.count_tool_tokens(tools)
-        trimmed, _ = await super().compact(model, messages, tools)
-        while await model.count_tokens(trimmed) > budget:
-            shorter, _ = await super().compact(model, trimmed, tools)
-            if len(shorter) >= len(trimmed):
-                break
-            trimmed = shorter
+        tool_tokens = await model.count_tool_tokens(tools)
+        budget = int(self.threshold) - tool_tokens
+        before = await model.count_tokens(messages)
+        trimmed, cleared = clear_old_tool_results(messages)
+        tokens = await model.count_tokens(trimmed)
+        if tokens > budget:
+            trimmed, _ = await super().compact(model, trimmed, tools)
+            while (tokens := await model.count_tokens(trimmed)) > budget:
+                shorter, _ = await super().compact(model, trimmed, tools)
+                if len(shorter) >= len(trimmed):
+                    break
+                trimmed = shorter
+        trimmed = clear_memory_content(trimmed)
+        world = store().get(WORLD_KEY)
+        store().set(HISTORY_COMPACTIONS_KEY, [*(store().get(HISTORY_COMPACTIONS_KEY) or []), {
+            "sim_time": load_world().now.isoformat() if world is not None else None,
+            "tokens_before": before + tool_tokens,
+            "tokens_after": await model.count_tokens(trimmed) + tool_tokens,
+            "messages_dropped": len(messages) - len(trimmed),
+            "tool_results_cleared": cleared,
+        }])
         return trimmed, None
 
 
