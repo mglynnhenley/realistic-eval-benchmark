@@ -22,6 +22,7 @@ ACTION_SHAPE = json.dumps({
     "decision": "snake_case_label",
     "decision_basis": "briefly explain which claims you believe or doubt and how your terms apply",
     "summary": "one line for your case notes", "reply": True,
+    "reply_kind": "substantive | automatic (administrative receipt only)",
     "reply_after_hours": "<number: realistic hours until your reply arrives>",
     "subject": "email subject", "body": "the email, or the full call/chat transcript",
     "page_body": "form only: the page shown straight after submission; otherwise an empty string",
@@ -104,6 +105,11 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
          "structured offers/payments or the recorded offers/payments. Do not say money is approved, "
          "processing or paid without the corresponding structured action. Earlier correspondence is "
          "only a record of what was said; it is not proof that money moved."),
+        ("Use reply_kind automatic only for a transactional receipt or acknowledgement, such as a copy "
+         "of a submitted form. It may arrive immediately, outside staff hours. It must not decide the "
+         "claim, approve or refuse eligibility, move money, change offers or mark the case resolved, "
+         "closed or final. Substantive staff replies use the organisation's normal delivery schedule. "
+         "Do not promise an email has already arrived when its delivery is still in the future."),
         ("If you promise to get back to the customer (an update, a decision, a callback, a supervisor "
          "review), set follow_up_in_hours and follow_up_plan. You will be asked again at that time, with "
          "your case history, and decide then what actually happens. Whether you keep to the time you gave "

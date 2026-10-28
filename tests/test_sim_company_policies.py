@@ -7,7 +7,13 @@ the runtime boundary, not whether a live model makes the same policy judgement.
 from datetime import timedelta
 
 import pytest
-from fixtures.simulator import MockSim, advance, install_mock_models, start_sample
+from fixtures.simulator import (
+    MockSim,
+    advance,
+    install_mock_models,
+    org_address,
+    start_sample,
+)
 from inspect_ai.model import get_model
 from inspect_ai.util import store
 
@@ -43,7 +49,7 @@ async def last_assessment():
 
 def contact(body="Please refund my cancelled train.", org="trainline", channel="email", **fields):
     return Inbound(channel=channel, tool="send_message" if channel == "email" else "submit",
-                   target=f"customer.services@{SC.org(org).email_domains[0]}", org=org,
+                   target=org_address(SC.org(org)), org=org,
                    subject="Refund", body=body, fields=fields,
                    interception_id=f"claim-{len(load_world().outcome.claims)}")
 

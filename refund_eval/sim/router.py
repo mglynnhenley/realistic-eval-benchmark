@@ -24,8 +24,10 @@ from refund_eval.formatting import long_date, money
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.common import (
     current_scenario,
+    persona_directive,
     phone_hours,
     phone_is_open,
+    reply_from,
 )
 from refund_eval.sim.counterparts import (
     create_counterpart,
@@ -137,6 +139,20 @@ def _unmonitored(address: str, org: Org, scenario: Scenario) -> bool:
     return unmonitored_address(address) or address in seed_senders
 
 
+def _cold_email_redirect(address: str, org: Org, world: World) -> str | None:
+    """Enforce an explicit new-enquiry redirect without closing staff reply routes."""
+    text = persona_directive(org, "Cold-email")
+    if org.kind.startswith("dynamic_") or not text:
+        return None
+    monitored = {a.lower() for a in org.contact_emails}
+    monitored.add(parse_address(reply_from(org)))
+    automatic_ids = {claim.response_email_id for claim in world.outcome.claims if claim.kind == "automatic_reply"}
+    monitored.update(parse_address(email.sender) for email in world.overlay_inbox
+                     if email.org == org.key and not email.automatic
+                     and email.id not in automatic_ids and email.sent_at <= world.now)
+    return None if address in monitored else text
+
+
 def _thread(world: World, inbound: Inbound) -> tuple[str, str | None]:
     if inbound.in_reply_to:
         for e in world.overlay_inbox:
@@ -224,6 +240,9 @@ async def _dispatch(scenario: Scenario, inbound: Inbound) -> SimResult:
         addr = _org_address(inbound, org)
         if addr and _unmonitored(addr, org, scenario):
             return await _unmonitored_reply(scenario, world, inbound, org, addr, thread_id, thread_subject)
+        if addr and (redirect := _cold_email_redirect(addr, org, world)):
+            return await _canned_reply(scenario, world, inbound, org, "cold_email_redirect", redirect,
+                                       thread_id, thread_subject, sender=addr)
     if ch == "phone" and not phone_is_open(org, now):
         return SimResult(immediate_text=_closed_transcript(org, inbound.target, now), decision="phone_line_closed",
                          kind="transcript")
@@ -258,7 +277,7 @@ async def _canned_reply(
     due = now + timedelta(minutes=1)
     email = Email(id=f"{inbound.interception_id}-{key}", thread_id=thread_id, sender=sender,
                   to=[scenario.user.email_addresses[0]], subject=f"Automatic reply: {subject or ''}".strip(),
-                  body=body, sent_at=due, org=org.key)
+                  body=body, sent_at=due, org=org.key, automatic=True)
     with world_tx() as w:
         case = w.cases.setdefault(org.key, CaseState(org=org.key))
         case.contacts += 1

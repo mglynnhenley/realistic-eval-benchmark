@@ -198,6 +198,15 @@ class PublishedBrowserService:
                     name, arguments, meta={"refund-eval/tool-call-id": call["tool_call_id"], **_sim_time_meta()}
                 )
                 self._raise_if_failed()
+                meta = dict(result.get("_meta") or {})
+                mapping = meta.pop("refund-eval/artifact-mapping", None)
+                if mapping is not None:
+                    # Preserve the exact upstream response and original paths in
+                    # private evidence before exposing runtime-owned file aliases.
+                    self._audit({"event": "browser_artifact_mapping", **call, **mapping})
+                    result = {**result, "_meta": meta}
+                    if not meta:
+                        result.pop("_meta")
                 completed = True
                 return result
             except MCPRPCError as error:

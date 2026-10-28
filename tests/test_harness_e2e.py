@@ -386,7 +386,8 @@ def test_unscheduled_stop_processes_followups_before_choosing_wake(tmp_path, mon
 def test_unscheduled_stop_at_deadline_stops_without_another_wake(tmp_path):
     sample = run(harness_task(max_turns=10, sim_weeks=1 / 7), PlannedTurns(), tmp_path).samples[0]
     world = world_of(sample)
-    assert world.stop_reason == "sim_time_cap" and world.turn == 2
+    # Reaching the boundary no longer permits another generation there.
+    assert world.stop_reason == "sim_time_cap" and world.turn == 1
     assert len(world.wakeups) == 1
     assert world.now == world.start_time + timedelta(days=1)
 

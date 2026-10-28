@@ -32,6 +32,8 @@ class CompanyAction(BaseModel):
         "This is an internal record, not part of the customer-facing reply."))
     summary: str = Field(default="", description="One line for your own case notes.")
     reply: bool = Field(description="Whether you respond to the customer at all.")
+    reply_kind: Literal["substantive", "automatic"] = Field(default="substantive", description=(
+        "Automatic is only an administrative receipt or acknowledgement, without a decision on merits or money."))
     reply_after_hours: float = Field(ge=0, description="Email/form only: hours until your reply arrives.")
     subject: str = Field(default="", description="Email subject; empty for calls and chats.")
     body: str = Field(description="Your email, or the full call or chat transcript for live contacts.")

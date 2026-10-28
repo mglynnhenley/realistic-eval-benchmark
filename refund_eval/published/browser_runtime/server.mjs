@@ -4,7 +4,7 @@ import { createConnection } from '@playwright/mcp';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 
@@ -19,6 +19,7 @@ let activeCall = null;
 await mkdir(home, { recursive: true });
 await mkdir(output, { recursive: true });
 await mkdir(workspace, { recursive: true });
+const artifactRoot = await realpath(output);
 process.chdir(workspace);
 
 async function exchange(request) {
@@ -185,6 +186,83 @@ const server = await createConnection({
   snapshot: { mode: 'explicit' },
 }, async () => context);
 
+// The pinned upstream names console files with the Node host clock. Keep its
+// append-only originals and real timers; expose real hardlinks named at the
+// trial time instead. Only native Events links to owned regular files qualify.
+const consoleFiles = new Map();
+let aliasSequence = 0;
+async function consoleAlias(reference, simTime) {
+  const original = path.resolve(reference);
+  if (path.dirname(original) !== artifactRoot ||
+      !/^console-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.log$/.test(path.basename(original))) return null;
+  try {
+    const source = await lstat(original);
+    if (!source.isFile() || await realpath(original) !== original) return null;
+    const previous = consoleFiles.get(original);
+    if (previous) {
+      const alias = await lstat(previous).catch(() => null);
+      if (alias?.isFile() && alias.dev === source.dev && alias.ino === source.ino) return previous;
+    }
+    const stamp = new Date(simTime).toISOString().replace(/[:.]/g, '-');
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const alias = path.join(artifactRoot, `console-${stamp}-${++aliasSequence}.log`);
+      try {
+        // link is exclusive; never overwrite another tab's or upstream's file.
+        await link(original, alias);
+        const linked = await lstat(alias);
+        if (!linked.isFile() || linked.dev !== source.dev || linked.ino !== source.ino) {
+          await unlink(alias);
+          return null;
+        }
+        consoleFiles.set(original, alias);
+        return alias;
+      } catch (error) {
+        if (error.code !== 'EEXIST') return null;
+      }
+    }
+  } catch {} // Missing/unowned artifacts retain their original native reference.
+  return null;
+}
+
+async function mapConsoleArtifacts(message, simTime) {
+  if (typeof simTime !== 'string' || !Number.isFinite(Date.parse(simTime)) ||
+      !message.result || message.result.isError || !Array.isArray(message.result.content)) return message;
+  const mappings = [];
+  const content = [];
+  for (const item of message.result.content) {
+    if (item.type !== 'text' || typeof item.text !== 'string') { content.push(item); continue; }
+    const lines = item.text.split('\n');
+    let fence = null;
+    let events = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const delimiter = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (fence) {
+        if (delimiter && delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length &&
+            !delimiter[2].trim()) fence = null;
+        continue;
+      }
+      if (delimiter) { fence = delimiter[1]; continue; }
+      if (/^#{1,6} /.test(line)) { events = line === '### Events'; continue; }
+      const match = events && line.match(/^- New console entries: (.+)(#L[1-9]\d*(?:-L[1-9]\d*)?)$/);
+      if (!match) continue;
+      const alias = await consoleAlias(match[1], simTime);
+      if (!alias) continue;
+      const printable = path.isAbsolute(match[1]) ? alias : path.relative(process.cwd(), alias);
+      lines[i] = `- New console entries: ${printable}${match[2]}`;
+      mappings.push({ original: path.resolve(match[1]), alias,
+        original_reference: match[1] + match[2], alias_reference: printable + match[2] });
+    }
+    content.push({ ...item, text: lines.join('\n') });
+  }
+  if (!mappings.length) return message;
+  const mapped = { ...message, result: { ...message.result, content,
+    _meta: { ...message.result._meta, 'refund-eval/artifact-mapping': { raw_result: message.result, mappings } } } };
+  // Raw evidence travels privately to the host. If duplication would exceed the
+  // existing transport limit, retain the untouched response instead.
+  return Buffer.byteLength(JSON.stringify(mapped)) < MAX_RESPONSE ? mapped : message;
+}
+
 // Correlation belongs to the transport envelope, never to tool arguments.
 // Keeping it in process avoids stale reads on host/container bind mounts.
 class CorrelatedTransport {
@@ -193,7 +271,8 @@ class CorrelatedTransport {
     this.inner.onmessage = message => {
       if (message.method === 'tools/call') {
         activeCall = { rpc_id: message.id,
-          tool_call_id: message.params?._meta?.['refund-eval/tool-call-id'] || null };
+          tool_call_id: message.params?._meta?.['refund-eval/tool-call-id'] || null,
+          sim_time: message.params?._meta?.['refund-eval/sim-time'] };
         // Pages see the trial's simulated date, not today's, before the call runs.
         // setSystemTime only moves Date; page timers keep real time.
         const simTime = message.params?._meta?.['refund-eval/sim-time'];
@@ -210,7 +289,9 @@ class CorrelatedTransport {
   }
   async start() { await this.inner.start(); }
   async send(message, options) {
-    await this.inner.send(message, options);
+    const outgoing = activeCall && message.id === activeCall.rpc_id
+      ? await mapConsoleArtifacts(message, activeCall.sim_time) : message;
+    await this.inner.send(outgoing, options);
     if (activeCall && message.id === activeCall.rpc_id && ('result' in message || 'error' in message)) activeCall = null;
   }
   async close() { await this.inner.close(); }

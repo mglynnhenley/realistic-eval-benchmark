@@ -35,6 +35,7 @@ class Email(BaseModel):
     body: str
     sent_at: datetime
     source: Literal["seed", "counterparty", "real"] = "counterparty"
+    automatic: bool = False  # Receipt/redirect, not a substantive staff reply.
     org: str | None = None  # counterparty key, if any
 
 

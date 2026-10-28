@@ -1,4 +1,4 @@
-"""Live web results show the simulated date, not the real one."""
+"""Snapshot date rebasing stays separate from factual public web dates."""
 
 import copy
 from datetime import UTC, date, datetime, timedelta
@@ -9,7 +9,7 @@ from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.agent.harness import initial_world
 from refund_eval.agent.schedule import london
-from refund_eval.published.adapter import AUDIT_KEY, TYPED_DATES_KEY, inspect_tools
+from refund_eval.published.adapter import AUDIT_KEY, inspect_tools
 from refund_eval.published.dates import shift_dates
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import load_scenario
@@ -74,19 +74,13 @@ def world():
 
 
 @pytest.mark.parametrize("live_web", [True, False])
-async def test_live_web_results_are_shifted_and_audited(world, live_web):
+async def test_web_results_preserve_source_dates_and_raw_audit(world, live_web):
     real_today = london(datetime.now(UTC)).date()
-    sim_today = london(world.start_time).date()
     page = f"Updated {real_today:%d %B %Y}; your journey on {real_today - timedelta(days=3):%d %B %Y}"
     [tool] = await inspect_tools(PageService(page), source="exa", live_web=live_web)
     typed = f"journey {real_today - timedelta(days=3):%d %B %Y}"
     [content] = await tool.tool(query=typed, objective="Find a policy")
-    if not live_web:
-        assert content.text == page
-        return
-    gap = sim_today - real_today
-    assert content.text == (f"Updated {real_today + gap:%d %B %Y}; "
-                            f"your journey on {real_today - timedelta(days=3):%d %B %Y}")
-    assert store().get(TYPED_DATES_KEY) == [(real_today - timedelta(days=3)).isoformat()]
-    [event] = [e for e in store().get(AUDIT_KEY) if e["event"] == "dates_shifted"]
-    assert event["count"] == 1 and event["sim_today"] == sim_today.isoformat()
+    assert content.text == page
+    [event] = [e for e in store().get(AUDIT_KEY) if e["event"] == "result"]
+    assert event["result"]["content"][0]["text"] == page
+    assert not any(e["event"] == "dates_shifted" for e in store().get(AUDIT_KEY))

@@ -365,23 +365,23 @@
       "thread_id": "19af166559c89e6e",
       "sender": "{{user_name}} <{{user_email}}>",
       "to": [
-        "Jackie {{user_surname}} <jackie.w1966@btinternet.com>"
+        "Auntie Jackie {{user_surname}} <jackie.w1966@btinternet.com>"
       ],
       "cc": [],
       "subject": "Re: Parcel",
-      "body": "Hi Mum,\n\nYes it came yesterday, thank you! Love the jumper.\n\nSo sorry to hear about Auntie Pat. I'll send a card this week.\n\nAnd I have no idea what party you're talking about...\n\nLove you xx",
+      "body": "Hi Auntie Jackie,\n\nYes it came yesterday, thank you! Love the jumper.\n\nSo sorry to hear about Auntie Pat. I'll send a card this week.\n\nAnd I have no idea what party you're talking about...\n\nLove you xx",
       "sent_at": "2026-09-05T20:10:00+01:00"
     },
     {
       "id": "19af166559c89e6e",
       "thread_id": "19af166559c89e6e",
-      "sender": "Jackie {{user_surname}} <jackie.w1966@btinternet.com>",
+      "sender": "Auntie Jackie {{user_surname}} <jackie.w1966@btinternet.com>",
       "to": [
         "{{user_name}} <{{user_email}}>"
       ],
       "cc": [],
       "subject": "Parcel",
-      "body": "Hello love,\n\nDid the parcel arrive? I sent it second class on Tuesday so it should have been with you by now. It's the blue jumper you liked and some post that still comes here for you.\n\nAuntie Pat is back in St James's, they think it's her heart again. She's on Ward 12 if you wanted to send a card, she'd love that. Don't say anything to Tom yet, I don't want him worrying.\n\n(I know about the party by the way. I'm not daft!! Don't tell him I know.)\n\nLots of love,\nMum xx",
+      "body": "Hello love,\n\nDid the parcel arrive? I sent it second class on Tuesday so it should have been with you by now. It's the blue jumper you liked and some post that still comes here for you.\n\nAuntie Pat is back in St James's, they think it's her heart again. She's on Ward 12 if you wanted to send a card, she'd love that. Don't say anything to Tom yet, I don't want him worrying.\n\n(I know about the party by the way. I'm not daft!! Don't tell him I know.)\n\nLots of love,\nJackie xx",
       "sent_at": "2026-09-05T18:45:00+01:00"
     },
     {

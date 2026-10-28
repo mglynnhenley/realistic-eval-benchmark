@@ -305,11 +305,21 @@ class GmailService:
         except (ValueError, TypeError):
             return float("-inf")
 
+    def _local_labels(self, email: Email, extra: dict[str, Any]) -> list[str]:
+        own = self.ctx.mailbox.user_addresses
+        sent = extra.get("native_gmail_accepted") or parse_address(email.sender) in own
+        labels = ["SENT"] if sent else ["INBOX"]
+        if sent and any(parse_address(address) in own for address in [*email.to, *email.cc]):
+            labels.append("INBOX")
+        if not sent and email.source == "counterparty":
+            labels.append("UNREAD")
+        return labels
+
     def _native_message(self, email: Email, extra: dict[str, Any], message_format: str = "FULL_CONTENT") -> dict[str, Any]:
         if message_format not in {"FULL_CONTENT", "MESSAGE_FORMAT_UNSPECIFIED", "MINIMAL", "METADATA_ONLY",
                                   "THREAD_VIEW_MINIMAL", "THREAD_VIEW_METADATA_ONLY", "THREAD_VIEW_UNSPECIFIED"}:
             raise ValueError("Unsupported native message format; capture and implement its output contract first.")
-        labels = ["SENT"] if extra.get("native_gmail_accepted") else ["INBOX", "UNREAD"]
+        labels = self._local_labels(email, extra)
         data: dict[str, Any] = {
             "id": _visible_id(email.id), "sender": email.sender,
             "toRecipients": list(email.to), "ccRecipients": list(email.cc),
@@ -367,20 +377,12 @@ class GmailService:
 
     @staticmethod
     def _check_query(query: str) -> None:
-        supported = {"from", "to", "cc", "subject", "after", "before", "newer", "older",
-                     "newer_than", "older_than", "in", "is", "label"}
-        unknown = set(re.findall(r"\b([A-Za-z_]+):", query)) - supported
-        # The old local matcher ignores several Gmail operators. Reject those
-        # forms instead of silently broadening or narrowing a live query.
-        unsupported_values = any(
-            (kind == "is" and value.lower() not in {"read", "unread", "starred"})
-            or (kind == "in" and value.lower() not in {"sent", "inbox", "anywhere", "all", "trash", "bin", "archive", "archived", "starred"})
-            for kind, value in re.findall(r"\b(is|in):([^\s(){}]+)", query)
-        )
-        if unknown or unsupported_values or re.search(r"\bAROUND\b|[()]|(?:^|\s)\+", query):
-            raise ValueError("Search syntax is unavailable for this mailbox view: " + ", ".join(sorted(unknown)))
+        # Validate the same grammar used by local matching. Operators mentioned
+        # inside quotes are literal text, not unsupported query syntax.
+        parse_query(query, strict=True)
 
     async def _search(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        matcher = parse_query(arguments.get("query", ""), strict=True)
         locals_ = self._locals()
         if not locals_:
             return await self._read_remote("search_threads", arguments)
@@ -392,12 +394,9 @@ class GmailService:
             if not saved or saved[0] != key_args:
                 raise ValueError("Invalid or expired page token.")
             return self._search_page(key_args, saved[1], saved[2], size, saved[3])
-        query = arguments.get("query", "")
-        self._check_query(query)
-        matcher = parse_query(query)
         world = load_world()
         match_ctx = MatchContext(user_addresses=self.ctx.mailbox.user_addresses, now=world.now,
-                                 unread=lambda e: e.source != "real")
+                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}))
         merged: dict[str, dict[str, Any]] = {}
         request = dict(arguments)
         first = None

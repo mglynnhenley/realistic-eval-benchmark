@@ -1,11 +1,9 @@
-"""Keep the real date out of live web results.
+"""Rebase text dates in explicitly shifted mailbox snapshots.
 
-Live pages and search results carry today's real date ("Updated 7 October 2026",
-"publishedDate": "2026-10-07"), which can contradict the simulated clock. Before
-the agent reads a live web result, every date near the real today is moved by the
-gap between the real and the simulated today, so the web appears to be read on the
-simulated date. Older dates are history and stay as they are, and so do dates the
-agent itself typed (its own words echoed back by a page or a search).
+This heuristic is used when a saved mailbox is deliberately moved to another
+anchor date. It must not be applied to live public web content: a recent date
+can be a deadline, historical event or annual holiday, not a movable clock.
+The published tool adapter preserves source text and raw audit results.
 
 Formats: ISO (2026-10-07), "7 October 2026", "Wed 7 Oct", "October 7, 2026",
 "Oct 7" and 07/10/2026 (read day first, as on UK sites). A weekday written next to

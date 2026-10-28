@@ -27,7 +27,7 @@ def sim():
 
 
 def contact(body='Please refund my cancelled train.', *, channel='email'):
-    return Inbound(channel=channel, tool='send_message', target='support@thetrainline.com', org='trainline',
+    return Inbound(channel=channel, tool='send_message', target='sales.support@info.thetrainline.com', org='trainline',
                    body=body, interception_id='consistency-test')
 
 

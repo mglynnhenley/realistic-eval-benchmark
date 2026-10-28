@@ -65,11 +65,16 @@ def advance(world: World, to: datetime) -> list[Email]:
     return arrived
 
 
-def charge(world: World, tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> list[Email]:
+def charge(world: World, tool_name: str, *, written: str = "", read: str = "", base: bool = True,
+           until: datetime | None = None) -> list[Email]:
     """Advance the clock by how long one call to `tool_name` takes a person: its base cost
-    (unless base=False), writing `written` and reading `read`."""
+    (unless base=False), writing `written` and reading `read`. An optional session
+    boundary limits clock movement and delivery; the caller enforces the stop."""
     minutes = (TOOL_COST_MINUTES.get(tool_name, 1) if base else 0) + words(written) / WRITE_WPM + words(read) / READ_WPM
-    return advance(world, world.now + timedelta(minutes=minutes))
+    to = world.now + timedelta(minutes=minutes)
+    if until is not None:
+        to = min(as_aware(to), as_aware(until))
+    return advance(world, to)
 
 
 def next_due(world: World) -> datetime | None:
