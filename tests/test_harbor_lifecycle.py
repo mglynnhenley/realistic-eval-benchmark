@@ -26,6 +26,7 @@ class Environment:
         self.request = json.loads(source.read_text())
 
     async def exec(self, command, **kwargs):
+        assert type(kwargs["timeout_sec"]) is int and kwargs["timeout_sec"] > 0
         if "--signal-owned" in command:
             self.events.append("stop" if command.endswith("TERM") else "kill")
             self.finished.set()
@@ -227,7 +228,7 @@ def test_preparation_binds_actual_task_job_and_policy_bytes(tmp_path, monkeypatc
         prepare(tmp_path / "waves", settings=settings, model="openrouter/example/offline", trials=3, concurrency=2)
 
 
-async def test_failed_exec_transport_still_signals_exact_worker_before_download(tmp_path):
+async def test_subsecond_failed_transport_skips_invalid_signals_and_still_downloads(tmp_path):
     env = Environment()
     obj = agent(tmp_path / "agent")
     obj.logs_dir.mkdir()
@@ -240,7 +241,10 @@ async def test_failed_exec_transport_still_signals_exact_worker_before_download(
     start = time.monotonic()
     await obj._collect_bounded(env, execution, worker_end=start + .02, agent_end=start + .1,
                                flush_seconds=.02, collect_seconds=.04, stop=True)
-    assert env.events.index("stop") < env.events.index("kill") < env.events.index("native")
+    assert "stop" not in env.events and "kill" not in env.events and "native" in env.events
+    errors = json.loads((obj.logs_dir / "collection.json").read_text())["errors"]
+    assert {row["phase"] for row in errors} >= {"stop", "flush", "owned_kill"}
+    assert all(row["error_type"] == "TimeoutError" for row in errors if row["phase"] in {"stop", "owned_kill"})
     assert time.monotonic() - start < .15
 
 

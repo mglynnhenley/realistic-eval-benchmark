@@ -106,6 +106,7 @@ class RefundInspectAgent(BaseAgent):
     async def _run_bounded(self, instruction, environment, context) -> None:
         from refund_eval.harbor.deadlines import (
             HOST_START_ENV,
+            exec_timeout_seconds,
             host_start,
             remaining,
             settle,
@@ -137,7 +138,7 @@ class RefundInspectAgent(BaseAgent):
                 "exec python -m refund_eval.harbor.worker --request /app/request.json "
                 f"--worker-seconds {allowance:.6f} > /logs/agent/worker.log 2>&1",
                 cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress"},
-                timeout_sec=allowance,
+                timeout_sec=exec_timeout_seconds(worker_end),
             ))
             killed = False
             next_poll = time.monotonic() + 2
@@ -146,7 +147,8 @@ class RefundInspectAgent(BaseAgent):
                     raise TimeoutError("Owned worker hard deadline reached")
                 if not killed and kill_reason():
                     async with asyncio.timeout(min(10, remaining(worker_end))):
-                        await environment.exec("mkdir -p /app/.context && touch /app/.context/KILL", timeout_sec=10)
+                        await environment.exec("mkdir -p /app/.context && touch /app/.context/KILL",
+                                               timeout_sec=exec_timeout_seconds(worker_end, 10))
                     killed = True
                 await asyncio.wait({execution}, timeout=min(.5, remaining(worker_end)))
                 if time.monotonic() >= next_poll and not execution.done():
@@ -206,7 +208,12 @@ class RefundInspectAgent(BaseAgent):
 
     async def _collect_bounded(self, environment, execution, *, worker_end, agent_end,
                                flush_seconds, collect_seconds, stop):
-        from refund_eval.harbor.deadlines import bounded, remaining, settle
+        from refund_eval.harbor.deadlines import (
+            bounded,
+            exec_timeout_seconds,
+            remaining,
+            settle,
+        )
 
         errors = []
         flush_end = min(worker_end, time.monotonic() + flush_seconds, agent_end - collect_seconds)
@@ -222,7 +229,7 @@ class RefundInspectAgent(BaseAgent):
             try:
                 await bounded(environment.exec(
                     "python -m refund_eval.harbor.worker --request /app/request.json --signal-owned TERM",
-                    cwd="/app", timeout_sec=min(10, remaining(flush_end))), min(flush_end, time.monotonic() + 10))
+                    cwd="/app", timeout_sec=exec_timeout_seconds(flush_end, 10)), min(flush_end, time.monotonic() + 10))
             except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 -- preserve primary error and collect best-effort evidence
                 errors.append({"phase": "stop", "error_type": type(exc).__name__})
             try:
@@ -237,7 +244,7 @@ class RefundInspectAgent(BaseAgent):
                 try:
                     await bounded(environment.exec(
                         "python -m refund_eval.harbor.worker --request /app/request.json --signal-owned KILL",
-                        cwd="/app", timeout_sec=min(10, remaining(agent_end))),
+                        cwd="/app", timeout_sec=exec_timeout_seconds(agent_end, 10)),
                         min(agent_end, time.monotonic() + 10))
                 except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 -- preserve primary error and collect best-effort evidence
                     errors.append({"phase": "owned_kill", "error_type": type(exc).__name__})

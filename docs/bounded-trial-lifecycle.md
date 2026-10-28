@@ -44,6 +44,16 @@ That epoch is used only by local orchestration and the local adapter. The sandbo
 worker receives a finite remaining duration and anchors its own clock. Neither
 polling, repeated signals nor repeated cancellation starts a new grace period.
 
+Harbor/Modal exec timeouts use integer wire seconds. The bounded adapter floors
+current remaining time at each worker, kill-switch touch, owned TERM and owned
+KILL call, retaining the existing ten-second control-command caps. Less than one
+whole second remaining rejects that exec before transport; zero/None must not
+turn an exhausted bound into an unspecified timeout. This may shorten a remote
+exec allowance by less than a second. The worker's duration argument and asyncio
+waits remain fractional, and the existing absolute host deadlines still bound
+polling, collection and cancellation without resetting for transport delays.
+Legacy exec arguments and the frozen lifecycle policy are unchanged.
+
 The worker cancels its one owned Inspect evaluation, allowing native logging to
 close within the flush budget. Its CLI hard timer covers stalled log closure,
 exports and event-loop shutdown. The adapter verifies the request hash, trial ID,

@@ -254,3 +254,47 @@ async def test_worker_hung_close_stops_at_fixed_hard_bound(tmp_path, monkeypatch
     finally:
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("left,cap,expected", [(2040.875, None, 2040), (10.0, None, 10),
+                                               (1.999, None, 1), (1.0, None, 1),
+                                               (20.25, 10, 10), (9.999, 10, 9)])
+def test_exec_wire_timeout_floors_current_remaining_without_extending(monkeypatch, left, cap, expected):
+    from refund_eval.harbor import deadlines
+
+    clock = [1000.0]
+    monkeypatch.setattr(deadlines, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    due = clock[0] + left
+    seconds = deadlines.exec_timeout_seconds(due, cap)
+    assert type(seconds) is int and seconds == expected and 0 < seconds <= left
+    clock[0] += .75
+    if due - clock[0] < 1:
+        with pytest.raises(TimeoutError):
+            deadlines.exec_timeout_seconds(due, cap)
+    else:
+        assert deadlines.exec_timeout_seconds(due, cap) <= seconds
+    assert due == 1000.0 + left
+
+
+@pytest.mark.parametrize("left", [.999, .5, 0, -1])
+def test_subsecond_exec_deadline_rejects_before_coroutine_construction(monkeypatch, left):
+    from refund_eval.harbor import deadlines
+
+    monkeypatch.setattr(deadlines, "time", SimpleNamespace(monotonic=lambda: 1000.0))
+    constructed = []
+
+    def exec_command(*, timeout_sec):
+        constructed.append(timeout_sec)
+        return asyncio.sleep(0)
+
+    with pytest.raises(TimeoutError):
+        exec_command(timeout_sec=deadlines.exec_timeout_seconds(1000.0 + left, 10))
+    assert not constructed
+
+
+@pytest.mark.parametrize("cap", [True, 0, -1, 10.0])
+def test_exec_timeout_rejects_noncanonical_control_cap(cap):
+    from refund_eval.harbor.deadlines import exec_timeout_seconds
+
+    with pytest.raises(ValueError):
+        exec_timeout_seconds(time.monotonic() + 100, cap)

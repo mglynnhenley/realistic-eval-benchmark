@@ -37,6 +37,17 @@ def remaining(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
 
 
+def exec_timeout_seconds(deadline: float, cap: int | None = None) -> int:
+    """Modal's exec wire timeout is whole seconds; zero is not an expired bound."""
+    if cap is not None and (type(cap) is not int or cap < 1):
+        raise ValueError("Exec timeout cap must be a positive integer")
+    duration = remaining(deadline)
+    seconds = math.floor(min(duration, cap) if cap is not None else duration)
+    if seconds < 1:
+        raise TimeoutError("Less than one whole second remains for bounded exec")
+    return seconds
+
+
 def host_start(value: str | None) -> float:
     """Only inherited by the local Harbor command, never sent to a sandbox."""
     now = time.monotonic()
