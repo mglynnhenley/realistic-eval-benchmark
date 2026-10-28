@@ -5,10 +5,12 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 from pathlib import Path
 
+from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.realism import stages
 from refund_eval.realism.background import atomic_json
 from refund_eval.realism.cycle import collect, compare, trial_commands
@@ -42,6 +44,7 @@ def _protocol(settings):
                 "scan_max_tokens": settings.get("scan_max_tokens", 8192), "scanner_single_attempt": True,
                 "sim_weeks": settings.get("sim_weeks", 3), "cost_limit": settings.get("per_trial_cost", .5),
                 "environment": "modal", "research_mode": "saved", "data_mode": "hybrid",
+                "search_auth": "api_key" if os.environ.get(HYBRID_EXA_KEY_ENV) else "keyless",
                 "simulator_model": "openrouter/anthropic/claude-opus-5.5",
                 "consistency_model": "openrouter/anthropic/claude-haiku-4.5"}
     for key in ("trials", "token_budget", "max_turns", "time_limit", "scan_max_tokens"):
@@ -105,6 +108,9 @@ def _prepare_trials(context, protocol, out, cwd, tag):
             or job.get("environment", {}).get("type") != "modal" or len(job.get("agents", [])) != 1):
         raise ValueError("Prepared Harbor job differs from the fixed trial protocol")
     agent = job["agents"][0]
+    search_auth = "api_key" if agent.get("env", {}).get(HYBRID_EXA_KEY_ENV) else "keyless"
+    if search_auth != protocol["search_auth"]:
+        raise ValueError("Prepared search authentication differs from the declared protocol")
     kwargs = agent.get("kwargs", {})
     fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
               "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
@@ -127,14 +133,19 @@ def _run_trials(context, protocol, out, cwd, tag):
 
 def _scan_plan(protocol, logs, context=None):
     if context is not None and getattr(context, "measurement_worktree", None) is not None:
-        program = ("import asyncio,json,sys; from refund_eval.realism.scan_budget import plan; "
-                   "p=json.loads(sys.argv[1]); "
-                   "print(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
+        program = ("import asyncio,json,sys; from pathlib import Path; "
+                   "from refund_eval.realism.scan_budget import plan; p=json.loads(sys.argv[1]); "
+                   "Path(sys.argv[3]).write_text(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
                    "max_tokens=p['scan_max_tokens'],single_attempt=True))))")
         identity = hashlib.sha256(json.dumps(logs).encode()).hexdigest()[:12]
-        return json.loads(_command(context, ["uv", "run", "python", "-c", program,
-                                            json.dumps(protocol), json.dumps(logs)],
-                                   name=f"scan-plan-{identity}", cwd=context.measurement_worktree))
+        output = context.directory / f"scan-plan-{identity}.json"
+        output.unlink(missing_ok=True)
+        # uv and dependency setup can write progress to the combined command log.
+        # Keep machine-readable planning output separate, just like scoring.
+        _command(context, ["uv", "run", "python", "-c", program,
+                           json.dumps(protocol), json.dumps(logs), str(output)],
+                 name=f"scan-plan-{identity}", cwd=context.measurement_worktree)
+        return json.loads(output.read_text())
     from refund_eval.realism.scan_budget import plan
     return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True))
 

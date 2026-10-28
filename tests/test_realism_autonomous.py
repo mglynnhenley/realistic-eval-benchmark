@@ -57,7 +57,8 @@ class Context:
 
 
 @pytest.fixture
-def context(tmp_path):
+def context(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
     return Context(tmp_path)
 
 
@@ -278,3 +279,26 @@ def test_actual_requested_short_round_has_full_reserve(context, adapters):
     assert plan["protocol"]["scanner_single_attempt"] is True
     assert plan["protocol"]["scan_max_tokens"] == 8192
     assert len(adapters) == 2
+
+
+def test_protocol_records_only_search_credential_presence(monkeypatch):
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
+    assert loop._protocol({})["search_auth"] == "keyless"
+    monkeypatch.setenv("REFUND_EVAL_EXA_API_KEY", "synthetic-search-test-value")
+    protocol = loop._protocol({})
+    assert protocol["search_auth"] == "api_key"
+    assert "synthetic-search-test-value" not in json.dumps(protocol)
+
+
+@pytest.mark.parametrize("declared,forwarded", [("keyless", True), ("api_key", False)])
+def test_prepared_search_auth_mismatch_stops_before_launch(context, monkeypatch, declared, forwarded):
+    out = context.directory / "prepared"
+    out.mkdir()
+    job = {"n_attempts": 3, "retry": {"max_retries": 0}, "environment": {"type": "modal"},
+           "agents": [{"env": {"REFUND_EVAL_EXA_API_KEY": "${REFUND_EVAL_EXA_API_KEY}"} if forwarded else {}}]}
+    (out / "job.json").write_text(json.dumps(job))
+    monkeypatch.setattr(loop, "_command", lambda *args, **kwargs: "")
+    with pytest.raises(ValueError, match="search authentication"):
+        loop._prepare_trials(context, {**loop._protocol({}), "search_auth": declared},
+                             out, context.worktree, "synthetic")
+    assert not context.ledger.exists()

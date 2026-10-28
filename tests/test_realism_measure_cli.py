@@ -110,18 +110,19 @@ def test_scan_and_score_use_fixed_runner_when_available(monkeypatch, tmp_path, t
 
 
 def test_scan_budget_executes_from_fixed_runner(monkeypatch, tmp_path):
-    context = SimpleNamespace(measurement_worktree=tmp_path / "runner")
+    context = SimpleNamespace(directory=tmp_path, measurement_worktree=tmp_path / "runner")
     calls = []
 
     def command(context, argv, **kwargs):
         calls.append((argv, kwargs))
-        return '{"required_usd": 0.8}'
+        Path(argv[-1]).write_text('{"required_usd": 0.8}')
+        return "Creating virtual environment at: .venv\nInstalled dependencies\n"
 
     monkeypatch.setattr(loop, "_command", command)
     protocol = loop._protocol({})
     assert loop._scan_plan(protocol, ["log.eval"], context) == {"required_usd": .8}
     assert calls[0][1]["cwd"] == context.measurement_worktree
-    assert json.loads(calls[0][0][-1]) == ["log.eval"]
+    assert json.loads(calls[0][0][-2]) == ["log.eval"]
 
 
 def test_trial_wallclock_override_preserves_legacy_default(monkeypatch, tmp_path):

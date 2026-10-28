@@ -39,7 +39,8 @@ def native_log(path, eval_id, protocol):
                                    "grader": {"model": protocol["consistency_model"]}}),
         results=EvalResults(total_samples=1, completed_samples=1),
         samples=[EvalSample(id="synthetic", epoch=1, input="synthetic input", target="",
-                            completed_at=datetime.now(UTC), metadata={
+                            completed_at=datetime.now(UTC),
+                            store={"published_tool_profile": {"search_auth": protocol["search_auth"]}}, metadata={
                                 "realism_version": f"{COMMIT[:7]}-synthetic+src-{'d' * 12}"})],
     )
     write_eval_log(evaluation, str(path))
@@ -47,9 +48,10 @@ def native_log(path, eval_id, protocol):
 
 
 @pytest.fixture
-def batch(tmp_path):
+def batch(tmp_path, monkeypatch):
     from inspect_scout import ScanSpec
 
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
     root = tmp_path / "original"
     root.mkdir()
     protocol = _protocol({"trials": 2})
@@ -73,7 +75,8 @@ def batch(tmp_path):
               "research_mode": "research_mode", "data_mode": "data_mode",
               "simulator_model": "simulator_model", "consistency_model": "grader_model"}
     job = {"n_attempts": 2, "retry": {"max_retries": 0}, "environment": {"type": "modal"},
-           "agents": [{"model_name": protocol["model"], "kwargs": {field: protocol[key] for key, field in fields.items()}}]}
+           "agents": [{"model_name": protocol["model"], "env": {},
+                       "kwargs": {field: protocol[key] for key, field in fields.items()}}]}
     job_path = root / "trials/job.json"
     job_path.write_text(json.dumps(job))
     (root / "manifest.json").write_text(json.dumps({"source_commit": COMMIT, "protocol": protocol, "hashes": HASHES}))
@@ -178,3 +181,29 @@ def test_trusted_runner_hashes_are_separate_from_trial_arm_hashes(batch):
     exported = evidence.write_evidence(batch, HASHES)
     assert exported.is_file()
     assert json.loads(path.read_text())["hashes"] == {"some-arm-source-file": "c" * 64}
+
+
+def test_keyless_evidence_cannot_be_reused_with_search_credentials(batch, monkeypatch):
+    exported = evidence.write_evidence(batch, HASHES)
+    monkeypatch.setenv("REFUND_EVAL_EXA_API_KEY", "synthetic-search-test-value")
+    with pytest.raises(ValueError, match="protocol differs"):
+        evidence.load_evidence(exported, commit=COMMIT, protocol=_protocol({"trials": 3}), hashes=HASHES)
+
+
+def test_export_rejects_changed_search_auth_in_prepared_job(batch):
+    root = Path(batch["path"])
+    path = root / "trials/job.json"
+    job = json.loads(path.read_text())
+    job["agents"][0]["env"] = {"REFUND_EVAL_EXA_API_KEY": "${REFUND_EVAL_EXA_API_KEY}"}
+    path.write_text(json.dumps(job))
+    prepared = json.loads((root / "prepared-source.json").read_text())
+    prepared["job_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (root / "prepared-source.json").write_text(json.dumps(prepared))
+    with pytest.raises(ValueError, match="search authentication"):
+        evidence.write_evidence(batch, HASHES)
+
+
+def test_native_search_auth_cannot_disagree_with_prepared_job(batch):
+    native_log(Path(batch["logs"][0]), "evaluation-0", {**batch["protocol"], "search_auth": "api_key"})
+    with pytest.raises(ValueError, match="Native search authentication"):
+        evidence.write_evidence(batch, HASHES)

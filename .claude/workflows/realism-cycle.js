@@ -45,6 +45,8 @@ const interactionReserve = num(a.interactionReserve, 4)
 const trialReserveMultiplier = num(a.trialReserveMultiplier, 1.15)
 const simWeeks = num(a.simWeeks, 3)
 const scanCost = num(a.scanCostPerTrial, 2)
+const scanMaxTokens = 8192
+const scannerSingleAttempt = true
 const scenario = a.scenario || 'train_refund_late'
 // One fixed judge for every round, so tell counts compare across rounds.
 const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.5']
@@ -68,7 +70,7 @@ if (!Number.isFinite(interactionReserve) || interactionReserve < 0) throw new Er
 const OUT = `${cycleDir}/.context/realism/cycle/${runId}`
 const LEDGER = `${OUT}/spend.json`
 const BUDGET = `uv run python -m refund_eval.realism.stages --ledger ${q(LEDGER)} --budget ${budgetUsd}`
-const trialConfig = { model, trials, costLimit, simWeeks, scenario, tokenBudget, maxTurns, timeLimit, judges }
+const trialConfig = { model, trials, costLimit, simWeeks, scenario, tokenBudget, maxTurns, timeLimit, judges, scanMaxTokens, scannerSingleAttempt }
 const trialOptions = `--model ${q(model)} --trials ${trials} --cost-limit ${costLimit} --sim-weeks ${simWeeks} --scenario ${q(scenario)} --token-budget ${tokenBudget} --max-turns ${maxTurns} --time-limit ${timeLimit}`
 const roundDir = r => `${OUT}/round-${r}`
 const role = (name, inputs, extra = '') =>
@@ -257,10 +259,20 @@ async function test(r, tag, cwd, expectedCommit) {
   const trialActual = usage && Number.isFinite(usage.cost_usd) && usage.cost_usd >= 0 ? usage.cost_usd : null
   await settle(trialStage, trialActual)
   const scans = `${out}/scans`
+  // Rendering and public model metadata are free. Reject an unsupported or
+  // unaffordable bound before reserving or launching any judge request.
+  const scanBudgetScript = `import asyncio,json,sys; from refund_eval.realism.scan_budget import plan; print(json.dumps(asyncio.run(plan(json.loads(sys.argv[1]),sys.argv[2],max_tokens=${scanMaxTokens},single_attempt=True))))`
+  const scanPlan = await limited(inDir(cwd,
+    `Plan the saved transcript scan without calling a model. Run only this local renderer and free public-pricing lookup:\n` +
+      `uv run python -c ${q(scanBudgetScript)} ${q(JSON.stringify(run.logs))} ${q(judges[0])} > ${q(`${out}/scan-budget.json`)}\n` +
+      `Return ok=true and required_usd from the saved JSON only when the command exited 0. On missing pricing, unsupported segmentation, invalid output or command failure return ok=false and required_usd=null. Never launch the scanner, make a model request, substitute an estimate, or retry paid work.`),
+  { label: `r${r} ${tag} scan plan`, phase: 'Budget', schema: { type: 'object', properties: { ok: { type: 'boolean' }, required_usd: { anyOf: [{ type: 'number' }, { type: 'null' }] } }, required: ['ok', 'required_usd'] }, effort: 'low' })
+  if (!scanPlan || scanPlan.ok !== true || !Number.isFinite(scanPlan.required_usd) || scanPlan.required_usd < 0) throw new Error(`r${r} ${tag} scan cost cannot be bounded; no judge call launched`)
+  if (scanPlan.required_usd > scanReserve) throw new Error(`r${r} ${tag} scan exceeds its declared reserve; no judge call launched`)
   const scanStage = await reserve(r, tag, 'tells', scanReserve)
   const scan = await limited(inDir(cwd,
     `Run the Scout tells scanner on these logs. ${PAID}\n` +
-      `uv run python scout/run.py ${run.logs.map(q).join(' ')} --scanners tells --yes --scans ${q(scans)} --judges ${judges.map(q).join(' ')}\n` +
+      `uv run python scout/run.py ${run.logs.map(q).join(' ')} --scanners tells --bounded-tells --max-tokens ${scanMaxTokens} --yes --scans ${q(scans)} --judges ${judges.map(q).join(' ')}\n` +
       `Return ok=true only if every requested log has one complete successful tells scan; otherwise return ok=false. Never treat missing scans as zero tells.`),
   { label: `r${r} ${tag} scan`, phase: ph, schema: OK, effort: 'low' })
   if (!scan || !scan.ok) { await settle(scanStage, null, 'failed'); throw new Error(`r${r} ${tag} tells coverage failed`) }
@@ -404,7 +416,7 @@ const setup = await limited(
 if (!setup || !setup.ok) return { stage: 'setup', error: setup ? setup.error : 'setup agent failed' }
 const manifest = { version: 2, run_id: runId, source_commit: setup.head, protocol: trialConfig, max_rounds: maxRounds, top, max_fix: MAX_FIX, rerun_unclear: a.rerunUnclear === true, budget_usd: budgetUsd, requested_budget_usd: requestedBudget, remaining_budget_bound_usd: remainingBudget, trial_reserve_multiplier: trialReserveMultiplier, scan_reserve_per_trial: scanCost, interaction_reserve: interactionReserve, ledger: LEDGER, status: 'prepared' }
 const manifestSaved = await limited(inCycle(
-  `Atomically write ${q(`${OUT}/manifest.json`)} with this manifest plus SHA256 hashes of scout/scanners.py, scout/rubrics/*.md, refund_eval/realism/cycle.py and uv.lock. If a manifest already exists, validate its source_commit and protocol exactly; never overwrite a mismatch or completed run. No secrets or transcripts.\n${JSON.stringify(manifest, null, 2)}\nReturn ok=true only after validation/readback.`),
+  `Atomically write ${q(`${OUT}/manifest.json`)} with this manifest plus SHA256 hashes of scout/scanners.py, scout/run.py, scout/legacy_grading_notes.json, scout/rubrics/*.md, refund_eval/realism/cycle.py, refund_eval/realism/coverage.py, refund_eval/realism/scan_budget.py and uv.lock. If a manifest already exists, validate its source_commit and protocol exactly; never overwrite a mismatch or completed run. No secrets or transcripts.\n${JSON.stringify(manifest, null, 2)}\nReturn ok=true only after validation/readback.`),
 { label: 'manifest', phase: 'Setup', schema: OK, effort: 'low' })
 if (!manifestSaved || !manifestSaved.ok) return { stage: 'manifest', error: 'frozen run manifest unavailable or mismatched' }
 if (budgetUsd === 0) return { stage: 'prepared', paid: false, head: setup.head, trialConfig, message: 'No paid work launched. Supply an explicitly authorized budget to run trials; use the manual saved-scan procedure for offline investigation.' }

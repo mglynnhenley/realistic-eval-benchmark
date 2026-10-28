@@ -114,6 +114,7 @@ def repository(tmp_path, monkeypatch):
     _git(repo, "commit", "-qm", "first environment change")
     candidate = _git(repo, "rev-parse", "HEAD")
     monkeypatch.chdir(repo)
+    monkeypatch.delenv("REFUND_EVAL_EXA_API_KEY", raising=False)
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     return {"repo": repo, "baseline": baseline, "candidate": candidate, "target": target}
 
@@ -149,7 +150,9 @@ def processes(monkeypatch):
                           grader_model="openrouter/anthropic/claude-haiku-4.5")
             (out / "job.json").write_text(json.dumps({"n_attempts": int(option(argv, "--trials")),
                 "retry": {"max_retries": 0}, "environment": {"type": "modal"},
-                "agents": [{"model_name": option(argv, "--model"), "kwargs": kwargs}]}))
+                "agents": [{"model_name": option(argv, "--model"), "kwargs": kwargs,
+                            "env": {"REFUND_EVAL_EXA_API_KEY": "${REFUND_EVAL_EXA_API_KEY}"}
+                            if os.environ.get("REFUND_EVAL_EXA_API_KEY") else {}}]}))
             # Use the real source-manifest function in the actual arm checkout.
             program = "from pathlib import Path; from refund_eval.realism.track import freeze_source_manifest; import sys; freeze_source_manifest(Path(sys.argv[1]))"
             return original(context, [sys.executable, "-c", program, str(source)], name=name, cwd=cwd,
@@ -282,3 +285,23 @@ def test_incomplete_native_scan_fails_and_cannot_replay_paid_trial(repository, p
     assert cli.main(argv) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "reconciliation_required"
     assert len(processes["trials"]) == len(processes["scans"]) == 1
+
+
+def test_direct_measurement_loads_search_environment_before_freezing_protocol(repository, monkeypatch, tmp_path):
+    from refund_eval.realism.measurement import run_measurement
+
+    argv, out = _arguments(repository, tmp_path, suffix="auth-prepare", execute=False, budget="0")
+    loaded = []
+
+    def synthetic_environment(path, **kwargs):
+        loaded.append(path)
+        monkeypatch.setenv("REFUND_EVAL_EXA_API_KEY", "synthetic-search-test-value")
+
+    monkeypatch.setattr("dotenv.load_dotenv", synthetic_environment)
+    result = run_measurement(repo=repository["repo"], run_dir=out,
+                             baseline=repository["baseline"], candidate=repository["candidate"],
+                             review=Path(argv[argv.index("--review") + 1]), budget=0, settings={})
+    assert result["status"] == "prepared"
+    assert result["protocol"]["search_auth"] == "api_key"
+    assert loaded == [repository["repo"] / ".env"]
+    assert "synthetic-search-test-value" not in (out / "request.json").read_text()

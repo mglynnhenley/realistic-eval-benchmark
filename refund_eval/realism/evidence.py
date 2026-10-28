@@ -12,6 +12,7 @@ import re
 import shutil
 from pathlib import Path
 
+from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.realism.coverage import source_identity
 from refund_eval.realism.cycle import score
 
@@ -91,6 +92,9 @@ def _provenance(root, commit, protocol, hashes):
             or job.get("environment", {}).get("type") != "modal" or len(agents) != 1):
         raise ValueError("Evidence Harbor job differs from the trial protocol")
     kwargs = agents[0].get("kwargs", {})
+    search_auth = "api_key" if agents[0].get("env", {}).get(HYBRID_EXA_KEY_ENV) else "keyless"
+    if protocol.get("search_auth") != search_auth:
+        raise ValueError("Evidence search authentication differs from the trial protocol")
     fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
               "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
               "research_mode": "research_mode", "data_mode": "data_mode",
@@ -117,6 +121,10 @@ def _native_protocol(logs, protocol, *, commit, prepared):
             if role not in roles or getattr(roles[role], "model", None) != protocol[key]:
                 raise ValueError("Native simulator settings differ from the saved evidence protocol")
         for sample in evaluation.samples or []:
+            profile = (sample.store or {}).get("published_tool_profile")
+            if (isinstance(profile, dict) and profile.get("search_auth") is not None
+                    and profile["search_auth"] != protocol.get("search_auth")):
+                raise ValueError("Native search authentication differs from the saved evidence protocol")
             version = (sample.metadata or {}).get("realism_version", "")
             if (not isinstance(version, str) or not version.startswith(commit[:7] + "-")
                     or not version.endswith("+src-" + str(prepared.get("source_sha256", ""))[:12])):

@@ -46,8 +46,9 @@ def collect(out: str, trials: int) -> dict:
             samples = evaluation.samples or []
             if evaluation.status != "success" or evaluation.error is not None:
                 raise ValueError("Evaluation did not succeed")
-            if not samples or any(sample.error is not None for sample in samples):
-                raise ValueError("Evaluation has missing or failed samples")
+            if not samples or any(sample.error is not None or not sample.completed_at
+                                  or getattr(sample, "invalidation", None) for sample in samples):
+                raise ValueError("Evaluation has missing, unfinished, invalidated or failed samples")
             results = evaluation.results
             if (results is None or results.total_samples != len(samples)
                     or results.completed_samples != len(samples)):

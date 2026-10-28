@@ -50,6 +50,13 @@ const agent = async (prompt, opts) => {
    logs:Array.from({length:config.failedBatch?n-1:n},(_,i)=>`${label}-${i}.eval`),probes:[]};
  }
  if(label.endsWith(' trial usage')) return {cost_usd:.01};
+ if(label.endsWith(' scan plan')) {
+  if(config.scanPlan===null) return null;
+  if(config.scanPlan==='missing') return {ok:true};
+  if(config.scanPlan==='unknown') return {ok:false,required_usd:null};
+  if(config.scanPlan==='nonfinite') return {ok:true,required_usd:Infinity};
+  return {ok:true,required_usd:config.scanPlan===undefined?.05:config.scanPlan};
+ }
  if(label.endsWith(' scan')) return {ok:!config.failedScan};
  if(label.endsWith(' score')) return {trials:config.partialScore?1:(input.args.trials||3),tells_per_trial:10,ci:[9,11],cost_usd:.01,per_trial:[10,10,10]};
  if(label.endsWith(' artifact')) return {ok:true};
@@ -131,6 +138,41 @@ def test_all_arms_use_identical_declared_short_protocol_and_unclear_stops():
     assert not any("ab-" in label for label in labels(run))
     assert run["result"]["rounds"][-1]["decision"] == "unclear"
     assert run["result"]["rounds"][-1]["correctness_retained"] == ["n1"]
+
+
+def test_scan_planning_precedes_paid_reservation_and_matches_bounded_scanner():
+    run = run_workflow()
+    ordered = labels(run)
+    for prefix in ("r0 baseline", "r1 candidate"):
+        stage_prefix = prefix.replace(" ", "-")
+        assert ordered.index(f"{prefix} trial usage") < ordered.index(f"{stage_prefix}-trials account")
+        assert ordered.index(f"{stage_prefix}-trials account") < ordered.index(f"{prefix} scan plan")
+        assert ordered.index(f"{prefix} scan plan") < ordered.index(f"{stage_prefix}-tells reserve")
+        assert ordered.index(f"{stage_prefix}-tells reserve") < ordered.index(f"{prefix} scan")
+        planning = next(call["prompt"] for call in run["calls"] if call["label"] == f"{prefix} scan plan")
+        scanning = next(call["prompt"] for call in run["calls"] if call["label"] == f"{prefix} scan")
+        assert "scan_budget import plan" in planning
+        assert "max_tokens=8192,single_attempt=True" in planning
+        assert "--bounded-tells --max-tokens 8192" in scanning
+    manifest = next(call["prompt"] for call in run["calls"] if call["label"] == "manifest")
+    assert '"scanMaxTokens": 8192' in manifest
+    assert '"scannerSingleAttempt": true' in manifest
+
+
+@pytest.mark.parametrize("plan,error", [(1, "exceeds its declared reserve"), (-.01, "cannot be bounded"),
+                                        (None, "cannot be bounded"), ("missing", "cannot be bounded"),
+                                        ("unknown", "cannot be bounded"), ("nonfinite", "cannot be bounded")])
+def test_unaffordable_or_unknown_scan_plan_never_reserves_or_launches_judging(plan, error):
+    run = run_workflow({"scanPlan": plan})
+    assert run["result"]["stage"] == "baseline"
+    assert error in run["result"]["error"]
+    assert "r0 baseline scan plan" in labels(run)
+    assert "r0 baseline scan" not in labels(run)
+    assert "r1 candidate trials" not in labels(run)
+    assert len(run["stages"]) == 1
+    stage, = run["stages"].values()
+    assert stage["kind"] == "trials" and stage["status"] == "complete"
+    assert stage["actual"] == .01  # The prior paid trials remain accounted.
 
 
 @pytest.mark.parametrize("case,error", [

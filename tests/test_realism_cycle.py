@@ -2,6 +2,7 @@
 per trial, and the champion-candidate comparison. Subprocesses and logs are faked; no model calls."""
 
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +21,8 @@ def test_trial_commands_match_the_harbor_flags():
     assert run == ["scripts/harbor", "harbor", "run", "-c", ".context/b/job.json"]
 
 
-def native_log(path, *, status="success", sample_error=False, total=1, completed=1, eval_id=None):
+def native_log(path, *, status="success", sample_error=False, total=1, completed=1, eval_id=None,
+               unfinished=False, invalidated=False):
     """Write real Inspect files so collection validates content rather than file names."""
     from inspect_ai.log import (
         EvalConfig,
@@ -40,7 +42,11 @@ def native_log(path, *, status="success", sample_error=False, total=1, completed
         eval=EvalSpec(created="2026-01-01T00:00:00Z", task="synthetic", dataset=EvalDataset(),
                       model="test/model", config=EvalConfig(), eval_id=eval_id or path.stem),
         results=EvalResults(total_samples=total, completed_samples=completed),
-        samples=[EvalSample(id="synthetic", epoch=1, input="synthetic input", target="", error=error if sample_error else None)],
+        samples=[EvalSample(id="synthetic", epoch=1, input="synthetic input", target="",
+                            error=error if sample_error else None,
+                            completed_at=None if unfinished else datetime.now(UTC),
+                            invalidation={"author": "synthetic reviewer", "reason": "invalid synthetic trial"}
+                            if invalidated else None)],
         error=error if status == "error" else None,
     )
     write_eval_log(evaluation, str(path))
@@ -119,11 +125,39 @@ def test_collect_requires_exact_requested_samples(tmp_path, count):
 
 
 @pytest.mark.parametrize("settings", [{"status": "started"}, {"status": "cancelled"}, {"status": "error"},
-                                     {"sample_error": True}, {"total": 2}, {"completed": 0}])
+                                     {"sample_error": True}, {"total": 2}, {"completed": 0},
+                                     {"unfinished": True}, {"invalidated": True}])
 def test_collect_rejects_failed_or_incomplete_native_logs(tmp_path, settings):
     native_log(tmp_path / "jobs" / "failed.eval", **settings)
     found = cycle.collect(str(tmp_path), 1)
     assert not found["logs"] and found["failed"] == 1 and found["valid_trials"] == 0
+
+
+@pytest.mark.parametrize("sample_settings", [{"unfinished": True}, {"invalidated": True}])
+def test_unscorable_native_samples_stop_batch_before_any_judge_call(monkeypatch, tmp_path, sample_settings):
+    from refund_eval.realism import autonomous, stages
+
+    context = SimpleNamespace(directory=tmp_path, worktree=tmp_path / "worktree", ledger=tmp_path / "spend.json",
+                              settings={"budget_usd": 5}, check_cancelled=lambda: None,
+                              update=lambda *args, **kwargs: None)
+    protocol = autonomous._protocol({"trials": 1})
+    monkeypatch.setattr(autonomous, "_assert_source", lambda *args, **kwargs: None)
+    monkeypatch.setattr(autonomous, "_prepare_trials", lambda *args: {"commit": "source", "dirty": False})
+
+    def synthetic_trial_command(argv, **kwargs):
+        native_log(tmp_path / "batches/candidate/trials/jobs/invalid.eval", **sample_settings)
+        return {"returncode": 0}
+
+    context.command = synthetic_trial_command
+    monkeypatch.setattr(autonomous, "_scan_plan", lambda *args: pytest.fail("Invalid trials must stop before scan planning"))
+    monkeypatch.setattr(autonomous, "_run_scan", lambda *args: pytest.fail("Invalid trials must never launch a judge"))
+    with pytest.raises(ValueError, match="Every requested trial must succeed"):
+        autonomous._batch(context, protocol, "source", {}, "candidate", cwd=context.worktree,
+                          trial_reserve=1, scan_reserve=1)
+    ledger = stages.show(context.ledger, 5)
+    assert set(ledger["stages"]) == {"candidate-trials"}
+    assert ledger["stages"]["candidate-trials"]["status"] == "failed"
+    assert ledger["held_usd"] == 1
 
 
 def test_collect_rejects_unreadable_and_duplicate_native_logs(tmp_path):

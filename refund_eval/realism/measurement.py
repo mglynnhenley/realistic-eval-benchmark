@@ -195,6 +195,8 @@ def run_measurement(*, repo: Path, run_dir: Path, baseline: str, candidate: str,
             return {"status": "rejected", "reason": "Candidate changes protected benchmark or measurement files",
                     "protected_changes": forbidden, "paid_stages_started": False}
         receipt, review_bytes = _review(review, repo, base, changed)
+        from dotenv import load_dotenv
+        load_dotenv(repo / ".env", override=False)
         selected = {"time_limit": 1800, "trial_wallclock_limit": 1800, **settings}
         protocol = autonomous._protocol(selected)
         wallclock = selected["trial_wallclock_limit"]
@@ -277,8 +279,6 @@ def run_measurement(*, repo: Path, run_dir: Path, baseline: str, candidate: str,
             context = JobContext(run_dir)
             context.measurement_worktree = run_dir / "runner"
             context.measurement_hashes = hashes
-            from dotenv import load_dotenv
-            load_dotenv(repo / ".env", override=False)
             reference = _saved_baseline(context, evidence_path, base, protocol, hashes) if evidence_path else None
             # Marker precedes the first possibly paid operation and survives process death.
             atomic_json(run_dir / "execution-started.json", {"fingerprint": fingerprint, "started_at": now()})
