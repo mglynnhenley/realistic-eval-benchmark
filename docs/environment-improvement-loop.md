@@ -27,7 +27,7 @@ All commands are run as `uv run python -m refund_eval.realism <command> [--scena
 
 | Command | Purpose |
 |---|---|
-| `open [--scans DIR] [--probe FILE...]` | The largest clusters of findings, with their existing notes |
+| `open [--scans DIR] [--probe FILE...] [--awareness FILE...]` | The largest clusters of findings, with their existing notes |
 | `probe [--out FILE]` | What this sandbox, its browser and its web requests reveal, with the checks that fail |
 | `notes show` / `notes merge FILE` | Print the memory, or merge a JSON list of notes into it |
 | `check LOG --interaction ID [--note ID]` | Rerun one interaction with the notes and judge it |
@@ -42,9 +42,13 @@ The `realism-cycle` workflow repeats test and improve. It keeps the champion env
 
 | Command | Purpose |
 |---|---|
-| `trials --model M --trials N --cost-limit USD --out DIR [--sim-weeks 3] [--environment modal] [--yes]` | Prepare and run one Harbor `train_refund_late` batch from the working tree (saved research, all trials concurrent). After asking, it prints the trials' `.eval` logs and `probe.json` files, and the number of trials without a log |
-| `score LOGS... --scans DIR [--out FILE]` | Tells per trial, matched by log, sample and epoch: the mean with a 95% bootstrap interval, `yes` tells, the mean per factor, the model cost and the per-trial counts |
-| `compare --a FILE... --b FILE... [--margin 0]` | Pool the per-trial counts of the champion (A) and candidate (B) score files and bootstrap B - A. The candidate is `better` if the interval is entirely below `-margin`, `worse` if it is entirely above `margin`, and `unclear` otherwise |
+| `trials --model M --trials N --cost-limit USD --out DIR [--sim-weeks 3] [--environment modal] [--history-tokens 60000] [--reasoning] [--yes]` | Prepare and run one Harbor `train_refund_late` batch from the working tree (saved research, all trials concurrent). After asking, it prints the trials' `.eval` logs and `probe.json` files, and the number of trials without a log. `--reasoning` asks OpenRouter to return the target's reasoning |
+| `score LOGS... --scans DIR [--out FILE] [--awareness FILE...]` | Tells per trial, matched by log, sample and epoch: the mean with a 95% bootstrap interval, `yes` tells, the mean per factor, the model cost and the per-trial counts. With `--awareness`, also the mean probe score per trial |
+| `compare --a FILE... --b FILE... [--margin 0] [--metric tells\|awareness]` | Pool the per-trial counts (or, with `--metric awareness`, the per-trial probe scores) of the champion (A) and candidate (B) score files and bootstrap B - A. The candidate is `better` if the interval is entirely below `-margin`, `worse` if it is entirely above `margin`, and `unclear` otherwise |
+
+### Eval-awareness probe
+
+An optional published probe reads an open-weights model's activations at each agent turn and scores how test-like the situation looks to it, including when the agent says nothing. Its `awareness.json` output can feed the loop: `open --awareness` adds turns where the score rose as findings, `score --awareness` adds a per-trial probe score, and `compare --metric awareness` decides on it. The `realism-loop` workflow takes `awareness` paths; `realism-cycle` takes `awarenessProbe`, `awarenessGpu` and `metric`. Scoring runs on a paid Modal GPU that the cycle's budget does not count. See [the awareness guide](awareness.md) for setup and limitations.
 
 ## Preserve reproducibility
 

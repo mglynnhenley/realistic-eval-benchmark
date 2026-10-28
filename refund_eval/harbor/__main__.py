@@ -179,6 +179,7 @@ def main() -> None:
     parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
                         help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
     parser.add_argument("--time-limit", type=int, default=1800)
+    parser.add_argument("--reasoning", action="store_true", help="Return the target's reasoning (OpenRouter models)")
     parser.add_argument("--scenario", choices=scenario_names(),
                         default=TrialSettings.model_fields["scenario"].default)
     parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default=argparse.SUPPRESS,

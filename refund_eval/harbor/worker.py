@@ -69,7 +69,8 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             **_resume_args(settings),
         },
         model=request.model,
-        model_args=published_model_args(request.model) if settings.tool_profile == "published" else {},
+        model_args={**(published_model_args(request.model) if settings.tool_profile == "published" else {}),
+                    **({"reasoning_enabled": True} if settings.reasoning else {})},
         model_roles={
             "simulator": settings.simulator_model or DEFAULT_ROLE_MODEL,
             "grader": settings.grader_model or DEFAULT_GRADER_MODEL,

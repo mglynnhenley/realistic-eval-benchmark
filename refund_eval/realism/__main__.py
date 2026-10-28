@@ -23,6 +23,10 @@ def _open(args) -> int:
     from scout.scanners import load_tells
 
     found = (load_tells(args.scans, judge=args.judge) if args.scans else []) + load_probes(args.probe)
+    if args.awareness:
+        from refund_eval.awareness.findings import findings, load_awareness
+
+        found += findings(load_awareness(args.awareness))
     clusters = open_clusters(load_memory(args.scenario), found, top=args.top)
     print(json.dumps(clusters, indent=2, ensure_ascii=False, default=str))
     return 0
@@ -132,7 +136,8 @@ def _trials(args) -> int:
     from refund_eval.realism.cycle import collect, trial_commands
 
     commands = trial_commands(args.model, args.trials, args.cost_limit, args.out, sim_weeks=args.sim_weeks,
-                              environment=args.environment)
+                              environment=args.environment, reasoning=args.reasoning,
+                              history_tokens=args.history_tokens)
     for command in commands:
         print(shlex.join(command))
     if not args.yes and input(f"Run {len(commands)} commands? [y/N] ").strip().lower() not in ("y", "yes"):
@@ -149,7 +154,7 @@ def _trials(args) -> int:
 def _score(args) -> int:
     from refund_eval.realism.cycle import score
 
-    result = json.dumps(score(args.logs, args.scans), indent=2)
+    result = json.dumps(score(args.logs, args.scans, awareness=args.awareness), indent=2)
     if args.out:
         with open(args.out, "w") as file:
             file.write(result + "\n")
@@ -160,14 +165,19 @@ def _score(args) -> int:
 def _compare(args) -> int:
     from refund_eval.realism.cycle import compare
 
+    field = "per_trial_awareness" if args.metric == "awareness" else "per_trial"
+
     def pooled(paths):
         trials = []
         for path in paths:
             with open(path) as file:
-                trials += json.load(file)["per_trial"]
-        return trials
+                trials += json.load(file)[field]
+        return [value for value in trials if value is not None]
 
-    print(json.dumps(compare(pooled(args.a), pooled(args.b), margin=args.margin), indent=2))
+    result = compare(pooled(args.a), pooled(args.b), margin=args.margin)
+    if args.metric == "awareness":  # probe means cross zero, so a relative change is meaningless
+        result["relative"] = None
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -188,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     opened.add_argument("--probe", nargs="*", default=[], help="probe.json files from trials or `realism probe --out`")
     opened.add_argument("--top", type=int, default=5, help="number of clusters")
     opened.add_argument("--judge", help="judge whose results are used (default: the first)")
+    opened.add_argument("--awareness", nargs="*", default=[], metavar="FILE", help="awareness.json files from the probe")
     opened.set_defaults(handler=_open)
     probing = commands.add_parser("probe", parents=[common], help="report what this sandbox and its browser reveal")
     probing.add_argument("--out", help="also save the raw facts here (a probe.json)")
@@ -232,12 +243,15 @@ def main(argv: list[str] | None = None) -> int:
     trials.add_argument("--out", required=True, help="new Git-ignored output directory")
     trials.add_argument("--sim-weeks", type=float, default=3, help="simulated weeks per trial")
     trials.add_argument("--environment", choices=["modal", "docker"], default="modal")
+    trials.add_argument("--history-tokens", type=int, default=60000, help="agent history kept per turn")
+    trials.add_argument("--reasoning", action="store_true", help="return the target's reasoning (OpenRouter models)")
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
     scoring = commands.add_parser("score", help="tells per trial for logs, as JSON")
     scoring.add_argument("logs", nargs="+", help="Inspect .eval logs")
     scoring.add_argument("--scans", required=True, help="Scout results directory with the tells scanner")
     scoring.add_argument("--out", help="also write the score JSON here")
+    scoring.add_argument("--awareness", nargs="+", metavar="FILE", help="awareness.json files: add per-trial probe means")
     scoring.set_defaults(handler=_score)
     comparing = commands.add_parser(
         "compare", help="bootstrap candidate minus champion tells per trial",
@@ -247,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
     comparing.add_argument("--a", nargs="+", required=True, metavar="FILE", help="champion score files")
     comparing.add_argument("--b", nargs="+", required=True, metavar="FILE", help="candidate score files")
     comparing.add_argument("--margin", type=float, default=0, help="tells per trial the interval must clear")
+    comparing.add_argument("--metric", choices=["tells", "awareness"], default="tells",
+                           help="pool per_trial (tells) or per_trial_awareness (probe means, nulls dropped)")
     comparing.set_defaults(handler=_compare)
 
     args = parser.parse_args(argv)

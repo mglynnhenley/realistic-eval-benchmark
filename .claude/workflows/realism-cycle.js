@@ -1,12 +1,12 @@
 export const meta = {
   name: 'realism-cycle',
   description: 'Repeated realism test-and-improve cycle on its own worktree branch: baseline, then improve, test, compare, accept or revert, until plateau, budget or maxRounds',
-  whenToUse: 'To run several paid realism rounds unattended. args: {model, trials: 5, costLimit: 4 (USD per trial), budget: 100 (USD total), plateau: 0.05, maxRounds: 6, simWeeks: 3, scanCostPerTrial: 2, cycleDir, branch: "realism/cycle", repo, scenario, judges, top, maxFix}',
+  whenToUse: 'To run several paid realism rounds unattended. args: {model, trials: 5, costLimit: 4 (USD per trial), budget: 100 (USD total), plateau: 0.05, maxRounds: 6, simWeeks: 3, scanCostPerTrial: 2, cycleDir, branch: "realism/cycle", repo, scenario, judges, top, maxFix, awarenessProbe?: probe JSON from `python -m refund_eval.awareness fetch` (scores every trial batch with the eval-awareness probe on a Modal GPU; GPU spend is not in the budget), awarenessGpu?, reasoning?: true to return the reasoning of an open model (OpenRouter), historyTokens? (agent history per turn, default 60000; ~24000 for 41k-context models), metric?: "tells" | "awareness" (decision and plateau metric; awareness needs awarenessProbe, and its plateau is an absolute drop in mean probe score)}',
   phases: [
     { title: 'Setup', detail: 'cycle worktree on args.branch, .env, uv sync' },
-    { title: 'Baseline', detail: 'round 0: trials, tells scan, score (paid)' },
+    { title: 'Baseline', detail: 'round 0: trials, tells scan, optional awareness probe, score (paid)' },
     { title: 'Improve', detail: 'triage, investigate, verify, merge, fix, check, integrate into the cycle branch' },
-    { title: 'Test', detail: 'trials, tells scan and score of the candidate (paid)' },
+    { title: 'Test', detail: 'trials, tells scan, optional awareness probe and score of the candidate (paid)' },
     { title: 'Decide', detail: 'compare; A/B rerun when unclear; accept or revert' },
     { title: 'Report', detail: 'round reports and the final summary' },
   ],
@@ -32,6 +32,15 @@ const scenario = a.scenario || 'train_refund_late'
 const judges = a.judges ? list(a.judges) : ['openrouter/anthropic/claude-opus-5.5']
 const top = Math.min(a.top || 5, 5)
 const MAX_FIX = a.maxFix || 10
+// Optional eval-awareness probe (refund_eval.awareness): scored on a Modal GPU after each trial batch.
+const awarenessProbe = a.awarenessProbe ? (String(a.awarenessProbe).startsWith('/') ? a.awarenessProbe : `${repo}/${a.awarenessProbe}`) : null
+const awarenessGpu = a.awarenessGpu || null
+// Ask OpenRouter for the target's reasoning, which the awareness probe reads when present.
+const reasoning = !!a.reasoning
+const metric = a.metric || 'tells'
+if (!['tells', 'awareness'].includes(metric)) return { stage: 'args', error: `metric must be tells or awareness, not ${metric}` }
+if (metric === 'awareness' && !awarenessProbe) return { stage: 'args', error: 'metric awareness needs args.awarenessProbe' }
+const KEY = metric === 'awareness' ? 'awareness_per_trial' : 'tells_per_trial'
 const CLI = 'uv run python -m refund_eval.realism'
 const OUT = `${cycleDir}/.context/realism/cycle`
 const roundDir = r => `${OUT}/round-${r}`
@@ -66,12 +75,13 @@ const SCORE = {
   properties: {
     trials: { type: 'integer' }, tells_per_trial: { type: 'number' }, ci: {}, yes_per_trial: { type: 'number' },
     by_factor: { type: 'object' }, cost_usd: { type: 'number' }, per_trial: { type: 'array' },
+    awareness_per_trial: {}, awareness_ci: {}, per_trial_awareness: { type: 'array' },
   },
   required: ['trials', 'tells_per_trial', 'ci', 'cost_usd'],
 }
 const COMPARE = {
   type: 'object',
-  properties: { decision: { enum: ['better', 'worse', 'unclear'] }, delta: { type: 'number' }, ci: {}, relative: { type: 'number' } },
+  properties: { decision: { enum: ['better', 'worse', 'unclear'] }, delta: { type: 'number' }, ci: {}, relative: {} },
   required: ['decision', 'delta', 'ci', 'relative'],
 }
 const CLUSTERS = {
@@ -145,19 +155,25 @@ const REPORT = { type: 'object', properties: { path: str, summary: str }, requir
 const scored = []
 const spent = () => scored.reduce((s, x) => s + (x.cost_usd || 0) + scanCost * (x.trials || 0), 0)
 const roundCost = trials * (costLimit + scanCost)
-const tpt = scores => {
-  const n = scores.reduce((s, x) => s + x.trials, 0)
-  return n ? scores.reduce((s, x) => s + x.tells_per_trial * x.trials, 0) / n : 0
+// Trial-weighted mean of a score field (the decision metric by default); awareness weighs only trials with a probe score.
+const weight = (x, key) => (key === 'awareness_per_trial' ? (x.per_trial_awareness || []).filter(v => v != null).length : x.trials)
+const tpt = (scores, key = KEY) => {
+  const n = scores.reduce((s, x) => s + (x[key] == null ? 0 : weight(x, key)), 0)
+  return n ? scores.reduce((s, x) => s + (x[key] == null ? 0 : x[key] * weight(x, key)), 0) / n : 0
 }
+const tells = scores => tpt(scores, 'tells_per_trial')
+const aware = scores => tpt(scores, 'awareness_per_trial')
+// Improvement of the champion: relative drop in tells, or absolute drop in mean probe score (it can be negative).
+const gain = (b, c) => (metric === 'awareness' ? tpt(b) - tpt(c) : tpt(b) > 0 ? (tpt(b) - tpt(c)) / tpt(b) : 0)
 const money = x => Math.round(x * 100) / 100
 
-// Trials -> tells scan -> score, from the working tree at `cwd`. Throws on failure.
+// Trials -> tells scan -> (awareness probe) -> score, from the working tree at `cwd`. Throws on failure.
 async function test(r, tag, cwd) {
   const out = `${roundDir(r)}/${tag}`
   const ph = r === 0 ? 'Baseline' : 'Test'
   const run = await agent(inDir(cwd,
     `Run the target-model trials. ${PAID} They can take hours: start the command with run_in_background and wait until it exits; never start it twice.\n` +
-      `mkdir -p ${q(out)} && ${CLI} trials --model ${q(model)} --trials ${trials} --cost-limit ${costLimit} --out ${q(`${out}/trials`)} --sim-weeks ${simWeeks} --yes > ${q(`${out}/trials.json`)}\n` +
+      `mkdir -p ${q(out)} && ${CLI} trials --model ${q(model)} --trials ${trials} --cost-limit ${costLimit} --out ${q(`${out}/trials`)} --sim-weeks ${simWeeks}${reasoning ? ' --reasoning' : ''}${a.historyTokens ? ` --history-tokens ${a.historyTokens}` : ''} --yes > ${q(`${out}/trials.json`)}\n` +
       `Return the JSON it printed (logs, probes, failed), ok=true if it exited 0 with at least one log, and the error text otherwise.`),
   { label: `r${r} ${tag} trials`, phase: ph, schema: TRIALS, effort: 'low' })
   if (!run || !run.ok || !run.logs.length) throw new Error(`r${r} ${tag} trials failed: ${run ? run.error : 'agent failed'}`)
@@ -168,17 +184,29 @@ async function test(r, tag, cwd) {
       `Return ok=true if the scan completed, and the error text otherwise.`),
   { label: `r${r} ${tag} scan`, phase: ph, schema: OK, effort: 'low' })
   if (!scan || !scan.ok) throw new Error(`r${r} ${tag} scan failed: ${scan ? scan.error : 'agent failed'}`)
+  let awareness = null
+  if (awarenessProbe) {
+    const af = `${out}/awareness.json`
+    const aw = await agent(inCycle(
+      `Score these logs with the eval-awareness probe on a Modal GPU. ${PAID}\n` +
+        `uv run --extra awareness python -m refund_eval.awareness score ${run.logs.map(q).join(' ')} --probe ${q(awarenessProbe)} --out ${q(af)} --modal${awarenessGpu ? ` --gpu ${q(awarenessGpu)}` : ''}\n` +
+        `Return ok=true and path=${af} if it exited 0 and wrote the file, and the error text otherwise.`),
+    { label: `r${r} ${tag} awareness`, phase: ph, schema: OK, effort: 'low' })
+    if (aw && aw.ok) awareness = af
+    else if (metric === 'awareness') throw new Error(`r${r} ${tag} awareness failed: ${aw ? aw.error : 'agent failed'}`)
+    else log(`r${r} ${tag} awareness failed, continuing on tells: ${aw ? aw.error : 'agent failed'}`)
+  }
   const file = `${out}/score.json`
   const score = await agent(inCycle(
-    `Run: ${CLI} score ${run.logs.map(q).join(' ')} --scans ${q(scans)} --out ${q(file)}\nReturn the JSON it printed, unchanged.`),
+    `Run: ${CLI} score ${run.logs.map(q).join(' ')} --scans ${q(scans)}${awareness ? ` --awareness ${q(awareness)}` : ''} --out ${q(file)}\nReturn the JSON it printed, unchanged.`),
   { label: `r${r} ${tag} score`, phase: ph, schema: SCORE, effort: 'low' })
   if (!score) throw new Error(`r${r} ${tag} score failed`)
   scored.push(score)
-  return { logs: run.logs, probes: run.probes, failed: run.failed, scans, score: { ...score, file } }
+  return { logs: run.logs, probes: run.probes, failed: run.failed, scans, awareness, score: { ...score, file } }
 }
 
 const compare = (r, label, A, B) => agent(inCycle(
-  `Run: ${CLI} compare --a ${A.map(q).join(' ')} --b ${B.map(q).join(' ')}\nReturn the JSON it printed, unchanged.`),
+  `Run: ${CLI} compare --a ${A.map(q).join(' ')} --b ${B.map(q).join(' ')}${metric === 'tells' ? '' : ` --metric ${metric}`}\nReturn the JSON it printed, unchanged.`),
 { label: `r${r} ${label}`, phase: 'Decide', schema: COMPARE, effort: 'low' })
 
 // One improvement round on the cycle branch: the realism-loop stages, then integrate the fixes as the candidate.
@@ -187,7 +215,7 @@ async function improve(r, run, recent) {
   const dropped = []
   const drop = m => { dropped.push(m); log(m) }
   const triage = await agent(inCycle(
-    `Run: ${CLI} open --scans ${q(run.scans)}${run.probes.length ? ` --probe ${run.probes.map(q).join(' ')}` : ''} --top ${top} --scenario ${scenario}\n` +
+    `Run: ${CLI} open --scans ${q(run.scans)}${run.probes.length ? ` --probe ${run.probes.map(q).join(' ')}` : ''}${run.awareness ? ` --awareness ${q(run.awareness)}` : ''} --top ${top} --scenario ${scenario}\n` +
       `Also run: git rev-parse HEAD\nReturn the sha as base and the printed JSON list, unchanged, as clusters.`),
   { label: `r${r} triage`, phase: 'Improve', schema: CLUSTERS, effort: 'low' })
   if (!triage) throw new Error(`r${r} triage failed`)
@@ -270,7 +298,7 @@ const setup = await agent(
     `otherwise git -C ${q(repo)} worktree add ${q(cycleDir)} -b ${branch} HEAD. If it exists, it must be a worktree on ${branch} (git -C ${q(cycleDir)} rev-parse --abbrev-ref HEAD); otherwise stop with ok=false.\n` +
     `2. cp ${q(`${repo}/.env`)} ${q(`${cycleDir}/.env`)}\n` +
     `3. cd ${q(cycleDir)} && uv sync && mkdir -p ${q(OUT)}\n` +
-    `4. cd ${q(cycleDir)} && ${CLI} trials --help && ${CLI} score --help && ${CLI} compare --help (no paid calls; confirms the branch has these commands).\n` +
+    `4. cd ${q(cycleDir)} && ${CLI} trials --help && ${CLI} score --help && ${CLI} compare --help${awarenessProbe ? ' && uv run python -m refund_eval.awareness score --help' : ''} (no paid calls; confirms the branch has these commands).\n` +
     `Return ok, head = git -C ${q(cycleDir)} rev-parse HEAD, and the error text if a step failed.`,
   { label: 'setup', phase: 'Setup', schema: OK, effort: 'low' })
 if (!setup || !setup.ok) return { stage: 'setup', error: setup ? setup.error : 'setup agent failed' }
@@ -280,7 +308,7 @@ phase('Baseline')
 let baseline = null
 try { baseline = await test(0, 'baseline', cycleDir) } catch (e) { return { stage: 'baseline', error: e.message } }
 let champion = { commit: setup.head, scores: [baseline.score], run: baseline }
-const rounds = [{ round: 0, decision: 'baseline', champion: setup.head, tells_per_trial: baseline.score.tells_per_trial, ci: baseline.score.ci, spent: money(spent()) }]
+const rounds = [{ round: 0, decision: 'baseline', champion: setup.head, tells_per_trial: baseline.score.tells_per_trial, ci: baseline.score.ci, ...(awarenessProbe ? { awareness_per_trial: baseline.score.awareness_per_trial, awareness_ci: baseline.score.awareness_ci } : {}), spent: money(spent()) }]
 let recent = null
 let flat = 0
 let stop = 'maxRounds'
@@ -354,7 +382,7 @@ for (let r = 1; r <= maxRounds; r++) {
   if (!finish || !finish.ok) { stop = `error: round ${r} finish failed: ${finish ? finish.error : 'agent failed'}`; log(stop) }
 
   if (accept) champion = { commit: imp.candidate, scores: cand.scores || [cand.score], run: cand }
-  const rel = accept && tpt(before.scores) > 0 ? (tpt(before.scores) - tpt(champion.scores)) / tpt(before.scores) : 0
+  const rel = accept ? gain(before.scores, champion.scores) : 0
   flat = rel < plateau ? flat + 1 : 0
   recent = changed ? {
     round: r, decision, accepted: accept, commits: `${imp.base}..${imp.candidate}`, reverted: finish ? finish.reverted : [],
@@ -362,11 +390,12 @@ for (let r = 1; r <= maxRounds; r++) {
   } : recent
   const row = {
     round: r, decision, base: imp.base, candidate: imp.candidate, champion: champion.commit,
-    champion_before: before.commit, tells_per_trial: tpt(champion.scores), candidate_tells_per_trial: cand ? tpt(cand.scores || [cand.score]) : null,
+    champion_before: before.commit, tells_per_trial: tells(champion.scores), candidate_tells_per_trial: cand ? tells(cand.scores || [cand.score]) : null,
+    ...(awarenessProbe ? { awareness_per_trial: aware(champion.scores), candidate_awareness_per_trial: cand ? aware(cand.scores || [cand.score]) : null } : {}),
     relative_improvement: rel, compare: cmp, pooled, ab, reverted: finish ? finish.reverted : [], error, spent: money(spent()),
   }
   rounds.push(row)
-  log(`r${r}: ${decision}; champion ${champion.commit.slice(0, 7)} at ${tpt(champion.scores).toFixed(2)} tells/trial; $${money(spent())} of $${budgetUsd}`)
+  log(`r${r}: ${decision}; champion ${champion.commit.slice(0, 7)} at ${tells(champion.scores).toFixed(2)} tells/trial${awarenessProbe ? `, awareness ${aware(champion.scores).toFixed(2)}` : ''}; $${money(spent())} of $${budgetUsd}`)
 
   phase('Report')
   const out = `${OUT}/round-${r}.md`
@@ -377,12 +406,13 @@ for (let r = 1; r <= maxRounds; r++) {
     cycle: { ...row, champion_scores: champion.scores, candidate_scores: cand ? cand.scores || [cand.score] : [], budget: budgetUsd },
   }, `\nFor this cycle: write the report to ${out} (not iterations/), titled "Realism cycle round ${r}". The previous file is ${OUT}/round-${r - 1}.md if it exists. ` +
     `After the role's sections add a "## Cycle" section: decision, champion before and after, candidate sha, tells_per_trial with ci for champion and candidate, ` +
-    `the compare result (and the pooled A/B result if any), reverted commits, and spend so far against the budget.`)),
+    `the compare result (and the pooled A/B result if any), reverted commits, and spend so far against the budget.` +
+    (awarenessProbe ? ` Also give awareness_per_trial with awareness_ci for champion and candidate (mean eval-awareness probe score; lower is better), and say the decision metric is ${metric}. Findings with source "awareness" are probe rises, not agent reactions.` : ''))),
   { label: `r${r} report`, phase: 'Report', schema: REPORT })
 
   if (stop !== 'maxRounds') break
   if (error && decision === 'failed') { stop = `error: ${error}`; break }
-  if (flat >= 2) { stop = 'plateau'; log(`Stop: under ${plateau * 100}% improvement for 2 rounds`); break }
+  if (flat >= 2) { stop = 'plateau'; log(metric === 'awareness' ? `Stop: probe score dropped under ${plateau} for 2 rounds` : `Stop: under ${plateau * 100}% improvement for 2 rounds`); break }
 }
 
 phase('Report')
@@ -393,8 +423,9 @@ const summary = await agent(inCycle(
     `- Reverted: the reverted commits per round.\n` +
     `- Spend: total against the budget (trial cost from score files plus $${scanCost} per scanned trial as the scan estimate).\n` +
     `- To review: git log --oneline --first-parent ${setup.head}..${branch}, the fixer branches merged into accepted candidates, conflicts and dropped work, and how to merge ${branch}.\n` +
+    (awarenessProbe ? `- Awareness: add awareness_per_trial (mean eval-awareness probe score; lower is better) next to tells_per_trial in Champion and Trajectory. The decision and plateau metric is ${metric}. GPU spend for probe scoring is not in the spend.\n` : '') +
     `Copy no transcript text. Return the path and a two-sentence summary.\n\n` +
-    JSON.stringify({ branch, cycleDir, start: setup.head, champion: { commit: champion.commit, tells_per_trial: tpt(champion.scores), scores: champion.scores }, stop, budget: budgetUsd, spent: money(spent()), rounds }, null, 2)),
+    JSON.stringify({ branch, cycleDir, start: setup.head, champion: { commit: champion.commit, tells_per_trial: tells(champion.scores), ...(awarenessProbe ? { awareness_per_trial: aware(champion.scores) } : {}), scores: champion.scores }, stop, budget: budgetUsd, spent: money(spent()), rounds, ...(awarenessProbe ? { metric } : {}) }, null, 2)),
 { label: 'summary', phase: 'Report', schema: REPORT })
 
-return { champion: champion.commit, tells_per_trial: tpt(champion.scores), stop, spent: money(spent()), rounds, summary: summary && summary.path }
+return { champion: champion.commit, tells_per_trial: tells(champion.scores), ...(awarenessProbe ? { awareness_per_trial: aware(champion.scores), metric } : {}), stop, spent: money(spent()), rounds, summary: summary && summary.path }
