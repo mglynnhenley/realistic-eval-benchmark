@@ -74,7 +74,7 @@ from refund_eval.agent.schedule import (
     sim_deadline,
     wakeup_text,
 )
-from refund_eval.config import RunConfig
+from refund_eval.config import BUDGET_NOTICES, RunConfig
 from refund_eval.killswitch import kill_reason
 from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
 from refund_eval.runtime.snapshots import emit_snapshot
@@ -512,6 +512,7 @@ def refund_agent(
     artifact_dir: str | None = None,
     resume_log: str | None = None,
     token_budget: int | None = None,
+    budget_notice: str = RunConfig.model_fields["budget_notice"].default,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -531,6 +532,9 @@ def refund_agent(
         on where it stopped.
       token_budget: Target input (including cached) plus output tokens for the
         whole trial, preserved on resume. None disables budgeting for new trials.
+      budget_notice: With a token budget, when the runtime notice of time and tokens left
+        is shown: "every_step", "daily" (first step of each simulated day) or "low"
+        (only when under 20% of the tokens or time remains).
     """
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
@@ -539,6 +543,8 @@ def refund_agent(
     if token_budget is not None and (isinstance(token_budget, bool)
                                     or not isinstance(token_budget, int) or token_budget <= 0):
         raise ValueError("token_budget must be a positive integer or None")
+    if budget_notice not in BUDGET_NOTICES:
+        raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}")
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
         if resume_log:
@@ -561,7 +567,8 @@ def refund_agent(
             local = [schedule_wakeup(), *([memory()] if history_tokens else [])]
             ledger = load_world().token_ledger if budgeted else None
             instructions = render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
-                                                token_budget=ledger.budget if ledger else None)
+                                                token_budget=ledger.budget if ledger else None,
+                                                budget_notice=budget_notice)
             return react(
                 prompt=AgentPrompt(
                     instructions=instructions,
@@ -572,7 +579,8 @@ def refund_agent(
                 tools=[guard_tool(t) for t in [*tools, *local]],
                 submit=False,
                 compaction=HistoryWindow(history_tokens) if history_tokens else None,
-                model=BudgetedModel(get_model(), state, sim_deadline(load_world(), sim_weeks)) if budgeted else None,
+                model=BudgetedModel(get_model(), state, sim_deadline(load_world(), sim_weeks),
+                                    budget_notice=budget_notice) if budgeted else None,
                 on_continue=make_on_continue(
                     scenario=scenario,
                     max_turns=max_turns,

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
+    BudgetNotice,
     CostLimit,
     RunConfig,
     resolve_cost_limits,
@@ -38,6 +39,7 @@ class TrialSettings(BaseModel):
     history_tokens: int = Field(default=RunConfig.model_fields["history_tokens"].default, ge=0, le=1_000_000)
     sim_weeks: float = Field(default=RunConfig.model_fields["sim_weeks"].default, gt=0)
     token_budget: int | None = Field(default=None, gt=0, strict=True)
+    budget_notice: BudgetNotice = RunConfig.model_fields["budget_notice"].default
     cost_limit: CostLimit = 1.0
     time_limit: int = Field(default=1800, ge=1, le=72000)
     research_mode: Literal["auto", "live", "saved"] = "auto"

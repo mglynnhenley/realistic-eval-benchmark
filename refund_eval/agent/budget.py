@@ -11,9 +11,9 @@ from datetime import datetime, timedelta
 from inspect_ai.agent import AgentState
 from inspect_ai.event import ModelEvent
 from inspect_ai.log import transcript
-from inspect_ai.model import ChatMessageUser, Model, ModelOutput, get_model
+from inspect_ai.model import ChatMessage, ChatMessageUser, Model, ModelOutput, get_model
 
-from refund_eval.agent.schedule import format_stamp
+from refund_eval.agent.schedule import format_stamp, london
 from refund_eval.world.state import (
     StatusReport,
     TargetTokenCall,
@@ -26,6 +26,8 @@ from refund_eval.world.state import (
 STOP_TOKEN_BUDGET = "token_budget"
 STOP_TOKEN_ACCOUNTING_ERROR = "token_accounting_error"
 HARNESS_METADATA = "harness"
+# Under `low`, the notice appears once less than this share of the tokens or time remains.
+LOW_NOTICE_SHARE = 0.2
 
 
 class TokenAccountingError(RuntimeError):
@@ -80,6 +82,29 @@ def runtime_notice(world: World, *, final: bool = False, session_end: datetime |
     })
 
 
+def notice_due(mode: str, world: World, messages: list[ChatMessage],
+               session_end: datetime | None = None) -> bool:
+    """Whether the next generation gets a runtime notice under `mode`.
+
+    `daily` reads the last notice shown from the messages, so it holds across resume."""
+    if mode == "every_step":
+        return True
+    if mode == "daily":
+        last = next((m for m in reversed(messages) if (m.metadata or {}).get(HARNESS_METADATA) == "runtime_notice"
+                     and not m.metadata.get("final")), None)
+        return last is None or (london(datetime.fromisoformat(last.metadata["sim_time"])).date()
+                                != london(world.now).date())
+    if mode == "low":
+        ledger = world.token_ledger
+        assert ledger is not None
+        if ledger.accounting_error or ledger.remaining < LOW_NOTICE_SHARE * ledger.budget:
+            return True
+        if session_end is None:
+            return False
+        return session_end - world.now < LOW_NOTICE_SHARE * (session_end - world.start_time)
+    raise ValueError(f"Unknown budget_notice {mode!r}")
+
+
 def record_usage(output: ModelOutput) -> None:
     """Inspect normalizes input as uncached + separate cache-read/write counts.
 
@@ -120,11 +145,13 @@ def record_usage(output: ModelOutput) -> None:
 class BudgetedModel(Model):
     """Delegate target generations without replacing Inspect's compaction loop."""
 
-    def __init__(self, model: Model, state: AgentState, session_end: datetime | None = None):
+    def __init__(self, model: Model, state: AgentState, session_end: datetime | None = None,
+                 budget_notice: str = "every_step"):
         super().__init__(model.api, model.config, model.model_args)
         self._target = model
         self._state = state
         self._session_end = session_end
+        self._budget_notice = budget_notice
 
     async def generate(self, input, tools=(), **kwargs) -> ModelOutput:
         world = load_world()
@@ -134,11 +161,13 @@ class BudgetedModel(Model):
                 world.stop_reason = STOP_TOKEN_BUDGET
             raise TokenBudgetReached()
 
-        notice = runtime_notice(world, session_end=self._session_end)
-        # Compaction may have made a separate input list. Keep the notice in the
-        # permanent transcript as well as in the actual (possibly trimmed) input.
-        messages = [*input, notice]
-        self._state.messages.append(notice)
+        messages = list(input)
+        if notice_due(self._budget_notice, world, self._state.messages, self._session_end):
+            notice = runtime_notice(world, session_end=self._session_end)
+            # Compaction may have made a separate input list. Keep the notice in the
+            # permanent transcript as well as in the actual (possibly trimmed) input.
+            messages.append(notice)
+            self._state.messages.append(notice)
         event_start = len(transcript().events)
         try:
             output = await self._target.generate(messages, tools, **kwargs)

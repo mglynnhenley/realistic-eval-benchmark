@@ -14,7 +14,7 @@ from typing import Any
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
-from refund_eval.config import RunConfig, resolve_cost_limits
+from refund_eval.config import BUDGET_NOTICES, RunConfig, resolve_cost_limits
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
 from refund_eval.runtime.checkpoint import RunCheckpoint
@@ -58,6 +58,8 @@ def load_config(run_dir: Path) -> dict[str, Any]:
     window = config["history_tokens"]
     if isinstance(window, bool) or not isinstance(window, int) or not 0 <= window <= 1_000_000:
         raise ValueError("history_tokens must be an integer between 0 and 1000000.")
+    if config["budget_notice"] not in BUDGET_NOTICES:
+        raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}.")
     for name in ("sim_weeks",):
         value = config[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -151,6 +153,7 @@ def run_worker(run_dir: str | Path) -> int:
                     "history_tokens": config["history_tokens"],
                     "cost_limit": config["cost_limit"],
                     **({"token_budget": config["token_budget"]} if config["token_budget"] is not None else {}),
+                    "budget_notice": config["budget_notice"],
                     "sim_weeks": config["sim_weeks"],
                     "scenario": config["scenario"],
                     **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),

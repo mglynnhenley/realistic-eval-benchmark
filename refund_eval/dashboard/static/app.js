@@ -1249,7 +1249,8 @@
     if (preset) {
       const fields = {"data-mode": "data_mode", scenario: "scenario",
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
-        "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens"};
+        "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens",
+        "budget-notice": "budget_notice"};
       for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
       $("token-budget").value = preset.settings.token_budget ?? "";
       $("form-error").hidden = true;
@@ -1482,6 +1483,7 @@
     if ($("token-budget").value) payload.token_budget = Number($("token-budget").value);
     payload.sim_weeks = Number($("sim-weeks").value);
     payload.history_tokens = Number($("history-tokens").value);
+    payload.budget_notice = $("budget-notice").value;
     const simulator = $("simulator-model").value.trim();
     const grader = $("grader-model").value.trim();
     if (simulator) payload.simulator_model = simulator;
@@ -1621,7 +1623,7 @@
     markPresetCustom();
   });
   $("run-preset").addEventListener("change", applyRunPreset);
-  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "token-budget", "sim-weeks", "history-tokens"]) {
+  for (const id of ["model", "simulator-model", "grader-model", "max-turns", "cost-limit", "token-budget", "sim-weeks", "history-tokens", "budget-notice"]) {
     $(id).addEventListener("input", markPresetCustom);
   }
   bindNewRunButtons();

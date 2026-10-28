@@ -61,7 +61,7 @@ def run_trial(request: TrialRequest, output: Path) -> dict:
             "max_turns": settings.max_turns, "history_tokens": settings.history_tokens,
             "sim_weeks": settings.sim_weeks,
             "cost_limit": settings.cost_limit, "time_limit": settings.time_limit,
-            "token_budget": settings.token_budget,
+            "token_budget": settings.token_budget, "budget_notice": settings.budget_notice,
             "research_mode": settings.research_mode,
             "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
             "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),

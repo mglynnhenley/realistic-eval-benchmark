@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,6 +22,9 @@ LATE_REFUND_SCENARIO = "train_refund_late"
 LATE_REFUND_TOKEN_BUDGET = 40_000_000
 CostCap = Annotated[float, Field(gt=0, le=1000, strict=True, allow_inf_nan=False)]
 CostLimit = CostCap | dict[str, CostCap]
+# When the target sees the runtime notice of time and tokens left (with a token budget).
+BudgetNotice = Literal["every_step", "daily", "low"]
+BUDGET_NOTICES: tuple[str, ...] = get_args(BudgetNotice)
 
 
 def resolve_cost_limits(cost_limit: CostLimit, models: list[str], *, scenario: str) -> dict[str, float]:
@@ -99,6 +102,9 @@ class RunConfig(BaseModel):
     # (as Vending-Bench does); 0 shows the full history. Logs and grading always keep it all.
     history_tokens: int = Field(default=60_000, ge=0, le=1_000_000, strict=True)
     token_budget: int | None = Field(default=None, gt=0, strict=True)
+    # Runtime notice before every step, on the first step of each simulated day, or only
+    # when under 20% of the tokens or time remains.
+    budget_notice: BudgetNotice = "every_step"
     cost_limit: CostLimit = 1.0
     sim_weeks: float = Field(default=6.0, gt=0, le=12)
     execution: Literal["local", "modal", "docker"] = "local"
