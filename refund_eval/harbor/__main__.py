@@ -56,11 +56,17 @@ def prepare(
     from harbor.models.job.config import JobConfig
     from harbor.models.task.task import Task
 
+    if settings.trial_deadlines is not None:
+        settings = TrialSettings.model_validate(settings.model_dump(mode="json"))
+    if settings.trial_deadlines is not None and concurrency != trials * len(models or ([model] if model else [])):
+        raise ValueError("Bounded lifecycle requires one concurrent wave")
     if trials < 1 or concurrency < 1:
         raise ValueError("trials and concurrency must be positive")
     if model is not None and models is not None:
         raise ValueError("Specify model or models, not both")
     targets = models if models is not None else [model] if model else []
+    if settings.trial_deadlines is not None and len(targets) != 1:
+        raise ValueError("Bounded lifecycle supports exactly one target model")
     if not targets or len(set(targets)) != len(targets):
         raise ValueError("Choose at least one model, without duplicates")
     if environment not in {"modal", "docker"}:
@@ -123,7 +129,7 @@ def prepare(
     (task_dir / "instruction.md").write_text(instruction + "\n", encoding="utf-8")
     (task_dir / "task.toml").write_text(
         'version = "1.0"\n\n[agent]\n'
-        f'timeout_sec = {settings.time_limit + 600}\n\n'
+        f'timeout_sec = {settings.trial_deadlines["agent_seconds"] if settings.trial_deadlines else settings.time_limit + 600}\n\n'
         '[verifier]\ntimeout_sec = 60\n\n'
         '[environment]\nbuild_timeout_sec = 1800\ncpus = 2\nmemory_mb = 4096\n'
         'workdir = "/app"\n'
@@ -138,7 +144,7 @@ def prepare(
     Task(task_dir)  # Validate task layout before writing the runnable job.
     env_kwargs = {}
     if environment == "modal":
-        env_kwargs = {"app_name": "refund-eval-harbor", "sandbox_timeout_secs": settings.time_limit + 1800}
+        env_kwargs = {"app_name": "refund-eval-harbor", "sandbox_timeout_secs": (settings.trial_deadlines["sandbox_seconds"] if settings.trial_deadlines else settings.time_limit + 1800)}
         if secrets:
             env_kwargs["secrets"] = secrets
     # Credential values are resolved by Harbor at execution, never serialized here.
@@ -162,8 +168,112 @@ def prepare(
     return config
 
 
+async def run_bounded_job(path: Path) -> None:
+    """Use Harbor's existing hooks to charge all setup to one aggregate budget."""
+    import asyncio
+    import signal
+    import time
+
+    from harbor.job import Job
+    from harbor.models.job.config import JobConfig
+
+    from refund_eval.harbor.deadlines import (
+        HOST_START_ENV,
+        host_start,
+        settle,
+        validate_deadlines,
+    )
+
+    config = JobConfig.model_validate_json(path.read_text())
+    if (len(config.agents) != 1 or len(config.tasks) != 1 or config.n_concurrent_trials != config.n_attempts
+            or config.retry.max_retries != 0):
+        raise ValueError("Bounded job requires one model, one concurrent wave and zero retries")
+    settings = TrialSettings.model_validate(config.agents[0].kwargs)
+    bounds = validate_deadlines(settings.trial_deadlines, settings.time_limit)
+    previous_anchor = os.environ.get(HOST_START_ENV)
+    start = host_start(previous_anchor)
+    os.environ[HOST_START_ENV] = str(start)  # local adapter only; never forwarded to worker
+    hard = start + bounds["command_hard_seconds"]
+    setup_due = start + bounds["setup_seconds"]
+    ready = asyncio.Event()
+    started = set()
+
+    async def agent_start(event):
+        if time.monotonic() >= setup_due:
+            raise TimeoutError("Aggregate setup budget exhausted")
+        started.add(str(event.trial_id))
+        if len(started) == config.n_attempts:
+            ready.set()
+
+    async def run():
+        job = await Job.create(config)
+        job.on_agent_started(agent_start)
+        return await job.run()
+
+    task = asyncio.create_task(run())
+    loop = asyncio.get_running_loop()
+    stopped = False
+    stopped_event = asyncio.Event()
+    stop_due = hard
+
+    def stop():
+        nonlocal stopped, stop_due
+        if not stopped:
+            stopped = True
+            stop_due = min(hard, time.monotonic() + bounds["termination_seconds"])
+            stopped_event.set()
+            task.cancel()
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signum, stop)
+    readiness = asyncio.create_task(ready.wait())
+    stop_waiter = asyncio.create_task(stopped_event.wait())
+    try:
+        done, _ = await asyncio.wait({task, readiness, stop_waiter}, timeout=max(0, setup_due - time.monotonic()),
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if not done:
+            stop()
+            try:
+                await settle(task, stop_due)
+            finally:
+                raise TimeoutError("Aggregate setup budget exhausted")
+        if task not in done and stop_waiter not in done:
+            done, _ = await asyncio.wait({task, stop_waiter}, timeout=max(0, hard - time.monotonic()),
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                raise TimeoutError("Native command hard deadline reached")
+        await settle(task, stop_due if stopped else hard)
+    except (TimeoutError, asyncio.CancelledError):
+        stop()
+        try:
+            await settle(task, stop_due)
+        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 -- preserve original stop, never reset the hard deadline
+            import logging
+
+            logging.getLogger(__name__).debug("Bounded job close failed: %s", type(exc).__name__)
+        raise
+    finally:
+        if previous_anchor is None:
+            os.environ.pop(HOST_START_ENV, None)
+        else:
+            os.environ[HOST_START_ENV] = previous_anchor
+        readiness.cancel()
+        stop_waiter.cancel()
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.remove_signal_handler(signum)
+        if not task.done():
+            stop()
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    if "--run-bounded-job" in __import__("sys").argv:
+        runner = argparse.ArgumentParser(description="Run one explicitly bounded frozen Harbor job")
+        runner.add_argument("--run-bounded-job", type=Path, required=True)
+        args = runner.parse_args()
+        import asyncio
+
+        asyncio.run(run_bounded_job(args.run_bounded_job))
+        return
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--environment", choices=["docker", "modal"], default="modal")
     parser.add_argument("--trials", type=int, default=4, help="Trials per selected model")
@@ -185,6 +295,7 @@ def main() -> None:
                         help="With a token budget, show the runtime notice every step, daily, or when low")
     parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
                         help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
+    parser.add_argument("--trial-deadline-policy", choices=["bounded-lifecycle-v1"], default=None)
     parser.add_argument("--time-limit", type=int, default=1800)
     parser.add_argument("--reasoning", action="store_true", help="Return the target's reasoning (OpenRouter models)")
     parser.add_argument("--scenario", choices=scenario_names(),
@@ -209,6 +320,10 @@ def main() -> None:
     settings = TrialSettings(**{name: getattr(args, name) for name in TrialSettings.model_fields
                                 if hasattr(args, name)},
                              inbox_sha256=file_sha256(args.inbox) if args.inbox else None)
+    if args.trial_deadline_policy is not None:
+        from refund_eval.harbor.deadlines import trial_deadlines
+
+        settings = settings.model_copy(update={"trial_deadlines": trial_deadlines(settings.time_limit, args.trial_deadline_policy)})
     config = prepare(
         args.output, settings=settings, models=args.model,
         environment=args.environment, trials=args.trials, concurrency=args.concurrency, secrets=args.secret,

@@ -152,3 +152,14 @@ def test_trial_wallclock_override_preserves_legacy_default(monkeypatch, tmp_path
     context.settings["trial_wallclock_limit"] = 1800
     loop._run_trials(context, protocol, tmp_path, tmp_path, "second")
     assert timeouts == [3000, 1800]
+
+
+def test_explicit_lifecycle_flag_binds_sample_and_outer_separately(cli_runner, tmp_path):
+    from refund_eval.harbor.deadlines import trial_deadlines
+
+    assert cli.main(arguments(tmp_path) + ["--trial-deadline-policy", "bounded-lifecycle-v1"]) == 0
+    settings = cli_runner[0]["settings"]
+    assert settings["trial_deadline_policy"] == "bounded-lifecycle-v1"
+    assert settings["time_limit"] == 1800
+    assert settings["trial_wallclock_limit"] == trial_deadlines(1800)["command_hard_seconds"] == 4200
+    assert loop._protocol(settings)["trial_deadlines"] == trial_deadlines(1800)

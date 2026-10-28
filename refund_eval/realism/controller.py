@@ -157,6 +157,12 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
         selected = {"model": "openrouter/anthropic/claude-sonnet-5.5", "time_limit": 1800,
                     "trial_wallclock_limit": 1800, **settings}
         protocol = autonomous._protocol(selected)
+        if protocol.get("trial_deadlines") is not None:
+            hard = protocol["trial_deadlines"]["command_hard_seconds"]
+            require("trial_wallclock_limit" not in settings or (type(settings["trial_wallclock_limit"]) is int
+                    and settings["trial_wallclock_limit"] == hard),
+                    "Trial wallclock limit must match the canonical deadline policy")
+            selected["trial_wallclock_limit"] = hard
         protocol.update(history_tokens=60000, budget_notice="every_step")
         require(type(budget) in (int, float) and 0 < budget < float("inf"), "Invalid total budget")
         require(type(selected["trial_wallclock_limit"]) is int and selected["trial_wallclock_limit"] > 0,

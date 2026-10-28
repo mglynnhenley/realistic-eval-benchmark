@@ -42,6 +42,7 @@ class TrialSettings(BaseModel):
     budget_notice: BudgetNotice = RunConfig.model_fields["budget_notice"].default
     cost_limit: CostLimit = 1.0
     time_limit: int = Field(default=1800, ge=1, le=72000)
+    trial_deadlines: dict | None = None
     research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
     grader_model: str | None = None
@@ -55,6 +56,14 @@ class TrialSettings(BaseModel):
         if value not in names:
             raise ValueError(f"Unknown scenario {value!r}; choose one of: {', '.join(names)}")
         return value
+
+    @model_validator(mode="after")
+    def finite_lifecycle(self):
+        if self.trial_deadlines is not None:
+            from refund_eval.harbor.deadlines import validate_deadlines
+
+            validate_deadlines(self.trial_deadlines, self.time_limit)
+        return self
 
     # A Gmail snapshot shipped in the image as data; the hash pins its contents.
     inbox_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
