@@ -115,6 +115,24 @@ WAKEUP_METADATA = "wakeup"
 # Share of the non-prefix history kept by each trim; Vending-Bench 2 keeps about 61%.
 HISTORY_PRESERVE = 0.6
 
+# Notes file the memory tool starts with: empty headings only, the same for every
+# task kind, so it suggests what to record but not what to do. Inspect seeds it on
+# the first memory call of a trial; a resumed trial restores the seeded flag with
+# the rest of the store, so it never re-seeds over (or resurrects) the agent's notes.
+MEMORY_NOTES_PATH = "/memories/case.md"
+MEMORY_TEMPLATE = """## Contacts
+
+## Messages sent
+
+## Replies received
+
+## Open promises and deadlines
+
+## Reference numbers
+
+## Next steps
+"""
+
 
 class HistoryWindow(CompactionTrim):
     """CompactionTrim that keeps trimming, down to the latest turn, until the window fits.
@@ -192,6 +210,7 @@ async def restore_snapshot(snapshot_path: str, scenario: Scenario | None = None)
         source={"snapshot": str(snapshot_path), "previous_phase": snapshot.get("phase")},
         record_revision=record_revision,
         rebuild_memory="MemoryStore:files" not in (snapshot.get("resume_state") or {}),
+        memory_seed={MEMORY_NOTES_PATH: MEMORY_TEMPLATE},
     )
 
 
@@ -558,7 +577,8 @@ def refund_agent(
 
         def make_inner(tools):
             # Notes and scheduling cost no simulated time and do not deliver mail.
-            local = [schedule_wakeup(), *([memory()] if history_tokens else [])]
+            local = [schedule_wakeup(),
+                     *([memory(initial_data={MEMORY_NOTES_PATH: MEMORY_TEMPLATE})] if history_tokens else [])]
             ledger = load_world().token_ledger if budgeted else None
             instructions = render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
                                                 token_budget=ledger.budget if ledger else None)
