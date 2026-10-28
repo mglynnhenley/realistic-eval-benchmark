@@ -92,7 +92,7 @@ def bounded_tells_config(max_tokens: int):
 
 
 def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: int,
-                             single_attempt: bool) -> None:
+                             single_attempt: bool, scan_protocol=None, parts_sha256=None) -> None:
     """Require saved scans to match the bounded policy before evidence reuse.
 
     Missing settings are unknown, not safe defaults. Compare exact JSON types
@@ -119,8 +119,22 @@ def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: in
         raise ValueError("Saved judge settings differ from the bounded scan policy")
     scanners = specification.get("scanners")
     tells = scanners.get("tells") if isinstance(scanners, dict) else None
+    expected_params = {"bounded": True}
+    if scan_protocol is not None:
+        import re
+        from pathlib import Path
+
+        from refund_eval.realism.scan_parts import PLAN_NAME, VERSION
+
+        params = tells.get("params") if isinstance(tells, dict) else None
+        if (scan_protocol != VERSION or not isinstance(parts_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", parts_sha256) or not isinstance(params, dict)
+                or not isinstance(params.get("parts_plan"), str)
+                or Path(params["parts_plan"]).name != PLAN_NAME):
+            raise ValueError("Saved frozen scan plan identity is missing")
+        expected_params.update(parts_protocol=VERSION, parts_plan=params["parts_plan"], parts_sha256=parts_sha256)
     if (not isinstance(tells, dict) or set(scanners) != {"tells"} or tells.get("name") != "tells"
-            or not matches(tells.get("params"), {"bounded": True})):
+            or not matches(tells.get("params"), expected_params)):
         raise ValueError("Saved scans lack the exact bounded tells scanner")
 
 

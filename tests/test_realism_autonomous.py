@@ -166,6 +166,39 @@ def test_trial_charge_survives_scan_failure(context, adapters, monkeypatch):
     assert ledger["stages"]["round-1-diagnostic-tells"]["status"] == "failed"
 
 
+@pytest.mark.parametrize("failure", ["unaffordable", "partial_generation"])
+def test_frozen_scan_total_reserve_precedes_every_call_and_unknown_cost_stays_held(context, adapters, monkeypatch, failure):
+    from refund_eval.realism.scan_parts import VERSION
+
+    protocol = loop._protocol({"scan_protocol": VERSION})
+    source = context.settings["source_commit"]
+    plan = {"scan_protocol": VERSION, "checked": {"judge": protocol["judge"], "max_tokens": 8192},
+            "max_parts_per_transcript": 4, "max_parts_total": 12,
+            "required_usd": 1.01 if failure == "unaffordable" else .8}
+    monkeypatch.setattr(loop, "_scan_plan", lambda *args: plan)
+    calls = []
+    def scan(ctx, *args):
+        ledger = json.loads(ctx.ledger.read_text())
+        assert ledger["stages"]["single-tells"]["reserve_usd"] == 1
+        assert ledger["stages"]["single-tells"]["actual_usd"] is None
+        calls.append("single original attempt")
+        raw = ctx.directory / "synthetic-failed-raw.json"
+        raw.write_text('{"attempted_parts":2,"completed_cost_usd":0.2,"failed_cost_usd":null}')
+        raise RuntimeError("partial generation")
+    monkeypatch.setattr(loop, "_run_scan", scan)
+    with pytest.raises((loop.BudgetStop, RuntimeError)):
+        loop._batch(context, protocol, source, loop._hashes(context.worktree), "single",
+                    cwd=context.worktree, trial_reserve=1, scan_reserve=1)
+    ledger = stages.summary(json.loads(context.ledger.read_text()))
+    assert ledger["actual_usd"] == .4
+    if failure == "unaffordable":
+        assert calls == [] and "single-tells" not in ledger["stages"] and ledger["held_usd"] == 0
+    else:
+        assert calls == ["single original attempt"] and ledger["held_usd"] == 1
+        assert ledger["stages"]["single-tells"]["actual_usd"] is None
+        assert json.loads((context.directory / "synthetic-failed-raw.json").read_text())["failed_cost_usd"] is None
+
+
 def test_dirty_source_rejected_before_payment(context, adapters):
     (context.worktree / "refund_eval/sim/example.py").write_text("value = 2\n")
     with pytest.raises(ValueError, match="clean committed"):

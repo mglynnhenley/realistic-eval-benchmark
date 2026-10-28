@@ -56,6 +56,17 @@ def _protocol(settings):
             raise ValueError(f"{key} must be positive")
     if not isinstance(protocol["judge"], str) or not protocol["judge"]:
         raise ValueError("Exactly one fixed judge is required")
+    if settings.get("scan_protocol") is not None:
+        from refund_eval.realism.scan_parts import VERSION, limits
+
+        if settings["scan_protocol"] != VERSION:
+            raise ValueError("Unsupported versioned scan protocol")
+        per_trial = settings.get("scan_max_parts_per_transcript", 4)
+        total = settings.get("scan_max_parts_total", 12)
+        limits(per_trial, total)
+        protocol.update(scan_protocol=VERSION, scan_max_parts_per_transcript=per_trial, scan_max_parts_total=total)
+    elif any(settings.get(key) is not None for key in ("scan_max_parts_per_transcript", "scan_max_parts_total")):
+        raise ValueError("Part limits require the explicit frozen scan protocol")
     return protocol
 
 
@@ -199,6 +210,24 @@ def _scan_preflight(protocol, context=None):
 
 
 def _scan_plan(protocol, logs, context=None):
+    if protocol.get("scan_protocol") is not None:
+        if context is not None and getattr(context, "measurement_worktree", None) is not None:
+            program = ("import asyncio,json,sys; from pathlib import Path; "
+                       "from refund_eval.realism.scan_parts import plan; p=json.loads(sys.argv[1]); "
+                       "Path(sys.argv[3]).write_text(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
+                       "max_tokens=p['scan_max_tokens'],max_parts_per_transcript=p['scan_max_parts_per_transcript'],"
+                       "max_parts_total=p['scan_max_parts_total']))))")
+            identity = hashlib.sha256(json.dumps(logs).encode()).hexdigest()[:12]
+            output = context.directory / f"scan-plan-{identity}.json"
+            _command(context, ["uv", "run", "--frozen", "--python", sys.executable, "python", "-c", program,
+                               json.dumps(protocol), json.dumps(logs), str(output)],
+                     name=f"scan-plan-{identity}", cwd=context.measurement_worktree)
+            return json.loads(output.read_text())
+        from refund_eval.realism.scan_parts import plan
+
+        return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"],
+                               max_parts_per_transcript=protocol["scan_max_parts_per_transcript"],
+                               max_parts_total=protocol["scan_max_parts_total"]))
     if context is not None and getattr(context, "measurement_worktree", None) is not None:
         program = ("import asyncio,json,sys; from pathlib import Path; "
                    "from refund_eval.realism.scan_budget import plan; p=json.loads(sys.argv[1]); "
@@ -218,8 +247,12 @@ def _scan_plan(protocol, logs, context=None):
 
 
 def _run_scan(context, protocol, logs, scans, cwd, tag):
+    extra = []
+    if protocol.get("scan_protocol") is not None:
+        path = scans.parent / "scan-budget.json"
+        extra = ["--parts-plan", str(path), "--parts-sha256", hashlib.sha256(path.read_bytes()).hexdigest()]
     _command(context, ["uv", "run", "python", "scout/run.py", *logs, "--scanners", "tells", "--yes",
-                       "--scans", str(scans), "--judges", protocol["judge"], "--bounded-tells", "--max-tokens", str(protocol["scan_max_tokens"])],
+                       "--scans", str(scans), "--judges", protocol["judge"], "--bounded-tells", "--max-tokens", str(protocol["scan_max_tokens"]), *extra],
              name=f"{tag}-scan", cwd=getattr(context, "measurement_worktree", cwd), timeout=protocol["time_limit"])
     # Scout does not expose a reliable aggregate bill in its CLI result. Hold the
     # estimate until usage can be reconciled; an absent charge is never zero.
@@ -299,6 +332,15 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
                  if getattr(context, "measurement_worktree", None) is not None
                  else _scan_plan(protocol, trials["logs"]))
     atomic_json(out / "scan-budget.json", scan_plan)
+    if protocol.get("scan_protocol") is not None:
+        from refund_eval.realism.scan_parts import VERSION
+
+        if (protocol["scan_protocol"] != VERSION or scan_plan.get("scan_protocol") != VERSION
+                or scan_plan.get("max_parts_per_transcript") != protocol["scan_max_parts_per_transcript"]
+                or scan_plan.get("max_parts_total") != protocol["scan_max_parts_total"]
+                or scan_plan.get("checked", {}).get("judge") != protocol["judge"]
+                or scan_plan.get("checked", {}).get("max_tokens") != protocol["scan_max_tokens"]):
+            raise ValueError("Frozen scan plan differs from the requested protocol")
     if not math.isfinite(scan_plan["required_usd"]) or scan_plan["required_usd"] <= 0:
         raise ValueError("Cannot establish a scan cost bound from current pricing")
     if scan_plan["required_usd"] > scan_reserve + 1e-9:

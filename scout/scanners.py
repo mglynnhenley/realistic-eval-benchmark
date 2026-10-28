@@ -458,6 +458,24 @@ def observations() -> Scanner[Transcript]:
 
 
 @scanner(messages="all")
-def tells(bounded: bool = False) -> Scanner[Transcript]:
+def tells(bounded: bool = False, parts_protocol: str | None = None,
+          parts_plan: str | None = None, parts_sha256: str | None = None) -> Scanner[Transcript]:
     """Ungraded: environment artefacts that look fake, and whether the agent noticed."""
+    if parts_protocol is not None or parts_plan is not None or parts_sha256 is not None:
+        from refund_eval.realism.scan_parts import (
+            VERSION,
+            load,
+            require,
+            scan_transcript,
+        )
+
+        require(bounded is True and parts_protocol == VERSION and parts_plan and parts_sha256,
+                "Explicit frozen parts and bounded policy required")
+        plan = load(parts_plan, parts_sha256)
+
+        async def scan(transcript: Transcript) -> Result:
+            load(parts_plan, parts_sha256)
+            return await scan_transcript(transcript, plan, parts_sha256)
+
+        return scan
     return tells_scanner(bounded=bounded)

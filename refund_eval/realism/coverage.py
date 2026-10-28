@@ -60,10 +60,19 @@ def scan_rows(scans: str | Path, judge: str | None = None) -> list[dict]:
         summary = status.summary.scanners.get("tells")
         if summary is None or summary.errors or status.errors:
             raise ValueError("Tells scan contains errors")
-        frame = scan_results_df(status.location, scanner="tells").scanners["tells"]
+        params = getattr(status.spec.scanners["tells"], "params", {})
+        frozen = isinstance(params, dict) and "parts_protocol" in params
+        frame = scan_results_df(status.location, scanner="tells", **({"exclude_columns": ["input", "input_data"]}
+                               if frozen else {})).scanners["tells"]
         if len(frame) != summary.results:
             raise ValueError("Tells scan result count does not match its summary")
-        rows.extend(frame.to_dict("records"))
+        records = frame.to_dict("records")
+        if frozen:
+            for record in records:
+                record["_parts_protocol"] = params["parts_protocol"]
+                record["_parts_sha256"] = params.get("parts_sha256")
+                record["_parts_spec"] = status.spec.model_dump(exclude_none=True)
+        rows.extend(records)
     return rows
 
 
@@ -126,7 +135,43 @@ def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: in
     if expected_trials is not None and (expected_trials <= 0 or len(expected) != expected_trials):
         raise ValueError(f"Expected {expected_trials} completed trials, found {len(expected)}")
     answers = {}
-    for row in scan_rows(scans, judge):
+    rows = scan_rows(scans, judge)
+    from refund_eval.realism.scan_parts import (
+        PLAN_NAME,
+        VERSION,
+        file_digest,
+        load,
+        require,
+        validate,
+        validate_answer,
+    )
+
+    root = Path(scans).resolve()
+    candidates = [path / PLAN_NAME for path in (root, root.parent, root.parent.parent) if (path / PLAN_NAME).is_file()]
+    declared = [row for row in rows if row.get("_parts_protocol") is not None
+                or (isinstance(row.get("metadata"), (str, dict))
+                    and _object(row["metadata"], "result metadata").get("scan_protocol") is not None)]
+    if candidates or declared:
+        import asyncio
+
+        require(len(candidates) == 1, "Exactly one frozen plan is required")
+        plan_sha256 = file_digest(candidates[0])
+        plan = load(candidates[0], plan_sha256)
+        require(not judge or judge == plan["checked"]["judge"], "Unexpected frozen judge")
+        asyncio.run(validate(plan, logs, aliases=source_aliases))
+        require(len(rows) == len(plan["per_transcript"]), "Missing/extra frozen transcript results")
+        generations = []
+        for row in rows:
+            require(row.get("_parts_protocol") == VERSION
+                    and row.get("_parts_sha256") == plan_sha256, "Scan specification/plan mismatch")
+            from refund_eval.realism.scan_budget import validate_saved_tells_scan
+
+            validate_saved_tells_scan(row["_parts_spec"], judge=plan["checked"]["judge"],
+                                      max_tokens=plan["checked"]["max_tokens"], single_attempt=True,
+                                      scan_protocol=VERSION, parts_sha256=plan_sha256)
+            generations.extend(validate_answer(row, plan, plan_sha256))
+        require(len(set(generations)) == len(generations), "Reused generation across frozen transcripts")
+    for row in rows:
         if _present(row.get("scan_error")) or _present(row.get("transcript_error")):
             raise ValueError("Failed tells scan result")
         meta = _object(row.get("transcript_metadata"), "transcript metadata")

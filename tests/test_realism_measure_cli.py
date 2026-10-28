@@ -44,6 +44,17 @@ def test_measure_defaults_to_prepare_with_bounded_pilot(cli_runner, tmp_path, ca
     assert call["settings"]["per_trial_cost"] == .5
     assert call["settings"]["time_limit"] == call["settings"]["trial_wallclock_limit"] == 1800
     assert json.loads(capsys.readouterr().out)["status"] == "prepared"
+    assert "scan_protocol" not in call["settings"]
+
+
+def test_measure_explicit_scan_version_and_limits(cli_runner, tmp_path):
+    assert cli.main(arguments(tmp_path) + ["--scan-protocol", "frozen-parts-v1",
+                                         "--scan-max-parts-per-transcript", "3",
+                                         "--scan-max-parts-total", "9"]) == 0
+    assert cli_runner[0]["settings"]["scan_max_parts_per_transcript"] == 3
+    assert cli_runner[0]["settings"]["scan_max_parts_total"] == 9
+    assert cli.main(arguments(tmp_path) + ["--scan-max-parts-total", "9"]) == 1
+    assert len(cli_runner) == 1
 
 
 def test_measure_explicit_execution_and_saved_evidence(cli_runner, tmp_path):

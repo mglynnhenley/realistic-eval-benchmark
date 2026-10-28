@@ -133,6 +133,18 @@ def _native_protocol(logs, protocol, *, commit, prepared):
 
 
 def _scan_protocol(scans, protocol):
+    parts_sha256 = None
+    if protocol.get("scan_protocol") is not None:
+        from refund_eval.realism.scan_parts import PLAN_NAME, VERSION, load
+
+        plan_path = scans / PLAN_NAME
+        parts_sha256 = _digest(plan_path)
+        plan = load(plan_path, parts_sha256)
+        if (protocol["scan_protocol"] != VERSION or plan["checked"]["judge"] != protocol["judge"]
+                or plan["checked"]["max_tokens"] != protocol["scan_max_tokens"]
+                or plan["max_parts_per_transcript"] != protocol["scan_max_parts_per_transcript"]
+                or plan["max_parts_total"] != protocol["scan_max_parts_total"]):
+            raise ValueError("Evidence frozen scan protocol differs")
     specifications = list(scans.rglob("_scan.json"))
     if not specifications:
         raise ValueError("Evidence lacks saved scan specifications")
@@ -140,7 +152,9 @@ def _scan_protocol(scans, protocol):
         specification = _json(path)
         validate_saved_tells_scan(specification, judge=protocol.get("judge"),
                                   max_tokens=protocol.get("scan_max_tokens"),
-                                  single_attempt=protocol.get("scanner_single_attempt"))
+                                  single_attempt=protocol.get("scanner_single_attempt"),
+                                  **({"scan_protocol": protocol["scan_protocol"], "parts_sha256": parts_sha256}
+                                     if parts_sha256 is not None else {}))
 
 
 def write_evidence(batch: dict, measurement_hashes: dict) -> Path:
@@ -184,7 +198,8 @@ def write_evidence(batch: dict, measurement_hashes: dict) -> Path:
                 raise ValueError("Evidence provenance cannot be a symbolic link")
             shutil.copyfile(source, destination / "provenance" / target)
         _provenance(destination, commit, protocol, measurement_hashes)
-        manifest = {"schema": SCHEMA, "source_commit": commit, "protocol": protocol,
+        manifest = {"schema": 2 if protocol.get("scan_protocol") is not None else SCHEMA,
+                    "source_commit": commit, "protocol": protocol,
                     "measurement_hashes": measurement_hashes, "expected_trials": protocol["trials"],
                     "source_hashes": _json(destination / "provenance/manifest.json")["hashes"],
                     "logs": originals, "scans": "scans",
@@ -207,7 +222,8 @@ def load_evidence(path: str | Path, *, commit: str, protocol: dict, hashes: dict
     path = Path(path).resolve()
     root = path.parent
     manifest = _json(path)
-    if manifest.get("schema") != SCHEMA or manifest.get("source_commit") != _commit(commit):
+    expected_schema = 2 if (manifest.get("protocol") or {}).get("scan_protocol") is not None else SCHEMA
+    if manifest.get("schema") != expected_schema or manifest.get("source_commit") != _commit(commit):
         raise ValueError("Evidence schema or exact source commit does not match")
     stored_protocol = manifest.get("protocol")
     if _protocol(stored_protocol) != _protocol(protocol):
