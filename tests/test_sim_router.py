@@ -52,13 +52,13 @@ def test_resolve_org_by_address_domain_url_phone_and_name() -> None:
     assert resolve_org(SC, "someone@example.org") is None
 
 
-async def test_email_reply_uses_the_simulators_delay(sim: MockSim) -> None:
+async def test_email_reply_obeys_the_organisations_configured_minimum(sim: MockSim) -> None:
     sim.open_actions.append({"reply_after_hours": 9, "body": "We are investigating."})
     result = await dispatch(inbound("email", OPERATOR.contact_emails[0], subject="Refund"))
     assert result.reply_scheduled and result.kind == "ack"
     world = load_world()
     [reply] = world.pending
-    assert reply.due_at == world.now + timedelta(hours=9)
+    assert reply.due_at == world.now + timedelta(hours=48)
     assert reply.email.to == [SC.user.email_addresses[0]] and reply.email.org == OPERATOR.key
     assert reply.email.body == "We are investigating."
 

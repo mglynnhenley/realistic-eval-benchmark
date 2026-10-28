@@ -11,7 +11,7 @@ import json
 import logging
 import random
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 
 from inspect_ai.util import LimitExceededError, store
@@ -38,6 +38,7 @@ from refund_eval.sim.common import (
     directive_from_text,
     make_case_ref,
     persona_directive,
+    phone_hours,
     reply_from,
 )
 from refund_eval.sim.consistency import response_problem
@@ -76,8 +77,8 @@ def offer_is_open(offer: Offer, now: datetime) -> bool:
 
 
 TEMPERAMENTS_KEY = "open_world_temperaments"
-# Shortest and longest any organisation takes to reply by email: real teams take hours,
-# and no reply stalls a long trial.
+# Personal contacts retain their existing bounds; organisations use their own
+# configured reply_delay_hours rather than a universal four-to-72-hour clamp.
 MIN_REPLY_HOURS = 4
 MAX_REPLY_HOURS = 72
 # Money that counts towards a refund. Vouchers and the user's own payments do not.
@@ -247,6 +248,17 @@ def _pending_due(world: World, org: Org) -> datetime | None:
                 if p.email.org == org.key and p.email.source == "counterparty"), key=as_aware, default=None)
 
 
+def _staffed_email_time(org: Org, due: datetime) -> datetime:
+    """Approximate staffed email delivery using the configured contact hours."""
+    due = to_london(due)
+    start, end, last_day = phone_hours(org)
+    while due.weekday() > last_day or due.hour >= end:
+        due = datetime.combine(due.date() + timedelta(days=1), time(start), tzinfo=LONDON)
+    if due.hour < start:
+        due = datetime.combine(due.date(), time(start), tzinfo=LONDON)
+    return due
+
+
 def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: Org,
                     record: dict | None, inbound_target: str | None) -> PreparedCompanyAction:
     action = action.model_copy(deep=True)
@@ -255,18 +267,22 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
     if event.kind == "note":
         action.notes_to_others = []  # Referrals never create another referral.
     if event.mode in {"email", "form"} and action.reply:
+        minimum, maximum = ((MIN_REPLY_HOURS, MAX_REPLY_HOURS) if org.kind == "dynamic_personal"
+                            else org.reply_delay_hours)
         action.reply_after_hours = min(
-            max(action.reply_after_hours * random.uniform(0.8, 1.2), MIN_REPLY_HOURS), MAX_REPLY_HOURS,
+            max(action.reply_after_hours * random.uniform(0.8, 1.2), minimum), maximum,
         )
     sender = _sender(org, action, record, inbound_target)
     effective_at = world.now
     if event.mode in {"email", "form"} and action.reply and sender:
-        effective_at += timedelta(hours=action.reply_after_hours)
+        effective_at = as_aware(world.now).astimezone(UTC) + timedelta(hours=action.reply_after_hours)
         if org.kind != "dynamic_personal":
             # Keep a later reply behind any earlier one still on its way.
             pending_due = _pending_due(world, org)
             if pending_due is not None and as_aware(pending_due) >= as_aware(effective_at):
-                effective_at = pending_due + timedelta(minutes=10)
+                effective_at = as_aware(pending_due).astimezone(UTC) + timedelta(minutes=10)
+            effective_at = _staffed_email_time(org, effective_at)
+        action.reply_after_hours = (effective_at - as_aware(world.now).astimezone(UTC)).total_seconds() / 3600
     return PreparedCompanyAction(action, effective_at, sender)
 
 
@@ -463,7 +479,7 @@ def _schedule_follow_up(world: World, org: Org, action: OpenAction, *, promised_
     n = sum(1 for f in world.follow_ups if f.org == org.key)
     world.follow_ups.append(FollowUp(
         id=f"{org.key}-followup-{n + 1}", org=org.key, promised_at=promised_at,
-        due_at=promised_at + timedelta(hours=max(action.follow_up_in_hours, 0.25)),
+        due_at=as_aware(promised_at).astimezone(UTC) + timedelta(hours=max(action.follow_up_in_hours, 0.25)),
         plan=plan, thread_id=thread[0], subject=thread[1],
     ))
     case = world.cases[org.key]

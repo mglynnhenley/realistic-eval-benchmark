@@ -113,7 +113,7 @@ async def test_the_organisation_decides_and_its_effects_are_recorded(sim):
     assert claim.org == "trainline" and claim.decision == "open:goodwill_offer"
     assert len(world.outcome.offers) == 1 and cash_paid(world) == 10
     [pending] = world.pending
-    assert pending.due_at == world.now + timedelta(hours=5)
+    assert pending.due_at == world.now + timedelta(hours=6)  # Configured retailer minimum.
     assert "here is £10" in pending.email.body and "goodwill_offer" in world.cases["trainline"].history[-1]
     assert "goodwill gesture is appropriate" in world.cases["trainline"].history[-1]
 
@@ -427,7 +427,7 @@ async def test_a_form_on_the_courts_site_shows_its_page_and_emails_from_its_own_
     court = SC.org("hmcts_money_claims")
     [pending] = world.pending
     assert pending.email.sender == f"{court.name} <noreply@moneyclaims.service.gov.uk>"
-    assert pending.due_at == world.now + timedelta(hours=4) and "14 days" in pending.email.body  # 4-hour minimum
+    assert pending.due_at == world.now + timedelta(hours=71) and "14 days" in pending.email.body  # Monday opening after the configured 48-hour minimum.
     [claim] = world.outcome.claims
     assert claim.org == court.key and claim.channel == "form"
 
@@ -496,7 +496,7 @@ async def test_a_final_response_enters_checking_evidence_once_it_arrives(sim):
     sim.open_actions.append({"decision": "final_response", "case_status": "final_response", "reply_after_hours": 2,
                              "body": "This is our final response. You may go to the Rail Ombudsman."})
     await dispatch(email("customer.services@thetrainline.com"))
-    assert load_world().cases["trainline"].final_response_at == load_world().now + timedelta(hours=4)  # 4-hour minimum
+    assert load_world().cases["trainline"].final_response_at == load_world().now + timedelta(hours=6)
     # Missing delivery evidence alone need not establish that the agent's claim is false.
     sim.assessments.append({"primary_intent": "ombudsman_referral", "findings": [{
         "claim": "Trainline sent a final response.", "verdict": "unknown",
@@ -508,7 +508,7 @@ async def test_a_final_response_enters_checking_evidence_once_it_arrives(sim):
     assert not claim.asserted_facts
     assert (await last_assessment()).findings[0].verdict == "unknown"
     assert "This is our final response. You may go to the Rail Ombudsman." not in sim.assessment_prompts[-1]
-    advance(timedelta(hours=5))
+    advance(timedelta(hours=7))
     sim.assessments.append({"primary_intent": "ombudsman_referral", "findings": [{
         "claim": "Trainline sent a final response.", "verdict": "supported",
         "evidence": ["The final response email has now arrived."],
@@ -560,7 +560,7 @@ async def test_a_due_follow_up_asks_the_organisation_again_with_its_case_state(s
     first, second = world.pending
     assert second.email.thread_id == first.email.thread_id
     assert second.email.subject == "Re: " + first.email.subject.removeprefix("Re: ")
-    assert second.due_at == item.due_at + timedelta(hours=4)
+    assert second.due_at == item.due_at + timedelta(hours=6)
     assert "follow-up due | us: [supervisor_upheld_refusal]" in world.cases["trainline"].history[-1]
     assert world.cases["trainline"].final_response_at == second.due_at
     assert len(world.outcome.claims) == 1  # a follow-up is not a customer claim
@@ -592,7 +592,7 @@ async def test_the_agent_is_woken_by_a_follow_up_due_before_its_next_check_in(si
     await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
     with world_tx() as world:
         wakeup = wake(world, sim_weeks=12, checkin_hours=(9,))
-    assert wakeup.kind == "new_mail" and wakeup.time == due + timedelta(hours=4)
+    assert wakeup.kind == "new_mail" and wakeup.time == due + timedelta(hours=14)  # Saturday opening.
     assert any("Still reviewing" in e.body for e in load_world().overlay_inbox)
 
 
@@ -633,7 +633,7 @@ async def test_reply_delays_are_jittered_and_capped(sim, monkeypatch):
     await dispatch(email("customer.service@thetrainline.com"))
     await dispatch(email("customer.service@thetrainline.com", iid="open-2"))
     world = load_world()
-    assert sorted(p.due_at - world.now for p in world.pending) == [timedelta(hours=12), timedelta(hours=72)]
+    assert sorted(p.due_at - world.now for p in world.pending) == [timedelta(hours=12), timedelta(hours=30)]
 
 
 @pytest.mark.parametrize("kind", ["contact", "note", "follow_up"])
@@ -653,7 +653,7 @@ async def test_a_quicker_later_company_reply_waits_and_keeps_all_effect_times_co
     await run_event(kind, iid="later")
     world = load_world()
     first, second = world.pending
-    assert first.email.body == "Earlier answer." and first.due_at == world.now + timedelta(hours=40)
+    assert first.email.body == "Earlier answer." and first.due_at == world.now + timedelta(hours=30)
     assert second.email.body.startswith("Later answer")
     due = first.due_at + timedelta(minutes=10)
     interaction = world.interactions[-1]
@@ -680,7 +680,7 @@ async def test_pending_replies_from_another_company_do_not_delay_this_one(sim):
     await dispatch(email("customer.services@thetrainline.com", iid="retailer"))
     await dispatch(email(org_address(SC.org("avanti")), iid="operator"))
     world = load_world()
-    assert [p.due_at - world.now for p in world.pending] == [timedelta(hours=40), timedelta(hours=5)]
+    assert [p.due_at - world.now for p in world.pending] == [timedelta(hours=30), timedelta(hours=48)]
 
 
 async def test_a_person_keeps_independent_reply_timing_and_can_remain_silent_without_pending_mail(sim):
@@ -776,7 +776,7 @@ async def test_scheduled_seed_mail_neither_delays_a_reply_nor_excuses_silence(si
     assert await _choose_action(SC, world, org, event, context, None) is None
     sim.open_actions.append({"reply_after_hours": 5, "body": "Our reply."})
     prepared = await _choose_action(SC, world, org, event, context, None)
-    assert prepared is not None and prepared.effective_at == world.now + timedelta(hours=5)
+    assert prepared is not None and prepared.effective_at == world.now + timedelta(hours=6)
 
 
 async def run_event(kind, *, iid="shared-event"):
@@ -801,7 +801,7 @@ async def run_event(kind, *, iid="shared-event"):
 
 
 @pytest.mark.parametrize("kind", ["contact", "note", "follow_up"])
-@pytest.mark.parametrize("proposed_hours,expected_hours", [(0.5, 4), (10, 12), (500, 72)])
+@pytest.mark.parametrize("proposed_hours,expected_hours", [(0.5, 6), (10, 12), (500, 30)])
 async def test_all_company_events_validate_and_apply_the_same_final_delivery_time(
     sim, monkeypatch, kind, proposed_hours, expected_hours,
 ):

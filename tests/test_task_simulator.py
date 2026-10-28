@@ -115,7 +115,7 @@ async def test_alternative_company_handles_contact_and_follow_up_without_task_ga
     assert not world.outcome.claims[0].asserted_facts
     assert not mock.assessment_prompts
     saved_observation = store().get(OBSERVATIONS_KEY)[0]
-    assert world.pending[0].due_at == scenario.start_time + timedelta(hours=8)
+    assert world.pending[0].due_at == scenario.start_time + timedelta(hours=24)
     pending = world.follow_ups[0]
     with world_tx() as w:
         w.now = pending.due_at

@@ -46,6 +46,15 @@ may remain silent while its own reply is pending; this does not merge new materi
 into the queued draft or guarantee that generated prose describes its status
 correctly. Personal contacts retain independent reply timing.
 
+Organisation email and form replies use each organisation's configured
+`reply_delay_hours`. The runtime places substantive replies within the configured
+contact-hours window, using `Phone-hours` as an approximation of staffed email
+hours; it is not a separate published email service guarantee. Queue ordering is
+applied before this adjustment, so a queue gap crossing closing time waits for
+the next staffed day. Effective delivery and financial-effect timestamps remain
+aligned. Personal contacts retain the existing independent timing bounds, and
+automatic routing acknowledgements continue to use their separate delivery path.
+
 All commands are run as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late]`:
 
 | Command | Purpose |

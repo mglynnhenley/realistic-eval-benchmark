@@ -193,8 +193,8 @@
       "location": "refund_eval/sim/open_world.py:250",
       "change": "In _prepare_action, for organisations whose kind is not dynamic_personal, clamp reply_after_hours to org.reply_delay_hours instead of MIN_REPLY_HOURS/MAX_REPLY_HOURS, then move effective_at forward into the organisation's working hours (for example 08:00-18:00) before delivery. Leave personal contacts unchanged.",
       "seen": 11,
-      "status": "accepted",
-      "updated": "2026-10-27"
+      "status": "resolved",
+      "updated": "2026-10-28"
     }
   ]
 }

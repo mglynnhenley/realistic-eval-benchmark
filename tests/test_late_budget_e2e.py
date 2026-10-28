@@ -170,7 +170,8 @@ def test_company_approval_after_long_wait_pays_once_with_exact_target_ledger(
     assert len(world.interceptions) == 4
     for claim in world.outcome.claims[:2]:
         assert claim.decision == "open:evidence_requested"
-        assert claim.response_available_at - claim.time == timedelta(hours=48)
+        expected_hours = 30 if claim.org == "trainline" else 48
+        assert claim.response_available_at - claim.time == timedelta(hours=expected_hours)
     ledger = world.token_ledger
     assert ledger.used == script.calls * 210
     assert ledger.used == sum(call.total_tokens for call in ledger.calls)
