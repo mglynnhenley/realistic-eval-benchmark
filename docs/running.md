@@ -167,6 +167,8 @@ The first export opens a browser for `gmail.readonly` consent and saves the toke
 
 Drafts, spam, trash and chats are excluded; attachments are not exported. Exports default to 300 messages and 20,000 characters per body. The bundled model-comparison pressure thread is included unless `--no-pressure-thread` is set. Loading an inbox personalises it to the scenario user and rebases dates by whole weeks.
 
+Native Gmail reads and snapshot exports exclude named attachment parts and explicit `Content-Disposition: attachment` subtrees from message-body extraction. Ordinary unnamed inline plain text and HTML alternatives remain available, and text attachments cannot displace the inline message body. Attachment data is not fetched.
+
 Snapshots and run logs contain your mail. Save custom inboxes under `.secrets/inboxes/` or with the `*.inbox.json` suffix; these and the default output directories are gitignored and should not be published. Selected mail is sent to the model providers; batch runs also copy the inbox into the trial image. No Gmail credential is needed inside a trial. Profiles record the inbox file name and SHA-256.
 
 ## Stopping and logs
