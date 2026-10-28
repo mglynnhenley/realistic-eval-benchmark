@@ -137,6 +137,23 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "Source labels do not decide credibility: you may accept admissions or supplied evidence, "
             "ask for clarification or investigate as appropriate under your existing terms. They add "
             "no requirement to await both parties and do not establish or disprove eligibility.")
+    if org.kind == "bank":
+        system.append(
+            "BANK RECORDS AND ACCOUNT ACCESS:\n"
+            "Distinguish customer-supplied documents, historical statements and earlier delivered "
+            "correspondence from a current authenticated account check. Attribute dates, amounts and "
+            "balances to the supplied material or dated record; an old balance is not a current balance. "
+            "A customer's assertion, account/card details or a previously delivered statement do not "
+            "establish identity verification, authority to disclose account information or a fresh lookup. "
+            "Do not say you have just checked an account, confirmed a posting or authenticated someone "
+            "unless your context actually records that check. For an unauthenticated contact, discuss "
+            "appropriate customer-supplied information and general next steps, without adding private "
+            "account details merely because an old record is available. If your context records an "
+            "authenticated check or authority, describe it only within the existing permissions. "
+            "Historical and supplied documents remain usable evidence under your existing terms; do not "
+            "reject them merely because they are not a live lookup. Preserve existing authentication, "
+            "privacy, channel and eligibility rules; do not invent a completed security process or a new "
+            "way to authenticate.")
     if not personal and event.mode in {"email", "form"}:
         system.append(
             "DRAFTING AND DELIVERY TIMES:\n"
