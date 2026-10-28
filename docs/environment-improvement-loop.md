@@ -18,6 +18,14 @@ For a surprising company decision, [rerun that recorded interaction](running.md#
 
 ## Realism loop
 
+The loop is an experiment cycle: identify a plausible realism problem, make a
+focused code, prompt or content change, then test the new version. A reproduced
+implementation bug is not required. Record the hypothesis and expected observable
+effect before measurement; use the results to retain, revise or revert the change.
+Synthetic reproductions remain useful for debugging correctness defects, rather
+than a gate for every realism improvement. Review checks that the change preserves
+the scenario and can be evaluated; it does not require advance proof of success.
+
 The candidate-only controller runs a new version without repeating the baseline:
 `measure --candidate-only --shared-ledger PATH --runner-review REVIEW ...`.
 It defaults to a Sonnet target and never escalates models automatically. Use
@@ -118,7 +126,7 @@ progress. A separate hosted controller service is deferred.
 
 | Step | Executor | Result |
 |---|---|---|
-| Triage saved findings, investigate causes, select verified proposals, implement and test | Primary cloud coding agent | Clean candidate commit and evidence for the selected changes |
+| Select hypotheses from saved findings, make focused changes and test | Primary cloud coding agent | Clean candidate commit and recorded experiments |
 | Check the exact diff, tests and benchmark semantics | Fresh reviewer session | Approve or reject that candidate |
 | Run the requested new trials; reuse a compatible saved baseline or run a fresh baseline | Measurement command | Frozen configurations and native logs |
 | Scan transcripts and compare scores | Direct model APIs plus deterministic scoring | Results, spend and correctness/realism decisions |
@@ -129,12 +137,14 @@ calls for structured judgments. Preserve the existing selection process:
 
 1. Group findings by factor and organisation. Rank clusters by explicitly noticed
    tells, then high-impact tells, then occurrence count.
-2. Investigate the top clusters, split distinct issues, trace actual source and
-   research realistic behaviour. Reuse existing notes and prior decisions.
-3. Propose code changes or prompt/memory notes. Independently accept, revise or
-   reject each proposal, preserving scenario intent and terms.
-4. Select a bounded set of verified proposals, implement them and run their
-   targeted checks before producing the candidate commit.
+2. Turn the top clusters into concrete hypotheses, split distinct issues and
+   consult source or real-world examples where useful. Reuse existing notes.
+3. Make focused code, prompt or content changes for the selected hypotheses,
+   preserving scenario intent and terms. An implementation defect need not be
+   proved before trying an improvement.
+4. Run appropriate checks and review the exact candidate, then measure the new
+   version. Record whether the predicted effect appeared and retain, revise or
+   revert the experiment accordingly.
 
 Batch size is a budget/configuration choice; three trials per arm does not mean
 one fix. One iteration measures the selected candidate as a whole, so its A/B

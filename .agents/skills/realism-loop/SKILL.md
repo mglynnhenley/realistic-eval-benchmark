@@ -15,8 +15,8 @@ MCP/API repair worker is experimental and optional, not the default route.
 
 Interpret the invocation's `key=value` settings or equivalent plain English.
 Defaults: three new trials per required arm, 1,000,000 target tokens and one
-improvement round. Keep triage, investigation and verification before selecting
-a bounded batch of changes; trial count does not set the number of fixes. Honour explicit shorter checkpoints or different limits.
+improvement round. Select a bounded batch of plausible improvements, make the
+changes and evaluate them; trial count does not set the number of changes. Honour explicit shorter checkpoints or different limits.
 The measurement command defaults to a finite 1,800-second batch limit.
 Record the model, simulator/judge, scenario, token/time/turn limits and web mode;
 use the same protocol for the reference and candidate. Historical full-length
@@ -34,17 +34,21 @@ within the user's authorised scope does not require another confirmation.
 Start from relevant saved logs/scans when provided. Preserve them unchanged.
 Group findings by factor and organisation, rank explicitly noticed tells first,
 then high-impact tells and occurrence count. Investigate the top groups, split
-distinct issues, trace source and research real-world behaviour. Reuse existing
-notes. Propose code repairs or prompt/memory notes; independently accept, revise
-or reject each proposal. Select a budget-bounded batch of verified proposals,
-not an arbitrary single issue. Delegate investigation and fixes when requested.
+distinct issues and form plausible improvement hypotheses using the saved evidence
+and relevant real-world examples. Reuse existing notes. Make a focused code,
+prompt or content change, then test it; proving an implementation bug is not an
+entry requirement. Record what each experiment predicts and let the new results
+support retaining, revising or reverting it. Select a budget-bounded batch of
+experiments, not an arbitrary single issue. Delegate work when requested.
 Keep candidate edits isolated and preserve scenario intent, business rules and
 company terms. Read relevant tracked rules/data even when they cannot be edited.
 
-Reproduce a suspected correctness defect with an independent synthetic example,
-make the smallest repair, run its checks and obtain independent review. Retain
+Use a synthetic reproduction when it helps diagnose a correctness defect; do not
+require one for a realism experiment. Make the focused change, run appropriate
+checks and obtain independent review of its scope and preserved scenario. Retain
 verified correctness repairs separately from the aggregate tells decision.
-Optional style/prompt changes require their targeted checks and realism evidence.
+Style and prompt hypotheses are valid experiments even without a code defect;
+evaluate their effects with targeted checks and the new realism measurement.
 An inconclusive small-sample score is not proof of improvement or a reason by itself
 to discard a verified repair. Never attach a measured score to different code.
 
