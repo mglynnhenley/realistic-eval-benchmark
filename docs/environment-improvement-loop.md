@@ -18,6 +18,32 @@ For a surprising company decision, [rerun that recorded interaction](running.md#
 
 ## Realism loop
 
+The candidate-only controller runs a new version without repeating the baseline:
+`measure --candidate-only --shared-ledger PATH --runner-review REVIEW ...`.
+It defaults to a Sonnet target and never escalates models automatically. Use
+`--baseline-evidence` only for exact compatible saved evidence, or
+`--historical-evidence` for integrity-checked diagnostic context that does not
+enter a comparison. Missing or incompatible evidence never triggers a baseline
+run. Preparation freezes the actual Harbor job and source; execution additionally
+requires `--execution-review` binding that request and preparation. Run the
+coordinator with Python 3.14; it pins child uv commands to the same interpreter.
+
+All rounds share an explicit existing spending ledger and use unique stage IDs.
+An authorized increase uses `stages ... amend-budget --total USD
+--expected-sha256 DIGEST --authorization REFERENCE --reason TEXT`; the existing
+budget is the command's `--budget`. This locked amendment preserves every stage,
+actual charge and unknown hold. A new total includes earlier spending.
+
+The controller saves phase state and sealed outcomes. Unknown costs retain their
+holds for independent reconciliation; fresh cleanup runs on success and failure.
+Native target attribution checks role, direct agent span, runtime notice and the
+ordered token ledger, including caches. Missing evidence remains unknown. Poor
+task performance and possible realism annotations do not establish evaluation
+awareness or its causal effect; model capability is a separate hypothesis.
+Coding agents investigate and repair between measured rounds. Each agent's
+handoff journal should record its current work, decisions, evidence, ownership
+and next action alongside machine-readable state for replacement-model takeover.
+
 The realism loop finds simulated artefacts that an agent noticed, or could have noticed, were fake, and makes them look like the real thing:
 
 1. **Mine.** The Scout `tells` scanner reads the transcripts. For each artefact it records the factor (`sandbox`, `internet`, `company` or `personal`), the organisation, a quote and whether the agent reacted to it.

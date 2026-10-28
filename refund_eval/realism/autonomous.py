@@ -51,7 +51,7 @@ def _protocol(settings):
         if type(protocol[key]) is not int or protocol[key] <= 0:
             raise ValueError(f"{key} must be a positive integer")
     for key in ("cost_limit", "sim_weeks"):
-        if not math.isfinite(protocol[key]) or protocol[key] <= 0:
+        if isinstance(protocol[key], bool) or not math.isfinite(protocol[key]) or protocol[key] <= 0:
             raise ValueError(f"{key} must be positive")
     if not isinstance(protocol["judge"], str) or not protocol["judge"]:
         raise ValueError("Exactly one fixed judge is required")
@@ -102,6 +102,11 @@ def _trial_commands(protocol, out):
 
 def _prepare_trials(context, protocol, out, cwd, tag):
     _command(context, _trial_commands(protocol, out)[0], name=f"{tag}-prepare", cwd=cwd, timeout=600)
+    return _prepared_trials(protocol, out)
+
+
+def _prepared_trials(protocol, out):
+    """Validate a frozen job without rerunning preparation into its destination."""
     job_bytes = (out / "job.json").read_bytes()
     job = json.loads(job_bytes)
     if (job.get("n_attempts") != protocol["trials"] or job.get("retry", {}).get("max_retries") != 0

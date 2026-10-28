@@ -300,14 +300,20 @@ def run_measurement(*, repo: Path, run_dir: Path, baseline: str, candidate: str,
                               "scope": "Exploratory realism comparison; correctness and change retention require separate judgment"}
             except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- preserve accounting for every paid failure
                 status = "budget_blocked" if isinstance(error, autonomous.BudgetStop) else "failed"
-                try:
-                    cleanup = autonomous.cleanup_job(context)
-                except Exception as cleanup_error:  # noqa: BLE001 -- report class only, never provider text
-                    cleanup = {"status": "failed", "error_type": type(cleanup_error).__name__, "remote_state": "unknown"}
                 result = {"status": status, "error_type": type(error).__name__, "artifacts": str(run_dir),
                           "reason": "Measurement stopped; inspect private artifacts and reconcile paid stages without retrying",
-                          "cleanup": cleanup, "spend": stages.show(context.ledger, budget),
+                          "spend": stages.show(context.ledger, budget),
                           "automatic_main_merge": False, "main_checkout_changed": False}
+            finally:
+                try:
+                    cleanup = autonomous.cleanup_job(context)
+                except Exception as cleanup_error:  # noqa: BLE001 -- retain unknown remote state on any cleanup failure
+                    cleanup = {"error_type": type(cleanup_error).__name__, "remote_state": "unknown"}
+            result["cleanup"] = cleanup
+            if (not isinstance(cleanup, dict) or not isinstance(cleanup.get("unresolved"), list)
+                    or cleanup.get("remote_state") == "unknown" or cleanup["unresolved"]
+                    or cleanup.get("discovery_errors")):
+                result["status"] = "reconciliation_required"
             atomic_json(run_dir / "result.json", result)
             if result["status"] == "complete":
                 atomic_json(run_dir / "completion.json", {

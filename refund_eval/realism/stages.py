@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -101,12 +102,50 @@ def show(path: str | Path, budget: float) -> dict:
     return result
 
 
+def amend_budget(path: str | Path, *, previous: float, total: float,
+                 expected_sha256: str, authorization: str, reason: str) -> dict:
+    """Explicitly raise a total ceiling without resetting any stage or hold.
+
+    The digest is checked under the same stable lock as reservations. Ordinary
+    show/reserve/finish continue to reject a different budget.
+    """
+    if isinstance(total, bool) or isinstance(previous, bool):
+        raise ValueError("Budget amendments require numeric total ceilings")  # noqa: TRY004 -- invalid budget input
+    previous, total = _money(previous, "previous", positive=True), _money(total, "total", positive=True)
+    if total <= previous or not isinstance(authorization, str) or not authorization.strip():
+        raise ValueError("An increase requires an explicit authorization reference")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("An amendment reason is required")
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError("Only an existing ledger can be amended")
+    with _locked(path, previous) as ledger:
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
+            raise ValueError("Ledger changed before budget amendment")
+        stage_bytes = json.dumps(ledger["stages"], sort_keys=True, allow_nan=False).encode()
+        amendment = {"previous_budget_usd": previous, "budget_usd": total,
+                     "previous_ledger_sha256": expected_sha256,
+                     "stages_sha256": hashlib.sha256(stage_bytes).hexdigest(),
+                     "authorization": authorization, "reason": reason,
+                     "amended_at": datetime.now(UTC).isoformat()}
+        amendment["id"] = hashlib.sha256(json.dumps(amendment, sort_keys=True).encode()).hexdigest()
+        ledger.setdefault("budget_amendments", []).append(amendment)
+        ledger["budget_usd"] = total
+        result = summary(ledger)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--budget", required=True, type=float)
     actions = parser.add_subparsers(dest="action", required=True)
     actions.add_parser("show")
+    amending = actions.add_parser("amend-budget", help="explicitly increase the existing total allowance")
+    amending.add_argument("--total", required=True, type=float)
+    amending.add_argument("--expected-sha256", required=True)
+    amending.add_argument("--authorization", required=True)
+    amending.add_argument("--reason", required=True)
     reserving = actions.add_parser("reserve")
     reserving.add_argument("--stage", required=True)
     reserving.add_argument("--kind", required=True, choices=["trials", "tells", "interaction", "coding", "review"])
@@ -118,7 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     finishing.add_argument("--detail")
     args = parser.parse_args(argv)
     try:
-        if args.action == "reserve":
+        if args.action == "amend-budget":
+            result = amend_budget(args.ledger, previous=args.budget, total=args.total,
+                                  expected_sha256=args.expected_sha256,
+                                  authorization=args.authorization, reason=args.reason)
+        elif args.action == "reserve":
             result = reserve(args.ledger, args.budget, args.stage, args.kind, args.reserve)
         elif args.action == "finish":
             result = finish(args.ledger, args.budget, args.stage, args.status, args.actual, args.detail)

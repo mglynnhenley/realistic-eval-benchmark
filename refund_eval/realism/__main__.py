@@ -183,14 +183,31 @@ def _score(args) -> int:
 def _measure(args) -> int:
     from refund_eval.realism.measurement import run_measurement
 
-    settings = {"scenario": args.scenario, "model": args.model, "judge": args.judge,
+    target = args.model or ("openrouter/anthropic/claude-sonnet-5.5" if args.candidate_only
+                            else "openrouter/anthropic/claude-haiku-4.5")
+    settings = {"scenario": args.scenario, "model": target, "judge": args.judge,
                 "trials": args.trials, "token_budget": args.token_budget,
                 "per_trial_cost": args.cost_limit, "scan_reserve": args.scan_reserve,
                 "sim_weeks": args.sim_weeks, "max_turns": args.max_turns,
                 "time_limit": args.time_limit, "trial_wallclock_limit": args.time_limit}
     try:
         repo = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-        result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
+        if args.candidate_only:
+            from refund_eval.realism.controller import run_candidate
+            if not args.shared_ledger or not args.runner_review:
+                raise ValueError("Candidate-only loop requires an existing shared ledger and runner review")
+            result = run_candidate(repo=repo, run_dir=Path(args.out).resolve(),
+                                   baseline=args.base, candidate=args.candidate,
+                                   review=Path(args.review).resolve(), budget=args.budget,
+                                   settings=settings, ledger=Path(args.shared_ledger).resolve(),
+                                   runner_review=Path(args.runner_review).resolve(),
+                                   baseline_evidence=args.baseline_evidence,
+                                   historical_evidence=args.historical_evidence,
+                                   execute=args.execute, execution_review=args.execution_review)
+        else:
+            if any((args.shared_ledger, args.runner_review, args.historical_evidence, args.execution_review)):
+                raise ValueError("Loop-specific inputs require --candidate-only")
+            result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
                                  baseline=args.base, candidate=args.candidate,
                                  review=Path(args.review).resolve(), budget=args.budget,
                                  settings=settings,
@@ -293,8 +310,13 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--out", required=True, help="saved measurement run directory")
     measure.add_argument("--budget", required=True, type=float, help="additional model USD allowance within existing authorization")
     measure.add_argument("--baseline-evidence", help="verified saved baseline evidence manifest")
+    measure.add_argument("--candidate-only", action="store_true", help="run only the new version; never launch a baseline")
+    measure.add_argument("--shared-ledger", help="existing loop ledger; --budget is its authorized total")
+    measure.add_argument("--runner-review", help="exact independent infrastructure approval")
+    measure.add_argument("--historical-evidence", help="validated diagnostic history, never included in comparison")
+    measure.add_argument("--execution-review", help="exact independent prepared-request approval")
     measure.add_argument("--execute", action="store_true", help="explicitly launch paid stages (default: prepare only)")
-    measure.add_argument("--model", default="openrouter/anthropic/claude-haiku-4.5")
+    measure.add_argument("--model", help="target model (candidate-only defaults to Sonnet; comparison defaults to Haiku)")
     measure.add_argument("--judge", default="openrouter/anthropic/claude-opus-5.5")
     measure.add_argument("--trials", type=int, default=3)
     measure.add_argument("--token-budget", type=int, default=1_000_000)
