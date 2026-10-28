@@ -122,6 +122,10 @@ and `remote_state: unknown` for configurations it could not safely identify.
 Only a fresh readable cleanup receipt confirms the current attempt; a missing
 receipt or timeout leaves the known sessions unresolved. Inspect these fields
 alongside held model reservations before deciding that remote work has stopped.
+The cleanup subprocess uses the trusted caller's absolute Harbor launcher and
+standalone worker paths, even when the job's cwd is an older environment candidate.
+The worker needs only the standard library and Modal; Harbor's lean environment
+does not include the measurement stack's NumPy, Inspect or Scout dependencies.
 
 The standalone `measure` command uses `stages.py`, `cycle.py`, coverage checks and
 the existing Modal helpers. It accepts reviewed commits without invoking the

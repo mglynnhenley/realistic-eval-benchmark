@@ -435,7 +435,12 @@ def cleanup_job(context):
         # cleanup says nothing about the outcome of this attempt.
         output.unlink(missing_ok=True)
         try:
-            response = context.command(["scripts/harbor", "python", "-m", "refund_eval.realism.autonomous",
+            # JobContext defaults to the environment candidate's cwd, which
+            # intentionally lacks new protected measurement code. Execute the
+            # lean worker and launcher from this trusted caller's checkout.
+            worker = Path(__file__).resolve().with_name("modal_cleanup.py")
+            launcher = worker.parents[2] / "scripts/harbor"
+            response = context.command([str(launcher), "python", str(worker),
                                         "--cleanup-modal", str(path), str(output)], name="modal-cleanup", timeout=35,
                                        allow_cancelled=True)
             if not response["returncode"]:
@@ -454,25 +459,10 @@ def cleanup_job(context):
 
 
 def _cleanup_modal(targets, output):
-    from modal import Sandbox
+    # Keep the existing in-process helper; subprocesses use the standalone file.
+    from refund_eval.realism.modal_cleanup import cleanup_modal
 
-    sessions = json.loads(Path(targets).read_text())["sessions"]
-    if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,160}__env", name) for name in sessions):
-        raise ValueError("Invalid job sandbox identity")
-    terminated, unresolved = [], []
-    for name in sessions:
-        try:
-            for sandbox in Sandbox.list(tags={"harbor.managed": "true", "harbor.session_id": name}):
-                tags = sandbox.get_tags()
-                if tags.get("harbor.managed") == "true" and tags.get("harbor.session_id") == name:
-                    sandbox.terminate()
-                    sandbox.wait(raise_on_termination=False)
-                    terminated.append(sandbox.object_id)
-                else:
-                    unresolved.append(name)
-        except Exception:  # noqa: BLE001 -- cleanup must report every unresolved remote without exposing credentials
-            unresolved.append(name)
-    atomic_json(Path(output), {"sessions": sessions, "terminated": terminated, "unresolved": unresolved})
+    cleanup_modal(targets, output)
 
 
 if __name__ == "__main__":
