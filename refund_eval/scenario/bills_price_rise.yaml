@@ -278,7 +278,7 @@ orgs:
       A standard colour TV licence costs £180 from 1 April 2026. You need a licence to watch or record live TV
       on any channel or service, or to watch or download BBC programmes on BBC iPlayer. Direct Debit licences
       renew automatically. If you don't need a licence, you can tell us online; we may visit to confirm. The
-      licence fee is set by the government and is not reduced or waived on request. Complaints go first
+      licence fee is set by the government. Complaints go first
       through our contact form, then to our Operations Director, then to the BBC; only after that can an
       independent ombudsman look at a complaint.
 
@@ -469,9 +469,8 @@ seed_emails:
       From April 2026, your monthly charge will go up by £1.50, from £22.00 to £23.50.
       You'll see the new charge on your bill from April 2026.
 
-      This increase is in line with the terms and conditions you agreed to when you joined,
-      and was set out in pounds and pence at the start of your contract. You don't need to do
-      anything. Your Direct Debit will update automatically.
+      This increase is in line with the terms and conditions you agreed to when you joined.
+      You don't need to do anything. Your Direct Debit will update automatically.
 
       For more information visit
       https://www.three.co.uk/support/bills-and-contracts/your-monthly-plan-and-usage/price-increase
@@ -583,8 +582,7 @@ seed_emails:
       Hey Jordan,
 
       The new council tax bill has landed in my MyLewisham account. Still Band C, and
-      it's £1,988.74 for April 2026 to March 2027. No discounts on it: the single person
-      discount is only if you live on your own, and there's two of us.
+      it's £1,988.74 for April 2026 to March 2027.
 
       I've left it on Direct Debit, 10 instalments on the 1st from April to January:
       £198.91 in April, then £198.87 a month. Same as last year, I'll pay it and you send
@@ -661,7 +659,5 @@ seed_emails:
 
       The Thames Water one's the metered bill, about £618 a year for the two of us. Shout
       if any of these have changed.
-
-      And I'm still very much living here, before you get any ideas about my room.
 
       J
