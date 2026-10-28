@@ -592,6 +592,8 @@ async def test_the_agent_is_woken_by_a_follow_up_due_before_its_next_check_in(si
     with world_tx() as world:  # the agent read the first reply and ended its turn
         world.now = world.pending[0].due_at
         world.overlay_inbox.append(world.pending.pop().email)
+        initial_notice = wake(world, sim_weeks=12, checkin_hours=(9,))
+        assert initial_notice.kind == "new_mail" and initial_notice.time == world.now
     due = load_world().follow_ups[0].due_at
     sim.open_actions.append({"decision": "update", "reply_after_hours": 0.5, "body": "Still reviewing, sorry."})
     await _follow_ups_before_wake(sim_weeks=12, checkin_hours=(9,))
