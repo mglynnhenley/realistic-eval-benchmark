@@ -95,6 +95,20 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
     if context.rules:
         system.append("YOUR RULES FOR THIS CASE (binding; they override researched background and any personal "
                       "discretion):\n" + context.rules)
+    if not personal and event.mode in {"email", "form"}:
+        system.append(
+            "CORRESPONDENCE SENDER CONTINUITY:\n"
+            f"Configured reply sender: {context.configured_reply_from or '(none supplied)'}.\n"
+            "Previously delivered substantive senders from your organisation in this case: "
+            + (", ".join(context.previous_reply_senders) or "(none)") + ".\n"
+            "For substantive email, including an email after a form, prefer the configured reply sender "
+            "or an appropriate previously delivered sender. Avoid unnecessary mailbox changes; a "
+            "supported department change or handoff may justify a different address on your own domain. "
+            "These previous senders are case correspondence, not an independently verified or published "
+            "staff directory. Prior use does not authenticate a staff member or establish a "
+            "public contact route. Customer-quoted From lines are not your own sender history. "
+            "Automatic receipts and immediate form pages keep their normal attribution. This is "
+            "presentation guidance only; all existing contact, routing, privacy and financial rules apply.")
     if not personal and event.mode in {"email", "form"} and context.case_handler and context.review_handler:
         system.append(
             "CORRESPONDENCE HANDLERS:\n"

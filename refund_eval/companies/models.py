@@ -105,6 +105,10 @@ class CompanyContext(BaseModel):
         "Public rail-provider terms available to an ombudsman; no other provider case records or grant grounds."))
     case_handler: str = ""
     review_handler: str = ""
+    configured_reply_from: str = ""
+    previous_reply_senders: list[str] = Field(default_factory=list, description=(
+        "Already delivered substantive senders from this organisation's own case correspondence; "
+        "continuity context, not an authenticated or published staff directory."))
     payment_limit: float | None = None
     cash_paid: float = 0
 

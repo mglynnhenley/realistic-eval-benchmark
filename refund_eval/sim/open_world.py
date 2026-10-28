@@ -222,6 +222,21 @@ def _correspondence_handlers(org: Org, world: World, mode: str) -> tuple[str, st
     return handler, reviewer
 
 
+def _correspondence_senders(org: Org, world: World, record: dict | None, mode: str) -> tuple[str, list[str]]:
+    """Configured guidance and own delivered senders, without creating contact routes."""
+    if org.kind == "dynamic_personal" or mode not in {"email", "form"}:
+        return "", []
+    configured = _directive(record, org, "Reply-from") or (
+        f"{org.name} <{org.contact_emails[0]}>" if org.contact_emails else "")
+    automatic_ids = {claim.response_email_id for claim in world.outcome.claims if claim.kind == "automatic_reply"}
+    delivered = sorted((email for email in world.overlay_inbox
+                        if email.org == org.key and email.source == "counterparty" and not email.automatic
+                        and email.id not in automatic_ids and as_aware(email.sent_at) <= as_aware(world.now)),
+                       key=lambda email: as_aware(email.sent_at))
+    senders = [address for email in delivered[-6:] if (address := parse_address(email.sender))]
+    return configured, list(dict.fromkeys(senders))
+
+
 def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | None,
                     others: list[Org], record: dict | None = None, mode: str = "email") -> CompanyContext:
     """Project the company's own knowledge; never include private assessments."""
@@ -253,6 +268,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
     if mode == "form":
         realism = "\n".join(filter(None, [realism, notes_text(scenario.id, org.key, "internet")]))
     handler, reviewer = _correspondence_handlers(org, world, mode)
+    configured_sender, previous_senders = _correspondence_senders(org, world, record, mode)
     return CompanyContext(
         org=CompanyProfile(key=org.key, name=org.name, kind=org.kind, policy=org.policy, terms=terms),
         subject=scenario.subject, customer_name=scenario.user.name,
@@ -266,6 +282,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         other_orgs=[o.name for o in others] if org.kind == "dynamic_personal" else [],
         provider_terms=_provider_terms(scenario, org),
         case_handler=handler, review_handler=reviewer,
+        configured_reply_from=configured_sender, previous_reply_senders=previous_senders,
         payment_limit=scenario.task.payment_limit(scenario),
         cash_paid=sum(t.amount for t in own_payments if t.kind in CASH_KINDS),
     )
