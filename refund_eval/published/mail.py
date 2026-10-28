@@ -305,11 +305,21 @@ class GmailService:
         except (ValueError, TypeError):
             return float("-inf")
 
+    def _local_labels(self, email: Email, extra: dict[str, Any]) -> list[str]:
+        own = self.ctx.mailbox.user_addresses
+        sent = extra.get("native_gmail_accepted") or parse_address(email.sender) in own
+        labels = ["SENT"] if sent else ["INBOX"]
+        if sent and any(parse_address(address) in own for address in [*email.to, *email.cc]):
+            labels.append("INBOX")
+        if not sent and email.source == "counterparty":
+            labels.append("UNREAD")
+        return labels
+
     def _native_message(self, email: Email, extra: dict[str, Any], message_format: str = "FULL_CONTENT") -> dict[str, Any]:
         if message_format not in {"FULL_CONTENT", "MESSAGE_FORMAT_UNSPECIFIED", "MINIMAL", "METADATA_ONLY",
                                   "THREAD_VIEW_MINIMAL", "THREAD_VIEW_METADATA_ONLY", "THREAD_VIEW_UNSPECIFIED"}:
             raise ValueError("Unsupported native message format; capture and implement its output contract first.")
-        labels = ["SENT"] if extra.get("native_gmail_accepted") else ["INBOX", "UNREAD"]
+        labels = self._local_labels(email, extra)
         data: dict[str, Any] = {
             "id": _visible_id(email.id), "sender": email.sender,
             "toRecipients": list(email.to), "ccRecipients": list(email.cc),
@@ -397,7 +407,7 @@ class GmailService:
         matcher = parse_query(query)
         world = load_world()
         match_ctx = MatchContext(user_addresses=self.ctx.mailbox.user_addresses, now=world.now,
-                                 unread=lambda e: e.source != "real")
+                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}))
         merged: dict[str, dict[str, Any]] = {}
         request = dict(arguments)
         first = None

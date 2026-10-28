@@ -133,8 +133,8 @@
       "location": "refund_eval/published/mail.py:312",
       "change": "In _native_message, label a local email [\"SENT\"] when parse_address(email.sender) is in self.ctx.mailbox.user_addresses, as fixtures.py:160 already does. Keep [\"INBOX\", \"UNREAD\"] for everything else.",
       "seen": 1,
-      "status": "accepted",
-      "updated": "2026-10-27"
+      "status": "resolved",
+      "updated": "2026-10-28"
     },
     {
       "id": "seed_own_mail_labelled_inbox_unread",
@@ -148,8 +148,8 @@
       "location": "refund_eval/published/mail.py:312",
       "change": "In _native_message, label an overlay email ['SENT'] when parse_address(email.sender) is in self.ctx.mailbox.user_addresses. Label other email.source == 'seed' mail ['INBOX'] (read), and keep ['INBOX', 'UNREAD'] only for counterparty mail. Make the matcher at mail.py:400 agree by using unread=lambda e: e.source == 'counterparty'. This mirrors fixtures.py _message.",
       "seen": 6,
-      "status": "accepted",
-      "updated": "2026-10-27"
+      "status": "resolved",
+      "updated": "2026-10-28"
     },
     {
       "id": "policy_page_analyst_statements",
@@ -163,8 +163,8 @@
       "location": "refund_eval/published/fixture_web.py:56",
       "change": "In policy_page_text, build the page from the facts' verbatim quotes only, grouped by source URL, and drop the dossier summary and every 'statement' paraphrase. De-duplicate quotes, and also drop any quote that is contained in another kept quote, because some dossiers have overlapping quotes such as the two Trainline data-protection quotes. FixtureSearchService ranks and returns page.text, so this also fixes search snippets. Leave the dossier files unchanged.",
       "seen": 4,
-      "status": "accepted",
-      "updated": "2026-10-27"
+      "status": "resolved",
+      "updated": "2026-10-28"
     },
     {
       "id": "unpublished_address_human_reply",

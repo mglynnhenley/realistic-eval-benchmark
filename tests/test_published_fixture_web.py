@@ -34,6 +34,25 @@ TRAINLINE_CONTACT_URL = "https://www.thetrainline.com/about-us/contact-us"
 AVANTI_CONTACT_URL = "https://www.railhelp.co.uk/avantiwestcoast"
 
 
+def test_policy_page_uses_public_quotes_instead_of_research_analysis(monkeypatch):
+    from refund_eval.published.fixture_web import policy_page_text
+
+    org = load_scenario("train_refund").org("trainline")
+    monkeypatch.setattr("refund_eval.published.fixture_web.saved_dossier", lambda _: {"dossier": {
+        "summary": "An analyst's private description of this company's style.",
+        "facts": [
+            {"statement": "An analyst's interpretation.", "quote": "Please have your booking reference ready."},
+            {"statement": "Repeated research.", "quote": "Please have your booking reference ready."},
+            {"statement": "Partial quotation.", "quote": "booking reference"},
+            {"statement": "Unquoted research.", "quote": ""},
+            {"statement": "A separate policy.", "quote": "Use our contact form for help."},
+        ],
+    }})
+    assert policy_page_text(org) == (
+        "Please have your booking reference ready.\n\nUse our contact form for help."
+    )
+
+
 @pytest.fixture
 def ctx():
     init_subtask_store(Store())

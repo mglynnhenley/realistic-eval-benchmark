@@ -190,6 +190,34 @@ async def test_native_reads_forward_unchanged(ctx):
     assert remote.calls == [("get_message", args)]
 
 
+@pytest.mark.parametrize("source,own,labels", [
+    ("seed", True, ["SENT"]),
+    ("seed", False, ["INBOX"]),
+    ("counterparty", False, ["INBOX", "UNREAD"]),
+])
+async def test_overlay_mail_labels_and_read_search_agree(ctx, source, own, labels):
+    address = next(iter(ctx.mailbox.user_addresses))
+    message = Email(
+        id="synthetic-label-message", thread_id="synthetic-label-thread",
+        sender=f"Account holder <{address}>" if own else "Support <support@example.test>",
+        to=["friend@example.test"] if own else [address], subject="A synthetic thread",
+        body="A synthetic message.", sent_at=load_world().now, source=source,
+    )
+    with world_tx() as world:
+        world.overlay_inbox = [message]
+    service = GmailService(Remote(), ctx)
+    found = await service.call_tool("search_threads", {"query": ""})
+    [thread] = found["structuredContent"]["threads"]
+    [visible] = thread["messages"]
+    assert visible["labelIds"] == labels
+    read = await service.call_tool("get_message", {"messageId": visible["id"]})
+    assert read["structuredContent"]["labelIds"] == labels
+    for query, expected in [("is:unread", "UNREAD" in labels), ("is:read", "UNREAD" not in labels),
+                            ("in:sent", own), ("in:inbox", not own)]:
+        result = await service.call_tool("search_threads", {"query": query})
+        assert bool(result["structuredContent"]["threads"]) is expected
+
+
 async def test_send_search_read_thread_and_delayed_reply_are_coherent(ctx, simulator):
     remote = Remote()
     service = GmailService(remote, ctx)

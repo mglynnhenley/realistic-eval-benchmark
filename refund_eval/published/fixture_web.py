@@ -48,12 +48,12 @@ class FixturePage:
 
 
 def policy_page_text(org: Org) -> str:
-    """The authored policy page: the committed dossier's summary and quoted facts,
-    else the scenario's own policy text. Offline either way."""
+    """Public quotations from the dossier, else the scenario's authored policy."""
     dossier = (saved_dossier(org) or {}).get("dossier")
     if not dossier:
         return org.policy.strip()
-    return "\n\n".join([dossier["summary"], *(f"{f['statement']} \"{f['quote']}\"" for f in dossier.get("facts", []))])
+    quotes = list(dict.fromkeys(f["quote"].strip() for f in dossier.get("facts", []) if f.get("quote", "").strip()))
+    return "\n\n".join(quote for quote in quotes if not any(quote != other and quote in other for other in quotes))
 
 
 def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
