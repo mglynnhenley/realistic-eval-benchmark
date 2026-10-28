@@ -25,7 +25,7 @@ class Response:
 class GoogleTransport:
     """Only Gmail list/get transport is substituted; selection is a test fact."""
 
-    def __init__(self, query, labels, selected, when=NOW):
+    def __init__(self, query, labels, selected, when=NOW, self_addressed=False):
         self.query = query
         self.selected = selected
         self.calls = []
@@ -39,6 +39,11 @@ class GoogleTransport:
                 {"name": "Subject", "value": "Invoice"},
             ]}, "snippet": "Synthetic account notice",
         }
+        if self_addressed:
+            self.message["payload"]["headers"] = [
+                {"name": field, "value": SCENARIO.user.email_addresses[0]}
+                for field in ("From", "To", "Cc")
+            ] + [{"name": "Subject", "value": "Invoice"}]
 
     def users(self):
         return self
@@ -58,9 +63,9 @@ class GoogleTransport:
         return Response(self.message)
 
 
-def search(tmp_path, query, labels, *, state=None, selected=True, when=NOW):
+def search(tmp_path, query, labels, *, state=None, selected=True, when=NOW, self_addressed=False):
     source = GmailMailSource(tmp_path / "absent-client.json", tmp_path / "absent-token.json")
-    transport = GoogleTransport(query, labels, selected, when)
+    transport = GoogleTransport(query, labels, selected, when, self_addressed)
     source._service = transport
     world = World(start_time=NOW, now=NOW)
     results = Mailbox(source, SCENARIO).search(world, query, limit=7, state=state)
@@ -116,7 +121,8 @@ def test_known_local_native_state_can_exclude_source_match(tmp_path, query, stat
     ("is:read", InboxState(marked_read={MID}), [MID]),
     ("label:accounts", InboxState(labels={MID: {"accounts"}}), [MID]),
     ("-in:inbox", InboxState(archived={MID}), [MID]),
-    ("(subject:invoice OR is:starred)", InboxState(marked_read={MID}), [MID]),
+    # An unrelated mark-read cannot establish native subject/text semantics.
+    ("(subject:invoice OR is:starred)", InboxState(marked_read={MID}), []),
     ("(is:starred AND label:accounts)", InboxState(starred={MID}), []),
     ("-is:starred", InboxState(marked_read={MID}), []),
     ("-is:read", InboxState(starred={MID}), []),
@@ -125,10 +131,23 @@ def test_known_local_native_state_can_exclude_source_match(tmp_path, query, stat
     ("(-attachmentkeyword OR is:starred)", InboxState(marked_read={MID}), []),
     ('(-"attachment phrase" OR is:starred)', InboxState(marked_read={MID}), []),
     ("(-bcc:accounts OR is:starred)", InboxState(marked_read={MID}), []),
-    ("(invoice OR is:starred)", InboxState(marked_read={MID}), [MID]),
+    ("(invoice OR is:starred)", InboxState(marked_read={MID}), []),
 ])
 def test_native_touched_recovery_requires_known_match_not_missing_flags(tmp_path, query, state, expected):
     assert search(tmp_path, query, ["STARRED", "UNREAD"], state=state, selected=False) == expected
+
+
+@pytest.mark.parametrize("native_term", ["-from:me", "-to:me", "-cc:me", "in:sent", "label:sent", "is:important"])
+def test_native_alias_folder_and_status_require_explicit_local_proof(tmp_path, native_term):
+    query = f"({native_term} OR is:starred)"
+    # The actual Gmail list result is empty: native :me matches this account,
+    # and the incoming self-addressed message has no SENT/STARRED/IMPORTANT.
+    # An unrelated local read action cannot establish a new query match.
+    assert search(tmp_path, query, ["INBOX"], state=InboxState(marked_read={MID}),
+                  selected=False, self_addressed=True) == []
+    # A local star is sufficient proof for the OR, independent of native terms.
+    assert search(tmp_path, query, ["INBOX"], state=InboxState(starred={MID}),
+                  selected=False, self_addressed=True) == [MID]
 
 
 def test_authoritative_native_result_still_respects_future_cutoff(tmp_path):

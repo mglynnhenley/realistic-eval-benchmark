@@ -558,15 +558,6 @@ class Mailbox:
                 labels = {label.replace("-", " ") for label in state.labels.get(e.id, set())}
                 if value.replace("-", " ") in labels:
                     result = True
-            elif not source_matched:
-                # Recovery may use represented message fields. Returned native
-                # matches remain authoritative even for unrepresented text.
-                if kind == "bcc":
-                    return None
-                result = p.test(e, ctx)
-                # Text found in represented fields is known; absent text may
-                # still be indexed in a native attachment not held in Email.
-                return None if kind in {"text", "phrase"} and result == p.neg else result
             return None if result is None else (not result if p.neg else result)
 
         result = q.evaluate_known(known)
