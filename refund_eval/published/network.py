@@ -264,12 +264,33 @@ def submission_text(fields: dict, text: str, url: str) -> str:
     return text or url
 
 
-def simulated_page(text: str, *, refund_form_action: str | None = None) -> str:
+def simulated_page(text: str, *, site_name: str = "", site_url: str = "",
+                   refund_form_action: str | None = None) -> str:
     """The page the simulator returned, as escaped HTML; blank lines separate paragraphs."""
     paragraphs = [part for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
     body = "".join(f"<p>{html.escape(part).replace(chr(10), '<br>')}</p>" for part in paragraphs) or "<p></p>"
     form = late_refund_form(refund_form_action) if refund_form_action else ""
-    return f"<!doctype html><title>Request status</title><main>{body}{form}</main>"
+    parts = urlsplit(site_url)
+    host = parts.hostname or ""
+    name = html.escape(site_name or host or "Contact")
+    origin = (urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], "/", "", ""))
+              if parts.scheme in {"http", "https"} and host else "")
+    home = f'<a href="{html.escape(origin, quote=True)}">Home</a>' if origin else ""
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{name} | Contact us</title>"
+        "<style>body{margin:0;color:#242424;background:#f6f6f6;font:16px/1.6 system-ui,sans-serif}"
+        "header,footer{padding:1.25rem max(1rem,calc((100% - 48rem)/2));background:white}"
+        "header{border-bottom:1px solid #ddd}nav{margin-top:.5rem}"
+        "main{max-width:44rem;margin:2rem auto;padding:2rem;background:white;border:1px solid #ddd}"
+        "h1{font-size:1.5rem}p{white-space:normal;overflow-wrap:anywhere}"
+        "a{color:#164e87}footer{border-top:1px solid #ddd;color:#666}"
+        "@media(max-width:48rem){main{margin:1rem;padding:1rem}}</style></head>"
+        f"<body><header><strong>{name}</strong><nav>{home}</nav></header>"
+        f"<main><h1>Contact us</h1>{body}{form}</main>"
+        f"<footer>{html.escape(host)}</footer></body></html>"
+    )
 
 
 def _validate_numeric_host(host: str, url: str) -> None:
@@ -556,7 +577,9 @@ class BrowserBoundary:
         status = 200 if result is not None and result.kind != "error" else 503
         form_action = (url if status == 200
                        and self.ctx.scenario.task.uses_refund_form(self.ctx.scenario, org) else None)
-        page = response(status, simulated_page(shown, refund_form_action=form_action))
+        site_name = self.ctx.scenario.org(org).name if org else ""
+        page = response(status, simulated_page(shown, site_name=site_name, site_url=url,
+                                               refund_form_action=form_action))
         if status == 200:
             self.pages[url] = page
         return done("simulated", page, reason=write)

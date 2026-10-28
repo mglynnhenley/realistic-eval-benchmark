@@ -271,9 +271,15 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
         minimum, maximum = ((0, MAX_REPLY_HOURS) if action.reply_kind == "automatic" else
                             (MIN_REPLY_HOURS, MAX_REPLY_HOURS) if org.kind == "dynamic_personal"
                             else org.reply_delay_hours)
-        action.reply_after_hours = min(
-            max(action.reply_after_hours * random.uniform(0.8, 1.2), minimum), maximum,
-        )
+        proposed_hours = action.reply_after_hours * random.uniform(0.8, 1.2)
+        if (org.kind != "dynamic_personal" and action.reply_kind != "automatic"
+                and proposed_hours < minimum):
+            # A model's short estimate should not put every staff reply exactly
+            # at the configured floor. Prefer the earlier part of the existing
+            # range while allowing ordinary variation across that range.
+            action.reply_after_hours = random.triangular(minimum, maximum, minimum)
+        else:
+            action.reply_after_hours = min(max(proposed_hours, minimum), maximum)
     sender = _sender(org, action, record, inbound_target)
     effective_at = world.now
     if event.mode in {"email", "form"} and action.reply and sender:

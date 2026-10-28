@@ -25,12 +25,30 @@ def prepare(org, now, hours, pending=(), *, reply_kind="substantive"):
     return _prepare_action(action, event, world, org, None, "help@example.test")
 
 
-@pytest.mark.parametrize("proposed,expected", [(1, 48), (500, 200)])
+@pytest.mark.parametrize("proposed,expected", [(1, 96), (500, 200)])
 def test_company_uses_its_configured_reply_delay(monkeypatch, proposed, expected):
     monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: 96)
     now = datetime(2026, 10, 12, 9, tzinfo=LONDON)
     result = prepare(company(), now, proposed)
     assert result.effective_at == now + timedelta(hours=expected)
+
+
+@pytest.mark.parametrize("sampled", [3, 6, 9])
+def test_too_short_company_estimates_can_arrive_across_the_existing_range(monkeypatch, sampled):
+    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: sampled)
+    now = datetime(2026, 10, 12, 8, tzinfo=LONDON)
+    result = prepare(company(reply_delay_hours=(2, 10)), now, 0)
+    assert result.effective_at == now + timedelta(hours=sampled)
+    assert result.action.body == "We are reviewing your enquiry."
+
+
+def test_in_range_company_estimate_keeps_its_timing_without_fallback_sampling(monkeypatch):
+    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: pytest.fail("Unexpected sampling"))
+    now = datetime(2026, 10, 12, 8, tzinfo=LONDON)
+    assert prepare(company(reply_delay_hours=(2, 10)), now, 4).effective_at == now + timedelta(hours=4)
 
 
 def test_staffed_reply_waits_until_monday_and_preserves_queue_order(monkeypatch):

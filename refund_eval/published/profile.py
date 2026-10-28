@@ -25,6 +25,7 @@ from refund_eval.published.browser_runtimes import (
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
+from refund_eval.world.state import world_tx
 
 PROFILE_KEY = "published_tool_profile"
 
@@ -132,6 +133,9 @@ async def published_tools(
 
     emit_snapshot(phase="checking_tools")
     source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture")
+    source = source.for_scenario(scenario)
+    with world_tx() as world:
+        source.schedule_future(world)
     ctx = ToolContext(scenario, Mailbox(source, scenario))
     mode_details = ({"mail_data_mode": "fixture", "web_data_mode": "live",
                      "web_time_basis": "wall_clock",

@@ -35,7 +35,7 @@ from refund_eval.world.mailquery import (
     resolve_relative_dates,
 )
 from refund_eval.world.orgs import parse_address
-from refund_eval.world.state import Email, World
+from refund_eval.world.state import Email, ScheduledEmail, World
 from refund_eval.world.timeutil import as_aware, epoch_seconds, to_london
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -77,7 +77,9 @@ class FixtureMailSource:
     {{date+3:num}} ('01/10/2026'), {{day+3}} ('Thursday').
 
     `for_scenario()` personalises it to the scenario's user and moves all dates by
-    whole weeks so the newest mail sits just before the scenario start.
+    whole weeks so its historical mail sits just before the scenario start.
+    Authored follow-on mail keeps its relative dates and becomes visible only
+    when the simulated clock reaches each message's timestamp.
     """
 
     local_state_is_complete = True
@@ -128,6 +130,21 @@ class FixtureMailSource:
 
     def for_scenario(self, scenario: Scenario) -> FixtureMailSource:
         return FixtureMailSource(self.path, user=scenario.user, start_time=scenario.start_time)
+
+    def schedule_future(self, world: World) -> None:
+        """Put this personalised fixture's future incoming mail on the clock.
+
+        Reopening the profile after a checkpoint keeps already queued/delivered
+        IDs. The source still supplies the same messages to search; mailbox
+        views merge by ID. Outgoing fixture mail never creates an inbox wake-up.
+        """
+        known = {email.id for email in world.overlay_inbox}
+        known.update(pending.email.id for pending in world.pending)
+        for email in self._emails:
+            if (email.id not in known and as_aware(email.sent_at) > as_aware(world.now)
+                    and parse_address(email.sender) not in self.user_addresses):
+                world.pending.append(ScheduledEmail(email=email, due_at=email.sent_at))
+                known.add(email.id)
 
     def _fill(self, text: str, sent_at: datetime) -> str:
         def sub(m: re.Match[str]) -> str:

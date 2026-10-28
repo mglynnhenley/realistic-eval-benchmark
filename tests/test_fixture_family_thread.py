@@ -48,7 +48,7 @@ def parcel_messages(source):
 def test_parcel_correspondent_role_and_private_family_details_survive_personalization(kind):
     source, _, surname = persona(kind)
     incoming, outgoing = parcel_messages(source)
-    assert len(source.emails) == 39
+    assert len(source.emails) == 45  # Original39 plus six time-gated unrelated follow-ons.
     assert incoming.sender == f"Auntie Jackie {surname} <{JACKIE_ADDRESS}>"
     assert outgoing.to == [incoming.sender]
     assert outgoing.body.startswith("Hi Auntie Jackie,\n")

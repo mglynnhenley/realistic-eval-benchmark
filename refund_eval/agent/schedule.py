@@ -4,7 +4,7 @@ Pure functions over the World, so they can be tested without Inspect.
 
 After ending a turn, the agent is woken by whichever comes first:
 - its requested wake-up time (a "requested" wake-up), or
-- the earliest pending counterparty reply (a "new_mail" wake-up).
+- the earliest pending incoming email (a "new_mail" wake-up).
 Only when neither exists is it woken at the next CHECKIN_HOURS UK time (a
 "scheduled_checkin" wake-up), so it never sleeps forever.
 
@@ -87,14 +87,14 @@ def sim_deadline(world: World, sim_weeks: float) -> datetime:
 def new_mail_count(
     world: World, since: datetime, until: datetime, arrived: Iterable[Email]
 ) -> int:
-    """Counterparty mail that arrived after `since` and by `until`: what was just
+    """Incoming mail that arrived after `since` and by `until`: what was just
     delivered, plus anything that came in while the agent was working."""
     lo, hi = aware(since), aware(until)
     ids = {e.id for e in arrived}
     ids.update(
         e.id
         for e in world.overlay_inbox
-        if e.source == "counterparty" and lo < aware(e.sent_at) <= hi
+        if e.source in {"counterparty", "real"} and lo < aware(e.sent_at) <= hi
     )
     return len(ids)
 

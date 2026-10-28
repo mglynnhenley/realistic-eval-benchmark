@@ -234,3 +234,38 @@ async def test_changed_fixture_contract_is_rejected_before_tool_execution(ctx, m
     monkeypatch.setattr(fixtures, "fixture_mail_catalog", lambda: changed)
     with pytest.raises(GmailSetupError, match="pinned hash"):
         await service.list_tools()
+
+
+async def test_future_fixture_mail_wakes_once_and_merges_without_duplicates(ctx):
+    from refund_eval.agent.harness import wake
+
+    source = ctx.mailbox.source.for_scenario(ctx.scenario)
+    world = load_world()
+    future = sorted((email for email in source.emails
+                     if as_aware(email.sent_at) > as_aware(world.now)), key=lambda e: as_aware(e.sent_at))
+    assert len(future) == 6
+    source.schedule_future(world)
+    source.schedule_future(world)  # Reopening the selected profile is idempotent.
+    assert len(world.pending) == 6
+    mailbox = Mailbox(source, ctx.scenario)
+    first = future[0]
+    assert mailbox.get(world, first.id) is None
+    wakeup = wake(world, sim_weeks=12)
+    assert wakeup.time == first.sent_at and wakeup.kind == "new_mail"
+    assert wakeup.text.endswith("1 new email.")
+    save_world(world)
+    service = make_fixture_mail(ctx)
+    result = await service.call_tool("search_threads", {"query": f'subject:"{first.subject}"'})
+    assert not result.get("isError"), result
+    messages = [message for thread in result["structuredContent"]["threads"] for message in thread["messages"]]
+    assert sum(message["id"] == first.id for message in messages) == 1
+    assert (await service.call_tool("get_message", {"messageId": first.id}))["structuredContent"]["plaintextBody"] == first.body
+    # Mail arriving while tools run is included in the next wake notice too.
+    advance(world, future[1].sent_at)
+    world.requested_wakeup = world.now + timedelta(minutes=1)
+    wakeup = wake(world, sim_weeks=12)
+    assert wakeup.kind == "requested" and wakeup.text.endswith("1 new email.")
+    assert mailbox.get(world, future[1].id).body == future[1].body
+    source.schedule_future(world)
+    assert len(world.pending) == 4
+    await service.aclose()

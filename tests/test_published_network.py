@@ -17,6 +17,7 @@ from refund_eval.published.network import (
     public_read,
     public_web_read_reason,
     response,
+    simulated_page,
     validate_public_url,
 )
 from refund_eval.published.profile import allow_search_request
@@ -87,6 +88,7 @@ async def test_navigation_writes_are_simulated_and_visible_on_reload(ctx, monkey
     boundary = BrowserBoundary(ctx, public_read_urls=[], fetch=forbidden)
     result = await boundary(req("https://thetrainline.com/claim", "POST", "booking=123"))
     assert result["status"] == 200 and "Your case is open." in body_text(result)
+    assert "Trainline | Contact us" in body_text(result)
     assert simulated[0].channel == "form" and simulated[0].org == "trainline"
     assert simulated[0].fields == {"booking": "123"} and simulated[0].body == "booking: 123"
     assert load_world().interceptions[0].payload["tool_call_id"] == "call1"
@@ -102,6 +104,26 @@ async def test_navigation_writes_are_simulated_and_visible_on_reload(ctx, monkey
     assert (await boundary(as_json))["status"] == 200
     assert simulated[1].fields == {"booking": "123", "items": "[1, 2]"}
     assert [x.channel for x in load_world().interceptions] == ["form", "web_action", "form"]
+
+
+def test_form_shell_preserves_escaped_content_without_reflecting_credentials_or_query():
+    page = simulated_page(
+        'We could not process <script>alert("test")</script>.\n\nPlease check the details.',
+        site_name='Example & Sons <Support>',
+        site_url='https://user:secret@help.example.org/contact?booking=private#token',
+    )
+    assert "Example &amp; Sons &lt;Support&gt; | Contact us" in page
+    assert '<a href="https://help.example.org/">Home</a>' in page
+    assert "&lt;script&gt;" in page and "<script>" not in page
+    assert "Please check the details." in page
+    assert all(value not in page for value in ("secret", "booking=", "#token", "Request received"))
+
+
+def test_unknown_site_shell_uses_destination_without_inventing_a_reply():
+    page = simulated_page("The request could not be completed.", site_url="https://help.example.org/contact")
+    assert "help.example.org | Contact us" in page
+    assert "The request could not be completed." in page
+    assert "Your case is open" not in page
 
 
 async def test_background_and_non_http_cannot_escape(ctx):

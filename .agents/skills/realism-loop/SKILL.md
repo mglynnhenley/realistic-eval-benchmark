@@ -15,7 +15,11 @@ MCP/API repair worker is experimental and optional, not the default route.
 
 Interpret the invocation's `key=value` settings or equivalent plain English.
 Defaults: three new trials per required arm, 1,000,000 target tokens and one
-improvement round. Select a bounded batch of plausible improvements, make the
+improvement round. Target three focused realism changes per candidate unless
+the owner sets another batch size. The three trials independently sample the
+candidate containing those changes; they are not three different edits. Do not
+count tests, workflow documents or analysis-helper repairs as extra realism
+changes. Select a bounded batch of plausible improvements, make the
 changes and evaluate them; trial count does not set the number of changes. Honour explicit shorter checkpoints or different limits.
 The measurement command defaults to a finite 1,800-second batch limit.
 Record the model, simulator/judge, scenario, token/time/turn limits and web mode;

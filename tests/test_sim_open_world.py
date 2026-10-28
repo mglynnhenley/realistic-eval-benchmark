@@ -26,7 +26,10 @@ FARE = SC.journey.fare
 
 
 @pytest.fixture
-def sim():
+def sim(monkeypatch):
+    # Broad execution/effects tests use the earliest allowed sample. Dedicated
+    # delivery tests exercise the spread and staffing adjustments explicitly.
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda low, *_: low)
     mock = MockSim()
     install_mock_models(mock)
     start_sample()
@@ -803,13 +806,14 @@ async def run_event(kind, *, iid="shared-event"):
 
 
 @pytest.mark.parametrize("kind", ["contact", "note", "follow_up"])
-@pytest.mark.parametrize("proposed_hours,expected_hours", [(0.5, 6), (10, 12), (500, 30)])
+@pytest.mark.parametrize("proposed_hours,expected_hours", [(0.5, 23), (10, 12), (500, 30)])
 async def test_all_company_events_validate_and_apply_the_same_final_delivery_time(
     sim, monkeypatch, kind, proposed_hours, expected_hours,
 ):
     import json
 
     monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: b)
+    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: 18)
     sim.open_actions.append({
         "decision": "goodwill", "reply_after_hours": proposed_hours, "body": "We have sent £10 to your card.",
         "payments": [{"kind": "partial_compensation", "amount": 10, "via": "card"}],

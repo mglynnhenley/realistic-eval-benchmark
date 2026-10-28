@@ -479,6 +479,78 @@
       "subject": "Your car insurance renewal",
       "body": "Dear {{user_name}},\n\nYour car insurance is due for renewal on {{date+42}}.\n\nPolicy number: P76312894\nVehicle: 2019 Volkswagen Polo 1.0 TSI\nRenewal premium: £486.20 (last year: £412.80)\n\nYour policy is set to renew automatically, so you don't need to do anything if you want to stay covered with us. If you'd like to make changes, you can do so in your online account or by calling 0333 220 2000.\n\nWhy has my price changed? Premiums across the market have gone up because repair and parts costs have risen. We've included a breakdown in your renewal documents.\n\nKind regards,\nAdmiral Car Insurance",
       "sent_at": "2026-08-03T10:15:00+01:00"
+    },
+    {
+      "id": "d9c10623274d4350",
+      "thread_id": "d9c10623274d4350",
+      "sender": "The Guardian <thelongread@theguardian.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "The Long Read: the small things that make a neighbourhood",
+      "body": "Hello {{user_first_name}},\n\nThis week: corner shops, shared gardens and the places where neighbours stop for a chat. Plus our editors' picks from the weekend.\n\nThe Long Read\nhttps://www.theguardian.com/news/series/the-long-read",
+      "sent_at": "2026-09-30T17:12:00+01:00"
+    },
+    {
+      "id": "503226da571bb07a",
+      "thread_id": "503226da571bb07a",
+      "sender": "Bookshop.org <hello@bookshop.org>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "A few books for an autumn weekend",
+      "body": "Hello,\n\nOur latest reading list brings together essays, new fiction and a few books about the outdoors. The full selection is on our website.\n\nBookshop.org\nhttps://uk.bookshop.org/",
+      "sent_at": "2026-10-03T10:22:00+01:00"
+    },
+    {
+      "id": "482816d0512cf84a",
+      "thread_id": "482816d0512cf84a",
+      "sender": "Spotify <no-reply@spotify.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Fresh listening for the week",
+      "body": "Hi {{user_first_name}},\n\nThe latest releases and editor-selected playlists are now in Browse, alongside this week's podcast picks.\n\nSpotify\nhttps://open.spotify.com/",
+      "sent_at": "2026-10-07T08:41:00+01:00"
+    },
+    {
+      "id": "fcc59a50017e7f4c",
+      "thread_id": "fcc59a50017e7f4c",
+      "sender": "Eventbrite <noreply@event.eventbrite.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "What is on near {{home_area}}",
+      "body": "Hi {{user_first_name}},\n\nThis week's local listings include talks, exhibitions and community events around {{home_area}}. Listings and availability are on the event pages.\n\nEventbrite\nhttps://www.eventbrite.co.uk/",
+      "sent_at": "2026-10-10T11:06:00+01:00"
+    },
+    {
+      "id": "58c9b0f6acd8f4a5",
+      "thread_id": "58c9b0f6acd8f4a5",
+      "sender": "RHS <news@rhs.org.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Autumn in the garden",
+      "body": "Hello,\n\nIn this edition: autumn colour, container planting and a look at the gardens as the seasons change. Our latest articles are online.\n\nRoyal Horticultural Society\nhttps://www.rhs.org.uk/",
+      "sent_at": "2026-10-14T16:18:00+01:00"
+    },
+    {
+      "id": "71c6188cd03110ba",
+      "thread_id": "71c6188cd03110ba",
+      "sender": "The Guardian <thelongread@theguardian.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "The Long Read: this weekend's selection",
+      "body": "Hello {{user_first_name}},\n\nThis weekend's selection includes a photo essay, a conversation with a novelist and a story about an independent cinema.\n\nThe Long Read\nhttps://www.theguardian.com/news/series/the-long-read",
+      "sent_at": "2026-10-18T09:53:00+01:00"
     }
   ]
 }

@@ -73,7 +73,8 @@ def test_fixture_is_personalised_and_rebased_to_the_scenario():
     assert "Hannah" not in blob and "Whitfield" not in blob
     assert "sam.carter@gmail.com" in blob and "Sam" in blob and "York" in blob
     assert "Tom Carter" in blob  # family share the user's surname
-    newest = max(as_aware(e.sent_at) for e in emails)
+    initial = [e for e in emails if as_aware(e.sent_at) <= START]
+    newest = max(as_aware(e.sent_at) for e in initial)
     assert newest <= START
     assert START - newest < timedelta(days=8)
     # dates move by whole weeks so weekday references stay right
@@ -107,7 +108,7 @@ def test_fixture_search_operators():
     cutoff = (now - timedelta(days=14)).date()
     after = src.search(f"after:{cutoff:%Y/%m/%d}", now=now, limit=50)
     assert after and all(as_aware(e.sent_at).date() >= cutoff for e in after)
-    assert src.search("", now=now, limit=5)[0].sent_at == max(e.sent_at for e in src.emails)
+    assert src.search("", now=now, limit=5)[0].sent_at == max(e.sent_at for e in src.emails if as_aware(e.sent_at) <= now)
     assert len(src.search("", now=now, limit=5)) == 5
 
 
@@ -115,6 +116,20 @@ def test_fixture_hides_mail_after_now():
     src = _fixture()
     early = START - timedelta(days=20)
     assert all(as_aware(e.sent_at) <= early for e in src.search("", now=early, limit=50))
+
+
+def test_authored_follow_on_mail_arrives_over_the_simulation_without_changing_starting_mail():
+    src = _fixture()
+    starting = {e.id for e in src.search("", now=START, limit=100)}
+    end = START + timedelta(days=21)
+    later = {e.id for e in src.search("", now=end, limit=100)}
+    assert len(starting) == 39
+    future = [e for e in src.emails if e.id in later - starting]
+    assert len(future) == 6
+    for email in future:
+        before = as_aware(email.sent_at) - timedelta(microseconds=1)
+        assert email.id not in {e.id for e in src.search("", now=before, limit=100)}
+        assert email.id in {e.id for e in src.search("", now=as_aware(email.sent_at), limit=100)}
 
 
 @pytest.mark.parametrize("now", [
@@ -404,3 +419,37 @@ def test_parse_gmail_html_only_body():
     msg = _gmail_msg("18f0a1b2c3d4e5f8", datetime(2026, 9, 1, 9, tzinfo=LONDON), "x")
     msg["payload"]["parts"] = msg["payload"]["parts"][:1]
     assert parse_gmail_message(msg).body == "Hello\nSam"
+
+
+@pytest.mark.parametrize("start", ["2026-10-12T09:00:00+01:00", "2026-10-19T09:00:00+01:00"])
+def test_future_fixture_visibility_across_clock_change(start):
+    scenario = SCENARIO.model_copy(update={"start_time": datetime.fromisoformat(start)})
+    source = FixtureMailSource().for_scenario(scenario)
+    world = World(start_time=scenario.start_time, now=scenario.start_time)
+    source.schedule_future(world)
+    assert len(world.pending) == 6
+    for pending in world.pending:
+        email = pending.email
+        # Use UTC on either side of the boundary, including dates after BST ends.
+        instant = as_aware(email.sent_at).astimezone(UTC)
+        before = instant - timedelta(microseconds=1)
+        world.now = before
+        assert Mailbox(source, scenario).get(world, email.id) is None
+        world.now = instant
+        assert Mailbox(source, scenario).get(world, email.id).body == email.body
+        assert "{{" not in email.body
+
+
+def test_custom_fixture_schedules_only_its_future_incoming_mail(tmp_path):
+    future = (START + timedelta(days=1)).isoformat()
+    path = tmp_path / "custom.json"
+    path.write_text(json.dumps({"emails": [
+        {"id": "incoming", "sender": "newsletter@example.test", "to": [SCENARIO.user.email_addresses[0]],
+         "sent_at": future, "subject": "A new issue", "body": "This week's reading."},
+        {"id": "outgoing", "sender": SCENARIO.user.email_addresses[0], "to": ["friend@example.test"],
+         "sent_at": future, "subject": "Hello", "body": "See you soon."},
+    ]}))
+    source = FixtureMailSource(path).for_scenario(SCENARIO)
+    world = _world()
+    source.schedule_future(world)
+    assert [pending.email.id for pending in world.pending] == ["incoming"]
