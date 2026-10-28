@@ -8,6 +8,33 @@ import pytest
 
 from refund_eval.realism import scan_budget
 
+
+def saved_bounded_spec(cap=8192):
+    return {"model_roles": {"judge": {"model": "openrouter/anthropic/claude-opus-5.5",
+            "args": {"max_retries": 0},
+            "config": scan_budget.bounded_tells_config(cap).model_dump(exclude_none=True)}},
+            "scanners": {"tells": {"name": "tells", "params": {"bounded": True}}}}
+
+
+@pytest.mark.parametrize("cap", [1, 4096, 8192])
+def test_saved_scan_policy_accepts_exact_declared_bounded_caps(cap):
+    scan_budget.validate_saved_tells_scan(saved_bounded_spec(cap),
+        judge="openrouter/anthropic/claude-opus-5.5", max_tokens=cap, single_attempt=True)
+
+
+@pytest.mark.parametrize("cap", [None, False, 0, -1, 8193, 8192.0])
+def test_saved_scan_policy_rejects_invalid_declared_cap(cap):
+    with pytest.raises(ValueError):
+        scan_budget.validate_saved_tells_scan(saved_bounded_spec(),
+            judge="openrouter/anthropic/claude-opus-5.5", max_tokens=cap, single_attempt=True)
+
+
+@pytest.mark.parametrize("single", [None, False, 1])
+def test_saved_scan_policy_requires_explicit_single_attempt(single):
+    with pytest.raises(ValueError, match="single-attempt"):
+        scan_budget.validate_saved_tells_scan(saved_bounded_spec(),
+            judge="openrouter/anthropic/claude-opus-5.5", max_tokens=8192, single_attempt=single)
+
 JUDGE = "openrouter/anthropic/claude-opus-5.5"
 
 

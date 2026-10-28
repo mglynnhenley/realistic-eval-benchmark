@@ -20,6 +20,7 @@ import pytest
 from refund_eval.realism import __main__ as cli
 from refund_eval.realism import evidence
 from refund_eval.realism.background import JobContext
+from refund_eval.realism.scan_budget import bounded_tells_config
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -72,8 +73,10 @@ def _native_scan(scans, logs, protocol, *, damaged=False):
 
     directory = scans / protocol["judge"].split("/")[-1] / "scan_id=synthetic"
     directory.mkdir(parents=True)
-    spec = ScanSpec(scan_name="synthetic", scan_id="synthetic", scanners={"tells": {"name": "tells", "version": 0}},
-                    model_roles={"judge": {"model": protocol["judge"]}})
+    spec = ScanSpec(scan_name="synthetic", scan_id="synthetic",
+                    scanners={"tells": {"name": "tells", "version": 0, "params": {"bounded": True}}},
+                    model_roles={"judge": {"model": protocol["judge"], "args": {"max_retries": 0},
+                        "config": bounded_tells_config(protocol["scan_max_tokens"]).model_dump(exclude_none=True)}})
     (directory / "_scan.json").write_text(spec.model_dump_json(exclude_none=True))
     (directory / "_summary.json").write_text(json.dumps({"complete": True, "scanners": {
         "tells": {"scans": len(logs), "results": len(logs), "errors": 0, "tokens": 0}}}))

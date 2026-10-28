@@ -15,6 +15,7 @@ from pathlib import Path
 from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.realism.coverage import source_identity
 from refund_eval.realism.cycle import score
+from refund_eval.realism.scan_budget import validate_saved_tells_scan
 
 SCHEMA = 1
 
@@ -137,8 +138,9 @@ def _scan_protocol(scans, protocol):
         raise ValueError("Evidence lacks saved scan specifications")
     for path in specifications:
         specification = _json(path)
-        if specification.get("model_roles", {}).get("judge", {}).get("model") != protocol.get("judge"):
-            raise ValueError("Saved scans do not use the declared fixed judge")
+        validate_saved_tells_scan(specification, judge=protocol.get("judge"),
+                                  max_tokens=protocol.get("scan_max_tokens"),
+                                  single_attempt=protocol.get("scanner_single_attempt"))
 
 
 def write_evidence(batch: dict, measurement_hashes: dict) -> Path:

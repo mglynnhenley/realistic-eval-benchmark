@@ -91,6 +91,39 @@ def bounded_tells_config(max_tokens: int):
                           extra_body={"plugins": []})
 
 
+def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: int,
+                             single_attempt: bool) -> None:
+    """Require saved scans to match the bounded policy before evidence reuse.
+
+    Missing settings are unknown, not safe defaults. Compare exact JSON types
+    as well as values: False and 0 must not stand in for one another. This is
+    consistency checking for trusted exports, not manifest authentication.
+    """
+    if single_attempt is not True:
+        raise ValueError("Saved evidence requires an explicitly single-attempt scanner protocol")
+    expected = bounded_tells_config(max_tokens).model_dump(exclude_none=True)
+    if (not isinstance(judge, str) or not judge.startswith("openrouter/")
+            or judge.removeprefix("openrouter/") not in SUPPORTED_WINDOWS):
+        raise ValueError("Saved evidence uses an unsupported bounded judge")
+    roles = specification.get("model_roles")
+    role = roles.get("judge") if isinstance(roles, dict) else None
+    if (not isinstance(role, dict) or set(roles) != {"judge"}
+            or role.get("model") != judge):
+        raise ValueError("Saved scans do not use the declared fixed judge")
+
+    def matches(actual, wanted):
+        return isinstance(actual, dict) and json.dumps(
+            actual, sort_keys=True, allow_nan=False) == json.dumps(wanted, sort_keys=True, allow_nan=False)
+
+    if not matches(role.get("config"), expected) or not matches(role.get("args"), {"max_retries": 0}):
+        raise ValueError("Saved judge settings differ from the bounded scan policy")
+    scanners = specification.get("scanners")
+    tells = scanners.get("tells") if isinstance(scanners, dict) else None
+    if (not isinstance(tells, dict) or set(scanners) != {"tells"} or tells.get("name") != "tells"
+            or not matches(tells.get("params"), {"bounded": True})):
+        raise ValueError("Saved scans lack the exact bounded tells scanner")
+
+
 async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
                     single_attempt: bool = False) -> dict:
     """Check the fixed no-web judge protocol and public tariffs before trials.

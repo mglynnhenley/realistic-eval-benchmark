@@ -10,6 +10,7 @@ import pytest
 
 from refund_eval.realism import evidence
 from refund_eval.realism.autonomous import _protocol
+from refund_eval.realism.scan_budget import bounded_tells_config
 
 COMMIT = "a" * 40
 HASHES = {"scout/run.py": "b" * 64}
@@ -58,8 +59,10 @@ def batch(tmp_path, monkeypatch):
     logs = [native_log(root / "trials" / f"{index}.eval", f"evaluation-{index}", protocol) for index in range(2)]
     scans = root / "scans" / "claude-opus-5.5" / "scan_id=synthetic"
     scans.mkdir(parents=True)
-    spec = ScanSpec(scan_name="synthetic", scan_id="synthetic", scanners={"tells": {"name": "tells", "version": 0}},
-                    model_roles={"judge": {"model": protocol["judge"]}})
+    spec = ScanSpec(scan_name="synthetic", scan_id="synthetic",
+                    scanners={"tells": {"name": "tells", "version": 0, "params": {"bounded": True}}},
+                    model_roles={"judge": {"model": protocol["judge"], "args": {"max_retries": 0},
+                        "config": bounded_tells_config(protocol["scan_max_tokens"]).model_dump(exclude_none=True)}})
     (scans / "_scan.json").write_text(spec.model_dump_json(exclude_none=True))
     (scans / "_summary.json").write_text(json.dumps({"complete": True, "scanners": {
         "tells": {"scans": 2, "results": 2, "errors": 0, "tokens": 0}}}))
@@ -169,6 +172,69 @@ def test_actual_judge_must_match_declared_protocol(batch):
     path.write_text(json.dumps(specification))
     with pytest.raises(ValueError, match="fixed judge"):
         evidence.write_evidence(batch, HASHES)
+
+
+@pytest.mark.parametrize("boundary", ["export", "reuse"])
+@pytest.mark.parametrize(("field", "value"), [
+    ("model_roles.judge.config.max_tokens", 16384),
+    ("model_roles.judge.config.max_tokens", 4096),
+    ("model_roles.judge.config.max_tokens", 8192.0),
+    ("model_roles.judge.config.max_tokens", None),
+    ("model_roles.judge.config.max_retries", 2),
+    ("model_roles.judge.config.max_retries", False),
+    ("model_roles.judge.config.max_retries", 0.0),
+    ("model_roles.judge.config.max_retries", None),
+    ("model_roles.judge.args.max_retries", 2),
+    ("model_roles.judge.args.max_retries", False),
+    ("model_roles.judge.args.max_retries", 0.0),
+    ("model_roles.judge.args.max_retries", None),
+    ("model_roles.judge.config.cache_prompt", True),
+    ("model_roles.judge.config.cache_prompt", None),
+    ("model_roles.judge.config.extra_body.plugins", [{"id": "web"}]),
+    ("model_roles.judge.config.extra_body.plugins", None),
+    ("model_roles.judge.config.extra_body", []),
+    ("model_roles.judge.config.temperature", 1),
+    ("model_roles.judge.config", None),
+    ("model_roles.judge.args", []),
+    ("model_roles.judge", None),
+    ("model_roles", []),
+    ("scanners.tells.params.bounded", False),
+    ("scanners.tells.params.bounded", 1),
+    ("scanners.tells.params.bounded", None),
+    ("scanners.tells.params", None),
+    ("scanners.tells.params.extra_tools", ["web"]),
+    ("scanners.other", {"name": "other"}),
+    ("scanners", []),
+])
+def test_saved_scan_policy_is_required_at_export_and_reuse(batch, boundary, field, value):
+    if boundary == "reuse":
+        manifest = evidence.write_evidence(batch, HASHES)
+        root = manifest.parent
+    else:
+        root = Path(batch["path"])
+    path = next((root / "scans").rglob("_scan.json"))
+    specification = json.loads(path.read_text())
+    parent = specification
+    *keys, leaf = field.split(".")
+    for key in keys:
+        parent = parent[key]
+    if value is None:
+        parent.pop(leaf)
+    else:
+        parent[leaf] = value
+    path.write_text(json.dumps(specification))
+    if boundary == "reuse":
+        # Keep hashes consistent to isolate the reader's policy validation from
+        # its separate integrity check. Unsigned bundles are not authentication.
+        data = json.loads(manifest.read_text())
+        data["artifacts"][str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="Saved"):
+            evidence.load_evidence(manifest, commit=COMMIT, protocol=batch["protocol"], hashes=HASHES)
+    else:
+        with pytest.raises(ValueError, match="Saved"):
+            evidence.write_evidence(batch, HASHES)
+        assert not (root / "evidence").exists()
 
 
 def test_trusted_runner_hashes_are_separate_from_trial_arm_hashes(batch):

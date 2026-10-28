@@ -182,6 +182,11 @@ the actual transcript scan bound may exceed its reserve; these stop measurement.
 
 Completed arms export portable evidence under `batches/<arm>/evidence/`; transfer
 the entire directory, including its manifest, native logs, scans and provenance.
+Export and reuse validate the actual saved judge generation settings, constructor
+retry settings and bounded tells scanner against the declared protocol. Missing
+or malformed settings are unknown and rejected; matching judge names and intact
+artifact hashes alone do not establish matching scan policy. This is internal
+consistency checking for trusted exports, not manifest authentication.
 Reuse requires the exact baseline commit, per-trial protocol, fixed judge and
 trusted measurement hashes, and complete validated evidence. Only trial count
 may differ: five matching saved baseline trials can be compared with three new
