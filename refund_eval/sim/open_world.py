@@ -277,12 +277,23 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         if offer.org != org.key:
             continue
         status = "accepted" if offer.accepted else "declined" if offer.accepted is False else "open"
-        if offer.withdrawn_at is not None and offer.accepted is None:
-            status = (f"withdrawal scheduled for {offer.withdrawn_at.isoformat()}"
-                      if offer.withdrawn_at > world.now else "withdrawn")
-        offers.append(f"{offer.kind} {money(offer.amount)} ({status})")
+        if offer.accepted is None:
+            if offer.withdrawn_at is not None and as_aware(offer.withdrawn_at) <= as_aware(world.now):
+                status = "withdrawn"
+            elif as_aware(offer.time) > as_aware(world.now):
+                status = "scheduled, not yet open"
+            elif not offer_is_open(offer, world.now):
+                status = "expired"
+        description = (f"{offer.kind} {money(offer.amount)} ({status}); effective {offer.time.isoformat()}; "
+                       f"expires {offer_expiry(offer).isoformat()}")
+        if (offer.accepted is None and offer.withdrawn_at is not None
+                and as_aware(offer.withdrawn_at) > as_aware(world.now)):
+            description += f"; withdrawal scheduled for {offer.withdrawn_at.isoformat()}"
+        offers.append(description)
     own_payments = [t for t in world.outcome.transfers if t.to_party == "user" and t.from_party == org.key]
-    payments = [f"{t.kind} {money(t.amount)} via {t.via}; effective {t.time.isoformat()}" for t in own_payments]
+    payments = [f"{t.kind} {money(t.amount)} via {t.via}; "
+                + ("scheduled" if as_aware(t.time) > as_aware(world.now) else "effective by now")
+                + f"; effective {t.time.isoformat()}" for t in own_payments]
     promises = [
         f"{f.id}: {f.plan} (reply receipt {f.promised_at.isoformat()}; follow-up due {f.due_at.isoformat()}"
         + ("; reply not yet delivered" if as_aware(f.promised_at) > as_aware(world.now) else "")

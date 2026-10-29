@@ -249,7 +249,9 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
         ("Financial statements in every response, case summary and follow-up plan must match your "
          "structured offers/payments or the recorded offers/payments. Do not say money is approved, "
          "processing or paid without the corresponding structured action. Earlier correspondence is "
-         "only a record of what was said; it is not proof that money moved."),
+         "only a record of what was said; it is not proof that money moved. Distinguish scheduled "
+         "transfers from transfers effective by the current time; a future effective time is not a "
+         "payment already made. Recorded effective time alone does not verify external settlement."),
         ("Use reply_kind automatic only for a transactional receipt or acknowledgement, such as a copy "
          "of a submitted form. It may arrive immediately, outside staff hours. It must not decide the "
          "claim, approve or refuse eligibility, move money, change offers or mark the case resolved, "
@@ -272,7 +274,8 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
     if context.payment_limit is not None:
         system.append(
             f"Accounting limit: cash payments and offers must not exceed {money(context.payment_limit)} "
-            f"in total, including {money(context.cash_paid)} you have already paid this customer. "
+            f"in total, including {money(context.cash_paid)} recorded toward this customer's limit "
+            "(including scheduled cash transfers). "
             "This is a financial limit, not a finding about whether the customer is eligible.")
     event_label = {"contact": "Incoming customer contact", "note": "Incoming note from a personal contact",
                    "follow_up": "Scheduled follow-up on your promise"}[event.kind]
@@ -285,7 +288,7 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
         *([f"Your case reference for this customer: {context.case_ref}."] if context.case_ref else []),
         "Your case history:", *[f"- {item}" for item in (context.history or ["(no previous contact)"])],
         "Your offers so far: " + ("; ".join(context.offers) or "none"),
-        "Money you have paid this customer: " + ("; ".join(context.payments) or "none"),
+        "Your recorded transfers to this customer: " + ("; ".join(context.payments) or "none"),
         "Your outstanding promises to this customer: " + ("; ".join(context.promises) or "none"),
         "Other organisations in this case (for notes): " +
         ((", ".join(context.other_orgs) or "none") if personal else "none"),

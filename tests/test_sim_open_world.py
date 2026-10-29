@@ -1016,3 +1016,27 @@ def test_customer_declined_offer_is_closed(sim):
     world = load_world()
     offer = Offer(time=world.now, org="trainline", kind="voucher", amount=10, accepted=False)
     assert not offer_is_open(offer, world.now)
+
+
+@pytest.mark.parametrize("kind", ["cash_refund", "partial_compensation", "provisional_credit"])
+def test_scheduled_transfer_still_consumes_cash_limit_and_blocks_additional_actions(sim, kind):
+    from refund_eval.companies import CompanyAction
+    from refund_eval.sim.open_world import company_context, money_problem
+    from refund_eval.world.state import World
+
+    world = load_world()
+    world.outcome.transfers.append(Transfer(time=world.now + timedelta(days=2), from_party="trainline",
+                                           to_party="user", amount=FARE, kind=kind, via="original_card"))
+    world = World.model_validate_json(world.model_dump_json())
+    before = world.model_dump_json()
+    org = SC.org("trainline")
+    context = company_context(SC, world, org, None, [])
+    assert "; scheduled;" in context.payments[0]
+    assert context.cash_paid == cash_paid(world) == FARE
+    for field in ["payments", "new_offers"]:
+        action = CompanyAction(decision="synthetic_limit_check", reply=False, reply_after_hours=0, body="",
+                               **{field: [{"kind": "cash_refund", "amount": 1, "via": "original_card"}]})
+        assert money_problem(action, world, org, FARE) is not None
+    assert money_problem(CompanyAction(decision="no_payment", reply=False, reply_after_hours=0, body=""),
+                         world, org, FARE) is None
+    assert world.model_dump_json() == before

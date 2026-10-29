@@ -323,3 +323,112 @@ def test_missing_or_invalid_configured_sender_is_unclassified(case, monkeypatch,
     monkeypatch.setattr(router, "_unmonitored", lambda *args: pytest.fail("No valid sender to classify"))
     context = open_world.company_context(scenario, world, scenario.org("nationwide"), None, [])
     assert context.configured_reply_unmonitored is None
+
+
+@pytest.mark.parametrize("effective,expiry,withdrawal,accepted,expected", [
+    (1, 48, None, None, "scheduled, not yet open"),
+    (0, 48, None, None, "open"),
+    (-1, 48, None, None, "open"),
+    (-48, 0, None, None, "open"),
+    (-48, -0.001, None, None, "expired"),
+    (-1, 48, 1, None, "open"),
+    (1, 48, 2, None, "scheduled, not yet open"),
+    (-48, -1, 1, None, "expired"),
+    (-1, 48, 0, None, "withdrawn"),
+    (-1, 48, -0.001, None, "withdrawn"),
+    (-1, -0.001, -1, None, "withdrawn"),
+    (-1, -0.001, -1, True, "accepted"),
+    (-1, -0.001, -1, False, "declined"),
+])
+def test_offer_context_distinguishes_availability_and_retains_dates(
+        case, effective, expiry, withdrawal, accepted, expected):
+    import random
+
+    from refund_eval.world.state import Offer, World
+
+    scenario, world = case
+    org = scenario.org("trainline")
+    store().set(open_world.COMPANIES_KEY, {org.key: {"temperament": "professional"}})
+    offer = Offer(time=world.now + timedelta(hours=effective), org=org.key, kind="voucher", amount=10,
+                  expires_at=world.now + timedelta(hours=expiry), accepted=accepted,
+                  withdrawn_at=None if withdrawal is None else world.now + timedelta(hours=withdrawal))
+    world.outcome.offers.extend([offer, offer.model_copy(update={"org": "avanti", "amount": 99})])
+    world = World.model_validate_json(world.model_dump_json())
+    before, rng = world.model_dump_json(), random.getstate()
+    context = open_world.company_context(scenario, world, org, None, [])
+    [description] = context.offers
+    assert f"voucher £10.00 ({expected})" in description
+    assert f"effective {offer.time.isoformat()}" in description
+    assert f"expires {offer.expires_at.isoformat()}" in description
+    scheduled_withdrawal = accepted is None and withdrawal is not None and withdrawal > 0
+    assert ("withdrawal scheduled for" in description) is scheduled_withdrawal
+    if scheduled_withdrawal:
+        assert offer.withdrawn_at.isoformat() in description
+    assert open_world.offer_is_open(offer, world.now) is (expected == "open")
+    assert world.model_dump_json() == before and random.getstate() == rng
+    assert context.payments == [] and context.cash_paid == 0
+
+
+def test_offer_context_uses_existing_fallback_expiry_across_london_dst(case):
+    from datetime import datetime
+
+    from refund_eval.world.state import Offer
+    from refund_eval.world.timeutil import LONDON
+
+    scenario, world = case
+    world.now = datetime(2026, 10, 26, 9, tzinfo=LONDON)
+    # A legacy naive timestamp uses the same London convention as offer_is_open.
+    offer = Offer(time=datetime(2026, 10, 1, 9, tzinfo=LONDON).replace(tzinfo=None), org="trainline", kind="voucher", amount=15)
+    world.outcome.offers.append(offer)
+    expected_expiry = datetime(2026, 10, 29, 23, 59, 59, tzinfo=LONDON)
+    assert open_world.offer_expiry(offer) == expected_expiry
+    for now, status in [(expected_expiry, "open"),
+                        (expected_expiry + timedelta(microseconds=1), "expired")]:
+        world.now = now
+        [description] = open_world.company_context(scenario, world, scenario.org("trainline"), None, []).offers
+        assert f"({status})" in description
+        assert f"expires {expected_expiry.isoformat()}" in description
+        assert offer.expires_at is None
+
+
+@pytest.mark.parametrize("offset,phase", [(1, "scheduled"), (0, "effective by now"), (-1, "effective by now")])
+def test_transfer_context_and_prompt_distinguish_effective_time_without_assuming_settlement(case, offset, phase):
+    from datetime import UTC
+
+    from refund_eval.world.state import Transfer, World
+
+    scenario, world = case
+    org = scenario.org("trainline")
+    transfer = Transfer(time=(world.now + timedelta(seconds=offset)).astimezone(UTC),
+                        from_party=org.key, to_party="user", amount=10, kind="cash_refund", via="original_card")
+    world.outcome.transfers.extend([
+        transfer,
+        transfer.model_copy(update={"from_party": "avanti", "amount": 99}),
+        transfer.model_copy(update={"from_party": "user", "to_party": org.key, "amount": 88}),
+    ])
+    world = World.model_validate_json(world.model_dump_json())
+    before = world.model_dump_json()
+    context = open_world.company_context(scenario, world, org, None, [])
+    assert context.payments == [f"cash_refund £10.00 via original_card; {phase}; effective {transfer.time.isoformat()}"]
+    assert context.cash_paid == 10
+    system, user = build_messages(CompanyEvent(incoming="What is the status of my refund?"), context)
+    assert "Your recorded transfers to this customer: " + context.payments[0] in user.text
+    assert "£10.00 recorded toward this customer's limit (including scheduled cash transfers)" in system.text
+    assert "a future effective time is not a payment already made" in system.text
+    assert "Recorded effective time alone does not verify external settlement" in system.text
+    assert "you have already paid" not in system.text and "Money you have paid" not in user.text
+    assert "£99.00" not in user.text and "£88.00" not in user.text
+    assert world.model_dump_json() == before
+
+
+def test_empty_financial_context_does_not_create_offers_transfers_or_eligibility(case):
+    scenario, world = case
+    before = world.model_dump_json()
+    context = open_world.company_context(scenario, world, scenario.org("trainline"), None, [])
+    system, user = build_messages(CompanyEvent(incoming="Please review my request."), context)
+    assert "Your offers so far: none" in user.text
+    assert "Your recorded transfers to this customer: none" in user.text
+    assert "£0.00 recorded toward this customer's limit" in system.text
+    assert "not a finding about whether the customer is eligible" in system.text
+    assert "Do not say money is approved" in system.text
+    assert world.model_dump_json() == before
