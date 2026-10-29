@@ -142,3 +142,35 @@ cannot authorize preparation or execution. All three full holds remain counted;
 any fourth unknown, active, failed or unfinished stage blocks. Known successful
 new native→scan transitions use the unchanged atomic reservation guard. The
 read-only snapshot accepts only100 or1000, independently of financial approval.
+
+## Separately reviewed reconciled nonattempt
+
+`retained-native-holds-v4` preserves the v3 three-hold proof, six acknowledgements,
+full reservations and total budget. It adds a strictly scoped
+`reconciled_nonattempt` descriptor for one independently proved failed native
+nonattempt whose cost was separately reconciled to numeric zero. Its failed
+status and original sealed outcome remain unchanged. This is separate from a
+successful trial, accepted scan coverage or provider invoice equivalence.
+
+The descriptor contains the exact scoped stage ID, canonical hash and complete
+stage snapshot, original request fingerprint and directory, independent scope
+reference, and every scoped evidence reference. The frozen request retains the
+whole descriptor. Original seals, raw trace, sole harvest and callback, terminal
+nonattempt proof, normal financial write and independent final readback must join
+and retain their exact bytes. Raw trace and script evidence are only hashed;
+they are never imported, executed or treated as JSON. Historical source paths in
+receipts describe their original provenance; the actual validator must bind its
+own current source digest.
+
+A fresh independent v4 disposition binds the actual ledger, validator and full
+future request. Preparation, execution, native reservation, scan transition and
+terminal reconciliation revalidate the evidence against the real historical
+image. No stage is deleted or relabelled to obtain v3 approval. Only the exact
+scoped reconciled stage can supplement the three original hold identities;
+every other failed, unknown or unfinished stage still blocks. All finalized
+historical stages, amendments and unrelated ledger fields remain exact.
+
+The original v1, v2 and v3 schemas and rejection behavior remain unchanged.
+A new validator requires new source, runner trust, helper and actual execution
+bindings. An implementation scope alone authorizes no paid start, replay,
+rescan, financial write or release of an unknown hold.
