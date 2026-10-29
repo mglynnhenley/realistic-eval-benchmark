@@ -116,3 +116,29 @@ measure invocation is rejected; use `controller.read_result(run_dir)` for a
 sealed historical read. This policy never authorizes replay, recovery, retries
 or rescanning of the original run, and cannot automatically carry another
 unknown outcome. Deadline and scanner policy gates remain independent.
+
+## Exact funded three-hold continuation
+
+`retained-native-holds-v3` selects a separately pinned scope for three ordered
+original native holds, including a complete-labelled stage whose actual cost is
+still unknown. It requires total allowance1000, the exact reviewed100→1000
+amendment append, the unchanged historical100 prefix and all baseline stage
+objects. Historical result seals retain their original budget records. The old
+v1/v2 factories still require100 and their original one/two-stage cases.
+
+The top-level shape remains v2's shape. The distinct review kind is
+`retained_native_three_holds_disposition_review`; its six literal-true
+acknowledgements are `retained_all_three_full_holds`,
+`actual_and_invoice_unknown`, `new_work_only`,
+`no_original_replay_recovery_or_rescan`, `reservation_is_not_provider_cap`, and
+`fourth_unknown_blocks`. Proof references come exclusively from the pinned scope.
+The validator checks saved seals, terminal/harvest identities, owned cleanup and
+exact budget history without querying remote services or modifying old stages.
+No-match cleanup remains no-match evidence; it does not price provider calls.
+
+A fresh independent disposition must bind the exact validator, current ledger,
+amendment and full future request/directory. Infrastructure scope approval alone
+cannot authorize preparation or execution. All three full holds remain counted;
+any fourth unknown, active, failed or unfinished stage blocks. Known successful
+new native→scan transitions use the unchanged atomic reservation guard. The
+read-only snapshot accepts only100 or1000, independently of financial approval.

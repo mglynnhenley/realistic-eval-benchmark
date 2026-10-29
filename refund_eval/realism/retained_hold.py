@@ -15,6 +15,12 @@ from refund_eval.realism import measurement, stages
 
 VERSION = "retained-native-hold-v1"
 PAIR_VERSION = "retained-native-holds-v2"
+THREE_VERSION = "retained-native-holds-v3"
+THREE_SCOPE_SHA256 = "045f23939ab3dae8636bca61899dc776e8b1a9d6026e29a1540a08d41d9d0a61"
+THREE_ACKNOWLEDGEMENTS = {
+    "retained_all_three_full_holds", "actual_and_invoice_unknown", "new_work_only",
+    "no_original_replay_recovery_or_rescan", "reservation_is_not_provider_cap", "fourth_unknown_blocks",
+}
 PAIR_SCOPE_SHA256 = "cb42ebfd64bf9429ff8e9ab3479426e132a6e51f5b00d0b7e366de4e89aff45b"
 # A reviewed scope, not authority for arbitrary future unknown stages. It pins
 # the original case/proof identities without shipping any private trial content.
@@ -127,7 +133,7 @@ def _read_snapshot(ledger, budget):
 @contextmanager
 def _snapshot(ledger, budget):
     """Use the very same stable lock inode as stages, without its write-on-exit."""
-    require(money(budget, positive=True) and budget == 100, "Retained hold uses only the existing $100 allowance")
+    require(money(budget, positive=True) and budget in (100, 1000), "Unsupported retained-hold snapshot allowance")
     ledger = Path(ledger).resolve()
     lock = ledger.with_suffix(ledger.suffix + ".lock")
     require(ledger.is_file() and lock.is_file(), "Existing retained-hold ledger and lock required")
@@ -258,6 +264,10 @@ def _freeze(repo, review_path, *, ledger, budget, binding, required_reserve, sna
     _path(repo, str(review_path.relative_to(repo)))
     raw = review_path.read_bytes()
     review = _json(raw)
+    if review.get("version") == THREE_VERSION:
+        return _freeze_three(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                             required_reserve=required_reserve, snapshot=snapshot,
+                             execution_fingerprint=execution_fingerprint)
     if review.get("version") == PAIR_VERSION:
         return _freeze_pair(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                             required_reserve=required_reserve, snapshot=snapshot,
@@ -446,6 +456,214 @@ def _freeze_pair(repo, review_path, review, raw, *, ledger, budget, binding, req
                 "Future pair execution already started; never replay")
     require(money(required_reserve, positive=True) and required_reserve <= stages.summary(current)["remaining_usd"] + 1e-9,
             "New native and scan reserves do not fit after both full holds")
+    return {**{key: review[key] for key in PAIR_FIELDS},
+            "review": {"path": str(review_path.relative_to(repo)), "sha256": digest(raw)}}
+
+
+
+def _three_references(repo, scope_path, scope):
+    """Only the fixed ordered three cases and budget proof in the pinned v3 scope."""
+    root = scope_path.parent.parent
+
+    def reference(item):
+        exact(item, {"path", "sha256"})
+        return {"path": str((root / item["path"]).relative_to(repo)), "sha256": item["sha256"]}
+
+    originals = scope["originals"]
+    require(type(originals) is list and [item["label"] for item in originals] == ["011", "013", "016"],
+            "Exactly the ordered three scoped originals required")
+    return {"scope_review": {"path": str(scope_path.relative_to(repo)), "sha256": THREE_SCOPE_SHA256},
+            "budget_review": reference(scope["budget_review"]),
+            "originals": [{"label": item["label"],
+                           "artifacts": {name: reference(ref) for name, ref in item["artifacts"].items()}}
+                          for item in originals]}
+
+
+def _three_pins(repo, root, pins):
+    """Pins include non-JSON documents; never reinterpret or rewrite their bytes."""
+    require(type(pins) is dict and bool(pins), "Three-hold evidence pins required")
+    for relative, sha256 in pins.items():
+        path = _path(repo, str((root / relative).relative_to(repo)))
+        require(type(sha256) is str and re.fullmatch(r"[0-9a-f]{64}", sha256)
+                and digest(path.read_bytes()) == sha256, "Three-hold scoped evidence changed")
+
+
+def _three_budget(repo, scope_path, scope, current, ledger):
+    root, chain = scope_path.parent.parent, scope["budget_chain"]
+
+    def load(reference):
+        return _artifact(repo, {"path": str((root / reference["path"]).relative_to(repo)),
+                               "sha256": reference["sha256"]})[1]
+
+    before, after, proof = (load(chain[name]) for name in ("before", "after", "budget_review"))
+    _three_pins(repo, root, scope["pins"])
+    _three_pins(repo, root, proof["pins"])
+    amendments = chain["entire_amendment_array_exact"]
+    require(type(amendments) is list and len(amendments) == 2
+            and measurement._json_hash(current["budget_amendments"]) == measurement._json_hash(amendments)
+            and measurement._json_hash(before["budget_amendments"]) == measurement._json_hash(amendments[:1])
+            and measurement._json_hash(after["budget_amendments"]) == measurement._json_hash(amendments)
+            and money(before["budget_usd"]) and before["budget_usd"] == 100
+            and money(after["budget_usd"]) and after["budget_usd"] == 1000
+            and money(current["budget_usd"]) and current["budget_usd"] == 1000,
+            "Exact old100 prefix and approved1000 append required")
+    require(proof.get("approved") is True and proof.get("original_ledger") == str(ledger)
+            and proof.get("before_ledger_sha256") == chain["before"]["sha256"]
+            and proof.get("after_ledger_sha256") == chain["after"]["sha256"]
+            and proof.get("amendment_id") == chain["amendment_id"] == amendments[-1]["id"]
+            and proof.get("amendment_sha256") == chain["amendment_sha256"] == measurement._json_hash(amendments[-1]),
+            "Exact reviewed1000 amendment required")
+    restored = deepcopy(after)
+    restored["budget_usd"], restored["budget_amendments"] = before["budget_usd"], before["budget_amendments"]
+    require(measurement._json_hash(restored) == measurement._json_hash(before)
+            and measurement._json_hash(before["stages"]) == chain["all28_stages_sha256"],
+            "Budget amendment must preserve the entire baseline")
+    for name, stage in after["stages"].items():
+        require(measurement._json_hash(current["stages"].get(name)) == measurement._json_hash(stage),
+                "A reviewed baseline stage changed")
+    prior = deepcopy(before)
+    del prior["stages"][scope["exact_original_stages"][2]]
+    require(measurement._json_hash(prior) == chain["prior27_whole_ledger_canonical_sha256"]
+            and measurement._json_hash(prior["stages"]) == chain["prior27_stage_map_canonical_sha256"],
+            "Exact pre-amendment prior ledger required")
+    return before, proof
+
+
+def _three_original016(repo, original, references, current, ledger, binding, prefix):
+    """016 is complete/null: its label never establishes a known actual cost."""
+    proofs = {name: _artifact(repo, ref)[1] for name, ref in references.items()}
+    request, result, bundle = (proofs[name] for name in ("request", "result", "exception_bundle"))
+    fingerprint = request["fingerprint"]
+    require(measurement._json_hash({key: value for key, value in request.items() if key != "fingerprint"}) == fingerprint
+            and proofs["start"].get("fingerprint") == fingerprint and result.get("fingerprint") == fingerprint
+            and proofs["completion"].get("fingerprint") == fingerprint
+            and proofs["completion"].get("result_sha256") == measurement._json_hash(result)
+            and result.get("status") == "reconciliation_required" and result.get("error_type") == "ValueError",
+            "Original016 exception seals differ")
+    directory = repo / original["run_directory"]
+    require(directory.resolve() == directory and directory.is_relative_to(repo / ".context/realism")
+            and bundle.get("run") == str(directory) and bundle.get("request_fingerprint") == fingerprint,
+            "Original016 directory or sole bundle differs")
+    for name, filename in {"request": "request.json", "start": "execution-started.json", "result": "result.json",
+                           "completion": "completion.json", "cleanup": "modal-cleanup.json"}.items():
+        path = directory / filename
+        require(repo / references[name]["path"] == path
+                and bundle["source_files"].get(str(path)) == references[name]["sha256"],
+                "Original016 sealed artifact identity differs")
+    terminal, accounting, harvest = (proofs[name] for name in ("terminal_review", "accounting_review", "harvest"))
+    for proof in (terminal, accounting):
+        require(proof.get("request_fingerprint") == fingerprint and "native_actual_usd" in proof
+                and proof["native_actual_usd"] is None and proof.get("original_execution_session") == harvest.get("original_execution_session")
+                and proof.get("original_status_remains") == "reconciliation_required"
+                and proof.get("error_type") == "ValueError", "Original016 accounting remains unknown")
+    require(terminal.get("approved") is True
+            and terminal.get("observer_bundle_sha256") == references["exception_bundle"]["sha256"]
+            and accounting.get("terminal_review_sha256") == references["terminal_review"]["sha256"]
+            and accounting.get("original_result_sha256") == references["result"]["sha256"]
+            and accounting.get("original_completion_sha256") == references["completion"]["sha256"]
+            and type(harvest.get("original_execution_session")) is int
+            and harvest["original_execution_session"] > 0 and type(harvest.get("exit_code")) is int and harvest["exit_code"] == 1
+            and harvest.get("terminal_status") == "reconciliation_required" and harvest.get("error_type") == "ValueError"
+            and harvest.get("sole_bundle_sha256") == references["exception_bundle"]["sha256"],
+            "Original016 terminal/harvest identities differ")
+    descriptor, expected = original["stage"], original["frozen_stage_snapshot"]
+    exact(descriptor, {"id", "sha256"})
+    exact(expected, {"kind", "status", "reserve_usd", "actual_usd", "started_at", "finished_at"})
+    require(descriptor["id"] == f"loop-{fingerprint[:16]}-candidate-trials"
+            and descriptor["sha256"] == measurement._json_hash(expected)
+            and measurement._json_hash(current["stages"].get(descriptor["id"])) == descriptor["sha256"]
+            and expected["kind"] == "trials" and expected["status"] == "complete" and expected["actual_usd"] is None
+            and money(expected["reserve_usd"], positive=True) and expected["reserve_usd"] == 7.762499999999999
+            and _time(expected["started_at"]) is not None and _time(expected["finished_at"]) is not None
+            and _time(expected["started_at"]) <= _time(expected["finished_at"]), "Original016 full null hold changed")
+    require(str(ledger) == request["shared_ledger"] and binding["request_sha256"] != fingerprint,
+            "Only original ledger and genuinely new future request allowed")
+    for name, stage in result["spend"]["stages"].items():
+        require(measurement._json_hash(current["stages"].get(name)) == measurement._json_hash(stage),
+                "An original016 historical stage changed")
+    require(measurement._json_hash(result["spend"]["budget_amendments"]) == measurement._json_hash(prefix),
+            "Original016 old amendment prefix changed")
+    launch, cleanup = proofs["launch"], proofs["cleanup"]
+    tasks = launch["owned_tasks"]
+    require(type(tasks) is list and len(tasks) == 3 and len({task["name"] for task in tasks}) == 3,
+            "Exact three original016 tasks required")
+    sessions = sorted(task["name"] + "__env" for task in tasks)
+    require(launch.get("request_fingerprint") == fingerprint and launch.get("candidate") == request["candidate"]
+            and launch.get("runner") == request["runner"] and proofs["cleanup_targets"] == {"sessions": sessions}
+            and sorted(cleanup["sessions"]) == sessions and cleanup.get("terminated") == []
+            and cleanup.get("unresolved") == [] and not cleanup.get("discovery_errors")
+            and cleanup.get("remote_state") != "unknown" and result.get("cleanup") == cleanup,
+            "Original016 owned no-match cleanup differs")
+    return descriptor, directory
+
+
+def _freeze_three(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
+                  snapshot, execution_fingerprint):
+    exact(review, PAIR_FIELDS | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    require(review["review_kind"] == "retained_native_three_holds_disposition_review" and review["approved"] is True
+            and type(review["reviewer"]) is str and bool(review["reviewer"].strip())
+            and _time(review["reviewed_at"]) is not None, "Exact independent three-hold approval required")
+    exact(review["acknowledgements"], THREE_ACKNOWLEDGEMENTS)
+    require(all(value is True for value in review["acknowledgements"].values()), "All three full holds require acknowledgement")
+    require(review["validator_sha256"] == digest(Path(__file__).read_bytes()), "Retained-hold validator source changed")
+    exact(binding, {"run_directory", "request_sha256"})
+    exact(review["future_binding"], {"run_directory", "request_sha256"})
+    require(type(binding["run_directory"]) is str and type(binding["request_sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}", binding["request_sha256"])
+            and review["future_binding"] == binding, "Three-hold approval binds a different future request")
+    exact(review["artifacts"], {"scope_review", "budget_review", "originals"})
+    exact(review["artifacts"]["scope_review"], {"path", "sha256"})
+    require(review["artifacts"]["scope_review"]["sha256"] == THREE_SCOPE_SHA256, "Exact three-original scope required")
+    scope_path, scope = _artifact(repo, review["artifacts"]["scope_review"])
+    require(scope.get("scope_approved") is True and scope.get("implementation_scope_supported") is True
+            and scope.get("protocol_proposal") == THREE_VERSION, "Exact three-original scope approval required")
+    references = _three_references(repo, scope_path, scope)
+    require(measurement._json_hash(review["artifacts"]) == measurement._json_hash(references),
+            "Only three scope-pinned proof chains allowed")
+    current, ledger_sha = snapshot
+    exact(review["ledger"], {"path", "sha256", "budget_usd", "amendment_id", "amendment_sha256"})
+    require(_path(repo, review["ledger"]["path"]) == ledger
+            and review["ledger"]["path"] == str(ledger.relative_to(repo))
+            and money(budget, positive=True) and budget == 1000
+            and review["ledger"]["sha256"] == ledger_sha and money(review["ledger"]["budget_usd"])
+            and review["ledger"]["budget_usd"] == budget, "Three-hold ledger approval is stale")
+    before, budget_proof = _three_budget(repo, scope_path, scope, current, ledger)
+    amendment = current["budget_amendments"][-1]
+    require(review["ledger"]["amendment_id"] == amendment["id"] == budget_proof["amendment_id"]
+            and review["ledger"]["amendment_sha256"] == measurement._json_hash(amendment), "Three-hold amendment differs")
+    future = repo / binding["run_directory"]
+    require(not Path(binding["run_directory"]).is_absolute() and future.resolve() == future
+            and future != repo / ".context/realism" and future.is_relative_to(repo / ".context/realism")
+            and str(future.relative_to(repo)) == binding["run_directory"], "Canonical private future directory required")
+    # Legacy helpers receive the exact historical amendment prefix; their strict
+    # failed-stage, seals and termination checks remain unchanged for v1/v2.
+    old_current = {**current, "budget_amendments": before["budget_amendments"]}
+    descriptors = []
+    for original, reference in zip(scope["originals"], references["originals"], strict=True):
+        if original["label"] == "016":
+            descriptor, directory = _three_original016(repo, original, reference["artifacts"], current, ledger,
+                                                        binding, before["budget_amendments"])
+        else:
+            descriptor, directory = _pair_original(repo, original, reference["artifacts"], old_current, ledger, binding)
+        require(not future.is_relative_to(directory) and not directory.is_relative_to(future),
+                "Original three runs cannot be replayed or modified")
+        descriptors.append(descriptor)
+    require(len({item["id"] for item in descriptors}) == 3
+            and scope["exact_original_stages"] == [item["id"] for item in descriptors]
+            and measurement._json_hash(review["stages"]) == measurement._json_hash(descriptors), "Three exact ordered stages required")
+    originals = {item["id"] for item in descriptors}
+    for name, stage in current["stages"].items():
+        if name not in originals:
+            require(stage.get("status") == "complete" and money(stage.get("actual_usd"))
+                    and _time(stage.get("finished_at")) is not None, "Every fourth unknown or unfinished stage blocks")
+    marker = future / "execution-started.json"
+    require(not marker.is_symlink(), "Noncanonical future start marker")
+    if marker.exists():
+        require(marker.resolve() == marker and execution_fingerprint is not None
+                and _json(marker.read_bytes()).get("fingerprint") == execution_fingerprint,
+                "Future three-hold execution already started; never replay")
+    require(money(required_reserve, positive=True) and required_reserve <= stages.summary(current)["remaining_usd"] + 1e-9,
+            "New native and scan reserves do not fit after all three full holds")
     return {**{key: review[key] for key in PAIR_FIELDS},
             "review": {"path": str(review_path.relative_to(repo)), "sha256": digest(raw)}}
 
