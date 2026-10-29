@@ -106,7 +106,7 @@ def test_deep_grouping_returns_a_query_error_instead_of_recursion_failure():
 
 @pytest.mark.parametrize("query", [
     "(has:attachment OR dinner)", "subject:(dinner OR +movie)", "(is:important OR dinner)",
-    "(in:spam OR dinner)", "subject:(dinner AROUND 5 movie)", "bcc:someone@example.com",
+    "(in:chats OR dinner)", "subject:(dinner AROUND 5 movie)", "bcc:someone@example.com",
 ])
 def test_published_unsupported_operators_still_fail_closed(query):
     with pytest.raises(ValueError):

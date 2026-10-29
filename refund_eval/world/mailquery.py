@@ -5,8 +5,9 @@ common operators so the fixture and overlay behave the same way.
 Supported: free words and "quoted phrases" (case-insensitive, all must match),
 -negation, nested () groups and {a b} alternatives, OR / |, from: to: cc: bcc: subject:,
 after: before: (YYYY/MM/DD, YYYY-MM-DD, MM/DD/YYYY or epoch seconds),
-newer_than: older_than: (Nh, Nd, Nw, Nm, Ny), in:sent/inbox/trash/anywhere/starred/archive,
-is:unread/read/starred, label:. Parenthesized word/phrase groups can be scoped to
+newer_than: older_than: (Nh, Nd, Nw, Nm, Ny), in:sent/inbox/trash/anywhere/starred/archive/spam,
+is:unread/read/starred/draft, label:. Spam and draft have no local status records
+and never match content-only fixture/overlay mail. Parenthesized groups can be scoped to
 from:, to:, cc: or subject:. Unsupported operators and malformed groups raise.
 The existing flat convention is retained: adjacent OR terms bind within AND
 clauses. Parentheses provide explicit boundaries; braces default to OR.
@@ -39,8 +40,8 @@ _TOKEN_RE = re.compile(
 _FIELD_OPS = {"from", "to", "cc", "bcc", "subject"}
 _SCOPED_FIELDS = {"from", "to", "cc", "subject"}
 _DATE_OPS = {"after", "before", "newer_than", "older_than", "newer", "older"}
-_IN_VALUES = {"sent", "inbox", "anywhere", "all", "trash", "bin", "archive", "archived", "starred"}
-_IS_VALUES = {"read", "unread", "starred"}
+_IN_VALUES = {"sent", "inbox", "anywhere", "all", "trash", "bin", "archive", "archived", "starred", "spam"}
+_IS_VALUES = {"read", "unread", "starred", "draft"}
 
 
 @dataclass
@@ -87,6 +88,8 @@ class Pred:
         if k in _DATE_OPS:
             return _date_test(k, v, e, ctx)
         if k == "in":
+            if v == "spam":
+                return False
             if v == "sent":
                 return ctx.is_sent(e)
             if v == "inbox":
@@ -101,6 +104,8 @@ class Pred:
                 return e.id in ctx.archived
             return v not in ("spam", "drafts", "draft", "snoozed", "chats", "scheduled")
         if k == "is":
+            if v == "draft":
+                return False
             if v == "unread":
                 return ctx.unread(e)
             if v == "read":

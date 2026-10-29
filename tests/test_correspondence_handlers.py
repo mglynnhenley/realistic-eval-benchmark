@@ -37,6 +37,17 @@ def test_handlers_are_stable_distinct_and_do_not_consume_timing_randomness(case)
     assert random.getstate() == before
 
 
+def test_fictional_staff_do_not_share_the_fixed_customer_surname(case):
+    scenario, world = case
+    customer_surname = scenario.user.name.rsplit(" ", 1)[-1].casefold()
+    for org in scenario.orgs:
+        if org.kind == "dynamic_personal":
+            continue
+        context = company_context(scenario, world, org, None, [])
+        assert all(name.rsplit(" ", 1)[-1].casefold() != customer_surname
+                   for name in (context.case_handler, context.review_handler))
+
+
 @pytest.mark.parametrize("mode", ["phone", "chat"])
 def test_live_channels_gain_no_handler_block(case, mode):
     scenario, world = case

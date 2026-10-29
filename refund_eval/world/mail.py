@@ -22,7 +22,8 @@ import stat
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from email.utils import getaddresses
+from email.message import Message
+from email.utils import getaddresses, quote
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -36,7 +37,7 @@ from refund_eval.world.mailquery import (
 )
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, ScheduledEmail, World
-from refund_eval.world.timeutil import as_aware, epoch_seconds, to_london
+from refund_eval.world.timeutil import as_aware, as_utc, epoch_seconds, to_london
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE_PATH = Path(__file__).resolve().parents[1] / "scenario" / "inbox.json"
@@ -123,7 +124,7 @@ class FixtureMailSource:
                 self._text_anchor = to_london(anchor).date()
         self._emails = sorted(
             (self._build(raw, shift) for raw in data["emails"]),
-            key=lambda e: as_aware(e.sent_at),
+            key=lambda e: as_utc(e.sent_at),
             reverse=True,
         )
         self._by_id = {e.id: e for e in self._emails}
@@ -141,7 +142,7 @@ class FixtureMailSource:
         known = {email.id for email in world.overlay_inbox}
         known.update(pending.email.id for pending in world.pending)
         for email in self._emails:
-            if (email.id not in known and as_aware(email.sent_at) > as_aware(world.now)
+            if (email.id not in known and as_utc(email.sent_at) > as_utc(world.now)
                     and parse_address(email.sender) not in self.user_addresses):
                 world.pending.append(ScheduledEmail(email=email, due_at=email.sent_at))
                 known.add(email.id)
@@ -197,7 +198,7 @@ class FixtureMailSource:
         ctx = MatchContext(user_addresses=self.user_addresses, now=now)
         out = []
         for e in self._emails:
-            if as_aware(e.sent_at) > as_aware(now):
+            if as_utc(e.sent_at) > as_utc(now):
                 continue
             if q.matches(e, ctx):
                 out.append(e)
@@ -292,9 +293,9 @@ class GmailMailSource:
         out = []
         for ref in resp.get("messages", []) or []:
             e = self.read(ref["id"])
-            if e is not None and as_aware(e.sent_at) <= as_aware(now):
+            if e is not None and as_utc(e.sent_at) <= as_utc(now):
                 out.append(e)
-        out.sort(key=lambda e: as_aware(e.sent_at), reverse=True)
+        out.sort(key=lambda e: as_utc(e.sent_at), reverse=True)
         return out[:limit]
 
     def read(self, email_id: str) -> Email | None:
@@ -333,8 +334,12 @@ def _gmail_query(query: str, now: datetime) -> str:
     return f"{q.strip()} before:{now_epoch + 1}".strip()
 
 
-def _b64(data: str) -> str:
-    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="replace")
+def _b64(data: str, charset: str = "utf-8") -> str:
+    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    try:
+        return raw.decode(charset, errors="replace")
+    except (LookupError, UnicodeError):
+        return raw.decode("utf-8", errors="replace")
 
 
 def _body_from_payload(payload: dict[str, Any]) -> str:
@@ -352,10 +357,17 @@ def _body_from_payload(payload: dict[str, Any]) -> str:
             return
         mime = part.get("mimeType", "")
         data = (part.get("body") or {}).get("data")
+        charset = "utf-8"
+        if data and mime in {"text/plain", "text/html"}:
+            header = next((h.get("value", "") for h in part.get("headers", []) or []
+                           if h.get("name", "").casefold() == "content-type"), "")
+            metadata = Message()
+            metadata["Content-Type"] = header
+            charset = metadata.get_content_charset() or "utf-8"
         if data and mime == "text/plain":
-            plain.append(_b64(data))
+            plain.append(_b64(data, charset))
         elif data and mime == "text/html":
-            html.append(_b64(data))
+            html.append(_b64(data, charset))
         for sub in part.get("parts", []) or []:
             walk(sub)
 
@@ -377,7 +389,14 @@ def parse_gmail_message(msg: dict[str, Any]) -> Email:
         raw = headers.get(name)
         if not raw:
             return []
-        return [f"{n} <{a}>" if n else a for n, a in getaddresses([raw]) if a]
+        result = []
+        for display_name, address in getaddresses([raw]):
+            if not address:
+                continue
+            if any(char in display_name for char in '()<>@,;:".[]\\'):
+                display_name = f'"{quote(display_name)}"'
+            result.append(f"{display_name} <{address}>" if display_name else address)
+        return result
 
     internal = msg.get("internalDate")
     if internal:
@@ -535,8 +554,8 @@ class Mailbox:
         self.user_addresses = {a.lower() for a in scenario.user.email_addresses}
 
     def _local(self, world: World) -> list[Email]:
-        now = as_aware(world.now)
-        return [e for e in world.overlay_inbox + sent_mail(world) if as_aware(e.sent_at) <= now]
+        now = as_utc(world.now)
+        return [e for e in world.overlay_inbox + sent_mail(world) if as_utc(e.sent_at) <= now]
 
     def _ctx(self, world: World, state: InboxState) -> MatchContext:
         return MatchContext(
@@ -594,7 +613,7 @@ class Mailbox:
         state = state or InboxState.from_world(world)
         q = parse_query(query)
         ctx = self._ctx(world, state)
-        now = as_aware(world.now)
+        now = as_utc(world.now)
         found: dict[str, Email] = {}
 
         for e in self._local(world):
@@ -605,19 +624,19 @@ class Mailbox:
         # bounded source search, then apply the effective local state; source
         # search alone cannot account for changes made in this simulated view.
         for e in self.source.search(query, now=world.now, limit=limit):
-            if (as_aware(e.sent_at) <= now and self._source_matches(e, q, ctx, state, source_matched=True)
+            if (as_utc(e.sent_at) <= now and self._source_matches(e, q, ctx, state, source_matched=True)
                     and self._visible(e, q, state)):
                 found.setdefault(e.id, e)
 
         if q.uses_state:
             for eid in state.touched - set(found):
                 e = self.source.read(eid)
-                if (e and as_aware(e.sent_at) <= now
+                if (e and as_utc(e.sent_at) <= now
                         and self._source_matches(e, q, ctx, state, source_matched=False)
                         and self._visible(e, q, state)):
                     found[eid] = e
 
-        return sorted(found.values(), key=lambda e: as_aware(e.sent_at), reverse=True)[:limit]
+        return sorted(found.values(), key=lambda e: as_utc(e.sent_at), reverse=True)[:limit]
 
     def get(self, world: World, email_id: str) -> Email | None:
         eid = (email_id or "").strip()
@@ -625,7 +644,7 @@ class Mailbox:
             if e.id == eid:
                 return e
         e = self.source.read(eid)
-        if e is not None and as_aware(e.sent_at) <= as_aware(world.now):
+        if e is not None and as_utc(e.sent_at) <= as_utc(world.now):
             return e
         return None
 

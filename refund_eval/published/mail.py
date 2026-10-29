@@ -20,7 +20,7 @@ from typing import Any, Protocol
 from bs4 import BeautifulSoup
 from jsonschema import Draft202012Validator, ValidationError
 
-from refund_eval.sim.mail import send_message
+from refund_eval.sim.mail import is_user_recipient, send_message
 from refund_eval.world.interception import ToolContext, remember_links
 from refund_eval.world.mailquery import MatchContext, parse_query
 from refund_eval.world.orgs import parse_address
@@ -127,6 +127,16 @@ def _visible_id(identifier: str) -> str:
     if re.fullmatch(r"[0-9a-f]{16}", identifier):
         return identifier
     return hashlib.sha256(("gmail-overlay:" + identifier).encode()).hexdigest()[:16]
+
+
+def _search_key(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Bind local continuations to effective arguments, including existing defaults.
+
+    This key is private pagination state; native requests retain their original
+    arguments. Different nondefault options and query text remain distinct.
+    """
+    return {"query": "", "pageSize": 20, "includeTrash": False, "view": "THREAD_VIEW_MINIMAL",
+            **{key: value for key, value in arguments.items() if key != "pageToken"}}
 
 
 class GmailService:
@@ -387,7 +397,7 @@ class GmailService:
         if not locals_:
             return await self._read_remote("search_threads", arguments)
         size = max(1, min(int(arguments.get("pageSize", 20)), 50))
-        key_args = {k: v for k, v in arguments.items() if k != "pageToken"}
+        key_args = _search_key(arguments)
         token = arguments.get("pageToken")
         if token:
             saved = self._pages.get(token)
@@ -399,9 +409,20 @@ class GmailService:
                                  unread=lambda e: "UNREAD" in self._local_labels(e, {}))
         merged: dict[str, dict[str, Any]] = {}
         request = dict(arguments)
+        # Collect a complete native snapshot independently of outward page size.
+        # Keep every internal request within the actual discovered input schema.
+        assert self._tools is not None
+        validator = Draft202012Validator(self._tools["search_threads"]["inputSchema"])
+        for fetch_size in range(50, size, -1):
+            candidate = {**request, "pageSize": fetch_size}
+            if validator.is_valid(candidate):
+                request = candidate
+                break
         first = None
         cursors: set[str] = set()
         for _ in range(self.max_search_pages):
+            if request.get("pageSize") != arguments.get("pageSize"):
+                validator.validate(request)
             response = await self._read_remote("search_threads", request)
             if response.get("isError"):
                 return response
@@ -482,13 +503,13 @@ class GmailService:
         subject = arguments.get("subject", "")
         if name == "reply" and original:
             if not to:
-                if parse_address(original.get("sender", "")) in self.ctx.mailbox.user_addresses:
+                if is_user_recipient(self.ctx, original.get("sender", "")):
                     to = list(original.get("toRecipients", []))
                 else:
                     to = [original["sender"]]
             if arguments.get("replyAll"):
                 cc += [a for a in original.get("toRecipients", []) + original.get("ccRecipients", [])
-                       if parse_address(a) not in self.ctx.mailbox.user_addresses and a not in to and a not in cc]
+                       if not is_user_recipient(self.ctx, a) and a not in to and a not in cc]
             subject = original.get("subject", "")
             if not re.match(r"^\s*re:", subject, re.IGNORECASE):
                 subject = "Re: " + subject

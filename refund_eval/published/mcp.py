@@ -333,6 +333,9 @@ class MCPHTTPClient(_MCPClient):
             buffer = bytearray()
             size = 0
             event_data: list[bytes] = []
+            first_line = True
+            skip_lf = False
+            scan_from = 0
             async for chunk in response.aiter_bytes():
                 size += len(chunk)
                 if size > self.max_response_bytes:
@@ -340,15 +343,54 @@ class MCPHTTPClient(_MCPClient):
                 buffer.extend(chunk)
                 if content_type == "application/json":
                     continue
-                while b"\n" in buffer:
-                    line, _, remainder = buffer.partition(b"\n")
-                    buffer = bytearray(remainder)
-                    line = bytes(line).removesuffix(b"\r")
+                while buffer:
+                    # SSE accepts CR, LF and CRLF. A CRLF split across chunks
+                    # is one line ending; only the stream's first BOM is ignored.
+                    if skip_lf:
+                        if buffer[0] == 10:
+                            del buffer[:1]
+                        skip_lf = False
+                    ending = re.search(b"[\r\n]", buffer[scan_from:])
+                    if ending is None:
+                        scan_from = len(buffer)
+                        break
+                    at = scan_from + ending.start()
+                    line = bytes(buffer[:at])
+                    skip_lf = buffer[at] == 13
+                    del buffer[:at + 1]
+                    scan_from = 0
+                    if first_line:
+                        line = line.removeprefix(b"\xef\xbb\xbf")
+                        first_line = False
                     if line.startswith(b"data:"):
                         event_data.append(line[5:].removeprefix(b" "))
                     elif not line and event_data:
                         message = _decode(b"\n".join(event_data))
                         event_data = []
+                        if "method" in message and "id" in message:
+                            if (type(message["id"]) not in (int, str)
+                                    or not isinstance(message["method"], str)
+                                    or "result" in message or "error" in message
+                                    or ("params" in message and not isinstance(message["params"], (dict, list)))):
+                                raise MCPProtocolError("Invalid MCP server request")
+                            reply = {"jsonrpc": "2.0", "id": message["id"]}
+                            if message["method"] == "ping":
+                                reply["result"] = {}
+                            else:
+                                reply["error"] = {"code": -32601, "message": "Client capability not supported"}
+                            reply_headers = {"MCP-Protocol-Version": self.protocol_version}
+                            if self._session_id:
+                                reply_headers["Mcp-Session-Id"] = self._session_id
+                            async with self._client.stream(
+                                "POST", self.endpoint, json=reply, headers=reply_headers,
+                            ) as accepted:
+                                if accepted.status_code == 404:
+                                    self._initialized = False
+                                    self._session_id = None
+                                accepted.raise_for_status()
+                                if accepted.status_code != 202:
+                                    raise MCPProtocolError("MCP server-request reply was not accepted")
+                            continue
                         if "id" in message:
                             return _result(message, payload["id"])
                         self._notification(message)

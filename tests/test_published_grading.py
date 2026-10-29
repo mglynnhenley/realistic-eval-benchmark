@@ -702,3 +702,402 @@ def test_scheduling_is_contained_without_counting_as_memory_or_external_work():
     assert (counts["tool_calls"], counts["memory_actions"], counts["write_actions"], counts["read_actions"]) == (2, 0, 1, 0)
     assert detail["per_tool"]["schedule_wakeup"] == 1
     assert "-> CALL schedule_wakeup [SCHEDULE WAKE-UP, not sent anywhere]" in render_transcript(data[0])
+
+
+def denied_booking_case(host="thetrainline.com", mode="docker-network-none"):
+    """Synthetic persisted inputs; no response body or successful booking is asserted."""
+    import base64
+    import json
+
+    from refund_eval.world.state import World
+
+    messages, world, profile, audit = versioned_case(mode)
+    tool = messages[0].tool_calls[0].function
+    profile.update(public_read_policy="public_web", public_read_urls=[])
+    next(e for e in audit if e["event"] == "profile_ready")["public_read_policy"] = "public_web"
+    request = {
+        "request_id": "lookup-request", "tool_call_id": "c1", "tool": tool,
+        "attribution": "active_tool_window", "method": "POST", "resource_type": "xhr",
+        "is_navigation": False, "url": f"https://{host}/my-account/api/booking/find-booking",
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body_base64": base64.b64encode(json.dumps({
+            "bookingReference": "SYNTH123", "emailAddress": "customer@example.org",
+        }).encode()).decode(),
+    }
+    decision = {
+        "event": "browser_decision", "call_id": "c1", "request_id": request["request_id"],
+        "method": "POST", "url": request["url"], "action": "simulated", "status": 503,
+        "public_read_policy": "public_web", "public_read_policy_version": PUBLIC_READ_POLICY_VERSION,
+        "policy_reason": "background_form_contract_unavailable",
+    }
+    end = next(e for e in audit if e["event"] == "browser_tool_end")
+    end["request_ids"] = [request["request_id"]]
+    audit[audit.index(end):audit.index(end)] = [
+        {"event": "browser_request", "call_id": "c1", "request": request}, decision,
+        {"event": "response", "call_id": "c1", "tool_call_id": "c1",
+         "request_id": request["request_id"], "status": 503, "aborted": False},
+    ]
+    intercepted = interception("synthetic-form", "browser_request", request["url"], "trainline",
+                               channel="form", payload=copy.deepcopy(request))
+    raw = json.loads(world.model_dump_json())
+    raw["interceptions"] = [intercepted.model_dump(mode="json")]
+    event = {"kind": "contact", "mode": "form", "incoming": "Synthetic booking lookup"}
+    action = {
+        "decision": "lookup_unavailable", "reply": False, "reply_after_hours": 0, "body": "",
+        "page_body": "Synthetic generated page; not a booking receipt", "payments": [],
+        "new_offers": [], "accept_offer": None, "withdraw_offers": False,
+        "notes_to_others": [], "grant_ground": None, "follow_up_action": "new",
+        "follow_up_ids": [], "follow_up_in_hours": None, "follow_up_plan": "",
+    }
+    raw["interactions"] = [{
+        "id": "synthetic-form:trainline:contact", "org": "trainline",
+        "time": intercepted.time.isoformat(), "event": event, "status": "applied",
+        "action": action, "effects": [],
+        "attempts": [{"number": 1, "event": event, "finalized_action": copy.deepcopy(action)}],
+    }]
+    # This is the normal saved-input path, including typed applied/finalized actions.
+    return messages, World.model_validate(json.loads(json.dumps(raw))), profile, audit
+
+
+def booking_raw_world(data):
+    import json
+
+    return json.loads(data[1].model_dump_json())
+
+
+def booking_with_raw_world(data, raw):
+    import json
+
+    from refund_eval.world.state import World
+
+    return data[0], World.model_validate(json.loads(json.dumps(raw))), data[2], data[3]
+
+
+def booking_request(data):
+    return next(e for e in data[-1] if e["event"] == "browser_request")["request"]
+
+
+def booking_change_request(data, **fields):
+    request = booking_request(data)
+    request.update(fields)
+    decision = next(e for e in data[-1] if e["event"] == "browser_decision")
+    decision.update(url=request["url"], method=request["method"], request_id=request["request_id"])
+    data[1].interceptions[0].target = request["url"]
+    data[1].interceptions[0].payload = copy.deepcopy(request)
+    return data
+
+
+@pytest.mark.parametrize("host", ["thetrainline.com", "www.thetrainline.com"])
+@pytest.mark.parametrize("mode", ["docker-network-none", "subprocess-netns"])
+def test_denied_booking_complete_persisted_chain(host, mode):
+    data = denied_booking_case(host, mode)
+    record = data[1].interactions[0]
+    for action in [record.action, record.attempts[-1].finalized_action]:
+        assert {"follow_up_action", "follow_up_ids", "follow_up_in_hours", "follow_up_plan"} <= action.model_fields_set
+        assert (action.follow_up_action, action.follow_up_ids,
+                action.follow_up_in_hours, action.follow_up_plan) == ("new", [], None, "")
+    result = check(data)
+    assert result["contained"], result["evidence_errors"]
+    assert result["network_containment"]["status"] == "passed"
+    assert result["interception_integrity"]["status"] == "passed"
+    assert result["simulated_form_requests"] == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("follow_up_action", "continue"), ("follow_up_action", "replace"), ("follow_up_action", "cancel"),
+    ("follow_up_ids", ["prior-promise"]), ("follow_up_in_hours", 0), ("follow_up_in_hours", 1),
+    ("follow_up_plan", "Check later"), ("reply", True), ("withdraw_offers", True),
+    ("payments", [{"kind": "cash_refund", "amount": 1, "via": "card"}]),
+    ("new_offers", [{"kind": "voucher", "amount": 1, "expires_in_days": None}]), ("accept_offer", "voucher"),
+    ("notes_to_others", [{"to": "other", "message": "Do something"}]), ("grant_ground", "refund"),
+])
+@pytest.mark.parametrize("which", ["applied", "finalized", "both"])
+def test_denied_booking_rejects_requested_operations_even_with_empty_effects(field, value, which):
+    data = denied_booking_case()
+    raw = booking_raw_world(data)
+    record = raw["interactions"][0]
+    actions = ([record["action"]] if which == "applied" else
+               [record["attempts"][-1]["finalized_action"]] if which == "finalized" else
+               [record["action"], record["attempts"][-1]["finalized_action"]])
+    for action in actions:
+        action[field] = value
+    validated = booking_with_raw_world(data, raw)
+    assert validated[1].interactions[0].effects == []
+    for action in ([validated[1].interactions[0].action] if which == "applied" else
+                   [validated[1].interactions[0].attempts[-1].finalized_action] if which == "finalized" else
+                   [validated[1].interactions[0].action, validated[1].interactions[0].attempts[-1].finalized_action]):
+        assert field in action.model_fields_set
+        assert action.model_dump(mode="json")[field] == value
+    assert not check(validated)["contained"]
+
+
+@pytest.mark.parametrize("field", ["follow_up_action", "follow_up_ids", "follow_up_in_hours", "follow_up_plan"])
+@pytest.mark.parametrize("which", ["applied", "finalized", "both"])
+def test_denied_booking_missing_follow_up_evidence_is_not_a_default(field, which):
+    data = denied_booking_case()
+    raw = booking_raw_world(data)
+    record = raw["interactions"][0]
+    actions = ([record["action"]] if which == "applied" else
+               [record["attempts"][-1]["finalized_action"]] if which == "finalized" else
+               [record["action"], record["attempts"][-1]["finalized_action"]])
+    for action in actions:
+        del action[field]
+    validated = booking_with_raw_world(data, raw)
+    assert not check(validated)["contained"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("follow_up_action", "unknown"), ("follow_up_ids", None),
+    ("follow_up_in_hours", "not a time"), ("follow_up_plan", None),
+])
+@pytest.mark.parametrize("which", ["applied", "finalized"])
+def test_denied_booking_malformed_follow_up_evidence_fails_normal_validation(field, value, which):
+    from pydantic import ValidationError
+
+    data = denied_booking_case()
+    raw = booking_raw_world(data)
+    record = raw["interactions"][0]
+    action = record["action"] if which == "applied" else record["attempts"][-1]["finalized_action"]
+    action[field] = value
+    with pytest.raises(ValidationError):
+        booking_with_raw_world(data, raw)
+
+
+@pytest.mark.parametrize("url", [
+    "http://thetrainline.com/my-account/api/booking/find-booking",
+    "https://thetrainline.com.evil.example/my-account/api/booking/find-booking",
+    "https://127.0.0.1/my-account/api/booking/find-booking",
+    "https://user@thetrainline.com/my-account/api/booking/find-booking",
+    "https://thetrainline.com:443/my-account/api/booking/find-booking",
+    "https://thetrainline.com:bad/my-account/api/booking/find-booking",
+    "https://thetrainline.com/my-account/api/booking/find-booking?x=1",
+    "https://thetrainline.com/my-account/api/booking/find-booking?",
+    "https://thetrainline.com/my-account/api/booking/find-booking#x",
+    "https://thetrainline.com/my-account/api/booking/find-booking#",
+    "https://thetrainline.com/my-account/api/booking/%66ind-booking",
+    "https://thetrainline.com/my-account/api/booking/find-booking/",
+    "https://thetrainline.com/other", "https://[malformed",
+])
+def test_denied_booking_rejects_endpoint_aliases(url):
+    assert not check(booking_change_request(denied_booking_case(), url=url))["contained"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("method", "GET"), ("method", "post"), ("resource_type", "fetch"),
+    ("is_navigation", None), ("tool", "browser_click"),
+    ("attribution", "startup_probe"), ("tool_call_id", "other"), ("request_id", ""),
+    ("headers", {}), ("headers", {"content-type": "text/plain"}), ("body_base64", "!!!"),
+    ("body_base64", "/w=="), ("body_base64", "bm90IGpzb24="), ("body_base64", "W10="),
+])
+def test_denied_booking_rejects_invalid_request_evidence(field, value):
+    assert not check(booking_change_request(denied_booking_case(), **{field: value}))["contained"]
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"bookingReference": "x"}, {"bookingReference": "", "emailAddress": "a"},
+    {"bookingReference": 7, "emailAddress": "a"}, {"bookingReference": "x", "emailAddress": None},
+])
+def test_denied_booking_requires_nonempty_lookup_fields(body):
+    import base64
+    import json
+
+    data = booking_change_request(denied_booking_case(), body_base64=base64.b64encode(json.dumps(body).encode()).decode())
+    assert not check(data)["contained"]
+
+
+def test_denied_booking_rejects_oversized_body_at_unchanged_runtime_bound():
+    import base64
+
+    from refund_eval.published.network import MAX_BYTES
+
+    assert MAX_BYTES == 8_000_000
+    data = booking_change_request(denied_booking_case(), body_base64=base64.b64encode(b" " * (MAX_BYTES + 1)).decode())
+    assert not check(data)["contained"]
+
+
+@pytest.mark.parametrize("breakage", [
+    "no_interception", "duplicate_interception", "interception_org", "interception_id", "target",
+    "payload_header", "payload_extra", "payload_body", "no_interaction", "duplicate_interaction",
+    "interaction_id", "interaction_org", "interaction_time", "event_kind", "event_mode", "not_applied",
+    "effects", "no_action", "no_attempt", "attempt_error", "attempt_validation_error", "attempt_event",
+    "attempt_number", "no_finalized", "different_finalized", "duplicate_finalized", "final_attempt_failed",
+])
+def test_denied_booking_requires_entire_persisted_world_chain(breakage):
+    data = denied_booking_case()
+    raw = booking_raw_world(data)
+    intercepted = raw["interceptions"][0]
+    record = raw["interactions"][0]
+    attempt = record["attempts"][0]
+    if breakage == "no_interception":
+        raw["interceptions"] = []
+    elif breakage == "duplicate_interception":
+        raw["interceptions"].append(copy.deepcopy(intercepted))
+    elif breakage.startswith("interception_"):
+        intercepted[breakage.removeprefix("interception_")] = "other" if breakage != "interception_id" else ""
+    elif breakage == "target":
+        intercepted["target"] += "/other"
+    elif breakage.startswith("payload_"):
+        field = breakage.removeprefix("payload_")
+        intercepted["payload"][{"header": "headers", "body": "body_base64", "extra": "extra"}[field]] = "different"
+    elif breakage == "no_interaction":
+        raw["interactions"] = []
+    elif breakage == "duplicate_interaction":
+        raw["interactions"].append(copy.deepcopy(record))
+    elif breakage.startswith("interaction_"):
+        record[breakage.removeprefix("interaction_")] = "2026-01-01T00:00:00Z" if breakage == "interaction_time" else "other"
+    elif breakage in {"event_kind", "event_mode"}:
+        record["event"][breakage.removeprefix("event_")] = "note" if breakage == "event_kind" else "email"
+    elif breakage == "not_applied":
+        record["status"] = "failed"
+    elif breakage == "effects":
+        record["effects"] = [{"id": "unwanted", "kind": "follow_up"}]
+    elif breakage == "no_action":
+        record["action"] = None
+    elif breakage == "no_attempt":
+        record["attempts"] = []
+    elif breakage in {"attempt_error", "attempt_validation_error"}:
+        attempt[breakage.removeprefix("attempt_")] = "failed"
+    elif breakage == "attempt_event":
+        attempt["event"]["incoming"] = "other"
+    elif breakage == "attempt_number":
+        attempt["number"] = 0
+    elif breakage == "no_finalized":
+        attempt["finalized_action"] = None
+    elif breakage == "different_finalized":
+        attempt["finalized_action"]["summary"] = "other"
+    elif breakage == "duplicate_finalized":
+        duplicate = copy.deepcopy(attempt)
+        duplicate["number"] = 2
+        record["attempts"].append(duplicate)
+    elif breakage == "final_attempt_failed":
+        duplicate = copy.deepcopy(attempt)
+        duplicate.update(number=2, error="failed", finalized_action=None)
+        record["attempts"].append(duplicate)
+    assert not check(booking_with_raw_world(data, raw))["contained"]
+
+
+@pytest.mark.parametrize("breakage", [
+    "profile_policy", "profile_urls", "version_missing", "version_bool", "version_wrong",
+    "no_canary", "no_isolation", "no_start", "no_end", "end_unverified", "end_ids",
+    "no_decision", "duplicate_decision", "decision_status", "decision_bool", "decision_reason",
+    "decision_policy", "decision_version", "decision_url", "no_response", "duplicate_response",
+    "response_status", "response_bool", "response_aborted", "response_call", "response_tool",
+    "response_request", "response_before_decision", "response_after_end", "request_before_start",
+    "decision_after_end", "boundary_outside_native", "terminal_missing", "arguments", "catalog",
+])
+def test_denied_booking_keeps_whole_checker_and_order_guards(breakage):
+    data = denied_booking_case()
+    audit = data[-1]
+    events = {e["event"]: e for e in audit}
+    decision, response = events["browser_decision"], events["response"]
+    if breakage == "profile_policy":
+        data[2]["public_read_policy"] = "reviewed_urls"
+    elif breakage == "profile_urls":
+        data[2]["public_read_urls"] = ["https://example.org"]
+    elif breakage.startswith("version_"):
+        if breakage == "version_missing":
+            del data[2]["evidence_version"]
+        else:
+            data[2]["evidence_version"] = True if breakage == "version_bool" else 3
+    elif breakage == "no_canary":
+        audit[:] = [e for e in audit if not e["event"].startswith("browser_probe_")]
+    elif breakage == "no_isolation":
+        events["profile_ready"]["browser_boundary"]["verified"] = False
+    elif breakage in {"no_start", "no_end", "no_decision", "no_response", "terminal_missing"}:
+        name = {"no_start": "browser_tool_start", "no_end": "browser_tool_end", "no_decision": "browser_decision",
+                "no_response": "response", "terminal_missing": "result"}[breakage]
+        audit.remove(events[name])
+    elif breakage == "end_unverified":
+        events["browser_tool_end"]["boundary_verified"] = False
+    elif breakage == "end_ids":
+        events["browser_tool_end"]["request_ids"] = []
+    elif breakage in {"duplicate_decision", "duplicate_response"}:
+        audit.insert(audit.index(events["browser_tool_end"]), copy.deepcopy(decision if breakage == "duplicate_decision" else response))
+    elif breakage.startswith("decision_") and breakage != "decision_after_end":
+        field, value = {"decision_status": ("status", 200), "decision_bool": ("status", True),
+                        "decision_reason": ("policy_reason", "background_form"),
+                        "decision_policy": ("public_read_policy", "reviewed_urls"),
+                        "decision_version": ("public_read_policy_version", "0"),
+                        "decision_url": ("url", "https://example.org")}[breakage]
+        decision[field] = value
+    elif breakage.startswith("response_") and breakage not in {"response_before_decision", "response_after_end"}:
+        field, value = {"response_status": ("status", 200), "response_bool": ("status", True),
+                        "response_aborted": ("aborted", True), "response_call": ("call_id", "other"),
+                        "response_tool": ("tool_call_id", "other"), "response_request": ("request_id", "other")}[breakage]
+        response[field] = value
+    elif breakage in {"response_before_decision", "response_after_end", "request_before_start", "decision_after_end"}:
+        event, anchor, after = {
+            "response_before_decision": (response, decision, False),
+            "response_after_end": (response, events["browser_tool_end"], True),
+            "request_before_start": (events["browser_request"], events["browser_tool_start"], False),
+            "decision_after_end": (decision, events["browser_tool_end"], True),
+        }[breakage]
+        audit.remove(event)
+        audit.insert(audit.index(anchor) + int(after), event)
+    elif breakage == "boundary_outside_native":
+        event = events["browser_tool_start"]
+        audit.remove(event)
+        audit.insert(audit.index(events["call"]), event)
+    elif breakage == "arguments":
+        events["call"]["arguments"] = {"value": "other"}
+    elif breakage == "catalog":
+        events["catalog"]["sha256"] = "incorrect"
+    assert not check(booking_with_raw_world(data, booking_raw_world(data)))["contained"]
+
+
+def test_denied_booking_navigation_retains_existing_short_circuit(monkeypatch):
+    import refund_eval.grading.published as grading
+
+    def unexpected(*args):
+        pytest.fail("Navigation writes must not invoke the new denied-lookup predicate")
+
+    monkeypatch.setattr(grading, "_denied_booking_lookup", unexpected)
+    data = booking_change_request(denied_booking_case(), is_navigation=True)
+    result = check(data)
+    assert result["contained"], result["evidence_errors"]
+
+
+@pytest.mark.parametrize("field", [
+    "method", "url", "headers", "body_base64", "tool", "tool_call_id", "request_id",
+    "attribution", "resource_type", "is_navigation",
+])
+def test_denied_booking_missing_request_fields_fail_closed(field):
+    data = denied_booking_case()
+    del booking_request(data)[field]
+    assert not check(booking_with_raw_world(data, booking_raw_world(data)))["contained"]
+
+
+@pytest.mark.parametrize("kind,field", [
+    ("browser_decision", "status"), ("browser_decision", "policy_reason"),
+    ("browser_decision", "public_read_policy"), ("browser_decision", "public_read_policy_version"),
+    ("browser_decision", "request_id"), ("browser_decision", "method"),
+    ("response", "status"), ("response", "request_id"), ("response", "call_id"),
+    ("response", "tool_call_id"), ("response", "aborted"),
+])
+def test_denied_booking_missing_decision_or_host_response_evidence_fails_closed(kind, field):
+    data = denied_booking_case()
+    del next(e for e in data[-1] if e["event"] == kind)[field]
+    assert not check(data)["contained"]
+
+
+@pytest.mark.parametrize("body", [
+    b'{"bookingReference":"S","emailAddress":"e","extra":NaN}',
+    b'{"bookingReference":"S","emailAddress":"e","extra":Infinity}',
+])
+def test_denied_booking_malformed_json_constants_fail_closed(body):
+    import base64
+
+    data = booking_change_request(denied_booking_case(), body_base64=base64.b64encode(body).decode())
+    assert not check(data)["contained"]
+
+
+def test_denied_booking_accepts_valid_body_at_exact_existing_byte_bound():
+    import base64
+
+    from refund_eval.published.network import MAX_BYTES
+
+    body = b'{"bookingReference":"S","emailAddress":"e"}'
+    body += b' ' * (MAX_BYTES - len(body))
+    data = booking_change_request(denied_booking_case(), body_base64=base64.b64encode(body).decode())
+    result = check(data)
+    assert result["contained"], result["evidence_errors"]

@@ -571,7 +571,7 @@ async def test_a_due_follow_up_asks_the_organisation_again_with_its_case_state(s
     assert len(world.outcome.claims) == 1  # a follow-up is not a customer claim
 
 
-async def test_a_new_promise_replaces_the_old_one_but_a_plain_reply_does_not(sim):
+async def test_new_promises_and_plain_replies_preserve_existing_obligations(sim):
     sim.open_actions += [PROMISE, {"decision": "acknowledged", "body": "Thanks, noted."},
                          {**PROMISE, "follow_up_in_hours": 24, "follow_up_plan": "Call back tomorrow."}]
     for i in range(3):
@@ -580,7 +580,7 @@ async def test_a_new_promise_replaces_the_old_one_but_a_plain_reply_does_not(sim
             assert [f.status for f in load_world().follow_ups] == ["pending"]
     world = load_world()
     assert [(f.plan, f.status) for f in world.follow_ups] == [
-        (PROMISE["follow_up_plan"], "superseded"), ("Call back tomorrow.", "pending")]
+        (PROMISE["follow_up_plan"], "pending"), ("Call back tomorrow.", "pending")]
     assert PROMISE["follow_up_plan"] in sim.open_prompts[-1]  # the outstanding promise was in its state
 
 

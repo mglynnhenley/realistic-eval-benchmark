@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from refund_eval.world import clock
 from refund_eval.world.state import Email, ScheduledEmail, World
@@ -91,3 +93,78 @@ def test_a_call_takes_as_long_as_writing_and_reading_take_a_person():
     assert w.now == T0 + timedelta(minutes=14)
     clock.charge(w, "get_thread", read=" ".join(["word"] * 250), base=False)
     assert w.now == T0 + timedelta(minutes=15)
+
+
+@pytest.mark.parametrize("start", [
+    datetime(2026, 10, 25, 1, 59, tzinfo=LONDON),
+    datetime(2026, 10, 25, 1, 20, tzinfo=LONDON, fold=1),
+    datetime(2026, 3, 29, 0, 59, tzinfo=LONDON),
+    datetime(2026, 10, 25, 1, 59),  # noqa: DTZ001 - naive London input
+])
+def test_tool_duration_is_elapsed_time_across_london_clock_changes(start):
+    from refund_eval.world.timeutil import as_aware
+
+    w = World(start_time=start, now=start)
+    before = as_aware(start).astimezone(UTC)
+    clock.charge(w, "send_message")
+    after = as_aware(w.now).astimezone(UTC)
+    assert after - before == timedelta(minutes=2)
+    assert w.now.tzinfo == start.tzinfo
+    # London times returned by the clock are real instants, not imaginary
+    # spring-gap times. Compare isoformat, since datetime equality hides fold.
+    assert as_aware(w.now).isoformat() == after.astimezone(LONDON).isoformat()
+
+
+def test_advance_compares_instants_in_the_repeated_hour():
+    first = datetime(2026, 10, 25, 1, 50, tzinfo=LONDON)
+    second = datetime(2026, 10, 25, 1, 10, tzinfo=LONDON, fold=1)
+    w = World(start_time=first, now=first)
+    clock.advance(w, second)
+    assert w.now.astimezone(UTC) == second.astimezone(UTC)
+    clock.advance(w, first)
+    assert w.now.astimezone(UTC) == second.astimezone(UTC)
+
+
+def test_fold_mail_is_not_delivered_early_and_is_ordered_by_instant():
+    first = datetime(2026, 10, 25, 1, 50, tzinfo=LONDON)
+    second = datetime(2026, 10, 25, 1, 10, tzinfo=LONDON, fold=1)
+    end = datetime(2026, 10, 25, 2, 0, tzinfo=LONDON)
+    pending = [ScheduledEmail(email=_mail(mid, when), due_at=when)
+               for mid, when in [("second", second), ("first", first)]]
+    w = World(start_time=first, now=first, pending=pending)
+    assert clock.next_due(w).astimezone(UTC) == first.astimezone(UTC)
+    assert [e.id for e in clock.advance(w, first)] == ["first"]
+    assert clock.next_due(w).astimezone(UTC) == second.astimezone(UTC)
+    assert [e.id for e in clock.advance(w, end)] == ["second"]
+    # Also exercise a single advance that delivers both pending messages.
+    w = World(start_time=first, now=first, pending=pending)
+    assert [e.id for e in clock.advance(w, end)] == ["first", "second"]
+
+
+def test_arrived_since_uses_elapsed_window_across_repeated_hour():
+    first = datetime(2026, 10, 25, 1, 50, tzinfo=LONDON)
+    second = datetime(2026, 10, 25, 1, 10, tzinfo=LONDON, fold=1)
+    w = World(start_time=first, now=second, overlay_inbox=[
+        _mail("old", first).model_copy(update={"source": "counterparty"}),
+        _mail("new", second).model_copy(update={"source": "counterparty"}),
+    ])
+    assert [e.id for e in clock.arrived_since(w, first)] == ["new"]
+
+
+def test_session_cap_limits_elapsed_charge_at_the_second_fold():
+    start = datetime(2026, 10, 25, 1, 59, tzinfo=LONDON)
+    cap = datetime(2026, 10, 25, 1, 0, tzinfo=LONDON, fold=1)
+    w = World(start_time=start, now=start)
+    clock.charge(w, "send_message", until=cap)
+    assert w.now.astimezone(UTC) == cap.astimezone(UTC)
+    assert w.now.astimezone(UTC) - start.astimezone(UTC) == timedelta(minutes=1)
+
+
+def test_fixed_offset_saved_world_has_the_same_absolute_delivery():
+    start = datetime(2026, 10, 25, 1, 59, tzinfo=LONDON)
+    due = datetime(2026, 10, 25, 1, 0, tzinfo=LONDON, fold=1)
+    w = World.model_validate_json(World(start_time=start, now=start, pending=[
+        ScheduledEmail(email=_mail("notice", due), due_at=due),
+    ]).model_dump_json())
+    assert [e.id for e in clock.charge(w, "send_message")] == ["notice"]
+    assert w.now.astimezone(UTC) == datetime(2026, 10, 25, 1, 1, tzinfo=UTC)

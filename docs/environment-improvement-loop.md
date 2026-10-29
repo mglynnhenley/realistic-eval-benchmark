@@ -14,6 +14,13 @@ inconclusive tells comparison does not by itself invalidate a repair verified by
 targeted tests. Record the correctness and realism decisions separately, and
 preserve the frozen versions used in each comparison.
 
+When local email is merged with native conversations, search collects a bounded
+native snapshot using a larger page size accepted by the discovered input schema.
+The caller's page size still controls the returned pages and their frozen
+continuation snapshot. The native page-count limit remains in force: incomplete
+aggregation returns an error rather than a partial successful result. Reads with
+no local email keep their native arguments and responses unchanged.
+
 For a surprising company decision, [rerun that recorded interaction](running.md#rerunning-one-company-decision) against a chosen company model or implementation. This compares responses without applying effects or changing the original trial. Use [offline claim evaluation](running.md#evaluating-saved-claims) to inspect factual contradictions separately from company belief.
 
 ## Realism loop
@@ -73,6 +80,25 @@ does not independently authenticate the original sender, and descriptive subject
 are marked when the original subject was unavailable.
 
 Company history labels future email as a timestamped draft until delivery.
+Company email input and later own-company history contain recipient-visible
+headers and content. Blind-copy destinations and private mail transport
+arguments remain in the sender's interception audit and delivery routing;
+they are omitted from recipients' copies. Explicit addresses in the customer's
+subject, body, HTML or attachments are preserved. Other contact channels retain
+their submitted fields.
+
+Local mailbox pagination binds each continuation to its effective search
+arguments. Omitting an optional argument is equivalent to supplying its existing
+default, including an empty query. Changing the effective query, page size,
+trash option or view still rejects the continuation. Pages remain a frozen
+snapshot; this comparison does not rewrite requests forwarded to native mail.
+
+The world clock charges tool use in elapsed minutes and orders mail, requested
+wake-ups and arrival notices by absolute time, including the repeated autumn
+hour in London. Local calendar check-ins and the scenario's week-based horizon
+retain their London wall-clock times. This does not change configured reply
+delays, office hours or reading and writing rates.
+
 Non-personal company replies are queued behind that organisation's earlier pending
 replies, with a ten-minute gap. This organisation-wide ordering is a modelling
 convention and can extend the sampled reply delay. A dynamically discovered company
@@ -94,6 +120,18 @@ behind substantive replies. They cannot grant eligibility, move money, change
 offers or close a case, and their wording is checked for substantive decisions.
 A receipt's sender does not establish a monitored staff contact. This distinction
 is explicit; a no-reply address alone does not prove that an email is a receipt.
+
+Company correspondence context also projects the existing routing classification
+of its configured sender. For substantive email sent from that same unmonitored
+address, the prompt asks for clear reply-destination wording and existing
+supported secure or contact next steps. This presentation guidance does not
+change sender selection, routing, contact availability or case decisions; it
+does not classify a different chosen sender or require wording on immediate
+form pages or automatic receipts.
+
+Fictional staff names keep a stable allocation within each case. The roster uses
+a surname distinct from the fixed benchmark customer's; this is a presentation
+choice, not identity verification or a promise about arbitrary custom scenarios.
 
 For known organisations with an explicit `Cold-email` directive, unsupported new
 enquiry mailboxes return that configured automatic redirect. Published contacts,
@@ -389,3 +427,49 @@ Avoid silently editing a saved transcript or world. If a repair is necessary, re
 Run `uv run pytest -q` and the relevant Harbor or browser checks described in [the run guide](running.md#validation). Prepare batch configurations separately from execution, confirm their budgets and output locations, and launch paid trials only through the documented commands.
 
 See [architecture](architecture.md) for the simulator boundaries and [Harbor](harbor.md) for frozen batch preparation.
+
+The `schedule_wakeup` tool accepts London wall times. It rejects the missing
+spring-forward hour rather than silently scheduling a different local time.
+During the repeated autumn hour it selects the earliest matching instant still
+in the future and reports BST or GMT. Ordinary dates retain the existing format;
+earlier mail, request replacement and local morning check-ins keep their usual
+behavior.
+
+Automatic mail reply recipients use the same own-address recognition as the
+simulated send boundary, including the supported Gmail aliases. Reply-all does
+not automatically add an own alias to Cc; replying to one's own sent message
+uses its original To recipients. Explicit To, Cc and Bcc overrides remain intact,
+including intentional copies to the user. This does not change mailbox labels,
+search matching or the original message headers.
+
+Multipart form submissions use their declared MIME boundary to delimit text.
+Signature separators and other lines beginning with two hyphens remain part of
+the message. Repeated fields retain their existing grouping and order within
+each field; raw browser requests stay in the private interception record.
+Parsing does not forward a submission or establish acceptance of an attachment.
+
+Mailbox visibility and newest-first ordering use absolute instants, including
+London's repeated autumn hour. This applies to fixture future scheduling and
+the merged local/source view; timestamps retain their original representation,
+naive values retain the London convention, and calendar/query rules are unchanged.
+
+The HTTP tool transport accepts SSE lines terminated by LF, CRLF or CR,
+including delimiters split across chunks, and ignores one leading UTF-8 BOM.
+Raw response bytes still count toward the size limit; incomplete events at EOF
+are not dispatched, and response validation and no-retry behavior are unchanged.
+
+While awaiting an HTTP tool result, the client answers server pings on the SSE
+stream with a separate POST to the configured endpoint. It declines unsupported
+client capabilities, requires a 202 acknowledgement, and then continues waiting
+for the original result under the same timeout and stream byte limit. Reply
+failures propagate without retrying the original operation.
+
+Read-only Gmail message parsing preserves required quoting and escaping in To/Cc
+display names. A name containing a comma or other phrase punctuation remains one
+recipient when reused in a message; the source header, address and recipient
+order are preserved. This formatting does not authenticate the sender or recipient.
+
+Gmail text and HTML bodies use the charset declared on each MIME part before
+text extraction. Missing or unusable declarations retain the UTF-8 replacement
+fallback. Attachment exclusion and plain-text preference remain unchanged;
+decoding neither fetches attachments nor changes the saved source payload.

@@ -421,6 +421,104 @@ def test_parse_gmail_html_only_body():
     assert parse_gmail_message(msg).body == "Hello\nSam"
 
 
+@pytest.mark.parametrize("field", ["To", "Cc"])
+@pytest.mark.parametrize("header", [
+    '"Example, Casey" <casey@example.test>',
+    '"Casey; Example" <casey@example.test>',
+    '"Casey: Example" <casey@example.test>',
+    '"Casey (Team)" <casey@example.test>',
+    '"Casey [Team]" <casey@example.test>',
+    '"Casey <Team>" <casey@example.test>',
+    '"Casey @ Team" <casey@example.test>',
+    '"Casey E. Example" <casey@example.test>',
+    r'"Casey \"C\" Example" <casey@example.test>',
+    r'"Casey \\ Example" <casey@example.test>',
+    '"Exämple, Casey" <Casey@Example.test>',
+    'Exämple Casey <casey@example.test>',
+    'Casey Example <casey@example.test>',
+    'casey@example.test',
+    '"Example, Casey" <casey@example.test>, Other <other@example.test>, casey@example.test',
+    'Team: "Example, Casey" <casey@example.test>, Other <other@example.test>;',
+])
+def test_gmail_recipient_display_names_roundtrip_without_changing_message(field, header):
+    import copy
+    from email.utils import getaddresses
+
+    from refund_eval.world.orgs import parse_address
+
+    msg = _gmail_msg("18f0a1b2c3d4e5f6", START, "Original subject")
+    msg["payload"]["headers"] = [h for h in msg["payload"]["headers"] if h["name"] != field]
+    msg["payload"]["headers"].append({"name": field, "value": header})
+    original = copy.deepcopy(msg)
+    baseline = parse_gmail_message(_gmail_msg("18f0a1b2c3d4e5f6", START, "Original subject"))
+    parsed = parse_gmail_message(msg)
+    values = parsed.to if field == "To" else parsed.cc
+    assert getaddresses(values) == getaddresses([header])
+    assert [parse_address(value) for value in values] == [a.casefold() for _, a in getaddresses([header])]
+    assert parsed.model_dump(exclude={field.lower()}) == baseline.model_dump(exclude={field.lower()})
+    assert msg == original
+    if header in ['Casey Example <casey@example.test>', 'Exämple Casey <casey@example.test>', 'casey@example.test']:
+        assert values == [header]
+
+
+def test_gmail_source_mailbox_and_serialization_preserve_quoted_recipients(tmp_path):
+    import copy
+    from email.utils import getaddresses
+
+    raw = _gmail_msg("18f0a1b2c3d4e5f6", START - timedelta(days=1), "Quoted names")
+    raw["payload"]["headers"] += [{"name": "Cc", "value": '"Example; Casey" <casey@example.test>'}]
+    raw["payload"]["headers"][1]["value"] = '"Carter, Sam" <sam.carter@gmail.com>, other@example.test'
+    original = copy.deepcopy(raw)
+    fake = FakeGmail({raw["id"]: raw})
+    source = GmailMailSource(tmp_path / "absent-client.json", tmp_path / "absent-token.json")
+    source._service = fake
+    world = World(start_time=START, now=START)
+    mailbox = Mailbox(source, SCENARIO)
+    email = mailbox.search(world, "", limit=20)[0]
+    assert mailbox.get(world, raw["id"]) == email
+    assert Email.model_validate_json(email.model_dump_json()) == email
+    assert getaddresses(email.to) == [("Carter, Sam", "sam.carter@gmail.com"), ("", "other@example.test")]
+    assert getaddresses(email.cc) == [("Example; Casey", "casey@example.test")]
+    assert email.sender == raw["payload"]["headers"][0]["value"]
+    assert email.body == "Hello Sam, your bill is ready."
+    assert email.subject == "Quoted names" and email.id == email.thread_id == raw["id"]
+    assert fake.messages_by_id[raw["id"]] == original
+    assert {method for method, _ in fake.calls} == {"list", "get"}
+
+
+async def test_parsed_gmail_quoted_recipient_passes_real_send_boundary(tmp_path, monkeypatch):
+    from inspect_ai.util._store import Store, init_subtask_store
+    from test_published_mail import Remote
+
+    from refund_eval.published.mail import GmailService
+    from refund_eval.sim.interface import SimResult
+    from refund_eval.world.interception import ToolContext
+    from refund_eval.world.state import load_world, save_world
+
+    init_subtask_store(Store())
+    raw = _gmail_msg("18f0a1b2c3d4e5f6", START, "Quoted recipient")
+    raw["payload"]["headers"][1]["value"] = '"Example, Casey" <casey@example.test>'
+    source = GmailMailSource(tmp_path / "absent-client.json", tmp_path / "absent-token.json")
+    source._service = FakeGmail({raw["id"]: raw})
+    context = ToolContext(SCENARIO, Mailbox(source, SCENARIO))
+    save_world(World(start_time=START, now=START))
+    email = context.mailbox.get(load_world(), raw["id"])
+    calls = []
+
+    async def simulator(inbound):
+        calls.append(inbound)
+        return SimResult(immediate_text="Message sent.")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", simulator)
+    remote = Remote()
+    response = await GmailService(remote, context).call_tool("send_message", {
+        "to": email.to, "subject": "Synthetic reply", "body": "Thank you for your message."})
+    assert not response.get("isError"), response
+    assert len(calls) == 1 and calls[0].target == "casey@example.test"
+    assert load_world().interceptions[0].payload["to"] == email.to
+    assert all(method != "send_message" for method, _ in remote.calls)
+
+
 @pytest.mark.parametrize("start", ["2026-10-12T09:00:00+01:00", "2026-10-19T09:00:00+01:00"])
 def test_future_fixture_visibility_across_clock_change(start):
     scenario = SCENARIO.model_copy(update={"start_time": datetime.fromisoformat(start)})
@@ -453,3 +551,113 @@ def test_custom_fixture_schedules_only_its_future_incoming_mail(tmp_path):
     world = _world()
     source.schedule_future(world)
     assert [pending.email.id for pending in world.pending] == ["incoming"]
+
+
+def _autumn_time(hour, minute, fold=0):
+    return datetime(2026, 10, 25, hour, minute, tzinfo=LONDON, fold=fold)
+
+
+def _chronology_email(key, when, *, sender="service@example.test"):
+    return Email(id=key, sender=sender, to=SCENARIO.user.email_addresses,
+                 subject="Update", body="Synthetic update", sent_at=when)
+
+
+class _ChronologySource:
+    local_state_is_complete = True
+
+    def __init__(self, messages, *, select=True):
+        self.messages = messages
+        self.select = select
+        self.calls = []
+
+    def search(self, query, *, now, limit=20):
+        self.calls.append((query, now, limit))
+        return self.messages[:limit] if self.select else []
+
+    def read(self, email_id):
+        return next((e for e in self.messages if e.id == email_id), None)
+
+
+@pytest.mark.parametrize("current", [_autumn_time(1, 45), _autumn_time(1, 10, 1)])
+@pytest.mark.parametrize("representation", ["london", "utc", "fixed", "naive"])
+@pytest.mark.parametrize("layer", ["overlay", "source", "touched"])
+def test_mailbox_visibility_orders_absolute_instants(current, representation, layer):
+    # The second-fold current time makes first-fold01:50 past despite its wall
+    # time. Before the fold, second-fold01:30 must remain hidden.
+    times = [_autumn_time(1, 50), _autumn_time(1, 30, 1), current]
+    if representation == "utc":
+        times = [t.astimezone(UTC) for t in times]
+    elif representation == "fixed":
+        times = [datetime.fromisoformat(t.isoformat()) for t in times]
+    elif representation == "naive":
+        # Naive-as-London is the existing convention, including an explicit
+        # in-memory fold value; no persistence of a naive fold is asserted.
+        times = [t.replace(tzinfo=None) for t in times]
+    messages = [_chronology_email(str(i), t) for i, t in enumerate(times)]
+    source = _ChronologySource(messages if layer != "overlay" else [], select=layer != "touched")
+    world = World(start_time=_autumn_time(0, 0), now=current,
+                  overlay_inbox=messages if layer == "overlay" else [])
+    mailbox = Mailbox(source, SCENARIO)
+    state = InboxState(starred={e.id for e in messages}) if layer == "touched" else InboxState()
+    query = "is:starred" if layer == "touched" else ""
+    instant = lambda t: as_aware(t).astimezone(UTC)
+    expected = sorted((e for e in messages if instant(e.sent_at) <= instant(current)),
+                      key=lambda e: instant(e.sent_at), reverse=True)
+    assert [e.id for e in mailbox.search(world, query, state=state)] == [e.id for e in expected]
+    for e in messages:
+        assert (mailbox.get(world, e.id) is not None) == (instant(e.sent_at) <= instant(current))
+    assert [e.sent_at.isoformat() for e in messages] == [t.isoformat() for t in times]
+
+
+def test_mailbox_newest_first_and_equal_instant_stability_after_clock_advance():
+    from refund_eval.world.clock import charge
+
+    older = _chronology_email("older", _autumn_time(1, 50))
+    newer = _chronology_email("newer", _autumn_time(1, 10, 1))
+    tie = _chronology_email("tie", newer.sent_at.astimezone(UTC))
+    world = World(start_time=_autumn_time(0, 0), now=_autumn_time(1, 59),
+                  overlay_inbox=[older, newer, tie])
+    charge(world, "read", read=" ".join(["word"] * 2750), base=False)
+    assert world.now.astimezone(UTC) == datetime(2026, 10, 25, 1, 10, tzinfo=UTC)
+    mailbox = Mailbox(_ChronologySource([]), SCENARIO)
+    assert [e.id for e in mailbox.search(world, "")] == ["newer", "tie", "older"]
+    assert [e.id for e in mailbox.search(world, "", limit=1)] == ["newer"]
+    # ISO persistence retains the absolute instants even though it drops ZoneInfo.
+    restored = World.model_validate_json(world.model_dump_json())
+    assert [e.id for e in mailbox.search(restored, "")] == ["newer", "tie", "older"]
+
+
+@pytest.mark.parametrize(("now", "expected", "pending"), [
+    (_autumn_time(1, 30), [], ["incoming"]),
+    (_autumn_time(1, 50), ["outgoing", "incoming"], []),
+    (_autumn_time(1, 10, 1), ["outgoing", "incoming"], []),
+])
+def test_fixture_naive_london_visibility_and_future_queue(tmp_path, now, expected, pending):
+    payload = {"user": {"email": "user@example.test"}, "emails": [
+        {"id": key, "sender": sender, "to": ["user@example.test"], "subject": "Update",
+         "body": "Synthetic fixture", "sent_at": "2026-10-25T01:50:00"}
+        for key, sender in [("outgoing", "user@example.test"), ("incoming", "service@example.test")]
+    ]}
+    path = tmp_path / "synthetic-mail.json"
+    path.write_text(json.dumps(payload))
+    source = FixtureMailSource(path)
+    assert [e.id for e in source.search("", now=now)] == expected
+    world = World(start_time=_autumn_time(0, 0), now=now)
+    source.schedule_future(world)
+    source.schedule_future(world)
+    assert [item.email.id for item in world.pending] == pending
+    assert source.read("incoming").sent_at.isoformat() == "2026-10-25T01:50:00"
+
+
+def test_gmail_source_fold_filter_uses_original_read_only_transport(tmp_path):
+    now = _autumn_time(1, 10, 1)
+    fake = FakeGmail({
+        "aa000001": _gmail_msg("aa000001", _autumn_time(1, 30, 1), "Future"),
+        "aa000002": _gmail_msg("aa000002", _autumn_time(1, 50), "Older"),
+        "aa000003": _gmail_msg("aa000003", now, "Equal"),
+    })
+    source = GmailMailSource(tmp_path / "absent-client.json", tmp_path / "absent-token.json")
+    source._service = fake
+    assert [e.id for e in source.search("", now=now)] == ["aa000003", "aa000002"]
+    assert {name for name, _ in fake.calls} <= {"list", "get"}
+    assert fake.calls[0][1]["q"] == f"before:{int(now.timestamp()) + 1}"

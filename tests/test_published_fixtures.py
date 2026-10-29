@@ -271,3 +271,71 @@ async def test_future_fixture_mail_wakes_once_and_merges_without_duplicates(ctx)
     source.schedule_future(world)
     assert len(world.pending) == 1
     await service.aclose()
+
+
+def paginated_service(ctx, tmp_path, layer):
+    """Forty-one unique conversations exercise both continuation boundaries."""
+    now = SCENARIO.start_time
+    messages = [Email(id=f"{n + 1:016x}", sender="support@example.test", to=[ctx.user_email],
+                      subject="Review request", body="Synthetic correspondence",
+                      sent_at=now - timedelta(minutes=n + 1)) for n in range(41)]
+    split = {"fixture": 41, "overlay": 0, "mixed": 21}[layer]
+    path = tmp_path / "pagination-inbox.json"
+    path.write_text(json.dumps({"emails": [email.model_dump(mode="json") for email in messages[:split]]}))
+    ctx.mailbox.source = FixtureMailSource(path)
+    save_world(World(start_time=now, now=now, overlay_inbox=messages[split:]))
+    return make_fixture_mail(ctx), [message.id for message in messages]
+
+
+@pytest.mark.parametrize("layer", ["fixture", "overlay", "mixed"])
+@pytest.mark.parametrize("field,default", [
+    ("query", ""), ("pageSize", 20), ("includeTrash", False), ("view", "THREAD_VIEW_MINIMAL"),
+])
+@pytest.mark.parametrize("explicit_first", [True, False])
+async def test_continuation_recognizes_effective_defaults(ctx, tmp_path, layer, field, default, explicit_first):
+    service, expected_ids = paginated_service(ctx, tmp_path, layer)
+    explicit, omitted = {field: default}, {}
+    first_args, next_args = (explicit, omitted) if explicit_first else (omitted, explicit)
+    first = await service.call_tool("search_threads", first_args)
+    assert not first.get("isError"), first
+    pages = [first["structuredContent"]]
+    while token := pages[-1].get("nextPageToken"):
+        result = await service.call_tool("search_threads", {**next_args, "pageToken": token})
+        assert not result.get("isError"), result
+        pages.append(result["structuredContent"])
+    assert [len(page["threads"]) for page in pages] == [20, 20, 1]
+    assert [thread["id"] for page in pages for thread in page["threads"]] == expected_ids
+    assert {page["resultCountEstimate"] for page in pages} == {"41"}
+    await service.aclose()
+
+
+@pytest.mark.parametrize("layer", ["fixture", "overlay", "mixed"])
+@pytest.mark.parametrize("changed", [
+    {"query": "different search"}, {"pageSize": 1}, {"includeTrash": True},
+    {"view": "THREAD_VIEW_METADATA_ONLY"},
+])
+async def test_continuation_still_rejects_changed_effective_arguments(ctx, tmp_path, layer, changed):
+    service, _ = paginated_service(ctx, tmp_path, layer)
+    first = (await service.call_tool("search_threads", {}))["structuredContent"]
+    invalid = await service.call_tool("search_threads", {**changed, "pageToken": first["nextPageToken"]})
+    assert invalid.get("isError") is True
+    unknown = await service.call_tool("search_threads", {"pageToken": "unknown-cursor"})
+    assert unknown.get("isError") is True
+    # Rejected calls cannot consume or replace the valid frozen continuation.
+    second = await service.call_tool("search_threads", {"pageToken": first["nextPageToken"]})
+    assert not second.get("isError")
+    assert len(second["structuredContent"]["threads"]) == 20
+    await service.aclose()
+
+
+async def test_published_tool_cursor_accepts_omitted_empty_query(ctx, tmp_path):
+    from refund_eval.published.adapter import inspect_tools
+
+    service, expected_ids = paginated_service(ctx, tmp_path, "mixed")
+    search = next(tool for tool in await inspect_tools(service, source="gmail") if tool.name == "search_threads")
+    first_parts = await search.tool(query="")
+    first = json.loads(first_parts[0].text)
+    second_parts = await search.tool(pageToken=first["nextPageToken"])
+    second = json.loads(second_parts[0].text)
+    assert [t["id"] for t in first["threads"] + second["threads"]] == expected_ids[:40]
+    await service.aclose()

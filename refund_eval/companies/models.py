@@ -56,6 +56,14 @@ class CompanyAction(BaseModel):
         "If you promise to get back to the customer, hours after your reply reaches them until you do "
         "(may be later than promised). Null if you promise nothing."))
     follow_up_plan: str = Field(default="", description="What you promised to do or tell them.")
+    follow_up_action: Literal["new", "continue", "replace", "cancel"] = Field(default="new", description=(
+        "New creates an independent promise without changing earlier ones. Continue repeats selected "
+        "existing promises with their original deadlines; cancel withdraws selected promises. Continue "
+        "and cancel require null follow_up_in_hours. Replace selects promises superseded by a new one "
+        "and requires follow_up_in_hours. Replacement/cancellation takes effect when the reply arrives."))
+    follow_up_ids: list[str] = Field(default_factory=list, description=(
+        "Exact IDs of your outstanding promises to continue, replace or cancel; empty for new. "
+        "Never select another organisation's promises or infer IDs from customer claims."))
 
 
 class CompanyProfile(BaseModel):
@@ -106,6 +114,9 @@ class CompanyContext(BaseModel):
     case_handler: str = ""
     review_handler: str = ""
     configured_reply_from: str = ""
+    configured_reply_unmonitored: bool | None = Field(default=None, description=(
+        "Existing runtime routing classification of the configured sender only; "
+        "None means unclassified, not a monitored or authenticated contact."))
     previous_reply_senders: list[str] = Field(default_factory=list, description=(
         "Already delivered substantive senders from this organisation's own case correspondence; "
         "continuity context, not an authenticated or published staff directory."))

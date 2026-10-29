@@ -175,3 +175,130 @@ async def test_actual_export_fixture_and_published_reads_keep_only_the_cover(tmp
         assert message["attachmentIds"] == message["attachments"] == []
     finally:
         await service.aclose()
+
+
+def encoded_part(mime, text, encoding, *, declared=None, header_name="Content-Type"):
+    return {"mimeType": mime, "headers": [{"name": header_name,
+        "value": f'{mime}; charset="{declared or encoding}"'}], "body": {
+        "data": base64.urlsafe_b64encode(text.encode(encoding)).decode().rstrip("=")}}
+
+
+@pytest.mark.parametrize("encoding,text", [
+    ("iso-8859-1", "Café refund £20"),
+    ("windows-1252", "Café — refund £20"),
+    ("utf-8", "Café — refund £20"),
+])
+@pytest.mark.parametrize("mime", ["text/plain", "text/html"])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("mixed_case", [False, True])
+def test_declared_text_charset_preserves_body_and_raw_message(encoding, text, mime, nested, mixed_case):
+    part = encoded_part(mime, f"<p>{text}</p>" if mime == "text/html" else text, encoding,
+        declared=encoding.upper() if mixed_case else encoding,
+        header_name="cOnTeNt-TyPe" if mixed_case else "Content-Type")
+    message = gmail_message([part])
+    if not nested:
+        message["payload"]["mimeType"] = mime
+        message["payload"]["body"] = part["body"]
+        message["payload"]["headers"] += part["headers"]
+        message["payload"].pop("parts")
+    original = copy.deepcopy(message)
+    parsed = parse_gmail_message(message)
+    baseline = parse_gmail_message(gmail_message([text_part("text/plain", text)]))
+    assert parsed.body == text
+    assert parsed.model_dump(exclude={"body"}) == baseline.model_dump(exclude={"body"})
+    assert message == original
+
+
+@pytest.mark.parametrize("mime", ["text/plain", "text/html"])
+@pytest.mark.parametrize("content_type", [None, "text/plain", 'text/plain; charset=""',
+    "text/plain; charset=no-such-charset", "text/plain; charset=base64_codec", "text/plain; charset=rot_13",
+    "text/plain; charset=idna"])
+def test_absent_or_unusable_charset_keeps_utf8_replacement_fallback(mime, content_type):
+    raw = b"Caf\xc3\xa9 \xff literal=E9"
+    data = b"<p>" + raw + b"</p>" if mime == "text/html" else raw
+    part = {"mimeType": mime, "body": {"data": base64.urlsafe_b64encode(data).decode()}}
+    if content_type is not None:
+        part["headers"] = [{"name": "Content-Type", "value": content_type}]
+    assert parse_gmail_message(gmail_message([part])).body == "Café � literal=E9"
+
+
+def test_child_charsets_are_independent_and_plain_preference_is_preserved():
+    first = encoded_part("text/plain", "Café £20", "iso-8859-1")
+    second = encoded_part("text/plain", "Résumé — next", "windows-1252")
+    html = encoded_part("text/html", "<p>Other HTML — omitted</p>", "windows-1252")
+    message = gmail_message([{"mimeType": "multipart/alternative", "headers": [
+        {"name": "Content-Type", "value": 'multipart/alternative; charset="us-ascii"'}],
+        "parts": [first, second, html]}])
+    original = copy.deepcopy(message)
+    assert parse_gmail_message(message).body == "Café £20\nRésumé — next"
+    assert message == original
+
+
+def test_charset_does_not_inherit_container_or_html_meta_or_transfer_decode():
+    text = "Café literal=E9"
+    plain = text_part("text/plain", text)
+    plain["headers"] = [{"name": "Content-Transfer-Encoding", "value": "quoted-printable"}]
+    message = gmail_message([plain])
+    message["payload"]["headers"].append({"name": "Content-Type", "value": "multipart/mixed; charset=ascii"})
+    assert parse_gmail_message(message).body == text
+    html = text_part("text/html", '<meta charset="windows-1252"><p>Café — UTF8</p>')
+    assert parse_gmail_message(gmail_message([html])).body == "Café — UTF8"
+
+
+@pytest.mark.parametrize("file_part", [
+    {"mimeType": "text/plain", "filename": "bad.txt", "body": {"data": "a"}},
+    {"mimeType": "text/html", "headers": [{"name": "Content-Disposition", "value": "attachment"}],
+     "body": {"data": "a"}},
+    {"mimeType": "multipart/mixed", "filename": "bad.mime", "parts": [
+        {"mimeType": "text/plain", "body": {"data": "a"}}]},
+])
+def test_attachments_are_excluded_before_charset_or_body_decoding(file_part):
+    part = encoded_part("text/html", "<p>Café — £20</p>", "windows-1252")
+    assert parse_gmail_message(gmail_message([part, file_part])).body == "Café — £20"
+
+
+@pytest.mark.parametrize("charset", ["utf-8", "iso-8859-1"])
+def test_bad_base64_does_not_become_a_charset_fallback(charset):
+    import binascii
+
+    part = encoded_part("text/plain", "x", charset)
+    part["body"]["data"] = "a"
+    with pytest.raises(binascii.Error):
+        parse_gmail_message(gmail_message([part]))
+
+
+def test_readonly_gmail_source_mailbox_and_serialization_keep_decoded_body(tmp_path, monkeypatch):
+    from refund_eval.world.state import Email
+
+    message = gmail_message([encoded_part("text/plain", "Café — refund £20", "windows-1252")])
+    message["internalDate"] = str(int(SCENARIO.start_time.timestamp() * 1000) - 1000)
+    original = copy.deepcopy(message)
+    calls = []
+
+    class Transport:
+        def users(self):
+            return self
+
+        def messages(self):
+            return self
+
+        def list(self, **kwargs):
+            calls.append(("list", kwargs))
+            return type("Result", (), {"execute": lambda self: {"messages": [{"id": MESSAGE_ID}]}})()
+
+        def get(self, **kwargs):
+            calls.append(("get", kwargs))
+            return type("Result", (), {"execute": lambda self: copy.deepcopy(message)})()
+
+    source = GmailMailSource(tmp_path / "absent-client.json", tmp_path / "absent-token.json")
+    source._service = Transport()
+    monkeypatch.setattr(source, "_credentials", lambda: pytest.fail("No Gmail credentials may be loaded"))
+    mailbox = Mailbox(source, SCENARIO)
+    world = World(start_time=SCENARIO.start_time, now=SCENARIO.start_time)
+    found = mailbox.search(world, "", limit=20)
+    assert len(found) == 1 and found[0].body == "Café — refund £20"
+    assert mailbox.get(world, MESSAGE_ID) == found[0]
+    assert Email.model_validate_json(found[0].model_dump_json()) == found[0]
+    assert {name for name, _ in calls} == {"list", "get"}
+    assert all(kw["format"] == "full" for name, kw in calls if name == "get")
+    assert message == original

@@ -25,7 +25,7 @@ from datetime import datetime, time, timedelta
 from typing import Literal
 
 from refund_eval.world.state import Email, World
-from refund_eval.world.timeutil import LONDON
+from refund_eval.world.timeutil import LONDON, as_utc
 from refund_eval.world.timeutil import as_aware as aware
 from refund_eval.world.timeutil import to_london as london
 
@@ -72,13 +72,13 @@ def next_event(world: World, hours: tuple[int, ...] = CHECKIN_HOURS) -> tuple[da
         return now, "new_mail"
     events: list[tuple[datetime, WakeupKind]] = []
     if world.pending:
-        earliest = min(aware(p.due_at) for p in world.pending)
-        events.append((max(earliest, now), "new_mail"))
+        earliest = min((aware(p.due_at) for p in world.pending), key=as_utc)
+        events.append((max(earliest, now, key=as_utc), "new_mail"))
     if world.requested_wakeup is not None:
-        events.append((max(aware(world.requested_wakeup), now), "requested"))
+        events.append((max(aware(world.requested_wakeup), now, key=as_utc), "requested"))
     if not events:
         return next_checkin(now, hours), "scheduled_checkin"
-    return min(events, key=lambda event: event[0])
+    return min(events, key=lambda event: as_utc(event[0]))
 
 
 def sim_deadline(world: World, sim_weeks: float) -> datetime:
@@ -97,12 +97,12 @@ def new_mail_count(
 
 def new_mail_ids(world: World, since: datetime, until: datetime, arrived: Iterable[Email]) -> set[str]:
     """IDs underlying a notice, without counting the same arrival twice."""
-    lo, hi = aware(since), aware(until)
+    lo, hi = as_utc(since), as_utc(until)
     ids = {e.id for e in arrived}
     ids.update(
         e.id
         for e in world.overlay_inbox
-        if e.source in {"counterparty", "real"} and lo < aware(e.sent_at) <= hi
+        if e.source in {"counterparty", "real"} and lo < as_utc(e.sent_at) <= hi
     )
     return ids
 
@@ -114,15 +114,15 @@ def unannounced_mail_ids(world: World) -> set[str]:
     also distinguishes a new arrival at the exact time of the previous notice.
     """
     previous = world.wakeups[-1] if world.wakeups else None
-    since = aware(previous.time if previous else world.start_time)
-    until = aware(world.now)
+    since = as_utc(previous.time if previous else world.start_time)
+    until = as_utc(world.now)
     announced = set(previous.announced_mail_ids or []) if previous else set()
     inclusive = previous is not None and previous.announced_mail_ids is not None
     return {
         email.id for email in world.overlay_inbox
         if email.source in {"counterparty", "real"}
-        and (since <= aware(email.sent_at) if inclusive else since < aware(email.sent_at))
-        and aware(email.sent_at) <= until and email.id not in announced
+        and (since <= as_utc(email.sent_at) if inclusive else since < as_utc(email.sent_at))
+        and as_utc(email.sent_at) <= until and email.id not in announced
     }
 
 

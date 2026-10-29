@@ -19,6 +19,8 @@ import json
 import re
 import socket
 from collections.abc import Callable
+from email.parser import Parser
+from email.policy import default as email_policy
 from typing import Literal
 from urllib.parse import (
     parse_qsl,
@@ -245,7 +247,8 @@ def _collect(pairs) -> dict:
 def form_fields(request: dict, text: str) -> dict:
     """The submitted fields: a URL-encoded or multipart form body, a JSON object
     (flattened to one level), or the query of a GET submission."""
-    content_type = str(request.get("headers", {}).get("content-type", "")).split(";")[0].strip().lower()
+    raw_content_type = str(request.get("headers", {}).get("content-type", ""))
+    content_type = raw_content_type.split(";")[0].strip().lower()
     if text.strip():
         if content_type == "application/json" or text.lstrip()[:1] == "{":
             try:
@@ -256,7 +259,17 @@ def form_fields(request: dict, text: str) -> dict:
                 return {str(key): value if isinstance(value, (str, int, float, bool)) or value is None
                         else json.dumps(value) for key, value in data.items()}
         if content_type == "multipart/form-data":
-            parts = re.findall(r'name="([^"]*)"[^\r\n]*\r?\n\r?\n(.*?)\r?\n--', text, re.DOTALL)
+            # Only the declared MIME boundary ends a value. A signature line
+            # beginning with "--" is ordinary text, not a form delimiter.
+            message = Parser(policy=email_policy).parsestr(f"Content-Type: {raw_content_type}\r\n\r\n{text}")
+            parts = []
+            if message.is_multipart():
+                for part in message.iter_parts():
+                    name = part.get_param("name", header="content-disposition")
+                    value = part.get_payload()
+                    if (part.get_content_disposition() == "form-data"
+                            and isinstance(name, str) and isinstance(value, str)):
+                        parts.append((name, value))
             if parts:
                 return _collect(parts)
         return _collect(parse_qsl(text, keep_blank_values=True))

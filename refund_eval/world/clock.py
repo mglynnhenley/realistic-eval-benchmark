@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timedelta
 
 from refund_eval.world.state import Email, World
-from refund_eval.world.timeutil import as_aware
+from refund_eval.world.timeutil import as_aware, as_utc
 
 # Base cost of an action in minutes; published calls cost one minute unless overridden here.
 TOOL_COST_MINUTES: dict[str, int] = {"send_message": 2, "reply": 2}
@@ -35,20 +35,20 @@ def advance(world: World, to: datetime) -> list[Email]:
     in due order. Returns the emails that arrived. Mutates `world`; the caller is
     responsible for saving it (use inside `world_tx()`).
     """
-    if as_aware(to) > as_aware(world.now):
+    if as_utc(to) > as_utc(world.now):
         world.now = to
-    now = as_aware(world.now)
+    now = as_utc(world.now)
 
-    due = [p for p in world.pending if as_aware(p.due_at) <= now]
+    due = [p for p in world.pending if as_utc(p.due_at) <= now]
     if not due:
         return []
-    world.pending = [p for p in world.pending if as_aware(p.due_at) > now]
+    world.pending = [p for p in world.pending if as_utc(p.due_at) > now]
 
     arrived: list[Email] = []
-    for p in sorted(due, key=lambda p: as_aware(p.due_at)):
+    for p in sorted(due, key=lambda p: as_utc(p.due_at)):
         email = p.email
         # An email is visible once its sent_at has passed; keep it consistent with due_at.
-        if as_aware(email.sent_at) > now:
+        if as_utc(email.sent_at) > now:
             email = email.model_copy(update={"sent_at": p.due_at})
         world.overlay_inbox.append(email)
         case = world.cases.get(email.org) if email.org else None
@@ -71,9 +71,14 @@ def charge(world: World, tool_name: str, *, written: str = "", read: str = "", b
     (unless base=False), writing `written` and reading `read`. An optional session
     boundary limits clock movement and delivery; the caller enforces the stop."""
     minutes = (TOOL_COST_MINUTES.get(tool_name, 1) if base else 0) + words(written) / WRITE_WPM + words(read) / READ_WPM
-    to = world.now + timedelta(minutes=minutes)
+    # Tool durations are elapsed minutes; London wall-clock arithmetic can
+    # skip/repeat an hour and even reset fold=1 to the earlier instant.
+    to = as_utc(world.now) + timedelta(minutes=minutes)
     if until is not None:
-        to = min(as_aware(to), as_aware(until))
+        to = min(to, as_utc(until))
+    to = to.astimezone(as_aware(world.now).tzinfo)
+    if world.now.tzinfo is None:
+        to = to.replace(tzinfo=None)
     return advance(world, to)
 
 
@@ -81,16 +86,16 @@ def next_due(world: World) -> datetime | None:
     """When the next pending email is due, if any."""
     if not world.pending:
         return None
-    return min((p.due_at for p in world.pending), key=as_aware)
+    return min((p.due_at for p in world.pending), key=as_utc)
 
 
 def arrived_since(world: World, since: datetime) -> list[Email]:
     """Counterparty mail that became visible after `since` (up to world.now).
 
     Useful for wake-up text, since mail can also arrive during tool calls."""
-    lo, hi = as_aware(since), as_aware(world.now)
+    lo, hi = as_utc(since), as_utc(world.now)
     return [
         e
         for e in world.overlay_inbox
-        if e.source == "counterparty" and lo < as_aware(e.sent_at) <= hi
+        if e.source == "counterparty" and lo < as_utc(e.sent_at) <= hi
     ]

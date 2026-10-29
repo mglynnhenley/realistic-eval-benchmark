@@ -720,3 +720,115 @@ async def test_script_sent_form_input_is_simulated_like_a_form(ctx, monkeypatch,
     assert simulated[0].channel == "form" and simulated[0].org == "trainline"
     assert [x.channel for x in load_world().interceptions] == ["form"]
     assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "background_form"
+
+
+def multipart_body(pairs, boundary="CaseSensitiveFormBoundary37", part_headers=""):
+    return "".join(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n'
+        f"{part_headers}\r\n{value}\r\n" for key, value in pairs
+    ) + f"--{boundary}--\r\n"
+
+
+@pytest.mark.parametrize("value", [
+    "Please review.\r\n-- \r\nPat Example\r\nFurther important text.",
+    "Before\r\n--not-the-boundary\r\nAfter",
+    "Before\r\n--CaseSensitiveFormBoundary37suffix\r\nAfter",
+    "Before\r\n--casesensitiveformboundary37\r\nAfter",
+    "First line\r\nSecond line\r\n",
+    "",
+    "Merci, café £25 — détails\r\n-- \r\nÉlodie",
+])
+@pytest.mark.parametrize("content_type", [
+    "multipart/form-data; boundary=CaseSensitiveFormBoundary37",
+    'Multipart/Form-Data; boundary="CaseSensitiveFormBoundary37"',
+])
+def test_multipart_preserves_complete_text_at_declared_boundary(value, content_type):
+    from refund_eval.published.network import form_fields
+
+    body = multipart_body([("message", value), ("subject", "Refund enquiry")])
+    request = {"headers": {"content-type": content_type}}
+    assert form_fields(request, body) == {"message": value, "subject": "Refund enquiry"}
+
+
+def test_multipart_retains_repeated_field_order_blank_and_text_part_headers():
+    from refund_eval.published.network import form_fields
+
+    pairs = [("message", "First\r\n-- \r\nSignature"), ("empty", ""),
+             ("message", "Second\r\n--another-line\r\nClarification"), ("last", "End")]
+    request = {"headers": {"content-type": 'multipart/form-data; boundary="MixedBoundary+_37"'}}
+    body = multipart_body(pairs, boundary="MixedBoundary+_37", part_headers="Content-Type: text/plain; charset=UTF-8\r\n")
+    fields = form_fields(request, body)
+    assert list(fields) == ["message", "empty", "last"]
+    assert fields == {"message": [pairs[0][1], pairs[2][1]], "empty": "", "last": "End"}
+
+
+@pytest.mark.parametrize("request_data,text,expected", [
+    ({"headers": {"content-type": "application/json"}}, '{"message":"a","items":[1,2],"ok":true}',
+     {"message": "a", "items": "[1, 2]", "ok": True}),
+    ({"headers": {"content-type": "application/x-www-form-urlencoded"}}, "message=hello+world&message=second&empty=",
+     {"message": ["hello world", "second"], "empty": ""}),
+    ({"url": "https://example.org/contact?message=a&message=b&empty="}, "",
+     {"message": ["a", "b"], "empty": ""}),
+    ({"headers": {"content-type": "multipart/form-data"}}, "message=legacy+fallback",
+     {"message": "legacy fallback"}),
+    ({"headers": {"content-type": "multipart/form-data; boundary=missing"}}, "message=legacy+fallback",
+     {"message": "legacy fallback"}),
+])
+def test_form_parser_keeps_other_formats_and_unparsed_multipart_fallback(request_data, text, expected):
+    from refund_eval.published.network import form_fields
+
+    assert form_fields(request_data, text) == expected
+
+
+@pytest.mark.parametrize("navigation", [True, False])
+async def test_multipart_complete_fields_reach_simulator_and_raw_request_stays_exact(ctx, monkeypatch, navigation):
+    async def forbidden(request):
+        pytest.fail("A form write reached the network")
+
+    observed = []
+
+    async def dispatch(inbound):
+        observed.append(inbound)
+        return SimResult(immediate_text="We received your enquiry.", kind="page")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    value = "Please reconsider the evidence.\r\n-- \r\nPat Example\r\nAn important qualification."
+    pairs = [("subject", "Enquiry"), ("message", value), ("message", "Second clarification.")]
+    body = multipart_body(pairs)
+    request = req("https://www.thetrainline.com/contact", "POST", body, navigation=navigation)
+    request["headers"]["content-type"] = "multipart/form-data; boundary=CaseSensitiveFormBoundary37"
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=forbidden)
+    result = await boundary(request)
+    assert result["status"] == 200
+    [inbound] = observed
+    assert inbound.fields == {"subject": "Enquiry", "message": [value, "Second clarification."]}
+    assert inbound.body == f"subject: Enquiry\nmessage: {value}, Second clarification."
+    [saved] = load_world().interceptions
+    assert saved.payload["body_base64"] == request["body_base64"]
+    assert saved.payload["headers"] == request["headers"]
+    assert saved.payload["tool_call_id"] == "call1"
+    assert saved.channel == "form" and saved.org == "trainline"
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "simulated"
+    if not navigation:
+        assert decision["policy_reason"] == "background_form"
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\n"])
+def test_multipart_retains_whitespace_and_does_not_decode_transfer_payload(newline):
+    from refund_eval.published.network import form_fields
+
+    value = " \t\r\n  "
+    pairs = [("", value), ("message", "SGVsbG8=")]
+    body = multipart_body(pairs, part_headers="Content-Transfer-Encoding: base64\r\n").replace("\r\n", newline)
+    result = form_fields({"headers": {"content-type": "multipart/form-data; boundary=CaseSensitiveFormBoundary37"}}, body)
+    assert result == {"": value.replace("\r\n", newline), "message": "SGVsbG8="}
+
+
+def test_multipart_wrong_boundary_never_guesses_named_parts():
+    from refund_eval.published.network import form_fields
+
+    body = multipart_body([("message", "An enquiry.")])
+    result = form_fields({"headers": {"content-type": "multipart/form-data; boundary=DifferentBoundary"}}, body)
+    assert result == dict(parse_qsl(body, keep_blank_values=True))
+    assert "message" not in result

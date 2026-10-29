@@ -28,8 +28,8 @@ from refund_eval.world.state import WORLD_KEY
 
 AUDIT_KEY = "published_tool_audit"
 PUBLIC_SEARCH_PROVENANCE = (
-    "Public search provenance (separate from source content): Dates and contact details "
-    "are claims made by the listed sources. These results are not verified historical "
+    "Source note: Dates and contact details are source claims. "
+    "These results are not verified historical "
     "snapshots for the date relevant to your query. Search ranking does not verify "
     "organisation affiliation or ownership of a listed domain, email address or phone number."
 )

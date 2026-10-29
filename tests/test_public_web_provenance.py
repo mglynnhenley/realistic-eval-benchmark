@@ -183,15 +183,21 @@ async def test_live_search_adds_separate_provenance_without_rewriting_or_authent
     assert content[0].text == source_text
     assert json.loads(content[1].text) == native["structuredContent"]
     assert content[2].text == PUBLIC_SEARCH_PROVENANCE
-    assert native == original and service.arguments == [args]
+    repeated = await tool.tool(**args)
+    assert [item.text for item in repeated] == [item.text for item in content]
+    assert native == original and service.arguments == [args, args]
     result_event = next(e for e in store().get(AUDIT_KEY) if e["event"] == "result")
     assert result_event["result"] == original
     catalog = next(e for e in store().get(AUDIT_KEY) if e["event"] == "catalog")
     assert catalog["catalog"] == PINNED_EXA_SEARCH_CATALOG
     descriptor = PINNED_EXA_SEARCH_CATALOG["tools"][0]
     assert tool.name == descriptor["name"] and tool.description == descriptor["description"]
+    assert "Dates and contact details are source claims" in content[2].text
     assert "not verified historical" in content[2].text
     assert "does not verify organisation affiliation" in content[2].text
+    assert "ownership of a listed domain, email address or phone number" in content[2].text
+    notices = [e for e in store().get(AUDIT_KEY) if e["event"] == "search_provenance"]
+    assert len(notices) == 2 and all(e["notice"] == content[2].text for e in notices)
 
 
 @pytest.mark.parametrize(("source", "live_web"), [("exa", False), ("gmail", True), ("playwright", True)])

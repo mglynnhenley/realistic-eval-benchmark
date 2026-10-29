@@ -147,3 +147,179 @@ def test_delayed_reply_followup_keeps_receipt_anchor_and_absolute_body(case, mon
     assert prepared.action.body == body
     assert world.follow_ups[0].due_at == prepared.effective_at + timedelta(hours=48)
     assert world.follow_ups[0].promised_at == prepared.effective_at
+
+
+@pytest.mark.parametrize("channel", ["email", "form", "phone", "chat"])
+async def test_received_fields_respect_email_envelope_privacy(case, monkeypatch, channel):
+    import copy
+    import json
+    from types import SimpleNamespace
+
+    scenario, world = case
+    org = scenario.org("trainline")
+    blind = "blind-envelope-only@example.test"
+    quoted = "customer-disclosed@example.test"
+    fields = {
+        "from": "sender@example.test", "to": ["visible-to@example.test"],
+        "cc": ["visible-cc@example.test"], "bcc": [blind],
+        "message_id": "mail-id", "thread_id": "thread-id",
+        "recipients": ["visible-to@example.test", blind],
+        "native_gmail_attempt": True,
+        "native_arguments": {"bcc": [blind], "htmlBody": "<p>Visible content</p>",
+                             "attachments": [{"filename": "letter.txt", "content": "Enclosed letter"}]},
+    }
+    body = f"Please review my request. Quoted Bcc: {quoted}."
+    inbound = Inbound(channel=channel, tool="submit", target="visible-to@example.test", org=org.key,
+                      subject="Review request", body=body, fields=fields, interception_id="synthetic-copy")
+    before = copy.deepcopy(inbound.model_dump())
+    received = []
+    action = CompanyAction(decision="silent", reply=False, body="", reply_after_hours=0)
+
+    async def receive(scenario, world, org, event, **kwargs):
+        received.append(event)
+        return SimpleNamespace(action=action, emails=[])
+
+    monkeypatch.setattr(open_world, "process_company_event", receive)
+    await open_world.handle_open(scenario, world, inbound, org, thread_id="thread-id", thread_subject="Review")
+    open_world.apply_open(world, org, action, inbound=inbound, effective_at=world.now,
+                          emails=[], case_ref=None, customer_contact=True)
+    context = open_world.company_context(scenario, world, org, None, [])
+    event_text, history = received[0].incoming, "\n".join(context.history)
+    assert body in event_text and body in history
+    for value in ["sender@example.test", "visible-to@example.test", "visible-cc@example.test",
+                  "mail-id", "thread-id", "letter.txt", "Enclosed letter", "<p>Visible content</p>"]:
+        assert value in event_text and value in history
+    if channel == "email":
+        assert blind not in event_text and blind not in history
+        assert "native_arguments" not in event_text and "native_gmail_attempt" not in event_text
+    else:
+        assert json.dumps(fields, ensure_ascii=False) in event_text
+        assert json.dumps(fields, ensure_ascii=False) in history
+    assert inbound.model_dump() == before
+
+
+async def test_local_mail_bcc_delivery_and_raw_audit_survive_recipient_projection(monkeypatch):
+    import copy
+
+    from fixtures.simulator import MockSim, install_mock_models
+
+    from refund_eval.sim.mail import send_message
+    from refund_eval.world.interception import ToolContext
+    from refund_eval.world.mail import FixtureMailSource, Mailbox
+
+    mock = MockSim()
+    install_mock_models(mock)
+    start_sample("train_refund", seed_mail=False)
+    scenario = load_scenario("train_refund")
+    mailbox = Mailbox(FixtureMailSource(), scenario)
+    ctx = ToolContext(scenario, mailbox)
+    monkeypatch.setattr(open_world.random, "triangular", lambda low, *_: low)
+    hidden = "info@railombudsman.org"
+    args = {"to": ["customer.resolutions@avantiwestcoast.co.uk"], "cc": [], "bcc": [hidden],
+            "subject": "Review request", "body": "Please review the decision."}
+    result = await send_message(ctx, tool_name="send_message", **args,
+                                extra={"native_arguments": copy.deepcopy(args)}, charge_clock=False)
+    assert result == "Email sent."
+    world = load_world()
+    assert {item.org for item in world.interactions} == {"avanti", "rail_ombudsman"}
+    sender_audit = copy.deepcopy([item.model_dump() for item in world.interceptions])
+    assert len(sender_audit) == 2
+    assert all(item["payload"]["bcc"] == [hidden] for item in sender_audit)
+    assert all(item["payload"]["native_arguments"] == args for item in sender_audit)
+    visible = next(item for item in world.interactions if item.org == "avanti")
+    assert hidden not in visible.event.incoming
+    assert hidden not in "\n".join(world.cases["avanti"].history)
+    # A later contact must not reintroduce the sender's envelope via own history.
+    await send_message(ctx, tool_name="send_message", **{**args, "bcc": [], "body": "Any update?"},
+                       charge_clock=False)
+    world = load_world()
+    later = [item for item in world.interactions if item.org == "avanti"][-1]
+    assert hidden not in "\n".join(later.context.history)
+    assert [item.model_dump() for item in world.interceptions[:2]] == sender_audit
+
+
+@pytest.mark.parametrize("kind,address,contacts,seed_sender,expected", [
+    ("bank", "noreply@bank.example", [], False, True),
+    ("bank", "statements@bank.example", [], True, True),
+    ("bank", "noreply@bank.example", ["NOREPLY@BANK.EXAMPLE"], False, False),
+    ("bank", "support@bank.example", [], False, False),
+    ("dynamic_other", "noreply@bank.example", ["noreply@bank.example"], False, True),
+    ("dynamic_other", "support@bank.example", ["support@bank.example"], False, False),
+    ("dynamic_other", "statements@bank.example", [], True, True),
+])
+def test_sender_availability_projects_existing_routing_without_mutation(
+    case, monkeypatch, kind, address, contacts, seed_sender, expected,
+):
+    from refund_eval.sim.router import _unmonitored
+
+    scenario, world = case
+    org = scenario.org("nationwide").model_copy(update={
+        "kind": kind, "contact_emails": contacts, "persona": f"Reply-from: Bank <{address}>"})
+    seeds = [scenario.seed_emails[0].model_copy(update={"sender": f"Bank <{address}>"})] if seed_sender else []
+    scenario = scenario.model_copy(update={"seed_emails": seeds})
+    before_world, before_org = world.model_dump(mode="json"), org.model_dump(mode="json")
+    before_scenario = scenario.model_dump(mode="json")
+    monkeypatch.setattr(open_world, "research", lambda *a, **k: pytest.fail("No research"))
+    monkeypatch.setattr(open_world, "company_rules", lambda *a, **k: pytest.fail("No rule generation"))
+    context = open_world.company_context(scenario, world, org, None, [])
+    assert context.configured_reply_unmonitored is expected
+    assert _unmonitored(address, org, scenario) is expected
+    assert world.model_dump(mode="json") == before_world
+    assert org.model_dump(mode="json") == before_org
+    assert scenario.model_dump(mode="json") == before_scenario
+    assert not store().get(open_world.COMPANIES_KEY)
+
+
+@pytest.mark.parametrize("mode", ["email", "form"])
+def test_bank_unmonitored_guidance_is_same_sender_and_substantive_only(case, mode):
+    scenario, world = case
+    context = open_world.company_context(scenario, world, scenario.org("nationwide"), None, [], mode=mode)
+    assert context.configured_reply_unmonitored is True
+    event = CompanyEvent(incoming="Please explain the next step.", mode=mode)
+    system, user = build_messages(event, context)
+    assert "REPLY DESTINATION CLARITY" in system.text
+    assert "from that same configured address" in system.text
+    assert "do not apply it to a different chosen or previous sender" in system.text
+    assert "existing supported secure or contact next steps" in system.text
+    assert "does not make a substantive reply an automatic receipt" in system.text
+    assert "no extra boilerplate on immediate form pages or automatic receipts" in system.text
+    assert context.configured_reply_from in system.text
+    assert context.org.terms in system.text and ACTION_SHAPE in user.text
+    assert not world.pending and not world.outcome.transfers and not world.outcome.offers
+
+
+@pytest.mark.parametrize("availability", [False, None])
+def test_unclassified_or_monitored_sender_leaves_original_prompt_exact(case, availability):
+    scenario, world = case
+    context = open_world.company_context(scenario, world, scenario.org("nationwide"), None, [])
+    event = CompanyEvent(incoming="Please review.")
+    baseline = context.model_copy(update={"configured_reply_unmonitored": None})
+    changed = context.model_copy(update={"configured_reply_unmonitored": availability})
+    assert [m.text for m in build_messages(event, changed)] == [m.text for m in build_messages(event, baseline)]
+    assert "REPLY DESTINATION CLARITY" not in build_messages(event, changed)[0].text
+
+
+@pytest.mark.parametrize("kind,mode", [
+    ("bank", "phone"), ("bank", "chat"),
+    ("dynamic_personal", "email"), ("dynamic_personal", "form"),
+])
+def test_personal_and_live_channels_do_not_classify_or_render_sender_availability(case, kind, mode):
+    scenario, world = case
+    org = scenario.org("nationwide").model_copy(update={"kind": kind})
+    context = open_world.company_context(scenario, world, org, None, [], mode=mode)
+    assert context.configured_reply_unmonitored is None
+    # Even supplied email-only guidance must not leak into personal/live channels.
+    context = context.model_copy(update={"configured_reply_unmonitored": True})
+    event = CompanyEvent(incoming="Please review.", mode=mode)
+    assert "REPLY DESTINATION CLARITY" not in build_messages(event, context)[0].text
+
+
+@pytest.mark.parametrize("sender", ["", "not-an-email", "No Reply <invalid>"])
+def test_missing_or_invalid_configured_sender_is_unclassified(case, monkeypatch, sender):
+    from refund_eval.sim import router
+
+    scenario, world = case
+    monkeypatch.setattr(open_world, "_correspondence_senders", lambda *args: (sender, []))
+    monkeypatch.setattr(router, "_unmonitored", lambda *args: pytest.fail("No valid sender to classify"))
+    context = open_world.company_context(scenario, world, scenario.org("nationwide"), None, [])
+    assert context.configured_reply_unmonitored is None

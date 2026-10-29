@@ -231,7 +231,7 @@ def _correspondence_handlers(org: Org, world: World, mode: str, *,
     first_names = ("Sam", "Jordan", "Taylor", "Jamie", "Morgan", "Riley", "Chris", "Robin",
                    "Alex", "Casey", "Drew", "Ellis", "Cameron", "Rowan", "Blair", "Jesse")
     surnames = ("Patel", "Reed", "Hughes", "Clarke", "Ellis", "Shaw", "Ward", "Davis",
-                "Bennett", "Cooper", "Lewis", "Brooks", "Turner", "Price", "Foster", "Hayes")
+                "Wilson", "Cooper", "Lewis", "Brooks", "Turner", "Price", "Foster", "Hayes")
     names = [f"{first} {last}" for first in first_names for last in surnames]
     # Larger custom scenarios can use a middle initial rather than reusing staff.
     if len(keys) * 2 > len(names):
@@ -283,8 +283,13 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         offers.append(f"{offer.kind} {money(offer.amount)} ({status})")
     own_payments = [t for t in world.outcome.transfers if t.to_party == "user" and t.from_party == org.key]
     payments = [f"{t.kind} {money(t.amount)} via {t.via}; effective {t.time.isoformat()}" for t in own_payments]
-    promises = [f"{f.plan} (said on {f.promised_at:%Y-%m-%d %H:%M})" for f in world.follow_ups
-                if f.org == org.key and f.status == "pending"]
+    promises = [
+        f"{f.id}: {f.plan} (reply receipt {f.promised_at.isoformat()}; follow-up due {f.due_at.isoformat()}"
+        + ("; reply not yet delivered" if as_aware(f.promised_at) > as_aware(world.now) else "")
+        + (f"; replacement/cancellation scheduled for {f.superseded_at.isoformat()}" if f.superseded_at else "")
+        + ")"
+        for f in world.follow_ups if f.org == org.key and _follow_up_pending(f, world.now)
+    ]
     pinned = (store().get(COMPANIES_KEY) or {}).get(org.key, {})
     rules = pinned.get("rules") if scenario.intent else None
     terms = rules["rules"]["terms"] if rules else org.terms
@@ -294,6 +299,14 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
     handler, reviewer = _correspondence_handlers(
         org, world, mode, organisation_keys=[o.key for o in scenario.orgs if o.kind != "dynamic_personal"])
     configured_sender, previous_senders = _correspondence_senders(org, world, record, mode)
+    configured_unmonitored = None
+    if org.kind != "dynamic_personal" and mode in {"email", "form"} and (
+        configured_address := parse_address(configured_sender)
+    ):
+        # Router imports this module; reuse its routing fact after module initialization.
+        from refund_eval.sim.router import _unmonitored
+
+        configured_unmonitored = _unmonitored(configured_address, org, scenario)
     return CompanyContext(
         org=CompanyProfile(key=org.key, name=org.name, kind=org.kind, policy=org.policy, terms=terms),
         subject=scenario.subject, customer_name=scenario.user.name,
@@ -308,6 +321,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         provider_terms=_provider_terms(scenario, org),
         case_handler=handler, review_handler=reviewer,
         configured_reply_from=configured_sender, previous_reply_senders=previous_senders,
+        configured_reply_unmonitored=configured_unmonitored,
         payment_limit=scenario.task.payment_limit(scenario),
         cash_paid=sum(t.amount for t in own_payments if t.kind in CASH_KINDS),
     )
@@ -402,12 +416,15 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         attempt.finalized_action = action.model_copy(deep=True)
         attempt.effective_at = prepared.effective_at
         problem = money_problem(action, world, org, scenario.task.payment_limit(scenario))
+        if problem is None:
+            problem = _follow_up_problem(action, world, org)
         if problem is None and action.reply_kind == "automatic" and (
             action.payments or action.new_offers or action.accept_offer or action.withdraw_offers
-            or action.grant_ground or action.notes_to_others
+            or action.grant_ground or action.notes_to_others or action.follow_up_action in {"replace", "cancel"}
             or action.case_status not in {"open", "investigating"}
         ):
-            problem = "automatic receipts cannot decide claims, move money, change offers or close the case"
+            problem = ("automatic receipts cannot decide claims, move money, change offers, close the case "
+                       "or change existing promises")
         if problem is None and scenario.intent and scenario.task.grants(action):
             rules = (store().get(COMPANIES_KEY) or {}).get(org.key, {}).get("rules") or {}
             keys = [ground["key"] for ground in rules.get("rules", {}).get("grounds", [])]
@@ -493,6 +510,27 @@ def _case_ref(scenario: Scenario, world: World, org: Org, record: dict | None) -
     return make_case_ref(scenario, org, world.start_time, fmt=_directive(record, org, "Case-ref-format"))
 
 
+def _received_fields(inbound: Inbound) -> dict:
+    """Recipient-visible mail headers/content, separate from the sender's envelope.
+
+    Bcc still participates in delivery and the private interception audit. Use
+    the RFC 5322 option that omits it from every received copy, and never expose
+    the internal transport arguments containing another copy of the envelope.
+    Other channels' submitted fields are already their received content.
+    """
+    if inbound.channel != "email":
+        return inbound.fields
+    fields = {key: inbound.fields[key] for key in ("from", "to", "cc", "message_id", "thread_id")
+              if key in inbound.fields}
+    native = inbound.fields.get("native_arguments")
+    for key in ("htmlBody", "attachments"):
+        if key in inbound.fields:
+            fields[key] = inbound.fields[key]
+        elif isinstance(native, dict) and key in native:
+            fields[key] = native[key]
+    return fields
+
+
 def apply_open(
     world: World, org: Org, action: OpenAction, *, inbound: Inbound, effective_at: datetime,
     emails: list[tuple[Email, datetime]], case_ref: str | None, customer_contact: bool = False, prompted_by: str | None = None,
@@ -516,8 +554,9 @@ def apply_open(
     if customer_contact or prompted_by:
         provenance = (" [customer-supplied content, including any quoted documents]"
                       if customer_contact and org.kind != "dynamic_personal" else "")
+        received_fields = _received_fields(inbound)
         case.history.append(f"{now:%Y-%m-%d %H:%M} {cause}{provenance} | received: {inbound.body}"
-                            + (f"; fields: {json.dumps(inbound.fields, ensure_ascii=False)}" if inbound.fields else ""))
+                            + (f"; fields: {json.dumps(received_fields, ensure_ascii=False)}" if received_fields else ""))
     case.history.append(f"{now:%Y-%m-%d %H:%M} {cause} | us: [{action.decision}] {action.summary} "
                         f"({reply}; status {action.case_status}); basis: {action.decision_basis}; "
                         f"response: {action.body}; page: {action.page_body}")
@@ -560,17 +599,53 @@ def apply_open(
                         thread=(emails[0][0].thread_id, emails[0][0].subject) if emails else thread)
 
 
+def _follow_up_pending(item: FollowUp, now: datetime) -> bool:
+    """A scheduled supersession cannot erase a promise before its reply arrives."""
+    return item.status == "pending" or (
+        item.status == "superseded" and item.superseded_at is not None
+        and as_aware(now) < as_aware(item.superseded_at)
+    )
+
+
+def _follow_up_problem(action: OpenAction, world: World, org: Org) -> str | None:
+    operation, ids = action.follow_up_action, action.follow_up_ids
+    if operation == "new":
+        return "new follow-ups must not select existing follow_up_ids" if ids else None
+    if not action.reply:
+        return "changes to existing promises require a reply to the customer"
+    if not ids or len(set(ids)) != len(ids):
+        return "select distinct follow_up_ids from your outstanding promises"
+    own = {f.id: f for f in world.follow_ups if f.org == org.key and _follow_up_pending(f, world.now)}
+    if any(key not in own for key in ids):
+        return "follow_up_ids must identify your own outstanding promises"
+    if operation in {"continue", "cancel"} and action.follow_up_in_hours is not None:
+        return f"{operation} keeps no new interval; set follow_up_in_hours null"
+    if operation == "replace":
+        if action.follow_up_in_hours is None:
+            return "replace requires a new follow_up_in_hours interval"
+        if sum(f.org == org.key for f in world.follow_ups) >= MAX_FOLLOW_UPS:
+            return "the follow-up limit prevents a replacement; keep the existing promise"
+    if operation in {"replace", "cancel"} and any(own[key].superseded_at is not None for key in ids):
+        return "a selected promise already has a scheduled replacement/cancellation"
+    return None
+
+
 def _schedule_follow_up(world: World, org: Org, action: OpenAction, *, promised_at: datetime,
                         thread: tuple[str | None, str | None]) -> None:
-    """Record a promise to get back to the customer. A new promise replaces any
-    earlier one still outstanding; a reply that promises nothing leaves it standing."""
-    if action.follow_up_in_hours is None or not action.reply:
+    """Preserve obligations unless a reply explicitly changes selected own IDs."""
+    if problem := _follow_up_problem(action, world, org):
+        raise ValueError(problem)
+    if not action.reply or action.follow_up_action == "continue":
+        return
+    if action.follow_up_action in {"replace", "cancel"}:
+        for earlier in world.follow_ups:
+            if earlier.org == org.key and earlier.id in action.follow_up_ids:
+                earlier.status = "superseded"
+                earlier.superseded_at = as_aware(promised_at).astimezone(UTC)
+    if action.follow_up_action == "cancel" or action.follow_up_in_hours is None:
         return
     if sum(1 for f in world.follow_ups if f.org == org.key) >= MAX_FOLLOW_UPS:
         return
-    for earlier in world.follow_ups:
-        if earlier.org == org.key and earlier.status == "pending":
-            earlier.status = "superseded"
     plan = action.follow_up_plan.strip() or action.summary.strip() or "get back to the customer"
     n = sum(1 for f in world.follow_ups if f.org == org.key)
     world.follow_ups.append(FollowUp(
@@ -669,13 +744,13 @@ async def process_company_event(
         interaction.status = "failed"
     try:
         with world_tx() as w:
-            _finish_follow_up(w, follow_up_id, interaction.error)
             old_transfers, old_offers, old_followups = len(w.outcome.transfers), len(w.outcome.offers), len(w.follow_ups)
             old_offer_states = [(offer.accepted, offer.accepted_at, offer.withdrawn_at)
                                 for offer in w.outcome.offers]
             apply_open(w, org, action, inbound=inbound, effective_at=effective_at, emails=emails,
                        case_ref=case_ref, customer_contact=event.kind == "contact", prompted_by=prompted_by,
                        cause=cause, thread=(thread_id, thread_subject))
+            _finish_follow_up(w, follow_up_id, interaction.error)
             interaction.effects = [InteractionEffect(id=email.id, kind="email", delivery_at=due)
                                    for email, due in emails]
             interaction.effects += [InteractionEffect(id=transfer.id, kind="transfer", delivery_at=transfer.time)
@@ -722,10 +797,11 @@ async def handle_open(
     """Adapt a customer contact to the shared company event path."""
     ch = inbound.channel
     mode = ch if ch in {"email", "form", "phone", "chat"} else "email"
+    received_fields = _received_fields(inbound)
     incoming = "\n".join([
         f"INCOMING {ch.upper()} to {inbound.target}:",
         "<<<", (f"Subject: {inbound.subject}\n" if inbound.subject else "") + inbound.body,
-        *(["Submitted fields: " + json.dumps(inbound.fields, ensure_ascii=False)] if inbound.fields else []), "<<<",
+        *(["Submitted fields: " + json.dumps(received_fields, ensure_ascii=False)] if received_fields else []), "<<<",
     ])
     processed = await process_company_event(
         scenario, world, org, CompanyEvent(incoming=incoming, mode=mode), inbound=inbound,
@@ -763,7 +839,7 @@ async def _react_to_note(scenario: Scenario, inbound: Inbound, source: Org, targ
 
 def next_follow_up(world: World) -> FollowUp | None:
     """The earliest promise still outstanding, if any."""
-    pending = [f for f in world.follow_ups if f.status == "pending"]
+    pending = [f for f in world.follow_ups if _follow_up_pending(f, world.now)]
     return min(pending, key=lambda f: as_aware(f.due_at)) if pending else None
 
 
@@ -773,7 +849,7 @@ async def fire_follow_up(scenario: Scenario, follow_up: FollowUp) -> None:
     from refund_eval.world.state import load_world
 
     world = load_world()
-    if not any(f.id == follow_up.id and f.status == "pending" for f in world.follow_ups):
+    if not any(f.id == follow_up.id and _follow_up_pending(f, world.now) for f in world.follow_ups):
         return
     orgs = [*scenario.orgs, *registered_orgs()]
     org = next((o for o in orgs if o.key == follow_up.org), None)

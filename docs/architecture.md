@@ -3,6 +3,12 @@
 The simulated Gmail view labels the account holder's outgoing mail as sent,
 historical seed inbox mail as read, and newly delivered counterparty mail as
 unread. Labels and local read/unread searches share the same classification.
+The content-only fixture and intercepted messages have no Spam or Draft status.
+Searches accept `in:spam` and `is:draft` with no local matches; negation and
+alternatives still apply normally. A custom label named `spam` or `draft` does
+not create either system status. A native backend's selected matches remain
+authoritative when merged with local mail; this does not add draft operations
+or change the native source's existing Spam/Trash fetch settings.
 Fixture policy pages display saved public quotations without the dossier's
 research summaries or analyst interpretations, grouped by their public source URL
 and page context. Repeated and contained quotations within a source are omitted.

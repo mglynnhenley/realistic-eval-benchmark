@@ -60,7 +60,8 @@ const browser = await chromium.launch({
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
   ],
 });
-const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+let context = null;
+let contextPromise = null;
 
 async function pausedRequest(session, event) {
   const request = event.request;
@@ -125,7 +126,7 @@ const attached = new WeakMap();
 function attachPage(page) {
   if (!attached.has(page)) {
     attached.set(page, (async () => {
-      const session = await context.newCDPSession(page);
+      const session = await page.context().newCDPSession(page);
       session.on('Fetch.requestPaused', event => { void pausedRequest(session, event); });
       await session.send('Network.enable');
       await session.send('Network.setCacheDisabled', { cacheDisabled: true });
@@ -134,13 +135,38 @@ function attachPage(page) {
   }
   return attached.get(page);
 }
-context.on('page', page => { void attachPage(page).catch(() => page.close().catch(() => {})); });
-const newPage = context.newPage.bind(context);
-context.newPage = async (...args) => {
-  const page = await newPage(...args);
-  await attachPage(page);
-  return page;
-};
+async function ensureContext() {
+  if (context) return context;
+  if (!contextPromise) {
+    contextPromise = (async () => {
+      const current = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false });
+      try {
+        current.on('page', page => { void attachPage(page).catch(() => page.close().catch(() => {})); });
+        const newPage = current.newPage.bind(current);
+        current.newPage = async (...args) => {
+          const page = await newPage(...args);
+          await attachPage(page);
+          return page;
+        };
+        await current.routeWebSocket('**/*', async (socket) => {
+          try {
+            await exchange({ url: socket.url(), method: 'WEBSOCKET', headers: {},
+              body_base64: '', resource_type: 'websocket', rejected: 'websocket_not_supported' });
+          } catch {}
+          socket.close({ code: 1008, reason: 'Connection unavailable' });
+        });
+        current.on('close', () => { if (context === current) context = null; });
+        context = current;
+        return current;
+      } catch (error) {
+        await current.close().catch(() => {});
+        throw error;
+      }
+    })().finally(() => { contextPromise = null; });
+  }
+  return contextPromise;
+}
+await ensureContext();
 
 if (process.env.REFUND_EVAL_BROWSER_PROBE) {
   // Realism probe: print what a page's scripts can read about this browser, then exit.
@@ -157,14 +183,6 @@ if (process.env.REFUND_EVAL_BROWSER_PROBE) {
   await browser.close();
   process.exit(0);
 }
-
-await context.routeWebSocket('**/*', async (socket) => {
-  try {
-    await exchange({ url: socket.url(), method: 'WEBSOCKET', headers: {},
-      body_base64: '', resource_type: 'websocket', rejected: 'websocket_not_supported' });
-  } catch {}
-  socket.close({ code: 1008, reason: 'Connection unavailable' });
-});
 
 const server = await createConnection({
   // Our fresh in-memory context already owns isolation. The upstream factory's
@@ -184,7 +202,7 @@ const server = await createConnection({
   // only the internal "explicit" mode (what browser_snapshot uses) is inlined
   // as a yaml block. Unvalidated and undocumented: re-check on any upgrade.
   snapshot: { mode: 'explicit' },
-}, async () => context);
+}, ensureContext);
 
 // The pinned upstream names console files with the Node host clock. Keep its
 // append-only originals and real timers; expose real hardlinks named at the
@@ -271,13 +289,14 @@ class CorrelatedTransport {
     this.inner.onmessage = message => {
       if (message.method === 'tools/call') {
         activeCall = { rpc_id: message.id,
+          tool_name: message.params?.name,
           tool_call_id: message.params?._meta?.['refund-eval/tool-call-id'] || null,
           sim_time: message.params?._meta?.['refund-eval/sim-time'] };
         // Pages see the trial's simulated date, not today's, before the call runs.
         // setSystemTime only moves Date; page timers keep real time.
         const simTime = message.params?._meta?.['refund-eval/sim-time'];
         if (simTime) {
-          context.clock.setSystemTime(new Date(simTime)).catch(() => {})
+          ensureContext().then(current => current.clock.setSystemTime(new Date(simTime))).catch(() => {})
             .finally(() => this.onmessage?.(message));
           return;
         }
@@ -289,6 +308,18 @@ class CorrelatedTransport {
   }
   async start() { await this.inner.start(); }
   async send(message, options) {
+    if (activeCall && message.id === activeCall.rpc_id && activeCall.tool_name === 'browser_close' &&
+        message.result && !message.result.isError) {
+      // Upstream disposes its tab listeners on browser_close. Closing the owned
+      // context also signals its public disconnection lifecycle, so the next
+      // call gets a fresh backend/context with every interception hook applied.
+      try {
+        await context?.close();
+      } catch (error) {
+        message = { ...message, result: { isError: true,
+          content: [{ type: 'text', text: `Browser close failed: ${String(error.message)}` }] } };
+      }
+    }
     const outgoing = activeCall && message.id === activeCall.rpc_id
       ? await mapConsoleArtifacts(message, activeCall.sim_time) : message;
     await this.inner.send(outgoing, options);
@@ -303,7 +334,7 @@ async function close() {
   if (closing) return;
   closing = true;
   await server.close().catch(() => {});
-  await context.close().catch(() => {});
+  if (context) await context.close().catch(() => {});
   await browser.close().catch(() => {});
   process.exit(0);
 }

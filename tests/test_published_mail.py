@@ -284,6 +284,166 @@ async def test_search_pagination_has_no_duplicates_and_rejects_wrong_query(ctx):
     assert error["isError"]
 
 
+def aggregate_fixture_service(ctx, tmp_path, count=61):
+    from refund_eval.published.fixtures import make_fixture_mail
+
+    now = load_world().now
+    emails = [
+        Email(id=f"{i:016x}", thread_id=f"{i:016x}", sender="native@example.test",
+              to=SCENARIO.user.email_addresses, subject=f"Native {i}", body="Saved native mail",
+              sent_at=now - timedelta(hours=1, minutes=i))
+        for i in range(1, count + 1)
+    ]
+    fixture = tmp_path / "aggregate-inbox.json"
+    fixture.write_text(json.dumps({"emails": [email.model_dump(mode="json") for email in emails]}))
+    ctx.mailbox.source = FixtureMailSource(fixture)
+    with world_tx() as world:
+        world.overlay_inbox = [
+            Email(id="ffffffffffffff01", sender="local@example.test", to=SCENARIO.user.email_addresses,
+                  subject="Separate local thread", body="Local", sent_at=now - timedelta(minutes=1)),
+            Email(id="ffffffffffffff02", thread_id=emails[-1].thread_id, sender="local@example.test",
+                  to=SCENARIO.user.email_addresses, subject="Newest reply in old native thread",
+                  body="Local reply", sent_at=now),
+        ]
+    audit = []
+    return make_fixture_mail(ctx, audit=audit.append), emails, audit
+
+
+@pytest.mark.parametrize("page_size", [1, 2, 20, 50])
+async def test_small_output_pages_collect_complete_native_snapshot(ctx, tmp_path, page_size):
+    service, emails, audit = aggregate_fixture_service(ctx, tmp_path)
+    args = {"query": "", "pageSize": page_size, "includeTrash": True, "view": "THREAD_VIEW_METADATA_ONLY"}
+    first = await service.call_tool("search_threads", args)
+    assert not first.get("isError"), first
+    pages = [first["structuredContent"]]
+    assert len(pages[0]["threads"]) == page_size
+    reads = [event for event in audit if event.get("phase") == "remote_read"]
+    assert len(reads) == 2
+    assert all(event["operation"] == "search_threads" and event["arguments"]["pageSize"] == 50
+               and event["arguments"]["includeTrash"] is True
+               and event["arguments"]["view"] == args["view"] and event["arguments"]["query"] == ""
+               for event in reads)
+    assert audit[1]["phase"] == "attempt" and audit[1]["arguments"] == args
+    with world_tx() as world:
+        world.overlay_inbox.append(Email(
+            id="ffffffffffffff03", sender="local@example.test", to=SCENARIO.user.email_addresses,
+            subject="Arrived after first page", body="Later", sent_at=world.now,
+        ))
+    while token := pages[-1].get("nextPageToken"):
+        result = await service.call_tool("search_threads", {**args, "pageToken": token})
+        assert not result.get("isError"), result
+        pages.append(result["structuredContent"])
+    threads = [thread for page in pages for thread in page["threads"]]
+    assert [thread["id"] for thread in threads] == [emails[-1].thread_id, "ffffffffffffff01", *[e.thread_id for e in emails[:-1]]]
+    assert len({thread["id"] for thread in threads}) == 62
+    assert [message["id"] for message in threads[0]["messages"]] == [emails[-1].id, "ffffffffffffff02"]
+    assert {page["resultCountEstimate"] for page in pages} == {"62"}
+    assert all(len(page["threads"]) <= page_size for page in pages)
+    assert len([event for event in audit if event.get("phase") == "remote_read"]) == len(reads)
+    assert all("plaintextBody" not in message for thread in threads for message in thread["messages"])
+    await service.aclose()
+
+
+@pytest.mark.parametrize("constraint,expected", [
+    ({"maximum": 7}, 7),
+    ({"enum": [1, 4, 8]}, 8),
+    ({"const": 1}, 1),
+])
+async def test_aggregate_request_respects_native_page_size_schema(ctx, constraint, expected):
+    remote = Remote()
+    remote.catalog["tools"][0]["inputSchema"]["properties"]["pageSize"].update(constraint)
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"query": "", "pageSize": 1})
+    assert not result.get("isError"), result
+    assert remote.calls == [("search_threads", {"query": "", "pageSize": expected})]
+
+
+async def test_aggregate_request_respects_complete_conditional_schema(ctx):
+    remote = Remote()
+    schema = remote.catalog["tools"][0]["inputSchema"]
+    schema.update({"if": {"properties": {"query": {"const": ""}}},
+                   "then": {"properties": {"pageSize": {"maximum": 3}}}})
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"query": "", "pageSize": 1})
+    assert not result.get("isError"), result
+    assert remote.calls == [("search_threads", {"query": "", "pageSize": 3})]
+
+
+async def test_aggregate_request_rejects_invalid_enlarged_cursor_before_native_read(ctx):
+    class CursorConditional(Remote):
+        async def call_tool(self, name, args):
+            self.calls.append((name, copy.deepcopy(args)))
+            assert name == "search_threads"
+            return native({"threads": [], **({"nextPageToken": "native-next"} if len(self.calls) == 1 else {})})
+
+    remote = CursorConditional()
+    remote.catalog["tools"][0]["inputSchema"].update({
+        "if": {"required": ["pageToken"]},
+        "then": {"properties": {"pageSize": {"maximum": 2}}},
+    })
+    audit = []
+    service = GmailService(remote, ctx, audit=audit.append)
+    result = await service.call_tool("search_threads", {"pageSize": 1})
+    assert result["isError"]
+    assert remote.calls == [("search_threads", {"pageSize": 50})]
+    assert audit[-1]["action"] == "local_rejection"
+    assert service._pages == {}
+
+
+async def test_aggregate_request_preserves_omission_if_catalog_excludes_page_size(ctx):
+    remote = Remote()
+    del remote.catalog["tools"][0]["inputSchema"]["properties"]["pageSize"]
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"query": ""})
+    assert not result.get("isError"), result
+    assert remote.calls == [("search_threads", {"query": ""})]
+
+
+async def test_aggregate_request_preserves_no_overlay_native_passthrough(ctx):
+    with world_tx() as world:
+        world.overlay_inbox.clear()
+    remote = Remote()
+    args = {"query": "", "pageSize": 1, "pageToken": "native-cursor", "includeTrash": True}
+    result = await GmailService(remote, ctx).call_tool("search_threads", args)
+    assert result == native({"threads": []})
+    assert remote.calls == [("search_threads", args)]
+
+
+async def test_aggregate_request_keeps_native_read_cap_without_partial_success(ctx, tmp_path):
+    service, _, audit = aggregate_fixture_service(ctx, tmp_path)
+    service.max_search_pages = 1
+    result = await service.call_tool("search_threads", {"pageSize": 1})
+    assert result["isError"] and "too many pages" in result["content"][0]["text"]
+    assert len([event for event in audit if event.get("phase") == "remote_read"]) == 1
+    assert audit[-1]["action"] == "local_rejection"
+    await service.aclose()
+
+
+@pytest.mark.parametrize("failure", ["repeated_cursor", "native_error"])
+async def test_aggregate_request_preserves_native_failures(ctx, failure):
+    error = {"content": [{"type": "text", "text": "Native read unavailable"}], "isError": True, "_meta": {"native": 1}}
+
+    class Pages(Remote):
+        async def call_tool(self, name, args):
+            self.calls.append((name, copy.deepcopy(args)))
+            assert name == "search_threads"
+            if failure == "native_error" and len(self.calls) == 2:
+                return copy.deepcopy(error)
+            return native({"threads": [], "nextPageToken": "same-cursor"})
+
+    remote = Pages()
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"pageSize": 1})
+    assert len(remote.calls) == 2
+    if failure == "native_error":
+        assert result == error
+    else:
+        assert result["isError"] and "repeated" in result["content"][0]["text"]
+
+
+async def test_aggregate_request_rejects_invalid_outward_arguments_before_read(ctx):
+    remote = Remote()
+    result = await GmailService(remote, ctx).call_tool("search_threads", {"pageSize": 0})
+    assert result["isError"]
+    assert remote.calls == []
+
+
 async def test_fixture_search_merges_full_timestamps_and_freezes_pagination(ctx, tmp_path):
     from refund_eval.published.fixtures import make_fixture_mail
 
@@ -502,3 +662,108 @@ async def test_native_read_rpc_error_retains_boundary_evidence(ctx):
     assert all(e["call_id"] == "c-rpc" for e in events)
     assert events[-1]["error"] == {"code": -32602, "message": "Native fixture error"}
     assert not load_world().interceptions
+
+
+def own_mail_variant(ctx, variant):
+    address = ctx.scenario.user.email_addresses[0]
+    local, domain = address.split("@")
+    compact = local.replace(".", "")
+    return {
+        "configured": address,
+        "plus": f"{local}+updates@{domain}",
+        "dots": f"{'.'.join(compact)}@{domain}",
+        "googlemail": f"{compact}@googlemail.com",
+        "combined": f"Account holder <{compact.upper()}+UPDATES@GOOGLEMAIL.COM>",
+    }[variant]
+
+
+def seed_reply_original(ctx, *, sender, to, cc=None):
+    email = Email(id="cafe123456789abc", thread_id="abcdef1234567890", sender=sender,
+                  to=to, cc=cc or [], subject="An ordinary update", body="An ordinary message.",
+                  sent_at=load_world().now, source="real")
+    with world_tx() as world:
+        world.overlay_inbox.append(email)
+    return email
+
+
+@pytest.mark.parametrize("variant", ["configured", "plus", "dots", "googlemail", "combined"])
+async def test_reply_all_does_not_automatically_copy_recognized_own_address(ctx, simulator, variant):
+    own = own_mail_variant(ctx, variant)
+    peer, other = "Peer <peer@example.test>", "Other <other@example.test>"
+    original = seed_reply_original(ctx, sender="Support <support@example.test>", to=[own, peer], cc=[own, other])
+    arguments = {"messageId": original.id, "body": "Thanks for the update.", "replyAll": True}
+    remote = Remote()
+    result = await GmailService(remote, ctx).call_tool("reply", arguments)
+    assert not result.get("isError")
+    outgoing = load_world().interceptions
+    assert outgoing and not any(item.to_user for item in outgoing)
+    assert {call.target for call in simulator} == {"support@example.test", "peer@example.test", "other@example.test"}
+    for item in outgoing:
+        assert item.payload["to"] == [original.sender]
+        assert item.payload["cc"] == [peer, other]
+        assert item.payload["native_arguments"] == arguments
+    assert next(email for email in load_world().overlay_inbox if email.id == original.id) == original
+    assert remote.calls == []
+
+
+@pytest.mark.parametrize("variant", ["configured", "plus", "dots", "googlemail", "combined"])
+@pytest.mark.parametrize("reply_all", [False, True])
+async def test_reply_to_recognized_own_sent_message_defaults_to_original_recipients(ctx, simulator, variant, reply_all):
+    recipients = ["First <first@example.test>", "Second <second@example.test>"]
+    original = seed_reply_original(ctx, sender=own_mail_variant(ctx, variant), to=recipients)
+    arguments = {"messageId": original.id, "body": "An additional detail.", "replyAll": reply_all}
+    remote = Remote()
+    result = await GmailService(remote, ctx).call_tool("reply", arguments)
+    assert not result.get("isError")
+    assert {call.target for call in simulator} == {"first@example.test", "second@example.test"}
+    outgoing = load_world().interceptions
+    assert outgoing and not any(item.to_user for item in outgoing)
+    assert all(item.payload["to"] == recipients and not item.payload["cc"] for item in outgoing)
+    assert all(item.payload["native_arguments"] == arguments for item in outgoing)
+    assert remote.calls == []
+
+
+@pytest.mark.parametrize("field", ["to", "cc", "bcc"])
+async def test_explicit_own_alias_recipient_is_preserved(ctx, simulator, field):
+    original = seed_reply_original(ctx, sender="Support <support@example.test>",
+                                   to=[ctx.scenario.user.email_addresses[0]])
+    alias = own_mail_variant(ctx, "combined")
+    arguments = {"messageId": original.id, "body": "An explicit copy.", "replyAll": True, field: [alias]}
+    remote = Remote()
+    result = await GmailService(remote, ctx).call_tool("reply", arguments)
+    assert not result.get("isError")
+    outgoing = load_world().interceptions
+    assert any(item.to_user for item in outgoing)
+    assert all(item.payload[field] == [alias] for item in outgoing)
+    assert all(item.payload["native_arguments"] == arguments for item in outgoing)
+    assert remote.calls == []
+
+
+@pytest.mark.parametrize("other", ["s.am.carter@example.test", "samcarter+updates@example.test",
+                                    "samcarter.different@gmail.com", "samcarter@googlemail.example"])
+async def test_reply_defaults_preserve_distinct_other_accounts(ctx, simulator, other):
+    from refund_eval.sim.mail import is_user_recipient
+
+    assert not is_user_recipient(ctx, other)
+    original = seed_reply_original(ctx, sender=other, to=[ctx.scenario.user.email_addresses[0]], cc=["peer@example.test"])
+    remote = Remote()
+    result = await GmailService(remote, ctx).call_tool("reply", {"messageId": original.id, "body": "Thanks.", "replyAll": True})
+    assert not result.get("isError")
+    assert {call.target for call in simulator} == {other, "peer@example.test"}
+    assert all(item.payload["to"] == [other] and item.payload["cc"] == ["peer@example.test"]
+               for item in load_world().interceptions)
+    assert not any(item.to_user for item in load_world().interceptions)
+    assert remote.calls == []
+
+
+async def test_reply_all_excludes_configured_secondary_non_gmail_address(ctx, simulator):
+    secondary = "Other account <me@private.example>"
+    ctx.scenario = ctx.scenario.model_copy(deep=True)
+    ctx.scenario.user.email_addresses.append("me@private.example")
+    ctx.mailbox.user_addresses.add("me@private.example")
+    original = seed_reply_original(ctx, sender="support@example.test", to=[secondary])
+    result = await GmailService(Remote(), ctx).call_tool("reply", {"messageId": original.id, "body": "Thanks.", "replyAll": True})
+    assert not result.get("isError")
+    assert len(simulator) == 1 and simulator[0].target == "support@example.test"
+    assert not any(item.to_user for item in load_world().interceptions)
+    assert all(item.payload["cc"] == [] for item in load_world().interceptions)

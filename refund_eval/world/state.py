@@ -144,6 +144,7 @@ class FollowUp(BaseModel):
     thread_id: str | None = None
     subject: str | None = None
     status: Literal["pending", "done", "superseded", "failed"] = "pending"
+    superseded_at: datetime | None = None  # Superseded takes effect on reply delivery; None is legacy immediate.
     failure_reason: str | None = None
 
 

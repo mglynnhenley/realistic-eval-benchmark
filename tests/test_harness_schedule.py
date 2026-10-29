@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 
+import pytest
 from fixtures.harness_fakes import isolated_harness  # noqa: F401  (autouse fixture)
 
 from refund_eval.agent.harness import initial_world, wake
@@ -230,3 +231,181 @@ def test_requested_wakeup_text():
     assert wakeup_text("requested", START, 0) == (
         "[Scheduled wake-up - Wed 23 Sep 2026 09:00] No new emails."
     )
+
+
+def test_repeated_hour_orders_mail_and_requests_by_absolute_time():
+    from refund_eval.world.timeutil import LONDON
+
+    now = datetime(2026, 10, 25, 0, 55, tzinfo=LONDON)
+    first = datetime(2026, 10, 25, 1, 50, tzinfo=LONDON)
+    second = datetime(2026, 10, 25, 1, 10, tzinfo=LONDON, fold=1)
+    w = world_at(now, second, first)
+    when, kind = next_event(w)
+    assert kind == "new_mail" and when.astimezone(UTC) == first.astimezone(UTC)
+    w = world_at(now, second)
+    w.requested_wakeup = first
+    when, kind = next_event(w)
+    assert kind == "requested" and when.astimezone(UTC) == first.astimezone(UTC)
+    w.now = second
+    when, kind = next_event(w)
+    assert kind == "new_mail" and when.astimezone(UTC) == second.astimezone(UTC)
+
+
+def test_repeated_hour_notice_window_counts_only_new_arrivals():
+    from refund_eval.agent.schedule import new_mail_ids, unannounced_mail_ids
+    from refund_eval.world.state import Wakeup
+    from refund_eval.world.timeutil import LONDON
+
+    first = datetime(2026, 10, 25, 1, 50, tzinfo=LONDON)
+    second = datetime(2026, 10, 25, 1, 10, tzinfo=LONDON, fold=1)
+    future = datetime(2026, 10, 25, 1, 20, tzinfo=LONDON, fold=1)
+    w = World(start_time=first, now=second, overlay_inbox=[
+        Email(id=mid, sender="help@example.test", to=["user@example.test"],
+              subject="Notice", body="Synthetic", sent_at=when, source="counterparty")
+        for mid, when in [("old", first), ("new", second), ("future", future)]
+    ])
+    w.wakeups.append(Wakeup(time=first, kind="new_mail", text="Earlier notice",
+                           announced_mail_ids=["old"]))
+    assert new_mail_ids(w, first, second, []) == {"new"}
+    assert unannounced_mail_ids(w) == {"new"}
+    # Serializing removes ZoneInfo but must not change the result.
+    saved = World.model_validate_json(w.model_dump_json())
+    assert new_mail_ids(saved, first, second, []) == {"new"}
+    assert unannounced_mail_ids(saved) == {"new"}
+
+
+def test_calendar_deadline_keeps_local_hour_through_clock_changes():
+    from refund_eval.world.timeutil import LONDON
+
+    for start in [datetime(2026, 10, 19, 9, tzinfo=LONDON),
+                  datetime(2026, 3, 23, 9, tzinfo=LONDON)]:
+        w = World(start_time=start, now=start)
+        deadline = sim_deadline(w, 1)
+        assert deadline.astimezone(LONDON).hour == 9
+        assert (deadline.date() - start.date()).days == 7
+
+
+# Exercise the real tool against the serialized store, including offset-aware
+# datetimes reconstructed by World. No model or published service is involved.
+def _saved_wakeup_world(stamp, previous=None):
+    from inspect_ai.util._store import Store, init_subtask_store
+
+    from refund_eval.world.state import load_world, save_world
+
+    init_subtask_store(Store())
+    now = datetime.fromisoformat(stamp)
+    save_world(World(start_time=now, now=now, requested_wakeup=previous))
+    return load_world()
+
+
+@pytest.mark.parametrize("at", ["2026-03-29 01:00", "2026-03-29 01:30", "2026-03-29 01:59"])
+async def test_wakeup_rejects_skipped_london_hour_without_replacing_request(at):
+    from inspect_ai.tool import ToolError
+
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+
+    before = _saved_wakeup_world("2026-03-29T00:30:00+00:00", datetime(2026, 3, 30, tzinfo=UTC))
+    with pytest.raises(ToolError, match="does not exist"):
+        await schedule_wakeup()(at)
+    assert load_world().model_dump(mode="json") == before.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("stamp,expected", [
+    ("2026-10-25T00:00:00+01:00", "2026-10-25T00:30:00+00:00"),
+    ("2026-10-25T01:10:00+01:00", "2026-10-25T00:30:00+00:00"),
+    ("2026-10-25T01:30:00+01:00", "2026-10-25T01:30:00+00:00"),
+    ("2026-10-25T01:45:00+01:00", "2026-10-25T01:30:00+00:00"),
+    ("2026-10-25T01:10:00+00:00", "2026-10-25T01:30:00+00:00"),
+    ("2026-10-25T00:50:00+00:00", "2026-10-25T01:30:00+00:00"),
+    ("2026-10-25T01:45:00", "2026-10-25T01:30:00+00:00"),
+])
+async def test_wakeup_repeated_hour_chooses_earliest_future_instant(stamp, expected):
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+    from refund_eval.world.timeutil import as_utc
+
+    before = _saved_wakeup_world(stamp, datetime(2026, 10, 27, tzinfo=UTC))
+    text = await schedule_wakeup()("2026-10-25 01:30")
+    after = load_world()
+    chosen = after.requested_wakeup
+    assert as_utc(chosen) == datetime.fromisoformat(expected)
+    assert chosen.strftime("%Y-%m-%d %H:%M") == "2026-10-25 01:30"
+    assert text.endswith("(BST)." if expected.endswith("00:30:00+00:00") else "(GMT).")
+    assert after.now.isoformat() == before.now.isoformat()
+    assert not after.wakeups
+
+
+@pytest.mark.parametrize("stamp,at", [
+    ("2026-10-25T01:30:00+00:00", "2026-10-25 01:30"),
+    ("2026-10-25T01:45:00+00:00", "2026-10-25 01:30"),
+    ("2026-10-25T02:00:00+00:00", "2026-10-25 01:59"),
+    ("2026-03-29T02:00:00+01:00", "2026-03-29 02:00"),
+])
+async def test_wakeup_requires_a_strictly_future_real_instant(stamp, at):
+    from inspect_ai.tool import ToolError
+
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+
+    before = _saved_wakeup_world(stamp, datetime(2026, 10, 27, tzinfo=UTC))
+    with pytest.raises(ToolError, match="after the current time"):
+        await schedule_wakeup()(at)
+    assert load_world().model_dump(mode="json") == before.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("at,expected", [
+    ("2026-03-29 00:59", "2026-03-29T00:59:00+00:00"),
+    ("2026-03-29 02:00", "2026-03-29T01:00:00+00:00"),
+    ("2026-03-29 02:30", "2026-03-29T01:30:00+00:00"),
+    ("2026-10-25 02:00", "2026-10-25T02:00:00+00:00"),
+    ("2026-06-01 12:00", "2026-06-01T11:00:00+00:00"),
+])
+async def test_wakeup_ordinary_times_preserve_format_and_exact_instant(at, expected):
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+    from refund_eval.world.timeutil import as_utc
+
+    _saved_wakeup_world("2026-03-29T00:00:00+00:00")
+    assert await schedule_wakeup()(at) == f"Wake-up scheduled for {at} London time."
+    assert as_utc(load_world().requested_wakeup) == datetime.fromisoformat(expected)
+
+
+@pytest.mark.parametrize("at", ["tomorrow", "2026-3-29 02:30", "2026-03-29 2:30", "2026-03-29 02:30 GMT"])
+async def test_wakeup_format_errors_retain_existing_request(at):
+    from inspect_ai.tool import ToolError
+
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+
+    before = _saved_wakeup_world("2026-03-29T00:00:00+00:00", datetime(2026, 4, 1, tzinfo=UTC))
+    with pytest.raises(ToolError, match="YYYY-MM-DD HH:MM"):
+        await schedule_wakeup()(at)
+    assert load_world().model_dump(mode="json") == before.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("earlier_mail", [False, True])
+async def test_repeated_hour_request_reaches_real_clock_and_earlier_mail_still_wins(monkeypatch, earlier_mail):
+    from refund_eval.agent import adapters
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.clock import advance
+    from refund_eval.world.state import load_world
+    from refund_eval.world.timeutil import as_utc
+
+    _saved_wakeup_world("2026-10-25T01:45:00+01:00")
+    await schedule_wakeup()("2026-10-25 01:30")
+    world = load_world()
+    expected = datetime(2026, 10, 25, 1, 30, tzinfo=UTC)
+    if earlier_mail:
+        expected = datetime(2026, 10, 25, 0, 55, tzinfo=UTC)
+        world.pending.append(ScheduledEmail(due_at=expected, email=Email(
+            id="before-second-fold", sender="support@example.com", to=["me@example.com"],
+            subject="Update", body="An update.", sent_at=expected)))
+    monkeypatch.setattr(adapters, "advance_clock", advance)
+    notice = wake(world, sim_weeks=1)
+    assert notice.kind == ("new_mail" if earlier_mail else "requested")
+    assert as_utc(notice.time) == expected
+    assert as_utc(world.now) == expected
+    # wake() selects the event; the surrounding harness clears requests.
+    assert as_utc(world.requested_wakeup) == datetime(2026, 10, 25, 1, 30, tzinfo=UTC)
+    assert [email.id for email in world.overlay_inbox] == (["before-second-fold"] if earlier_mail else [])

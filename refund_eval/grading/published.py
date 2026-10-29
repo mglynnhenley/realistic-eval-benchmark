@@ -7,11 +7,13 @@ prevent writes from reaching email accounts or public browser destinations.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from collections import Counter
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jsonschema
@@ -27,6 +29,7 @@ from refund_eval.grading.transcript import (
     tool_calls,
 )
 from refund_eval.published.network import (
+    MAX_BYTES,
     PUBLIC_READ_POLICY_VERSION,
     PUBLIC_WEB_CHECKS,
     navigation_write_reason,
@@ -489,6 +492,99 @@ def _mail_evidence(call: ToolCallRecord, events: list[dict], world: World | None
     return 0
 
 
+def _denied_booking_lookup(
+    call: ToolCallRecord, request: dict, decision: dict, matches: list,
+    events: list[dict], world: World | None, profile: dict,
+) -> bool:
+    """Recognise a completely joined denied lookup, without claiming booking success."""
+    if (world is None or len(matches) != 1
+            or profile.get("public_read_policy") != "public_web" or profile.get("public_read_urls") != []
+            or type(profile.get("evidence_version")) is not int or profile["evidence_version"] != 2
+            or not isinstance(call.id, str) or not call.id
+            or not isinstance(request.get("request_id"), str) or not request["request_id"]
+            or request.get("tool_call_id") != call.id or request.get("tool") != call.function
+            or request.get("attribution") != "active_tool_window"
+            or request.get("method") != "POST" or request.get("resource_type") != "xhr"
+            or request.get("is_navigation") is not False):
+        return False
+    url, encoded, headers = request.get("url"), request.get("body_base64"), request.get("headers")
+    if not isinstance(url, str) or not isinstance(encoded, str) or not isinstance(headers, dict):
+        return False
+    try:
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.netloc not in {"thetrainline.com", "www.thetrainline.com"}
+                or parts.path != "/my-account/api/booking/find-booking"
+                or url != f"https://{parts.netloc}{parts.path}"):
+            return False
+        media_types = [v for k, v in headers.items() if isinstance(k, str) and k.lower() == "content-type"]
+        if (len(media_types) != 1 or not isinstance(media_types[0], str)
+                or media_types[0].split(";", 1)[0].strip().lower() != "application/json"
+                or len(encoded) > 4 * ((MAX_BYTES + 2) // 3)):
+            return False
+        body = base64.b64decode(encoded, validate=True)
+        if len(body) > MAX_BYTES:
+            return False
+        # JSON has no NaN/Infinity constants; missing dictionary entries reject them.
+        fields = json.loads(body.decode("utf-8"), parse_constant={}.__getitem__)
+        if (not isinstance(fields, dict)
+                or any(not isinstance(fields.get(k), str) or not fields[k].strip()
+                       for k in ("bookingReference", "emailAddress"))):
+            return False
+    except (ValueError, KeyError, RecursionError):
+        return False
+    intercepted = matches[0]
+    if (not intercepted.id or intercepted.org != "trainline" or intercepted.target != url
+            or intercepted.payload != request):
+        return False
+    interactions = [r for r in world.interactions if r.id == intercepted.id + ":trainline:contact"]
+    if len(interactions) != 1:
+        return False
+    record = interactions[0]
+    if (record.org != intercepted.org or record.time != intercepted.time
+            or record.event.kind != "contact" or record.event.mode != "form"
+            or record.status != "applied" or record.action is None or record.effects != []):
+        return False
+    successful = [a for a in record.attempts
+                  if type(a.number) is int and a.number > 0 and a.error is None and a.validation_error is None
+                  and a.event == record.event and a.finalized_action == record.action]
+    if len(successful) != 1 or successful[0] is not record.attempts[-1]:
+        return False
+    for action in (record.action, successful[0].finalized_action):
+        if (not {"follow_up_action", "follow_up_ids", "follow_up_in_hours", "follow_up_plan"}
+                <= action.model_fields_set
+                or action.reply is not False or action.payments != [] or action.new_offers != []
+                or action.accept_offer is not None or action.withdraw_offers is not False
+                or action.notes_to_others != [] or action.grant_ground is not None
+                or action.follow_up_action != "new" or action.follow_up_ids != []
+                or action.follow_up_in_hours is not None or action.follow_up_plan != ""):
+            return False
+    rid = request["request_id"]
+    if (decision.get("call_id") != call.id or decision.get("request_id") != rid
+            or decision.get("url") != url or decision.get("method") != "POST"
+            or decision.get("action") != "simulated" or type(decision.get("status")) is not int
+            or decision["status"] != 503 or decision.get("public_read_policy") != "public_web"
+            or decision.get("public_read_policy_version") != PUBLIC_READ_POLICY_VERSION
+            or decision.get("policy_reason") != "background_form_contract_unavailable"):
+        return False
+    starts = [(n, e) for n, e in enumerate(events) if e.get("event") == "browser_tool_start"]
+    requests = [(n, e) for n, e in enumerate(events)
+                if e.get("event") == "browser_request" and e.get("request") == request]
+    decisions = [(n, e) for n, e in enumerate(events)
+                 if e.get("event") == "browser_decision" and e.get("request_id") == rid]
+    responses = [(n, e) for n, e in enumerate(events)
+                 if e.get("event") == "response" and e.get("request_id") == rid]
+    ends = [(n, e) for n, e in enumerate(events) if e.get("event") == "browser_tool_end"]
+    if any(len(items) != 1 for items in (starts, requests, decisions, responses, ends)):
+        return False
+    response = responses[0][1]
+    return bool(
+        response.get("call_id") == call.id and response.get("tool_call_id") == call.id
+        and type(response.get("status")) is int and response["status"] == 503
+        and response.get("aborted") is False
+        and starts[0][0] < requests[0][0] < decisions[0][0] < responses[0][0] < ends[0][0]
+    )
+
+
 def _browser_evidence(
     call: ToolCallRecord, events: list[dict], world: World | None, profile: dict,
     outcome: dict, fail: Any, requests_seen: set[str],
@@ -561,7 +657,8 @@ def _browser_evidence(
                        and x.payload.get("tool_call_id") == call.id] if world else []
             if len(matches) != 1:
                 fail("simulated browser write lacks exact interception", call.id)
-            if navigation_write_reason(request) is None:
+            if (navigation_write_reason(request) is None
+                    and not _denied_booking_lookup(call, request, decision, matches, events, world, profile)):
                 fail("simulated browser response is not a navigation write", call.id)
         elif action == "fixture" and policy == "public_web":
             fail("public_web browser unexpectedly returned a fixture page", call.id)

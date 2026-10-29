@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from refund_eval.published.mail import GmailService, _visible_id
+from refund_eval.published.mail import GmailService, _search_key, _visible_id
 from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource
 from refund_eval.world.mailquery import MatchContext, parse_query
@@ -195,7 +195,7 @@ class FixtureGmailRemote:
                     if matching else _error("Conversation not found."))
         query = arguments.get("query", "")
         GmailService._check_query(query)
-        args = {key: value for key, value in arguments.items() if key != "pageToken"}
+        args = _search_key(arguments)
         size = max(1, min(int(arguments.get("pageSize", 20)), 50))
         if token := arguments.get("pageToken"):
             saved = self._pages.get(token)

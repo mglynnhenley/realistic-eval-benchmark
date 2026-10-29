@@ -18,5 +18,10 @@ def to_london(dt: datetime) -> datetime:
     return as_aware(dt).astimezone(LONDON)
 
 
+def as_utc(dt: datetime) -> datetime:
+    """An absolute instant for ordering/elapsed arithmetic, including DST folds."""
+    return as_aware(dt).astimezone(UTC)
+
+
 def epoch_seconds(dt: datetime) -> int:
     return int(as_aware(dt).astimezone(UTC).timestamp())

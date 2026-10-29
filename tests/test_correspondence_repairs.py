@@ -127,3 +127,111 @@ def test_live_organisation_channels_receive_no_email_review_or_identity_suppleme
     assert context.case_handler == context.review_handler == ""
     assert "REVIEW AND FOLLOW-UP CONTINUITY" not in prompt
     assert "CORRESPONDENCE HANDLERS" not in prompt
+
+
+@pytest.mark.parametrize("mode", ["email", "form"])
+@pytest.mark.parametrize("delivered", [False, True])
+async def test_trainline_policy_presentation_preserves_binding_payload_and_response(case, mode, delivered):
+    _, world = case
+    terms = "A qualifying refund or payment directed by a binding Ombudsman decision remains payable."
+    rules = ("No goodwill, discretionary or settlement payments, including to avoid complaints or escalation. "
+             "Requests are due 28 days after expiry; genuine new evidence can be reconsidered. "
+             "Existing complaint and Ombudsman appeal routes remain available.")
+    history = ["Delivered reply: the restriction was explained." if delivered
+               else "Queued draft, not yet delivered: the restriction was explained."]
+    context = CompanyContext(
+        org=CompanyProfile(key="trainline", name="Example Retailer", kind="retailer", terms=terms),
+        subject="Review of the requested remedy", customer_name="Alex", customer_email="alex@example.test",
+        now=world.now, rules=rules, history=history,
+    )
+    before = context.model_dump(mode="json")
+    action = {"decision": "review_complete", "reply": True, "reply_after_hours": 18,
+              "body": "The requested alternative is not available under the supplied conditions.",
+              "case_status": "final_response", "follow_up_in_hours": 48,
+              "follow_up_plan": "Send the requested document copy."}
+    model = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(completion=json.dumps(action))))
+    result = await LLMCompanySimulator(model=model).respond(
+        CompanyEvent(incoming="Please reconsider the requested payment and send the document copy.", mode=mode), context)
+    system, user = [message.text for message in model.generate.call_args.args[0]]
+    assert system.count("REQUEST-SPECIFIC POLICY EXPLANATION") == 1
+    assert terms in system and rules in system and history[0] in user
+    assert "goodwill, discretionary or settlement payments remains a firm ban" in system
+    assert "including payments to avoid a complaint or escalation" in system
+    assert "only when your history shows it was delivered" in system
+    assert "Do not omit a relevant restriction, add a new proof requirement" in system
+    assert context.model_dump(mode="json") == before
+    assert result.body == action["body"] and result.case_status == action["case_status"]
+    assert result.reply_after_hours == 18 and result.follow_up_in_hours == 48
+    assert result.follow_up_plan == action["follow_up_plan"]
+    assert not result.payments and not result.new_offers
+
+
+@pytest.mark.parametrize(("key", "kind", "mode"), [
+    ("trainline", "retailer", "phone"), ("trainline", "retailer", "chat"),
+    ("trainline", "dynamic_personal", "email"), ("avanti", "retailer", "email"),
+    ("other_retailer", "retailer", "form"),
+])
+def test_request_specific_policy_presentation_is_limited_to_trainline_correspondence(case, key, kind, mode):
+    _, world = case
+    context = CompanyContext(
+        org=CompanyProfile(key=key, name="Example Contact", kind=kind), subject="A question",
+        customer_name="Alex", customer_email="alex@example.test", now=world.now,
+    )
+    system = build_messages(CompanyEvent(incoming="Please review my request.", mode=mode), context)[0].text
+    assert "REQUEST-SPECIFIC POLICY EXPLANATION" not in system
+
+
+@pytest.mark.parametrize("mode", ["email", "form"])
+@pytest.mark.parametrize(("incoming", "history"), [
+    ("Please explain my options after the seller refused my debit-card refund.", []),
+    ("Does Section 75 apply to this debit-card purchase?", []),
+    ("Please explain the answer to my earlier question.", [
+        "Delivered correspondence: the customer asked whether Section 75 applies to a debit-card purchase."]),
+    ("Please explain my options.", [
+        "Queued draft, not yet delivered: You asked about Section 75."]),
+])
+async def test_customer_attribution_preserves_evidence_and_unsolicited_guidance(case, mode, incoming, history):
+    _, world = case
+    context = CompanyContext(
+        org=CompanyProfile(key="example_bank", name="Example Bank", kind="bank", terms=(
+            "Section 75 applies only to qualifying credit-card purchases, not debit-card payments. "
+            "A Visa dispute can be requested under its existing conditions.")),
+        subject="A payment question", customer_name="Alex", customer_email="alex@example.test", now=world.now,
+        records="Dated record: the purchase was made with a debit card.", history=history,
+        rules="No discretionary payment. Preserve medical privacy and existing complaint rights.",
+    )
+    event = CompanyEvent(incoming=incoming, mode=mode)
+    before_context, before_event = context.model_dump(mode="json"), event.model_dump(mode="json")
+    action = {"decision": "explain_options", "reply": True, "reply_after_hours": 24,
+              "body": "Section 75 covers qualifying credit-card purchases; it does not cover this debit-card payment.",
+              "case_status": "open", "follow_up_in_hours": None, "follow_up_plan": ""}
+    model = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(completion=json.dumps(action))))
+    result = await LLMCompanySimulator(model=model).respond(event, context)
+    system, user = [message.text for message in model.generate.call_args.args[0]]
+    assert system.count("Only describe a point as something the customer asked, supplied or already did") == 1
+    assert "supported by the incoming message or delivered correspondence in the supplied history" in system
+    assert "You may explain other relevant routes in your own voice." in system
+    assert context.org.terms in system and context.rules in system
+    assert context.records in user and incoming in user and ACTION_SHAPE in user
+    assert all(item in user for item in history)
+    if any("Queued draft" in item for item in history):
+        assert "Queued draft, not yet delivered:" in user
+    assert context.model_dump(mode="json") == before_context
+    assert event.model_dump(mode="json") == before_event
+    assert result.body == action["body"] and result.reply_after_hours == 24
+    assert result.case_status == "open" and result.follow_up_in_hours is None
+    assert not result.payments and not result.new_offers
+
+
+@pytest.mark.parametrize(("kind", "mode"), [
+    ("bank", "phone"), ("bank", "chat"),
+    ("dynamic_personal", "email"), ("dynamic_personal", "form"),
+])
+def test_customer_attribution_keeps_other_channel_prompts_unchanged(case, kind, mode):
+    _, world = case
+    context = CompanyContext(
+        org=CompanyProfile(key="example", name="Example Contact", kind=kind), subject="A question",
+        customer_name="Alex", customer_email="alex@example.test", now=world.now,
+    )
+    prompt = build_messages(CompanyEvent(incoming="Please explain my options.", mode=mode), context)[0].text
+    assert "Only describe a point as something the customer asked, supplied or already did" not in prompt

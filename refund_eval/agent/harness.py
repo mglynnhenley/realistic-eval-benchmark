@@ -106,6 +106,7 @@ from refund_eval.world.state import (
     save_world,
     world_tx,
 )
+from refund_eval.world.timeutil import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -406,18 +407,30 @@ def schedule_wakeup() -> Tool:
 
         Args:
           at: Future London local time in YYYY-MM-DD HH:MM format.
+            Repeated autumn times use the earliest occurrence still in the
+            future. Skipped spring times are rejected.
         """
         try:
-            when = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
+            local = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
         except ValueError as ex:
             raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.") from ex
-        if when.strftime("%Y-%m-%d %H:%M") != at:
+        if local.strftime("%Y-%m-%d %H:%M") != at:
             raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.")
+        # Attaching ZoneInfo alone accepts nonexistent spring times. A UTC
+        # roundtrip validates wall fields and retains both real autumn instants.
+        candidates = [local.replace(fold=fold) for fold in (0, 1)]
+        valid = [when for when in candidates
+                 if as_utc(when).astimezone(LONDON).strftime("%Y-%m-%d %H:%M") == at]
+        if not valid:
+            raise ToolError("That London local time does not exist because the clocks change. Choose another time.")
         with world_tx() as world:
-            if when <= aware(world.now):
+            future = [when for when in valid if as_utc(when) > as_utc(world.now)]
+            if not future:
                 raise ToolError("The wake-up time must be after the current time.")
+            when = min(future, key=as_utc)
             world.requested_wakeup = when
-        return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time."
+        zone = f" ({when:%Z})" if valid[0].utcoffset() != valid[-1].utcoffset() else ""
+        return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time{zone}."
 
     return execute
 
