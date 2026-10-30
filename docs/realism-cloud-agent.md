@@ -1,181 +1,261 @@
-# Run a realism iteration in Conductor Cloud
+# Run continuous realism rounds in Conductor Cloud
 
-Use one cloud workspace containing the merged loop implementation. A primary
-coding agent investigates and fixes the environment, a fresh reviewer checks the
-candidate, and the `measure` command handles paid trials and direct API scans.
-There is no separate hosted controller to deploy.
+Use one cloud workspace with a primary coding agent and the bounded
+`continuous` CLI. Each round measures one committed environment with three
+independent trials, obtains four investigator reports and blinded realism scores,
+then hands selection and implementation to the primary. Successful checks lead
+directly to the next round. There is no independent review, baseline comparison
+or score-based acceptance stage. The existing paid pause remains active until
+explicit owner resume; these instructions do not resume it.
 
 ## Prepare the workspace
 
-Create or open the repository's cloud workspace from the branch containing this
-implementation. Unpushed local commits and gitignored `.context` files do not
-appear in a cloud checkout. Explicitly transfer the selected private findings
-bundle into `.context/realism/input/`; keep its hashes and source information.
-For reusable baseline evidence, transfer the entire exported `evidence/`
-directory, not just its manifest or score. Keep private evidence out of Git.
+Open a workspace containing the committed loop implementation. Unpushed source
+and gitignored `.context` evidence from another machine need explicit transfer.
+Keep complete evidence bundles, hashes, source information, operational IDs and
+transcripts private under `.context/realism/`. Preserve the existing ledger and
+pause state byte-for-byte during preparation. Do not initialize against historical
+run directories or use a fresh ledger to reset the authorized allowance.
 
-Use a compatible Python 3.12–3.14 and install `uv` if it is not available. The
-locked Modal SDK rejects Python 3.15. Set `UV_PYTHON` for the whole session so
-fresh runner and Harbor environments use the same compatible interpreter.
-Install and check the local tooling without launching trials:
+Use Python 3.14 for the coordinator and child uv environments. The locked Modal
+SDK rejects Python 3.15. Check tooling without launching trials:
 
 ```sh
 export UV_PYTHON=3.14
 uv sync --frozen
 scripts/harbor harbor --version
+uv run python -m refund_eval.realism continuous --help
 uv run python -m refund_eval.realism measure --help
 ```
 
-Configure `OPENROUTER_API_KEY`, `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` using
-Conductor's cloud environment settings when paid execution is authorized. Never
-paste secret values into an agent prompt or commit them. Do not copy credentials
-or `.env` files into candidate/test worktrees. Run candidate checks with those
-credentials removed and dotenv loading disabled, for example:
+When paid execution is authorized, configure `OPENROUTER_API_KEY`,
+`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` through the cloud environment. Never
+paste secret values into prompts, commit them or copy `.env` into repair/test
+worktrees. Run local tests and linting with credentials removed and dotenv loading
+disabled, for example:
 
 ```sh
 env -u OPENROUTER_API_KEY -u MODAL_TOKEN_ID -u MODAL_TOKEN_SECRET \
-  PYTHON_DOTENV_DISABLED=1 MODAL_CONFIG_PATH=/dev/null uv run --frozen pytest -q
+  -u REFUND_EVAL_EXA_API_KEY PYTHON_DOTENV_DISABLED=1 MODAL_CONFIG_PATH=/dev/null \
+  UV_PYTHON=3.14 uv run --frozen pytest -q tests/RELEVANT_TEST.py
+env -u OPENROUTER_API_KEY -u MODAL_TOKEN_ID -u MODAL_TOKEN_SECRET \
+  -u REFUND_EVAL_EXA_API_KEY PYTHON_DOTENV_DISABLED=1 MODAL_CONFIG_PATH=/dev/null \
+  UV_PYTHON=3.14 uv run --frozen ruff check CHANGED_PYTHON_PATHS
 ```
 
-This keeps credentials out of ordinary test environments; the coding agent and
-runner still share workspace privileges. This setup is not a security boundary.
+Production checks use a sanitized environment and do not receive trial
+credentials. The coding session and runner share workspace privileges; these are
+correctness guards, not a credential security boundary. Coding-session charges
+and Modal/other compute are separate from the model-stage spending ledger.
 
-## Copy-paste task for the primary agent
+## Immutable configuration
 
-Replace every angle-bracket placeholder before sending this task. Set the model
-budget to zero when only investigation and preparation are authorized. Cloud
-coding/review charges and Modal compute require their own applicable allowance;
-the model ledger below does not cap them.
-
-```text
-Run one bounded realism improvement iteration from branch <MERGED_BRANCH>.
-Read .agents/skills/realism-loop/SKILL.md, docs/environment-improvement-loop.md,
-and docs/realism-cloud-agent.md. The loop implementation is already merged.
-
-Use these transferred private findings: <FINDINGS_BUNDLE_PATH>.
-Baseline source: <EXACT_BASELINE_COMMIT>.
-Optional saved baseline evidence: <EVIDENCE_MANIFEST_PATH_OR_NONE>.
-Additional authorized trial/judge model budget: <MODEL_BUDGET_USD>.
-Existing overall allowance remaining: <REMAINING_AUTHORIZED_USD>.
-Paid measurement authorized: <YES_OR_NO>.
-Run directory: .context/realism/<UNIQUE_RUN_ID>.
-
-Use three new trials per required arm, 200000 target tokens, 1800 seconds per
-batch, 10000 turns, three simulated weeks, $0.50 per-trial model cost limit and
-$2 scan reserve per new arm. Target: openrouter/anthropic/claude-haiku-4.5.
-Judge: openrouter/anthropic/claude-opus-5.5. Keep the configured simulator,
-consistency model and web/data modes identical across comparison arms.
-
-Start from saved findings. Group by factor and organisation; rank explicitly
-noticed tells, high-impact tells and occurrence count. Form plausible improvement
-hypotheses from the top groups, consulting source and real-world examples where
-useful. Reuse existing notes. Select a budget-bounded batch of code, prompt or
-content experiments, make the changes and test them. Proving an implementation
-bug is not an entry requirement. Three trials does not set the number of changes.
-
-Make the smallest changes that address that batch on an isolated candidate
-branch/worktree. Read relevant tracked rules and scenario data. Preserve the
-impossible-refund goal, eligibility, terms, privacy and grading. Protected-path
-proposals need separate scope review; do not bypass the measurement gate.
-Use synthetic regression examples when useful for correctness changes, without
-private transcript details; they are not required for every realism hypothesis.
-Run appropriate checks, full tests and Ruff with trial credentials removed.
-
-Obtain a fresh independent reviewer session for the exact candidate commit.
-Have it review the diff, tests and semantic preservation of the experiment,
-then write the review receipt described below. Fix rejected changes and obtain
-a new exact-commit review before measurement. Stop with saved reasons if there
-is no supported candidate; do not invent a fix to keep the loop running.
-
-Prepare the measure command using the agreed budget/protocol and inspect its
-saved plan. If paid measurement is authorized and fits the remaining allowance,
-execute once using --execute. Otherwise stop after unpaid preparation. Reuse
-baseline evidence only if the command validates its exact source, per-trial
-protocol, judge and measurement hashes. Do not reconstruct missing provenance.
-
-Do not rerun unknown/interrupted paid stages, retry unclear comparisons, start a
-longer confirmation run or automatically merge. Save and report the exact
-commits, selected changes, reviewer and test evidence, correctness judgment,
-realism comparison and uncertainty, spend/held reservations, artifact paths and
-why the loop stopped. Do not call preparation or a planned cloud job “running”.
-```
-
-## Receipt and measurement commands
-
-The independent reviewer saves a private JSON receipt. Use full commit hashes:
+Write a private JSON configuration and replace every placeholder. Paths should be
+absolute. Model IDs must explicitly identify versions; four investigator IDs must
+be distinct, preferably across families. No default or silent substitution is
+provided for investigators. The realism judge may use one investigator's model
+ID through a separate blinded call. Each model needs positive `max_tokens`;
+settings support `temperature`, `top_p`, `seed` and `reasoning`, defaulting
+`temperature` to zero. Settings must be supported by the pinned model.
 
 ```json
 {
-  "baseline": "<EXACT_BASELINE_COMMIT>",
-  "candidate": "<EXACT_CANDIDATE_COMMIT>",
-  "approved": true,
-  "scenario_preserved": true,
-  "reviewer": "<FRESH_REVIEW_SESSION_IDENTIFIER>"
+  "repo": "<ABSOLUTE_REPOSITORY>",
+  "run_dir": "<REPOSITORY>/.context/realism/<NEW_RUN>",
+  "source": "<EXACT_STARTING_SOURCE_COMMIT>",
+  "last_tested_source": "<EXACT_LAST_TESTED_COMMIT>",
+  "ledger": "<REPOSITORY>/.context/realism/<EXISTING_LEDGER>/spend.json",
+  "budget": 1000,
+  "max_rounds": 3,
+  "pause_file": "<EXISTING_OWNER_PAUSE_JSON>",
+  "settings": {
+    "trials": 3,
+    "model": "<PINNED_TARGET_MODEL>",
+    "judge": "<PINNED_TELLS_SCANNER_MODEL>",
+    "token_budget": 200000,
+    "time_limit": 1800,
+    "trial_wallclock_limit": 1800,
+    "max_turns": 10000,
+    "sim_weeks": 3,
+    "per_trial_cost": 0.5,
+    "scan_reserve": 2
+  },
+  "investigation": {
+    "investigators": [
+      {"name": "A", "model": "<PINNED_MODEL_A>", "settings": {"max_tokens": 8192}},
+      {"name": "B", "model": "<PINNED_MODEL_B>", "settings": {"max_tokens": 8192}},
+      {"name": "C", "model": "<PINNED_MODEL_C>", "settings": {"max_tokens": 8192}},
+      {"name": "D", "model": "<PINNED_MODEL_D>", "settings": {"max_tokens": 8192}}
+    ],
+    "judge": {"model": "<PINNED_REALISM_JUDGE>", "settings": {"max_tokens": 8192}}
+  },
+  "checks": [
+    ["uv", "run", "--frozen", "pytest", "-q", "tests/RELEVANT_TEST.py"],
+    ["uv", "run", "--frozen", "ruff", "check", "CHANGED_PYTHON_PATHS"]
+  ],
+  "backlog": []
 }
 ```
 
-The command requires a candidate descending from the baseline and rejects
-protected-path changes. Realism notes and exemplars can be candidates; business
-rules and scenario YAML remain protected. The receipt records the review; it
-does not prove reviewer independence or certify correctness automatically.
+The numbers illustrate the schema, not a new authorization or recommended model
+choice. `budget` must equal the existing ledger's authorized overall total,
+including earlier spending; it is not an additional invocation allowance. Use
+the agreed protocol and round limit. Required `checks` are nonempty argv lists,
+executed without a shell. Replace example test/lint paths with checks appropriate
+to the repairs and complete any required broader repository checks.
 
-Run measurement from the repository checkout containing the committed runner.
-The candidate remains in its isolated branch. Replace the uppercase placeholders:
+`source` and optional `last_tested_source` resolve to exact commits.
+`last_tested_source` records history; it never launches a baseline. Omit it if no
+version has been tested. `pause_file` is optional for new work and required when
+carrying an existing external owner pause. Initialization saves its own paused
+control state and never changes the historical file. Put saved unresolved findings
+in `backlog`; investigators receive them only after their independent first pass.
+
+The configuration freezes the trusted runner at clean committed `HEAD`, model
+identities/settings, protocol, ledger, budget, checks and round limit. Changed
+configuration needs a new run directory. Environment sources must contain the
+committed trusted runner infrastructure. Rebase an older untrialled candidate
+onto that infrastructure before a future production run; do not run the old
+infrastructure to avoid the check. Begin on the next candidate with saved findings
+rather than launching a retrospective baseline pilot.
+
+## CLI and primary handoff
+
+These commands use the top-level entry point. The equivalent direct module is
+`python -m refund_eval.realism.continuous`.
 
 ```sh
-uv run python -m refund_eval.realism measure \
-  --base BASE_COMMIT --candidate CANDIDATE_COMMIT \
-  --review .context/realism/review.json \
-  --out .context/realism/pilot-001 --budget AUTHORIZED_MODEL_USD \
-  --model openrouter/anthropic/claude-haiku-4.5 \
-  --judge openrouter/anthropic/claude-opus-5.5 \
-  --trials 3 --token-budget 200000 --cost-limit 0.5 --scan-reserve 2 \
-  --sim-weeks 3 --max-turns 10000 --time-limit 1800
+uv run python -m refund_eval.realism continuous init --config .context/realism/config.json
+uv run python -m refund_eval.realism continuous status --run-dir .context/realism/NEW_RUN
+uv run python -m refund_eval.realism continuous advance --run-dir .context/realism/NEW_RUN
 ```
 
-This prepares and saves `plan.json` without trials or model calls. `--budget 0`
-is valid for preparation. A run directory binds its budget and other settings;
-use a new directory when changing them. For an already authorized paid run,
-repeat the exact prepared command with `--execute`. Successful `prepared` and
-`complete` results exit zero; rejected, blocked or incomplete runs exit nonzero.
-Preparation can succeed while `can_execute` is false; inspect the plan.
+Initialization is local and unpaid, always returning paused. `advance` without
+`--execute` never launches paid work and does not advance the phase. To clear a
+saved pause, the owner must explicitly resume. Only then, within the existing
+spending authorization, use:
 
-Without reusable evidence this example reserves $7.45 for three fresh baseline
-and three fresh candidate trials plus scans. Add
-`--baseline-evidence .context/realism/input/evidence/manifest.json` to both
-preparation and execution to use a compatible saved baseline; then only three
-candidate trials are new and the reserve is $3.725. These are model reservations,
-not provider-enforced billing ceilings. Unknown costs keep their reservation.
+```sh
+uv run python -m refund_eval.realism continuous advance \
+  --run-dir .context/realism/NEW_RUN --resume --execute
+```
 
-The evidence gate matches the exact baseline commit, per-trial settings, judge,
-measurement hashes and all saved artifacts. Trial count alone can differ: five
-matching saved baseline samples may be compared with three new candidate samples.
-Five old full-length trials do not match a new short checkpoint. Use incompatible
-or incomplete old evidence for diagnosis only. Missing scans are unknown, not
-zero tells. A successful arm exports `batches/<arm>/evidence/manifest.json` and
-its accompanying portable bundle for future compatible reuse.
+`--resume` acknowledges the current external pause-file digest in the new control
+file; it never rewrites history. A changed external pause requires a new explicit
+resume. Subsequent advances need `--execute` but no repeated `--resume` unless
+paused again. `--execute` alone never clears a pause. With no paid authorization,
+use saved evidence, local investigation/tests and unpaid preparation only.
 
-## Stop and recover
+The production bindings preflight all pinned identities, tariffs, supported
+settings/tools and context limits, then call
+`controller.run_candidate(..., continuous=True)` for three frozen trials. The
+measurement controller owns preparation validation, reservations, accounting,
+portable evidence and cleanup. Its `settings.judge` is the tells scanner;
+`investigation.judge` supplies the separate 0–10 rating. The investigator adapter
+checks the full actual evidence again before inference and checks expanded tool
+histories without truncation. No paid call is silently retried or routed to a
+replacement model.
 
-The command saves requests, plans, stage accounting and outputs under its private
-run directory. It freezes baseline/candidate commits and runs scans/scoring from
-a clean runner checkout. It does not merge changes or decide that every repair
-is correct; retain correctness and realism judgments separately.
+Investigators receive equivalent evidence tools: `trajectory`, `source`,
+`list_source`, `state`, `public_reference` and `reproduce`. The production binding
+validates exported evidence, extracts complete visible native messages for the
+blinded judge, keeps hidden native events/store in investigator state tools, and
+uses the exact frozen measurement worktree for source access. Public retrieval
+is unauthenticated; local reproductions use disposable source and private scratch.
+Unavailable or incomplete evidence remains explicit.
 
-After execution starts, repeating the command returns a digest-checked historical
-completion report or `reconciliation_required`; it does not repeat paid stages.
-A new use of baseline evidence revalidates the complete exported bundle. If a
-process stops, inspect original outputs, held reservations and remote Modal jobs.
-Cancel/confirm those jobs separately from the coding agent. Saved cleanup evidence
-may report unresolved jobs; do not treat killing a local process as remote cleanup.
-Unreadable trial configurations appear in `discovery_errors` with
-`remote_state: unknown`, even when cleanup succeeds for other known sessions.
-Missing, unreadable or timed-out cleanup receipts also leave sessions unresolved;
-an earlier successful receipt is not reused.
+After investigation, `advance` returns `awaiting_selection` with
+`rounds/0001/primary-request.json`. Read the handoff and saved reports, resolve
+conflicts using evidence and write its requested `selection.json`:
 
-Cloud workspace sleep/lifetime limits can stop processes. V1 supports a bounded
-session and manual recovery, not guaranteed continuous operation. Keep source,
-evidence and the ledger; do not deploy a standing poller, provider framework or
-fleet for this pilot. Report missing credentials or incomplete cloud setup as
-such. The presence of these instructions is not evidence that a cloud workspace
-was connected or that a paid comparison ran.
+```json
+{
+  "source_commit": "<EXACT_ROUND_SOURCE>",
+  "repairs": [{"change": "<REPAIR>", "evidence": "<CITATIONS>", "expected_effect": "<BEHAVIOUR>"}],
+  "reason": "<EVIDENCE-BASED_SYNTHESIS_AND_DISAGREEMENT_RESOLUTION>",
+  "deferred": [{"concern": "<ALTERNATIVE>", "reason": "<TRADEOFF>"}],
+  "backlog": []
+}
+```
+
+An empty `repairs` list stops as `no_repair`. Otherwise, advance again with
+`--execute` to create the isolated `rounds/0001/repair` worktree and return
+`awaiting_implementation`. Implement and commit only there. Preserve substantive
+task constraints, terms, privacy, financial rules and grading integrity. Existing
+protected source boundaries remain enforced; review removal does not authorize
+editing accounting or grading machinery. Changes may span underlying environment
+mechanics and presentation without a fixed fix count or prompt-only restriction.
+
+Write the requested `implementation.json` using the exact clean descendant commit
+and SHA-256 of the saved selection file's bytes:
+
+```json
+{
+  "source_commit": "<EXACT_ROUND_SOURCE>",
+  "candidate": "<EXACT_REPAIR_COMMIT>",
+  "selection_sha256": "<SHA256_OF_SELECTION_JSON_BYTES>",
+  "summary": "<CHANGES_AND_EXPECTED_EFFECTS>",
+  "task_meaning_preserved": true,
+  "additional_checks": []
+}
+```
+
+The handoff supplies authoritative schemas and paths; there are no reviewer
+receipt or comparison fields. Advance with `--execute` to run configured checks
+plus optional additional argv lists on that exact commit. Failed checks return
+`checks_failed` without launching the next version. Correct and commit in the
+repair worktree, rewrite `implementation.json` to bind the corrected descendant,
+and advance. Successful checks immediately continue into the next round when
+budget and the round limit permit. No score threshold, comparison result or
+independent review is needed. The owner's checkout is never merged or switched.
+
+## Pause, report and recover
+
+```sh
+uv run python -m refund_eval.realism continuous pause \
+  --run-dir .context/realism/NEW_RUN --reason 'Owner pause'
+uv run python -m refund_eval.realism continuous report --run-dir .context/realism/NEW_RUN
+```
+
+Pause is observable while advancement is running. Production callbacks check it
+before paid stages and while waiting on subprocesses. Pausing is not proof that a
+remote call was cancelled or that its cost is known.
+
+Private artifacts include `configuration.json`, `control.json`, `checkpoint.json`
+and `rounds/NNNN/` with requests, measurement, investigation, scores, selection,
+implementation, checks, backlog and spend snapshots. Started-operation markers and
+sealed digest-bound results live under each round's `operations/`; trial evidence,
+model requests/responses, scratch and command logs remain private too.
+
+Reports identify the environment version that ran, investigator findings, changes
+and reasons, per-trial scores, mean, score-series identity, exposure limitations,
+scanner counts separately, spend, held reservations and next action. Invalid or
+insufficient scores have no numeric value; a missing rating makes the mean
+unknown without vetoing repair selection. Changing judge/settings/rubric starts a
+new series. There are no automatic confirmation runs or significance gates.
+
+At any stop, report `last_tested_source`, `next_source` and `untrialled_source`.
+A repair committed and checked at the round limit may never have run; do not attach
+the previous version's scores to it. Preserve its continuation checkpoint and
+unresolved concerns.
+
+Never replay an uncertain started paid operation. A start marker without a sealed
+result requires reconciliation of original outputs; missing cost is held, never
+zero. `reconciliation_required` and other safety stops require inspection rather
+than repeated `--resume` or deletion of markers. Completed sealed operations may
+be reused without reissuing calls. Historical unknown holds may need the existing
+exact accounting disposition through optional `prior_unknown_review` in the init
+configuration; this is a spending proof despite its legacy name. Outstanding
+unvalidated charges stop further operations. Do not edit/release holds to fit a
+new round or mutate historical pause/ledger files during configuration.
+
+Inspect cleanup evidence and remote Modal jobs independently of local process
+state. Unknown discovery, unreadable configurations, unresolved jobs and missing
+or stale cleanup receipts do not establish that remote work stopped. Cancellation
+of a coding agent is insufficient. Cloud workspace sleep/lifetime limits may stop
+processes; this is bounded execution with durable handoffs and manual recovery,
+not a permanent scheduler. Coding and compute bills remain separately identified.
+
+The legacy JavaScript workflows, MCP/API repair worker and reviewed A/B `measure`
+mode remain available for compatibility. They are not prerequisites for the
+continuous workflow; their implementation and historical results are unchanged.

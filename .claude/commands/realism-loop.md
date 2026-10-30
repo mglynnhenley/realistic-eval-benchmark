@@ -1,20 +1,24 @@
 ---
-description: Run the repository realism improvement loop with short matched trials
-argument-hint: "[budget=USD] [trials=3] [tokenBudget=200000] [timeLimit=1800] [baselineEvidence=PATH]"
+description: Run the continuous realism loop with three trials and four investigators
+argument-hint: "[config=PATH] [runDir=PATH] [maxRounds=N] [budget=TOTAL_USD]"
 ---
 
-Follow the repository skill at `.agents/skills/realism-loop/SKILL.md`.
-Read it before running any stages. Invocation settings and instructions:
+Read and follow `.agents/skills/realism-loop/SKILL.md`, including its maintained
+workflow and actual CLI/config/handoff references. Invocation settings:
 
 $ARGUMENTS
 
-Use the maintained workflow and CLI contracts referenced by that skill. With no
-paid budget supplied or established in the session, prepare and investigate
-existing evidence locally without launching paid model work. Preserve the current
-branch; use isolated worktrees for fixes and comparison environments.
-Use the primary-agent, fresh-reviewer and standalone `measure` workflow; the
-legacy MCP/API repair worker is not the default. Three refers to new trials per
-required arm, not the number of fixes. Select a bounded batch after triage and
-verification. Reuse a saved baseline only when its validated evidence matches the
-exact commit, per-trial protocol and measurement hashes. Preparation is default;
-paid execution requires `--execute` within the existing authorization.
+Use `UV_PYTHON=3.14` and `python -m refund_eval.realism continuous`. Each round
+measures three independent trials of one frozen source, obtains four distinct
+pinned-model investigator reports (independent then supplementary passes) and
+blinded 0–10 ratings, then hands selection/implementation/checks to the primary.
+Successful checks proceed directly to the next round within the authorized limits.
+No independent review receipt, baseline comparison or score acceptance is needed.
+
+Preserve the current branch and use isolated repair worktrees. Initialization is
+unpaid and paused; `advance` without `--execute` is unpaid. The existing paid pause
+requires explicit owner resume; do not infer resume from this invocation or a
+budget. Use the existing overall ledger, retain unknown holds and never retry
+uncertain paid actions. Without established paid authorization, work from saved
+evidence and local checks only. Keep evidence and operational details private,
+and distinguish the last tested version from any untrialled next version.

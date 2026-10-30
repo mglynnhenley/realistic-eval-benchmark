@@ -188,7 +188,7 @@ def _score(args) -> int:
 def _measure(args) -> int:
     from refund_eval.realism.measurement import run_measurement
 
-    target = args.model or ("openrouter/anthropic/claude-sonnet-5.5" if args.candidate_only
+    target = args.model or ("openrouter/anthropic/claude-sonnet-5.5" if args.candidate_only or args.continuous
                             else "openrouter/anthropic/claude-haiku-4.5")
     settings = {"scenario": args.scenario, "model": target, "judge": args.judge,
                 "trials": args.trials, "token_budget": args.token_budget,
@@ -209,22 +209,28 @@ def _measure(args) -> int:
         return 1
     try:
         repo = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-        if args.candidate_only:
+        if args.candidate_only or args.continuous:
             from refund_eval.realism.controller import run_candidate
-            if not args.shared_ledger or not args.runner_review:
+            if not args.shared_ledger:
+                raise ValueError("Candidate-only and continuous measurement require an existing shared ledger")
+            if not args.continuous and (not args.runner_review or not args.review or not args.base):
                 raise ValueError("Candidate-only loop requires an existing shared ledger and runner review")
+            if args.continuous and args.trials != 3:
+                raise ValueError("Continuous rounds require exactly three independent trials")
             result = run_candidate(repo=repo, run_dir=Path(args.out).resolve(),
                                    baseline=args.base, candidate=args.candidate,
-                                   review=Path(args.review).resolve(), budget=args.budget,
+                                   review=Path(args.review).resolve() if args.review else None, budget=args.budget,
                                    settings=settings, ledger=Path(args.shared_ledger).resolve(),
-                                   runner_review=Path(args.runner_review).resolve(),
+                                   runner_review=Path(args.runner_review).resolve() if args.runner_review else None,
                                    baseline_evidence=args.baseline_evidence,
                                    historical_evidence=args.historical_evidence,
                                    execute=args.execute, execution_review=args.execution_review,
-                                   prior_unknown_review=args.prior_unknown_review)
+                                   prior_unknown_review=args.prior_unknown_review, continuous=args.continuous)
         else:
             if any((args.shared_ledger, args.runner_review, args.historical_evidence, args.execution_review, args.prior_unknown_review)):
-                raise ValueError("Loop-specific inputs require --candidate-only")
+                raise ValueError("Loop-specific inputs require --candidate-only or --continuous")
+            if not args.review or not args.base:
+                raise ValueError("Legacy comparison requires --base and --review")
             result = run_measurement(repo=repo, run_dir=Path(args.out).resolve(),
                                  baseline=args.base, candidate=args.candidate,
                                  review=Path(args.review).resolve(), budget=args.budget,
@@ -261,6 +267,10 @@ def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
 
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["continuous"]:
+        from refund_eval.realism.continuous import main as continuous_main
+
+        return continuous_main(argv[1:])
     extra = argv[argv.index("--") + 1:] if "--" in argv else []
     argv = argv[:argv.index("--")] if "--" in argv else argv
 
@@ -268,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     common.add_argument("--scenario", default=LATE_REFUND_SCENARIO, help="scenario whose memory is used")
     parser = argparse.ArgumentParser(prog="python -m refund_eval.realism", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("continuous", help="initialize, advance, pause or inspect durable continuous rounds")
 
     opened = commands.add_parser("open", parents=[common], help="print the top tell clusters as JSON")
     opened.add_argument("--scans", help="Scout results directory with the tells scanner")
@@ -329,21 +340,22 @@ def main(argv: list[str] | None = None) -> int:
     trials.add_argument("--yes", action="store_true", help="run without asking")
     trials.set_defaults(handler=_trials)
     measure = commands.add_parser("measure", parents=[common],
-                                  help="prepare a reviewed candidate comparison; --execute launches paid measurement")
-    measure.add_argument("--base", required=True, help="baseline Git commit")
-    measure.add_argument("--candidate", required=True, help="reviewed candidate Git commit")
-    measure.add_argument("--review", required=True, help="JSON review of the exact baseline and candidate")
+                                  help="prepare candidate measurement; --execute launches paid stages")
+    measure.add_argument("--base", help="baseline Git commit (optional for --continuous)")
+    measure.add_argument("--candidate", required=True, help="candidate Git commit")
+    measure.add_argument("--review", help="JSON review of the exact baseline and candidate (legacy modes)")
     measure.add_argument("--out", required=True, help="saved measurement run directory")
     measure.add_argument("--budget", required=True, type=float, help="additional model USD allowance within existing authorization")
     measure.add_argument("--baseline-evidence", help="verified saved baseline evidence manifest")
     measure.add_argument("--candidate-only", action="store_true", help="run only the new version; never launch a baseline")
+    measure.add_argument("--continuous", action="store_true", help="measure exactly three trials without reviewer receipts or a comparison gate")
     measure.add_argument("--shared-ledger", help="existing loop ledger; --budget is its authorized total")
-    measure.add_argument("--runner-review", help="exact independent infrastructure approval")
+    measure.add_argument("--runner-review", help="exact independent infrastructure approval (legacy candidate-only)")
     measure.add_argument("--historical-evidence", help="validated diagnostic history, never included in comparison")
-    measure.add_argument("--execution-review", help="exact independent prepared-request approval")
-    measure.add_argument("--prior-unknown-review", type=Path, help="Exact independently approved original native hold disposition; candidate-only")
+    measure.add_argument("--execution-review", help="exact independent prepared-request approval (legacy candidate-only)")
+    measure.add_argument("--prior-unknown-review", type=Path, help="original native hold accounting disposition; candidate-only or continuous")
     measure.add_argument("--execute", action="store_true", help="explicitly launch paid stages (default: prepare only)")
-    measure.add_argument("--model", help="target model (candidate-only defaults to Sonnet; comparison defaults to Haiku)")
+    measure.add_argument("--model", help="target model (candidate-only/continuous default to Sonnet; comparison defaults to Haiku)")
     measure.add_argument("--judge", default="openrouter/anthropic/claude-opus-5.5")
     measure.add_argument("--trials", type=int, default=3)
     measure.add_argument("--token-budget", type=int, default=1_000_000)

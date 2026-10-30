@@ -1,4 +1,4 @@
 interface:
   display_name: "Realism improvement loop"
-  short_description: "Repair simulator defects with short matched trials"
-  default_prompt: "Use $realism-loop to run one short improvement round within the specified budget."
+  short_description: "Improve realism with four investigators and continuous rounds"
+  default_prompt: "Use $realism-loop to improve realism within the existing budget and round limit, preserving any owner pause."

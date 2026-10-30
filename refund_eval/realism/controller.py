@@ -1,11 +1,13 @@
-"""Durable candidate-only loop steps; investigation remains coding-agent work.
+"""Durable measurement steps for legacy comparisons and continuous rounds.
 
 No baseline is launched here. Compatible evidence supports a comparison;
 diagnostic history never enters one. Every paid step uses an explicit existing
-shared ledger, exact reviews, immutable preparation and a one-use start marker.
+shared ledger, immutable preparation and a one-use start marker. Continuous
+rounds do not require reviewer receipts or make comparison-based decisions.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -44,7 +46,23 @@ def read(path):
     return value
 
 
+def read_spend(ledger, budget):
+    """Read an existing shared ledger under its lock without rewriting history."""
+    path = Path(ledger)
+    with path.with_suffix(path.suffix + ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        value = read(path)
+        require(value.get("budget_usd") == budget, "Budget differs from persisted ledger; use the original budget")
+        return stages.summary(value)
+
+
 class LoopContext(JobContext):
+    def check_cancelled(self):
+        super().check_cancelled()
+        checker = getattr(self, "check_paused", None)
+        if checker is not None:
+            checker()
+
     def command(self, *args, env=None, **kwargs):
         # Harbor's independent uv project otherwise may select an unsupported
         # newer Python even when the coordinator uses its tested interpreter.
@@ -132,31 +150,52 @@ def read_result(run_dir):
     return result
 
 
-def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
+def run_candidate(*, repo, run_dir, candidate, baseline=None, review=None, runner_review=None,
                   ledger, budget, settings, baseline_evidence=None, historical_evidence=None,
-                  execute=False, execution_review=None, prior_unknown_review=None):
-    """Prepare/read/execute one candidate-only round, with no baseline fallback."""
+                  execute=False, execution_review=None, prior_unknown_review=None, continuous=False,
+                  check_paused=None):
+    """Prepare/read/execute one frozen candidate, with no baseline fallback.
+
+    ``continuous`` measures exactly three trials without reviewer receipts or a
+    baseline comparison. Existing retained-hold proofs still govern unresolved
+    historical spending; they are accounting evidence, not candidate approval.
+    """
     repo, run_dir, ledger = Path(repo).resolve(), Path(run_dir).resolve(), Path(ledger).resolve()
     context = None
     try:
         require(type(execute) is bool, "Execution must be explicit")
+        require(type(continuous) is bool, "Continuous mode must be explicit")
+        require(check_paused is None or callable(check_paused), "Pause checker must be callable")
+        if execute and check_paused is not None:
+            check_paused()
+        require(not (continuous and baseline_evidence), "Continuous rounds do not use comparison evidence")
         require(not (baseline_evidence and historical_evidence), "Choose compatible reuse or diagnostic history")
         private = repo / ".context/realism"
         require(run_dir != private and run_dir.is_relative_to(private), "Use a private run directory")
         require(ledger.is_file() and ledger.is_relative_to(private), "Use the existing shared private ledger")
+        if continuous and baseline is None:
+            baseline = candidate
         base, changed, runner = (measurement._commit(repo, value) for value in (baseline, candidate, "HEAD"))
-        require(base != changed and measurement._git(repo, "merge-base", base, changed) == base,
+        require((continuous or base != changed) and measurement._git(repo, "merge-base", base, changed) == base,
                 "Candidate must descend from the reviewed Git base")
         paths = measurement._git(repo, "diff", "--no-renames", "--name-only", base, changed).splitlines()
         require(not any(measurement._protected(path) for path in paths), "Protected candidate changes")
-        _, review_bytes = measurement._review(Path(review), repo, base, changed)
-        approved(runner_review, "measurement_infrastructure_review", candidate=runner, runner=runner,
-                 scenario_preserved=True, paid_execution_ready=True)
+        review_hashes = {}
+        if not continuous:
+            require(review is not None and runner_review is not None,
+                    "Legacy candidate-only measurement requires candidate and runner reviews")
+            _, review_bytes = measurement._review(Path(review), repo, base, changed)
+            approved(runner_review, "measurement_infrastructure_review", candidate=runner, runner=runner,
+                     scenario_preserved=True, paid_execution_ready=True)
+            review_hashes = {"review_sha256": hashlib.sha256(review_bytes).hexdigest(),
+                             "runner_review_sha256": sha(runner_review)}
         measurement._assert_trusted_source(repo, runner)
         load_dotenv(repo / ".env", override=False)
         selected = {"model": "openrouter/anthropic/claude-sonnet-5.5", "time_limit": 1800,
                     "trial_wallclock_limit": 1800, **settings}
         protocol = autonomous._protocol(selected)
+        require(not continuous or protocol["trials"] == 3,
+                "Continuous rounds require exactly three independent trials")
         if protocol.get("trial_deadlines") is not None:
             hard = protocol["trial_deadlines"]["command_hard_seconds"]
             require("trial_wallclock_limit" not in settings or (type(settings["trial_wallclock_limit"]) is int
@@ -173,24 +212,27 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                 and type(scan_reserve) in (int, float) and 0 < scan_reserve < float("inf"), "Invalid reserves")
         trial_reserve = protocol["trials"] * protocol["cost_limit"] * multiplier
         hashes = measurement._hashes(repo, runner)
+        require(not continuous or measurement._hashes(repo, changed) == hashes,
+                "Continuous candidate infrastructure must match the trusted runner")
         reference, history = None, None
         if baseline_evidence:
             reference = load_evidence(baseline_evidence, commit=base, protocol=protocol, hashes=hashes)
         if historical_evidence:
             history = historical_reference(Path(historical_evidence).resolve())
         # Current allowance may differ from old requests, which stay immutable.
-        spend = stages.show(ledger, budget) if prior_unknown_review is None else None
+        spend_reader = (retained_hold.read_spend if prior_unknown_review is not None
+                        else read_spend if continuous else stages.show)
+        spend = spend_reader(ledger, budget) if prior_unknown_review is None else None
         with measurement._exclusive(repo):
             if prior_unknown_review is not None:
                 spend = retained_hold.read_spend(ledger, budget)
             amendment = (spend.get("budget_amendments") or [{}])[-1].get("id")
-            request = {"version": 1, "mode": "candidate_only", "baseline_for_review": base,
+            request = {"version": 1, "mode": "continuous" if continuous else "candidate_only", "baseline_for_review": base,
                        "candidate": changed, "runner": runner, "protocol": protocol,
                        "measurement_hashes": hashes, "shared_ledger": str(ledger), "budget_usd": budget,
                        "budget_amendment_id": amendment, "trial_reserve_usd": trial_reserve,
                        "scan_reserve_usd": scan_reserve, "trial_wallclock_limit": selected["trial_wallclock_limit"],
-                       "review_sha256": hashlib.sha256(review_bytes).hexdigest(),
-                       "runner_review_sha256": sha(runner_review),
+                       **review_hashes,
                        "baseline_evidence": str(Path(baseline_evidence).resolve()) if baseline_evidence else None,
                        "baseline_evidence_sha256": sha(baseline_evidence) if baseline_evidence else None,
                        "historical_reference": history, "interpretation": INTERPRETATION}
@@ -226,6 +268,9 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             context = LoopContext(run_dir)
             context.ledger = ledger
             context.validate_native_usage = True
+            context.check_paused = check_paused if execute else None
+            if continuous:
+                context.read_spend = spend_reader
             if prior_unknown_review is not None:
                 context.read_spend = retained_hold.read_spend
                 guard = retained_hold.ReservationGuard(
@@ -252,25 +297,27 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
             atomic_json(run_dir / "plan.json", plan)
             if not execute:
                 return plan
-            require(execution_review is not None, "Prepared loop needs independent execution review")
-            approved(execution_review, "candidate_only_execution_review", execution_approved=True,
-                     request_fingerprint=fingerprint, runner=runner,
-                     preparation_sha256=plan["preparation_sha256"],
-                     public_preflight_sha256=plan["public_preflight_sha256"])
+            if not continuous:
+                require(execution_review is not None, "Prepared loop needs independent execution review")
+                approved(execution_review, "candidate_only_execution_review", execution_approved=True,
+                         request_fingerprint=fingerprint, runner=runner,
+                         preparation_sha256=plan["preparation_sha256"],
+                         public_preflight_sha256=plan["public_preflight_sha256"])
             measurement._assert_trusted_source(repo, runner)
             autonomous._preflight(context, trial_reserve + scan_reserve)
             fresh = autonomous._scan_preflight(protocol, context)
             require({k: v for k, v in fresh.items() if k != "planned_at"}
                     == {k: v for k, v in read(run_dir / "public-preflight.json").items() if k != "planned_at"},
-                    "Public scan tariff/preflight changed after review")
+                    "Public scan tariff/preflight changed after preparation")
             if prior_unknown_review is not None:
                 require(retained_hold.freeze_disposition(
                     repo, prior_unknown_review, ledger=ledger, budget=budget, binding=binding,
                     required_reserve=trial_reserve + scan_reserve) == request["prior_unknown_disposition"],
                     "Retained-hold approval changed before execution")
+            context.check_cancelled()
             with marker.open("x") as stream:
                 json.dump({"fingerprint": fingerprint, "started_at": now()}, stream)
-            result = {"mode": "candidate_only", "fingerprint": fingerprint,
+            result = {"mode": request["mode"], "fingerprint": fingerprint,
                       "historical_reference": history, "comparison": None, "interpretation": INTERPRETATION}
             try:
                 with measurement._interruptible():
@@ -291,8 +338,7 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                     cleanup = autonomous.cleanup_job(context)
                 except Exception as error:  # noqa: BLE001 -- missing cleanup remains unknown
                     cleanup = {"remote_state": "unknown", "error_type": type(error).__name__}
-                result.update(cleanup=cleanup, spend=(retained_hold.read_spend(ledger, budget)
-                              if prior_unknown_review is not None else stages.show(ledger, budget)), finished_at=now())
+                result.update(cleanup=cleanup, spend=spend_reader(ledger, budget), finished_at=now())
                 if not cleanup_verified(cleanup):
                     result["status"] = "reconciliation_required"
                 if result["status"] == "complete" and any(
@@ -306,5 +352,7 @@ def run_candidate(*, repo, run_dir, baseline, candidate, review, runner_review,
                             "result_sha256": measurement._json_hash(result)})
             return result
     except (ValueError, TypeError, OSError, KeyError, subprocess.SubprocessError) as error:
-        return {"status": "rejected", "error_type": type(error).__name__, "artifacts": str(run_dir),
-                "reason": str(error) if isinstance(error, measurement.Rejected) else "Invalid saved loop input"}
+        return {"status": "budget_blocked" if continuous and isinstance(error, autonomous.BudgetStop) else "rejected",
+                "error_type": type(error).__name__, "artifacts": str(run_dir),
+                "reason": str(error) if isinstance(error, (measurement.Rejected, autonomous.BudgetStop))
+                else "Invalid saved loop input"}
