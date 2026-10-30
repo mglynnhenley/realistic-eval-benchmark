@@ -36,7 +36,8 @@ def artifact(reference):
 
 def validate(policy, current, *, ledger, budget, enforce_limits=True):
     require(set(policy) == {"version", "ledger", "budget_usd", "authorization", "snapshot",
-                            "max_unresolved_usd", "max_new_unknowns", "analysis_stage_namespace"},
+                            "max_unresolved_usd", "max_new_unknowns", "analysis_stage_namespace",
+                            "historical_interruptions"},
             "Unknown or missing recovery policy field")
     require(policy.get("version") == VERSION and policy.get("budget_usd") == budget
             and policy.get("ledger") == str(Path(ledger).resolve()), "Recovery policy ledger/budget differs")
@@ -49,6 +50,19 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
             == {k: v for k, v in original.items() if k != "stages"}, "Historical budget metadata changed")
     require(all(current["stages"].get(k) == v for k, v in original["stages"].items()),
             "Historical charges/holds changed; reconcile separately")
+    abandoned = {}
+    for reference in policy["historical_interruptions"]:
+        observation = artifact(reference)
+        require(observation.get("no_exact_original_coordinator_process_found") is True
+                and observation.get("no_remote_completion_or_zero_charge_inferred") is True,
+                "Historical local interruption evidence required; charges remain unknown")
+        for name, stage in observation["new_uncertain_attempts"].items():
+            require(name not in abandoned and original["stages"].get(name) == stage
+                    and stage.get("kind") == "interaction" and stage.get("status") == "started"
+                    and stage.get("actual_usd") is None, "Interrupted analysis does not match frozen hold")
+            abandoned[name] = stage
+        for request in observation["requests"]:
+            artifact({key: request[key] for key in ("path", "sha256")})
     limit = policy.get("max_unresolved_usd")
     count = policy.get("max_new_unknowns")
     require(type(limit) in (int, float) and math.isfinite(limit) and 0 < limit < budget
@@ -60,7 +74,8 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
                 or type(stage["actual_usd"]) in (int, float) and math.isfinite(stage["actual_usd"])
                 and stage["actual_usd"] >= 0), "Invalid recovery charge")
         if name in original["stages"]:
-            require(stage.get("status") != "started", "Historical in-flight stage needs reconciliation")
+            require(stage.get("status") != "started" or name in abandoned,
+                    "Historical in-flight stage needs reconciliation")
             continue
         status, actual = stage.get("status"), stage.get("actual_usd")
         if status == "complete" and actual is not None:

@@ -1028,6 +1028,9 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                 raise
 
     initial_results = await asyncio.gather(*(initial(item) for item in config["investigators"]), return_exceptions=True)
+    for result in initial_results:
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
+            raise result
     if any(isinstance(result, OwnerPaused) for result in initial_results):
         raise next(result for result in initial_results if isinstance(result, OwnerPaused))
     failures = [result for result in initial_results if isinstance(result, BaseException)]
@@ -1069,6 +1072,9 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                 raise
 
     supplements = await asyncio.gather(*(supplementary(item) for item in config["investigators"]), return_exceptions=True)
+    for result in supplements:
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
+            raise result
     if any(isinstance(result, OwnerPaused) for result in supplements):
         raise next(result for result in supplements if isinstance(result, OwnerPaused))
     failures = [result for result in supplements if isinstance(result, BaseException)]

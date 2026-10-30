@@ -381,3 +381,10 @@ failure details; missing judge results stay unknown. Local selection can use the
 saved evidence and must record the missing coverage. This does not authorize
 replaying a failed report, rerating an invalid score, changing models or replacing
 a target trial. Legacy configurations retain their original stricter behavior.
+
+Historical analysis reservations left `started` by a killed process require an
+exact raw-hashed interruption observation and original request pins in
+`historical_interruptions`. This permits retaining the unchanged unknown hold;
+it does not claim remote completion or a zero charge. An active or unfinished
+native stage cannot use this analysis exception. Process cancellation and owner
+pause always propagate through partial-report handling.

@@ -26,7 +26,8 @@ def fixture(tmp_path):
     value = {"version": policy.VERSION, "budget_usd": 1000, "ledger": str(ledger),
              "authorization": pin(tmp_path / "owner.json", {"resume": True, "retain_unknown_holds": True}),
              "snapshot": pin(tmp_path / "snapshot.json", original),
-             "max_unresolved_usd": 50, "max_new_unknowns": 2, "analysis_stage_namespace": "new-stream-v1"}
+             "max_unresolved_usd": 50, "max_new_unknowns": 2, "analysis_stage_namespace": "new-stream-v1",
+             "historical_interruptions": []}
     return value, original, ledger
 
 
@@ -103,4 +104,22 @@ def test_local_synthesis_can_finish_after_paid_failure_limit(fixture):
     pending = policy.validate(value, current, ledger=ledger, budget=1000, enforce_limits=False)
     assert len(pending) == 3
     with pytest.raises(ValueError, match='Repeated'):
+        check(fixture)
+
+
+def test_lost_analysis_may_be_retained_only_with_exact_interruption_evidence(fixture, tmp_path):
+    value, current, _ = fixture
+    lost = stage(status='started')
+    del lost['finished_at']
+    current['stages']['lost-analysis'] = lost
+    value['snapshot'] = pin(tmp_path / 'snapshot2.json', current)
+    with pytest.raises(ValueError, match='in-flight'):
+        check(fixture)
+    observation = {'no_exact_original_coordinator_process_found': True,
+                   'no_remote_completion_or_zero_charge_inferred': True,
+                   'new_uncertain_attempts': {'lost-analysis': lost}, 'requests': []}
+    value['historical_interruptions'] = [pin(tmp_path / 'interruption.json', observation)]
+    assert check(fixture)['lost-analysis'] == lost
+    current['stages']['lost-analysis']['actual_usd'] = 0
+    with pytest.raises(ValueError, match='Historical charges'):
         check(fixture)
