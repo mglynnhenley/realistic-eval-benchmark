@@ -142,6 +142,10 @@ def _settings(value: dict) -> dict:
         raise InvestigationError("A positive explicit max_tokens is required")
     result = {"temperature": 0, **copy.deepcopy(value)}
     for name in ("temperature", "top_p"):
+        if name == "temperature" and result.get(name) is None:
+            # Some pinned models expose fixed sampling and reject temperature.
+            # Explicit null pins omission; it is not an unsupported fallback.
+            continue
         if name in result and (type(result[name]) not in (int, float) or not math.isfinite(result[name])
                                or not 0 <= result[name] <= (2 if name == "temperature" else 1)):
             raise InvestigationError(f"Invalid {name}")
@@ -405,6 +409,8 @@ class OpenRouterAdapter:
         payload = {"model": _model(model), "messages": messages, **_settings(settings),
                    "usage": {"include": True}, "plugins": [], "transforms": [],
                    "provider": {"allow_fallbacks": False, "require_parameters": True}}
+        if payload.get("temperature") is None:
+            payload.pop("temperature", None)
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"

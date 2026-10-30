@@ -324,6 +324,25 @@ async def test_real_adapter_reserves_durably_before_single_request_and_records_c
     assert len(requests) == 1
 
 
+async def test_fixed_sampling_model_explicitly_omits_unsupported_temperature(tmp_path):
+    model = "family/fixed-5.5"
+    entry = metadata(model)
+    entry["supported_parameters"].remove("temperature")
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        assert "temperature" not in json.loads(request.content)
+        return provider_response(request)
+
+    adapter = real_adapter(tmp_path, transport, model=model, catalog={model: entry})
+    await adapter.call(model=model, settings={"max_tokens": 1000, "temperature": None},
+                       messages=[{"role": "user", "content": "Synthetic evidence"}], tools=[], stage_id="fixed-call")
+    assert len(requests) == 1
+    assert inv.score_series_id({"model": model, "settings": {"max_tokens": 1000, "temperature": None}}) != inv.score_series_id(
+        {"model": model, "settings": {"max_tokens": 1000, "temperature": 0}})
+
+
 @pytest.mark.parametrize("cost", [None, "0.0", True, -1])
 async def test_unknown_costs_keep_full_hold(tmp_path, cost):
     adapter = real_adapter(tmp_path, lambda request: provider_response(request, cost=cost))

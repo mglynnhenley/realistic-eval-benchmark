@@ -57,6 +57,8 @@ provided for investigators. The realism judge may use one investigator's model
 ID through a separate blinded call. Each model needs positive `max_tokens`;
 settings support `temperature`, `top_p`, `seed` and `reasoning`, defaulting
 `temperature` to zero. Settings must be supported by the pinned model.
+For a model with fixed sampling that rejects `temperature`, explicitly set
+`"temperature": null` to pin omission of that parameter.
 
 ```json
 {
