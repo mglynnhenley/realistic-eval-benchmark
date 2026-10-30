@@ -49,7 +49,10 @@ Return a JSON object with findings (list), uncertainty (list), contrary_evidence
 contrary_evidence, proposed_improvement, validation. Quotes must be exact substrings
 of the cited event's rendered JSON or textual fields. Do not fabricate citations.
 You may use the same evidence tools regardless of your starting lens. Scratch and
-isolated experiments are private to you. Use no shared implementation edits."""
+isolated experiments are private to you. Use no shared implementation edits.
+Native state can be very large. Read state with outline=true first, then use
+JSON pointers and explicit start/count ranges to inspect relevant complete values.
+Oversized reads are refused explicitly; all original evidence remains accessible."""
 RUBRIC = {
     "version": "realism-0-10-v1",
     "criteria": {
@@ -284,8 +287,10 @@ class EvidenceTools:
         _tool("source", "Read a complete source/prompt file. No truncation.",
               {"path": {"type": "string"}}, ["path"]),
         _tool("list_source", "List available source/prompt paths.", {}, []),
-        _tool("state", "Read complete recorded state and effects for a trial.",
-              {"trial_id": {"type": "string"}}, ["trial_id"]),
+        _tool("state", "Read recorded state/effects. Start with outline=true; use RFC6901 pointer paths and explicit list/string ranges for large values. No silent truncation.",
+              {"trial_id": {"type": "string"}, "pointer": {"type": "string"},
+               "outline": {"type": "boolean"}, "start": {"type": "integer", "minimum": 0},
+               "count": {"type": "integer", "minimum": 1}}, ["trial_id"]),
         _tool("public_reference", "Fetch a public reference, with explicit access limitations.",
               {"url": {"type": "string"}}, ["url"]),
         _tool("reproduce", "Run Python in a disposable source copy with sanitized environment and separate working directory. No paid calls or shared edits. Not a security sandbox.",
@@ -345,6 +350,36 @@ class EvidenceTools:
                     value = {key: trial[key] for key in ("state", "effects") if key in trial}
                     if not value:
                         raise InvestigationError("Recorded state/effects are inaccessible")
+                pointer = arguments.get("pointer", "")
+                if not isinstance(pointer, str) or pointer and not pointer.startswith("/"):
+                    raise InvestigationError("State pointer must be an RFC6901 JSON pointer")
+                for part in pointer.split("/")[1:]:
+                    key = part.replace("~1", "/").replace("~0", "~")
+                    if isinstance(value, list):
+                        if not key.isdigit() or int(key) >= len(value):
+                            raise InvestigationError("State array pointer is out of range")
+                        value = value[int(key)]
+                    elif isinstance(value, dict):
+                        value = value[key]
+                    else:
+                        raise InvestigationError("State pointer crosses a scalar value")
+                if "start" in arguments or "count" in arguments:
+                    start, count = arguments.get("start"), arguments.get("count")
+                    if (type(start) is not int or start < 0 or type(count) is not int or count < 1
+                            or not isinstance(value, (list, str))):
+                        raise InvestigationError("State ranges need explicit nonnegative start and positive count on a list/string")
+                    total = len(value)
+                    value = {"pointer": pointer, "start": start, "count": count,
+                             "total": total, "value": value[start:start + count]}
+                elif arguments.get("outline") is True:
+                    def shape(item):
+                        return {"type": type(item).__name__, **({"length": len(item)}
+                                if isinstance(item, (dict, list, str)) else {})}
+
+                    value = {"pointer": pointer, **shape(value), **({"keys": {
+                        key: shape(item) for key, item in value.items()}} if isinstance(value, dict) else {})}
+                if len(_json(value).encode()) > 120_000:
+                    raise InvestigationError("Requested state exceeds 120000 bytes; original saved evidence is intact. Use outline=true, pointer and smaller explicit start/count ranges; no partial content returned")
             elif name == "public_reference":
                 if self.public_reference is None:
                     raise InvestigationError("Public-reference runtime is unavailable")

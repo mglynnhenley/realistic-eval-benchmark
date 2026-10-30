@@ -164,6 +164,26 @@ async def test_inaccessible_tools_and_path_escape_are_explicit(tmp_path, trials)
         assert result["status"] == "inaccessible" and result["reason"]
 
 
+async def test_large_native_state_is_accessible_by_index_and_explicit_pointer_ranges(tmp_path, trials):
+    text = "saved-evidence-" * 20_000
+    state = {"trial-1": {"native_events": [{"a/b": {"~content": text}}]}}
+    tools = inv.EvidenceTools(trials=trials, state=state)
+    scratch = tmp_path / "scratch"
+    refused = await tools.invoke("state", {"trial_id": "trial-1"}, scratch=scratch)
+    assert refused["status"] == "inaccessible" and "no partial" in refused["reason"]
+    outline = await tools.invoke("state", {"trial_id": "trial-1", "outline": True}, scratch=scratch)
+    assert outline["result"]["keys"]["native_events"] == {"type": "list", "length": 1}
+    chunks = []
+    for start in range(0, len(text), 10_000):
+        response = await tools.invoke("state", {"trial_id": "trial-1", "pointer": "/native_events/0/a~1b/~0content",
+                                               "start": start, "count": 10_000}, scratch=scratch)
+        assert response["status"] == "available"
+        assert response["result"]["total"] == len(text)
+        chunks.append(response["result"]["value"])
+    assert "".join(chunks) == text
+    assert tools.state == state
+
+
 @pytest.mark.parametrize("mutation", ["duplicate", "alias", "three", "missing_max"])
 def test_four_explicit_distinct_pinned_models_required(investigators, judge, mutation):
     if mutation == "duplicate":
