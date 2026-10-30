@@ -364,6 +364,11 @@ class ProductionBindings(Bindings):
             failed_scans = disposition.get("reconciled_failed_scans", [])
             if failed_scans:
                 descriptors = [*descriptors, *(item["stage"] for item in failed_scans)]
+            if disposition.get("version") == "retained-seven-holds-known-failed-interaction-v8":
+                known_interaction = disposition.get("reconciled_failed_interaction")
+                _require(isinstance(known_interaction, dict) and isinstance(known_interaction.get("stage"), dict),
+                         "Exact validated finite FAILED004 descriptor required")
+                descriptors = [*descriptors, known_interaction["stage"]]
             held = {}
             for item in descriptors:
                 _require(isinstance(item, dict) and item.get("id") in result["spend"]["stages"], "Invalid retained-hold descriptor")

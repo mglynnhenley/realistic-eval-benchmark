@@ -101,6 +101,128 @@ FAILED_SCAN_PINS = {'loop-051047e3c5087e5c-candidate-tells': {'proof': {'path': 
                                'original_run_directory': '.context/realism/20261030-continuous-001/deepseek-recovery-001/scan-001'}}
 
 
+# Exactly three interrupted002 requests pinned via owner003, never arbitrary active stages.
+SEVEN_VERSION = "retained-seven-holds-continuation-v7"
+SEVEN_FIELDS = FAILED_SCAN_FIELDS | {"retained_interrupted", "regeneration_scope"}
+SEVEN_SCOPE_FIELDS = FAILED_SCAN_SCOPE_FIELDS | {"parent_owner_request"}
+SEVEN_ACKNOWLEDGEMENTS = (FAILED_SCAN_ACKNOWLEDGEMENTS - {"fifth_unknown_blocks", "no_new_unknown_allowance"}) | {
+    "retained_all_seven_full_holds", "interrupted_started_status_is_not_terminal_success",
+    "owner003_regeneration_and_parent002_normal_scope", "eighth_unknown_blocks",
+    "no_interrupted_cost_inference_release_or_retry", "no_unpinned_unknown_allowance",
+}
+SEVEN_ARTIFACT_PINS = {'owner_request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/owner-request-003.json',
+                   'sha256': 'f12bc17dea2401b0ea53dc9344a515690c81d8da1b0ee19a0c0b0a9b1e61c7cf'},
+ 'parent_owner_request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/owner-request-002.json',
+                          'sha256': '6a82a23e063a46ad2b19a7932c0c507e465a03df288c5cb79784cbe4d2b26305'},
+ 'recovery_config': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-003/config-actual-001.json',
+                     'sha256': '813f8018e716bf2b58cf37359e85538dd6598b0bf4d4c5060a4a5858c80772b1'},
+ 'ledger_before': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-003/run-001/ledger-before.json',
+                   'sha256': 'deffc378bc8b730594d805a11b4eb64134c92493af1286a291a2c0f01c8ad393'},
+ 'original_config': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-002/config-actual-001.json',
+                     'sha256': 'bf78f7bc826c2a50916dd3bbc6925eb5e8e993db5048a142b41cf99566832f89'},
+ 'original_coordinator': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-002/coordinator.py',
+                          'sha256': '1c18dfcdd21fab009faddcea3493168e4b721d67cdfaee2af6bbf67f15c4a373'},
+ 'interruption': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-001/interruption-observation-001.json',
+                  'sha256': '03f8713abf381074ea33d13e0224f4557499cb99874cdee9a3f60cdcdbd5e6d6'}}
+SEVEN_INTERRUPTED_PINS = {'recovery-investigate-continuation-002-001-A-initial-001-01': {'snapshot_sha256': '1cafdd52d85b317a902cec1ad1ade3d4142767a4eaad8d9ec98d0460c6a1f241',
+                                                                'reserve_usd': 2.008088,
+                                                                'request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-002/run-001/model-calls/recovery-investigate-continuation-002-001-A-initial-001-01-request.json',
+                                                                            'sha256': 'b6163c6c0a3e7ada8bd1904228f8b0c7567ce9888539a5889d35478030e198d7'}},
+ 'recovery-investigate-continuation-002-001-B-initial-001-01': {'snapshot_sha256': 'b7d181005c9d85b4d16512110a96dc9fab06c5aab6b8aa789436d6565d5dbe5e',
+                                                                'reserve_usd': 8.160792,
+                                                                'request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-002/run-001/model-calls/recovery-investigate-continuation-002-001-B-initial-001-01-request.json',
+                                                                            'sha256': '0a90e94c0681ea1411b1f30ea007e7bbf5242326208f5a0be3a8934928614a1a'}},
+ 'recovery-investigate-continuation-002-001-C-initial-001-01': {'snapshot_sha256': '4dc70993317ff796a616655967576af61e158239638394b441454501d93d0f6d',
+                                                                'reserve_usd': 4.093756,
+                                                                'request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-002/run-001/model-calls/recovery-investigate-continuation-002-001-C-initial-001-01-request.json',
+                                                                            'sha256': 'fba4f4f2681a236f9608fa1be74210635f5b4cf9d515635cd5e7d949af094c5a'}}}
+
+
+# A separate known-cost FAILED interaction, never an eighth unknown reservation.
+EIGHT_VERSION = "retained-seven-holds-known-failed-interaction-v8"
+EIGHT_FIELDS = SEVEN_FIELDS | {"reconciled_failed_interaction", "continuation_owner_request"}
+EIGHT_SCOPE_FIELDS = SEVEN_SCOPE_FIELDS | {"continuation_owner_request"}
+EIGHT_ACKNOWLEDGEMENTS = SEVEN_ACKNOWLEDGEMENTS | {
+    "known004_failed_accounting_not_success", "no_eighth_unknown_allowance",
+    "same1000_total_cap", "no_savedcall_resend", "stop_on_real_unknown_cost",
+}
+EIGHT_STAGE_ID = "recovery-investigate-regen004-stream-v1-A-initial-003-08"
+EIGHT_GENERATION_ID = "gen-1793372867-ZztSLfL85cQQEUaQdgiH"
+EIGHT_MODEL = "qwen/qwen3.8-max-0902"
+EIGHT_CANONICAL_MODEL = "qwen/qwen3.8-max-20260902"
+EIGHT_ORIGINAL_RUNNER = "585547231e7f241b2d76d3b7ce9c78418127ebe7"
+EIGHT_RESERVE_USD = 2.060814
+EIGHT_ACTUAL_USD = 0.40302
+EIGHT_DETAIL = "Accounting only: exact saved provider generation reports USD 0.40302; provider status 499/client disconnect; complete answer remains unknown; no retry."
+EIGHT_STAGE_PREFIX = "recovery-investigate-regen004-stream-v1-"
+# Exact saved historical normal-finish evidence; future continuation bindings are separate.
+EIGHT_STAGE_SHA256 = "2a0999724e21515462dbd732eafdf66393aab380cba5807d69c0f33832b42b08"
+EIGHT_ACCOUNTING_PINS = {'proof': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/A-charge-recovery-001/case.json',
+           'sha256': '8620056dd2ef5b1494ffab0c07a27bc8c312e6e5c7be9eaf6f6d85c2ac452b86'},
+ 'receipt': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/accounting-receipt.json',
+             'sha256': 'bcfdeb4bef070294154e9426700985926bddd31611385f837610e821249f352a'},
+ 'whole_before': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/ledger-before.json',
+                  'sha256': 'e9b0508a7673cb65ebfff048749600ef6a22d6146a12b4963844f622e35aa05d'},
+ 'whole_after': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/ledger-after.json',
+                 'sha256': '25e0f1415552be8a1dce929d284eed2b65818fd36e6cfa7ce45215fa9630e49c'},
+ 'owner_resume': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/owner-resume-request.json',
+                  'sha256': '948269bfd52d67f5e95cb0733d2cffcd7656b004b511a5aef8103b28fe04774a'},
+ 'finish_script': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/A-charge-recovery-001/reconcile_charge.py',
+                   'sha256': '1d1f687ef0c8f93b8201eb4e20f9d56cf9ae10ab5e20a7fb7460c47b78fb3634'},
+ 'finish_source': {'path': 'refund_eval/realism/stages.py',
+                   'sha256': 'a52bdf1cb7e199ba563392305aa51e568504d1e535cb58a3aed2222bb168a59c'},
+ 'readback': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/accounting-readback.json',
+              'sha256': '38e9eabc7775e17a7ccbcc7b0b802f909d15220a60ecefe314bdd9bd994e981e'},
+ 'accounting_process': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/accounting-process-ended.json',
+                        'sha256': '6cb428f453c6d557cc052b66f19508e05cd8dac7249e6e6494a117397b3a312d'},
+ 'accounting_intent': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/accounting-exclusive-intent.json',
+                       'sha256': '1b7fecfc71a9224282432d186ad3c43f926a7b587b481efbae2ce7f4a2e987ea'},
+ 'accounting_stderr': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/accounting-stderr.log',
+                       'sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}}
+EIGHT_ARTIFACT_PINS = {'request': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-calls/recovery-investigate-regen004-stream-v1-A-initial-003-08-request.json',
+             'sha256': 'fb0a58971a685e1626684cf6d7fcd4bf6e1ca2d9e0ca51c1c6bddebd5ec35fa1'},
+ 'call_intent': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/call-intents/recovery-investigate-regen004-stream-v1-A-initial-003-08.json',
+                 'sha256': '4374fb89182fa5b8053ff7ba523c4686f2ecafbedd387b698934eddd211ff6a0'},
+ 'manifest': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-calls/recovery-investigate-regen004-stream-v1-A-initial-003-08-stream/manifest.json',
+              'sha256': 'fca52e4f8f3a879af941e78ed93362a710b9f1dc23d3d614391c40f474a75501'},
+ 'headers': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-calls/recovery-investigate-regen004-stream-v1-A-initial-003-08-stream/headers.json',
+             'sha256': 'ec7a16d88e7cbd7ba7750c680c69c57f1349220e6cb35ef35310946d2dbde198'},
+ 'generation': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-calls/recovery-investigate-regen004-stream-v1-A-initial-003-08-stream/generation-id.json',
+                'sha256': '269a2519153c0d6e0a945cb442e46afbfc4e97935ae097e4a23a07f2f3fbe01f'},
+ 'generation_chunk': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-calls/recovery-investigate-regen004-stream-v1-A-initial-003-08-stream/raw-000030.bin',
+                      'sha256': '5eda588dc06e39527c32499d77637633c1503a9723c642520b75fab24c8291a1'},
+ 'metadata_receipt': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/provider-metadata-receipt.json',
+                      'sha256': '3fafb67bdefe7984e98d4dfca800f012a50414322cf753de97414cac0d6e7224'},
+ 'metadata_body': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/provider-metadata.body',
+                   'sha256': '4c210efdc7aa9f9b391cd4f9dcf6e362dface2cd9c50db1530ed1db8a0480941'},
+ 'content_receipt': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/provider-content-receipt.json',
+                     'sha256': '561e8de71abfe0f47c99fd6d6e19a6ab2e20c84ea07607a181a39259c1139bed'},
+ 'content_body': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/provider-content.body',
+                  'sha256': '9635b287d2698dfe3f941a8155fbc7934c565a9b6454cc6ce4c3341354f2fbaa'},
+ 'provider_read_intent': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/provider-read-intent.json',
+                          'sha256': '8cdfca4c4a95547bcb8bbe6dde58228c56b6f5e61dbdc3806f5c9915385814b9'},
+ 'original_config': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/config-actual-001.json',
+                     'sha256': 'd1d7dda3c0fbff5a4a1f5550084cde2006f6a3edc18a11c480384eee5b673016'},
+ 'process_ended': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/worker-001/process-ended.json',
+                   'sha256': 'b040921304312f4b3a09e449e51679869e1bac908d03e538b0c63eafb0c0bfc6'},
+ 'task_ended': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/worker-001/task-ended.json',
+                'sha256': 'dcbbb7cc30c8da118f02cd6d6838373ba3a5c97e9ac92cfa7d65b4455409770f'},
+ 'signal': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/worker-001/signals/000.json',
+            'sha256': 'a0bdb5bf29f4bb93d5fa7db8a45abc8ee01b8cab34e64417a01baff4679ec106'},
+ 'task_signal': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/worker-001/task-signals/001.json',
+                 'sha256': 'a3f63ed03ad55eeaa052253240741093367709c3f3f2e0f8de9104b02ffa3f0b'},
+ 'streaming_source': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/trusted-runner/refund_eval/realism/streaming_receipts.py',
+                      'sha256': '0c8c6eadc16b3a8cab3799d45743e5f0598571cb1f5de4c7eb5aa4d58cc27a8a'},
+ 'adapter_source': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/trusted-runner/refund_eval/realism/investigation.py',
+                    'sha256': '0bb0fd151e74085b60843f411e7197a6390709eed843642302ebe6724dd27d93'},
+ 'coordinator_source': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/coordinator.py',
+                        'sha256': '8552368a0fa86cf7119ddeae31100e1252f4c65ee27575ccb2d0ce728e85f9de'},
+ 'preflight': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/recovery-coordinator-004/run-001/model-preflight.json',
+               'sha256': '1c4adcc1756715504fac10a7ad2b129ea71771d53eac5d2c181b21fd7f1ac30a'},
+ 'provider_reader_source': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/interrupted-recovery-004-001/read_provider_record.py',
+                            'sha256': '20fc2fd2c668ba418d82ac5a21dd5db6477fa1da90de9dbb366af6c6b39246fa'}}
+
+
 def require(condition, message):
     if not condition:
         raise measurement.Rejected(message)
@@ -326,6 +448,14 @@ def _freeze(repo, review_path, *, ledger, budget, binding, required_reserve, sna
     _path(repo, str(review_path.relative_to(repo)))
     raw = review_path.read_bytes()
     review = _json(raw)
+    if review.get("version") == EIGHT_VERSION:
+        return _freeze_eight_boundary(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                                      required_reserve=required_reserve, snapshot=snapshot,
+                                      execution_fingerprint=execution_fingerprint)
+    if review.get("version") == SEVEN_VERSION:
+        return _freeze_seven(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                             required_reserve=required_reserve, snapshot=snapshot,
+                             execution_fingerprint=execution_fingerprint)
     if review.get("version") == FAILED_SCAN_VERSION:
         return _freeze_known_failed_scans(repo, review_path, review, raw, ledger=ledger, budget=budget,
                                           binding=binding, required_reserve=required_reserve, snapshot=snapshot,
@@ -1352,3 +1482,645 @@ def _freeze_known_failed_scans(repo, review_path, review, raw, *, ledger, budget
     return _freeze_interaction(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                                required_reserve=required_reserve, snapshot=snapshot,
                                execution_fingerprint=execution_fingerprint, reconciled_failed_scans=validated)
+
+
+def _seven_scope(repo, review, current, ledger, binding):
+    """Three exact interrupted unknowns; the saved whole ledger is never filtered."""
+    scope = review["regeneration_scope"]
+    exact(scope, SEVEN_ARTIFACT_PINS)
+    documents = {}
+    for name, pin in SEVEN_ARTIFACT_PINS.items():
+        exact(scope[name], {"path", "sha256"})
+        require(scope[name] == pin, "Only exact owner003/config003/original002 provenance is eligible")
+        path = _path(repo, pin["path"])
+        require(digest(path.read_bytes()) == pin["sha256"], "Interrupted-recovery provenance changed")
+        if path.suffix == ".json":
+            documents[name] = _json(path.read_bytes())
+    owner, parent, config, before = (documents[name] for name in ("owner_request", "parent_owner_request",
+                                                               "recovery_config", "ledger_before"))
+    original, observation = documents["original_config"], documents["interruption"]
+    ids = list(SEVEN_INTERRUPTED_PINS)
+    require(owner.get("owner_messages_verbatim") == ["nop ejust regenerate"]
+            and owner.get("regeneration_authorized") is True and owner.get("resume_authorized") is True
+            and owner.get("unknown_holds_released") is False and owner.get("saved_native_only") is True
+            and owner.get("budget_total_usd") == 1000 and owner.get("ledger") == str(ledger)
+            and owner.get("original_ledger_sha256") == scope["ledger_before"]["sha256"]
+            and owner.get("regenerated_interrupted_stage_ids") == config.get("regenerated_interrupted_stage_ids") == ids
+            and type(owner.get("retained_unknown_stage_ids")) is list
+            and len(owner["retained_unknown_stage_ids"]) == 7
+            and set(owner["retained_unknown_stage_ids"]) == {item["id"] for item in review["stages"]},
+            "Exact seven-full-hold owner regeneration scope required; no billing inference")
+    require(parent.get("resume_authorized") is True and parent.get("no_unsubstantiated_hold_release") is True
+            and parent.get("budget_total_usd") == 1000 and parent.get("ledger") == str(ledger)
+            and parent.get("normal_future_rounds_remaining_after_recovery") == 8
+            and owner.get("parent_scope") == {"path": str(repo / scope["parent_owner_request"]["path"]),
+                                              "sha256": scope["parent_owner_request"]["sha256"]},
+            "Parent owner002 normal continuation scope must remain separate from regeneration")
+    require(config.get("ledger") == {"path": str(ledger), "sha256": scope["ledger_before"]["sha256"]}
+            and config.get("owner_request") == {"path": str(repo / scope["owner_request"]["path"]),
+                                                "sha256": scope["owner_request"]["sha256"]}
+            and original.get("ledger", {}).get("path") == str(ledger)
+            and observation.get("kind") == "coordinator_interruption_observation_not_provider_receipt"
+            and observation.get("no_remote_completion_or_zero_charge_inferred") is True,
+            "Pinned config/observation is not a provider settlement or zero-cost proof")
+    require(before.get("budget_usd") == current.get("budget_usd") == 1000
+            and set(current) == set(before)
+            and all(measurement._json_hash({key: current.get(key)}) == measurement._json_hash({key: value})
+                    for key, value in before.items() if key != "stages")
+            and all(measurement._json_hash(current["stages"].get(name)) == measurement._json_hash(value)
+                    for name, value in before["stages"].items()),
+            "Every original003 whole-ledger entry and top-level value must remain exact")
+    retained = config.get("retained_stages")
+    expected_ids = {item["id"] for item in review["stages"]} | {
+        review["reconciled_nonattempt"]["stage"]["id"]} | {item["stage"]["id"] for item in review["reconciled_failed_scans"]}
+    require(type(retained) is list and len(retained) == len(expected_ids) == 10
+            and {item.get("id") for item in retained} == expected_ids
+            and all(item.get("sha256") == measurement._json_hash(before["stages"].get(item.get("id")))
+                    for item in retained), "Exact original ten pending snapshots required")
+    descriptors = review["retained_interrupted"]
+    require(type(descriptors) is list and len(descriptors) == 3, "Only three exact interrupted full holds allowed")
+    for descriptor, sid in zip(descriptors, ids, strict=True):
+        exact(descriptor, {"stage", "original_request"})
+        pin, stage = SEVEN_INTERRUPTED_PINS[sid], descriptor["stage"]
+        exact(stage, {"id", "sha256", "snapshot"})
+        expected = stage["snapshot"]
+        exact(expected, {"kind", "status", "reserve_usd", "actual_usd", "started_at"})
+        require(stage["id"] == sid and stage["sha256"] == pin["snapshot_sha256"]
+                == measurement._json_hash(expected) == measurement._json_hash(before["stages"].get(sid))
+                and expected["kind"] == "interaction" and expected["status"] == "started"
+                and expected["actual_usd"] is None and expected["reserve_usd"] == pin["reserve_usd"]
+                and money(expected["reserve_usd"], positive=True) and _time(expected["started_at"]) is not None
+                and observation.get("new_uncertain_attempts", {}).get(sid) == expected,
+                "Original interrupted stage remains exact started/null/full reservation")
+        exact(descriptor["original_request"], {"path", "sha256"})
+        require(descriptor["original_request"] == pin["request"], "Only exact interrupted request bytes are eligible")
+        request_path, request = _artifact(repo, descriptor["original_request"])
+        require(request_path.name == sid + "-request.json" and request_path.parent.name == "model-calls"
+                and request.get("reserve_usd") == expected["reserve_usd"], "Original request/reservation differs")
+    future = repo / binding["run_directory"]
+    for name in ("recovery_config", "original_config"):
+        directory = (repo / scope[name]["path"]).parent
+        require(not future.is_relative_to(directory) and not directory.is_relative_to(future),
+                "Recovery002/003 runs and configuration cannot be replayed or overwritten")
+    return [item["stage"] for item in descriptors]
+
+
+def _seven_authorization(repo, review, ledger, budget, binding):
+    _, authorization = _artifact(repo, review["restart_authorization"])
+    exact(authorization, SEVEN_SCOPE_FIELDS)
+    exact(authorization["acknowledgements"], SEVEN_ACKNOWLEDGEMENTS)
+    for name in ("owner_request", "parent_owner_request"):
+        require(authorization[name] == SEVEN_ARTIFACT_PINS[name], "Exact new/parent owner provenance required")
+    require(authorization["original_v5_scope"]["sha256"] == FAILED_SCAN_V5_SCOPE_SHA256,
+            "Old v5 declaration remains provenance only")
+    _, old = _artifact(repo, authorization["original_v5_scope"])
+    exact(old, INTERACTION_SCOPE_FIELDS)
+    require(old["version"] == INTERACTION_VERSION, "Original v5 provenance differs")
+    owner = _artifact(repo, authorization["owner_request"])[1]
+    require(authorization["version"] == SEVEN_VERSION
+            and authorization["declaration_kind"] == "coordinator_seven_holds_continuation_interpretation"
+            and type(authorization["declared_by"]) is str and bool(authorization["declared_by"].strip())
+            and _time(authorization["declared_at"]) is not None and _time(owner.get("at")) is not None
+            and _time(authorization["declared_at"]) >= _time(owner["at"])
+            and all(_time(authorization["declared_at"]) >= _time(item["stage"]["snapshot"]["finished_at"])
+                    for item in review["reconciled_failed_scans"])
+            and authorization["continuation_after_feedback_integration"] is True
+            and money(budget, positive=True) and authorization["budget_usd"] == budget == 1000
+            and authorization["ledger"] == review["ledger"]
+            and authorization["future_binding"] == binding == review["future_binding"]
+            and authorization["bounded_disposition_sha256"] == measurement._json_hash({
+                key: review[key] for key in SEVEN_FIELDS - {"restart_authorization"}})
+            and all(value is True for value in authorization["acknowledgements"].values()),
+            "New exact prospective coordinator disposition required; old approvals are not extended")
+
+def _seven_original_interaction(repo, review, ledger, binding, snapshot):
+    exact(binding, {"run_directory", "request_sha256"})
+    require(type(binding["run_directory"]) is str, "Invalid continuation future directory")
+    descriptor = review["retained_interaction"]
+    exact(descriptor, {"stage", "original_request", "failure_accounting"})
+    stage = descriptor["stage"]
+    exact(stage, {"id", "sha256", "snapshot"})
+    require(type(stage["id"]) is str and bool(stage["id"]), "Exact retained interaction identity required")
+    expected = stage["snapshot"]
+    exact(expected, {"kind", "status", "reserve_usd", "actual_usd", "started_at", "finished_at", "detail"})
+    require(expected["kind"] == "interaction" and expected["status"] == "unknown"
+            and expected["actual_usd"] is None and money(expected["reserve_usd"], positive=True)
+            and _time(expected["started_at"]) is not None and _time(expected["finished_at"]) is not None
+            and _time(expected["finished_at"]) >= _time(expected["started_at"])
+            and type(expected["detail"]) is str, "Only a finished terminal unknown full interaction hold is eligible")
+    current, _ = snapshot
+    require(stage["sha256"] == measurement._json_hash(expected)
+            == measurement._json_hash(current["stages"].get(stage["id"])), "Retained interaction stage changed")
+    for name, sha256 in (("original_request", INTERACTION_REQUEST_SHA256),
+                         ("failure_accounting", INTERACTION_ACCOUNTING_SHA256)):
+        exact(descriptor[name], {"path", "sha256"})
+        require(descriptor[name]["sha256"] == sha256, "Only the pinned original interaction evidence is eligible")
+    request_path, request = _artifact(repo, descriptor["original_request"])
+    accounting_path, accounting = _artifact(repo, descriptor["failure_accounting"])
+    require(request_path.parent.name == "model-calls" and request_path.name == stage["id"] + "-request.json",
+            "Exact original interaction request artifact required")
+    require(accounting.get("review_kind") == "independent_original_http400_accounting_recovery"
+            and accounting.get("approved") is False and accounting.get("outcome") == "unresolved_original_charge"
+            and accounting.get("stage_id") == stage["id"]
+            and accounting.get("original_request_sha256") == descriptor["original_request"]["sha256"]
+            and accounting.get("ledger_path") == str(ledger.relative_to(repo))
+            and accounting.get("ledger_before_sha256") == accounting.get("ledger_after_sha256")
+            and "exact_actual_cost_usd" in accounting and accounting["exact_actual_cost_usd"] is None
+            and accounting.get("one_time_normal_stages_finish_justified") is False
+            and "supported_stage_update" in accounting and accounting["supported_stage_update"] is None
+            and accounting.get("inference_retry_permitted") is False
+            and accounting.get("old036_failed_zero_preserved") is True
+            and money(request.get("reserve_usd"), positive=True)
+            and request["reserve_usd"] == expected["reserve_usd"], "Original interaction accounting must remain unresolved")
+    descriptors = review["stages"][:4]
+    require(type(descriptors) is list and len(descriptors) == 4, "Exactly three native holds and one interaction required")
+    for item in descriptors:
+        exact(item, {"id", "sha256"})
+        require(type(item["id"]) is str, "Invalid retained-hold stage identity")
+    require(descriptors[-1] == {"id": stage["id"], "sha256": stage["sha256"]}
+            and len({item["id"] for item in descriptors}) == 4, "Interaction must be the sole fourth retained hold")
+    originals = accounting.get("all_four_unknown_stage_snapshots")
+    exact(originals, {item["id"] for item in descriptors})
+    require(all(measurement._json_hash(originals[item["id"]]) == item["sha256"] for item in descriptors),
+            "All four original accounting snapshots must remain exact")
+    future = repo / binding["run_directory"]
+    require(all(not future.is_relative_to(directory) and not directory.is_relative_to(future)
+                for directory in (request_path.parent.parent, accounting_path.parent)),
+            "Original interaction evidence cannot overlap new work")
+    return descriptors[-1]
+
+def _freeze_seven(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
+                  snapshot, execution_fingerprint):
+    """Independent exact-seven accounting branch; old v1-v6 authority unchanged."""
+    fields, kind, acknowledgements = (SEVEN_FIELDS, "retained_seven_holds_continuation_disposition",
+                                      SEVEN_ACKNOWLEDGEMENTS)
+    exact(review, fields | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    require(type(review["stages"]) is list and len(review["stages"]) == 7, "Exactly seven ordered unknown descriptors required")
+    exact(binding, {"run_directory", "request_sha256"})
+    current, _ = snapshot
+    interrupted = _seven_scope(repo, review, current, ledger, binding)
+    retained_interaction = _seven_original_interaction(repo, review, ledger, binding, snapshot)
+    known = review["reconciled_failed_scans"]
+    require(type(known) is list and len(known) == 2
+            and [item["stage"]["id"] for item in known] == list(FAILED_SCAN_PINS), "Both exact knownFAILED scans required")
+    reconciled_failed_scans = [_reconciled_failed_scan(repo, item, current, ledger, binding) for item in known]
+    _seven_authorization(repo, review, ledger, budget, binding)
+    require(review["review_kind"] == kind and review["approved"] is True
+            and type(review["reviewer"]) is str and bool(review["reviewer"].strip())
+            and _time(review["reviewed_at"]) is not None,
+            "Exact independent three-hold approval required" if retained_interaction is None
+            else "Exact bounded continuation declaration required")
+    exact(review["acknowledgements"], acknowledgements)
+    require(all(value is True for value in review["acknowledgements"].values()),
+            "All three full holds require acknowledgement" if retained_interaction is None
+            else "All seven full holds require acknowledgement")
+    require(review["validator_sha256"] == digest(Path(__file__).read_bytes()), "Retained-hold validator source changed")
+    exact(binding, {"run_directory", "request_sha256"})
+    exact(review["future_binding"], {"run_directory", "request_sha256"})
+    require(type(binding["run_directory"]) is str and type(binding["request_sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}", binding["request_sha256"])
+            and review["future_binding"] == binding, "Three-hold approval binds a different future request")
+    exact(review["artifacts"], {"scope_review", "budget_review", "originals"})
+    exact(review["artifacts"]["scope_review"], {"path", "sha256"})
+    require(review["artifacts"]["scope_review"]["sha256"] == THREE_SCOPE_SHA256, "Exact three-original scope required")
+    scope_path, scope = _artifact(repo, review["artifacts"]["scope_review"])
+    require(scope.get("scope_approved") is True and scope.get("implementation_scope_supported") is True
+            and scope.get("protocol_proposal") == THREE_VERSION, "Exact three-original scope approval required")
+    references = _three_references(repo, scope_path, scope)
+    require(measurement._json_hash(review["artifacts"]) == measurement._json_hash(references),
+            "Only three scope-pinned proof chains allowed")
+    current, ledger_sha = snapshot
+    exact(review["ledger"], {"path", "sha256", "budget_usd", "amendment_id", "amendment_sha256"})
+    require(_path(repo, review["ledger"]["path"]) == ledger
+            and review["ledger"]["path"] == str(ledger.relative_to(repo))
+            and money(budget, positive=True) and budget == 1000
+            and review["ledger"]["sha256"] == ledger_sha and money(review["ledger"]["budget_usd"])
+            and review["ledger"]["budget_usd"] == budget, "Three-hold ledger approval is stale")
+    before, budget_proof = _three_budget(repo, scope_path, scope, current, ledger)
+    amendment = current["budget_amendments"][-1]
+    require(review["ledger"]["amendment_id"] == amendment["id"] == budget_proof["amendment_id"]
+            and review["ledger"]["amendment_sha256"] == measurement._json_hash(amendment), "Three-hold amendment differs")
+    future = repo / binding["run_directory"]
+    require(not Path(binding["run_directory"]).is_absolute() and future.resolve() == future
+            and future != repo / ".context/realism" and future.is_relative_to(repo / ".context/realism")
+            and str(future.relative_to(repo)) == binding["run_directory"], "Canonical private future directory required")
+    # Legacy helpers receive the exact historical amendment prefix; their strict
+    # failed-stage, seals and termination checks remain unchanged for v1/v2.
+    old_current = {**current, "budget_amendments": before["budget_amendments"]}
+    descriptors = []
+    for original, reference in zip(scope["originals"], references["originals"], strict=True):
+        if original["label"] == "016":
+            descriptor, directory = _three_original016(repo, original, reference["artifacts"], current, ledger,
+                                                        binding, before["budget_amendments"])
+        else:
+            descriptor, directory = _pair_original(repo, original, reference["artifacts"], old_current, ledger, binding)
+        require(not future.is_relative_to(directory) and not directory.is_relative_to(future),
+                "Original three runs cannot be replayed or modified")
+        descriptors.append(descriptor)
+    expected_descriptors = [*descriptors, retained_interaction, *({"id": item["id"], "sha256": item["sha256"]} for item in interrupted)]
+    require(len({item["id"] for item in descriptors}) == 3
+            and scope["exact_original_stages"] == [item["id"] for item in descriptors]
+            and measurement._json_hash(review["stages"]) == measurement._json_hash(expected_descriptors),
+            "Three exact ordered stages required" if retained_interaction is None
+            else "Seven exact ordered unknown stages required")
+    originals = {item["id"] for item in descriptors}
+    reconciled = _reconciled_nonattempt(repo, review["reconciled_nonattempt"], current, ledger, binding)
+    require(reconciled not in originals, "Reconciled case cannot replace an original full hold")
+    originals.add(reconciled)
+    if retained_interaction is not None:
+        require(retained_interaction["id"] not in originals, "Retained interaction cannot replace a native case")
+        originals.add(retained_interaction["id"])
+    if reconciled_failed_scans is not None:
+        for known_scan in reconciled_failed_scans:
+            require(known_scan["id"] not in originals, "Known scan cannot replace an original hold/nonattempt")
+            originals.add(known_scan["id"])
+    for item in interrupted:
+        require(item["id"] not in originals, "Interrupted case cannot replace any historical hold")
+        originals.add(item["id"])
+    for name, stage in current["stages"].items():
+        if name not in originals:
+            require(stage.get("status") == "complete" and money(stage.get("actual_usd"))
+                    and _time(stage.get("finished_at")) is not None,
+                    "Every fourth unknown or unfinished stage blocks" if retained_interaction is None
+                    else "Every eighth unknown or foreign unfinished stage blocks")
+    marker = future / "execution-started.json"
+    require(not marker.is_symlink(), "Noncanonical future start marker")
+    if marker.exists():
+        require(marker.resolve() == marker and execution_fingerprint is not None
+                and _json(marker.read_bytes()).get("fingerprint") == execution_fingerprint,
+                "Future three-hold execution already started; never replay")
+    require(money(required_reserve, positive=True) and required_reserve <= stages.summary(current)["remaining_usd"] + 1e-9,
+            "New native and scan reserves do not fit after all three full holds" if retained_interaction is None
+            else "New reserves do not fit after all seven full holds")
+    return {**{key: review[key] for key in fields},
+            "review": {"path": str(review_path.relative_to(repo)), "sha256": digest(raw)}}
+
+
+def _eight_failed_interaction(repo, descriptor, current, ledger, binding):
+    """One finite-cost FAILED004 interaction; never an eighth unknown allowance."""
+    exact(descriptor, {"stage", "artifacts", "accounting"})
+    exact(descriptor["stage"], {"id", "sha256", "snapshot"})
+    exact(descriptor["artifacts"], EIGHT_ARTIFACT_PINS)
+    exact(descriptor["accounting"], EIGHT_ACCOUNTING_PINS)
+    docs = {}
+    for name, pin in {**EIGHT_ARTIFACT_PINS, **EIGHT_ACCOUNTING_PINS}.items():
+        require(type(pin) is dict and set(pin) == {"path", "sha256"}
+                and type(pin["sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]),
+                "Exact004 accounting/receipt/wholepostimage/owner pins are unsupplied; do not use")
+        ref = descriptor["artifacts" if name in EIGHT_ARTIFACT_PINS else "accounting"][name]
+        require(ref == pin, "Only exact pinned original004 evidence and settlement is eligible")
+        path = repo / pin["path"] if name == "finish_source" else _path(repo, pin["path"])
+        require(path.resolve() == path and path.is_file() and path.is_relative_to(repo), "Canonical exact source path required")
+        raw = path.read_bytes()
+        require(digest(raw) == pin["sha256"], "Original004/settlement source bytes changed")
+        if name not in {"generation_chunk", "streaming_source", "adapter_source", "coordinator_source",
+                        "finish_script", "finish_source", "provider_reader_source", "accounting_stderr"}:
+            docs[name] = _json(raw)
+    sid, generation = EIGHT_STAGE_ID, EIGHT_GENERATION_ID
+    stage, expected = descriptor["stage"], descriptor["stage"]["snapshot"]
+    require(type(EIGHT_STAGE_SHA256) is str and re.fullmatch(r"[0-9a-f]{64}", EIGHT_STAGE_SHA256),
+            "Exact normal-finish target snapshot pin is unsupplied")
+    require(stage["id"] == sid and stage["sha256"] == EIGHT_STAGE_SHA256
+            == measurement._json_hash(expected) == measurement._json_hash(current["stages"].get(sid))
+            and expected.get("kind") == "interaction" and expected.get("status") == "failed"
+            and money(expected.get("actual_usd"), positive=True) and expected["actual_usd"] == EIGHT_ACTUAL_USD
+            and expected.get("reserve_usd") == EIGHT_RESERVE_USD
+            and _time(expected.get("finished_at")) is not None
+            and _time(expected.get("started_at")) is not None
+            and _time(expected["finished_at"]) >= _time(expected["started_at"]),
+            "Only exact finite FAILED004 status/cost/full snapshot is eligible")
+    request, manifest, headers, gen = (docs[name] for name in ("request", "manifest", "headers", "generation"))
+    request_sha = EIGHT_ARTIFACT_PINS["request"]["sha256"]
+    require(request.get("reserve_usd") == EIGHT_RESERVE_USD
+            and request.get("transport_profile") == "openrouter-chat-sse-receipts-v1"
+            and request.get("payload", {}).get("stream") is True
+            and request.get("payload", {}).get("model") == EIGHT_MODEL
+            and request.get("bound", {}).get("metadata", {}).get("id") == EIGHT_MODEL
+            and request["bound"]["metadata"].get("canonical_slug") == EIGHT_CANONICAL_MODEL
+            and docs["preflight"].get(EIGHT_MODEL) == request["bound"]["metadata"]
+            and docs["call_intent"].get("stage_id") == sid
+            and docs["call_intent"].get("payload_sha256") == measurement._json_hash(request["payload"]),
+            "Original004 request/canonical model/full reserve/call intent differs")
+    for item in (manifest, headers, gen):
+        require(item.get("stage_id") == sid and item.get("request_sha256") == request_sha
+                and item.get("model") == EIGHT_MODEL
+                and item.get("transport_profile") == "openrouter-chat-sse-receipts-v1",
+                "Generation receipt must bind this original request and stream")
+    require(headers.get("status_code") == 200 and gen.get("generation_id") == generation
+            and gen.get("source") == "complete SSE JSON event id"
+            and manifest.get("streaming_source_sha256") == EIGHT_ARTIFACT_PINS["streaming_source"]["sha256"]
+            and manifest.get("base_adapter_source_sha256") == EIGHT_ARTIFACT_PINS["adapter_source"]["sha256"],
+            "Exact original004 streaming source/generation binding differs")
+    chunk = gen.get("through_chunk", {})
+    chunk_path = _path(repo, EIGHT_ARTIFACT_PINS["generation_chunk"]["path"])
+    chunk_raw = chunk_path.read_bytes()
+    require(chunk.get("file") == chunk_path.name and chunk.get("sha256") == digest(chunk_raw)
+            and chunk.get("bytes") == len(chunk_raw) and type(chunk.get("sequence")) is int,
+            "Original generation ID raw event source differs")
+    events = [_json(line[5:].strip()) for line in chunk_raw.splitlines()
+              if line.startswith(b"data:") and line[5:].strip() != b"[DONE]"]
+    require(any(event.get("id") == generation for event in events), "Generation ID is not present in pinned raw event")
+    intent, metadata_receipt = docs["provider_read_intent"], docs["metadata_receipt"]
+    content_receipt, metadata = docs["content_receipt"], docs["metadata_body"].get("data", {})
+    require(intent.get("method") == "GET" and intent.get("redirects") is False and intent.get("retries") == 0
+            and intent.get("inference_calls") == intent.get("ledger_writes") == 0
+            and intent.get("stage_id") == sid and intent.get("generation_id") == generation
+            and intent.get("request_sha256") == request_sha
+            and intent.get("generation_receipt_sha256") == EIGHT_ARTIFACT_PINS["generation"]["sha256"],
+            "Original saved GET-only recovery intent differs")
+    for item, name, code, endpoint in ((metadata_receipt, "metadata_body", 200, "/generation"),
+                                     (content_receipt, "content_body", 404, "/generation/content")):
+        body_raw = _path(repo, EIGHT_ARTIFACT_PINS[name]["path"]).read_bytes()
+        require(item.get("generation_id") == generation and item.get("status_code") == code
+                and item.get("endpoint") == endpoint and item.get("body_sha256") == digest(body_raw)
+                and item.get("bytes") == len(body_raw), "Saved provider GET receipt/body/ID join differs")
+    provider = metadata.get("provider_responses")
+    require(metadata.get("id") == generation and metadata.get("model") == EIGHT_CANONICAL_MODEL
+            and metadata.get("streamed") is True and metadata.get("is_byok") is False
+            and money(metadata.get("total_cost"), positive=True) and metadata["total_cost"] == EIGHT_ACTUAL_USD
+            and metadata.get("usage") == EIGHT_ACTUAL_USD
+            and type(provider) is list and len(provider) == 1 and provider[0].get("status") == 499
+            and provider[0].get("is_byok") is False
+            and provider[0].get("model_permaslug") == EIGHT_CANONICAL_MODEL
+            and provider[0].get("id") == metadata.get("upstream_id")
+            and metadata.get("finish_reason") is None and metadata.get("native_finish_reason") is None,
+            "Exact original finite charge/provider499/canonical Qwen metadata required; no completion claim")
+    ended, task, signal, task_signal = (docs[name] for name in ("process_ended", "task_ended", "signal", "task_signal"))
+    require(ended.get("child_exit_observed") is True and ended.get("child_returncode") == 143
+            and ended.get("remote_state") == "not_established_by_local_exit" and ended.get("automatic_replay") is False
+            and task.get("outcome") == "catchable_signal" and task.get("exit_code") == 143
+            and task.get("scope") == "python_finalizer" and task.get("signals") == [15]
+            and task.get("os_exit_observed") is False and ended.get("child") == task.get("process")
+            and signal.get("number") == task_signal.get("signal") == 15 and signal.get("name") == "SIGTERM",
+            "Original local SIGTERM records do not prove remote success or zero cost")
+    config = docs["original_config"]
+    require(config.get("runner_commit") == EIGHT_ORIGINAL_RUNNER
+            and config.get("ledger", {}).get("path") == str(ledger), "Original004 source/ledger config differs")
+    proof, receipt = docs["proof"], docs["receipt"]
+    before, after = docs["whole_before"], docs["whole_after"]
+    old = before.get("stages", {}).get(sid, {})
+    require(before.get("budget_usd") == after.get("budget_usd") == 1000
+            and old.get("kind") == "interaction" and old.get("status") == "unknown"
+            and old.get("actual_usd") is None and old.get("reserve_usd") == EIGHT_RESERVE_USD
+            and _time(old.get("finished_at")) is not None
+            and _time(expected["finished_at"]) >= _time(old["finished_at"])
+            and expected.get("detail") == EIGHT_DETAIL
+            and all(expected.get(key) == old.get(key) for key in ("kind", "reserve_usd", "started_at"))
+            and after.get("stages", {}).get(sid) == expected,
+            "Exact original unknown/null to finite FAILED normal accounting postimage required")
+    restored = deepcopy(after)
+    restored["stages"][sid] = deepcopy(old)
+    require(measurement._json_hash(restored) == measurement._json_hash(before),
+            "Whole normal finish changed unrelated ledger entries/top-level fields")
+    for key, value in after.items():
+        if key != "stages":
+            require(measurement._json_hash({key: current.get(key)}) == measurement._json_hash({key: value}),
+                    "Post-accounting top-level ledger changed")
+    require(set(current) == set(after)
+            and all(measurement._json_hash(current["stages"].get(name)) == measurement._json_hash(value)
+                    for name, value in after["stages"].items()),
+            "Every complete post-accounting stage must remain exact in future whole ledger")
+    expected_post = deepcopy(before)
+    expected_post["stages"][sid].update(status="failed", actual_usd=EIGHT_ACTUAL_USD,
+        finished_at=expected["finished_at"], detail=EIGHT_DETAIL)
+    require(measurement._json_hash(after) == measurement._json_hash(expected_post),
+            "Only status/actual/finish time/detail of exact target may change")
+    require(sum(name.startswith(EIGHT_STAGE_PREFIX) and row.get("status") == "complete"
+                for name, row in before["stages"].items()) == 61
+            and sum(row.get("actual_usd") is None for name, row in before["stages"].items() if name != sid) == 7,
+            "Exact61 COMPLETE original004 calls and seven other full holds must remain")
+    require(proof.get("version") == 1 and type(proof.get("version")) is int
+            and proof.get("stage_id") == sid and proof.get("generation_id") == generation
+            and proof.get("budget_usd") == 1000 and proof.get("reserve_usd") == EIGHT_RESERVE_USD
+            and proof.get("actual_usd") == EIGHT_ACTUAL_USD
+            and proof.get("ledger_before") == {"path": str(repo / EIGHT_ACCOUNTING_PINS["whole_before"]["path"]),
+                                                "sha256": EIGHT_ACCOUNTING_PINS["whole_before"]["sha256"]}
+            and proof.get("stage_before_sha256") == digest(json.dumps(old, sort_keys=True, ensure_ascii=False, allow_nan=False).encode())
+            and proof.get("stages_source") == {"path": str(repo / EIGHT_ACCOUNTING_PINS["finish_source"]["path"]),
+                                                "sha256": EIGHT_ACCOUNTING_PINS["finish_source"]["sha256"]},
+            "Exact frozen A accounting case/source/before-stage proof required")
+    proof_names = {"request": "request", "manifest": "manifest", "generation_receipt": "generation", "headers": "headers",
+                   "preflight": "preflight", "provider_read_intent": "provider_read_intent", "provider_reader_source": "provider_reader_source",
+                   "metadata_receipt": "metadata_receipt", "metadata_body": "metadata_body", "content_receipt": "content_receipt", "content_body": "content_body"}
+    exact(proof.get("artifacts"), proof_names)
+    require(all(proof["artifacts"][name] == {"path": str(repo / EIGHT_ARTIFACT_PINS[key]["path"]),
+                                            "sha256": EIGHT_ARTIFACT_PINS[key]["sha256"]}
+                for name, key in proof_names.items()), "Accounting case must bind every original raw artifact/source")
+    journal = _path(repo, EIGHT_ARTIFACT_PINS["manifest"]["path"]).parent
+    chunks = proof.get("journal_chunks")
+    require(type(chunks) is list and bool(chunks)
+            and {path.name for path in journal.glob("raw-*.bin")} == {f"raw-{i:06d}.bin" for i in range(len(chunks))},
+            "Entire original interrupted raw journal inventory differs")
+    for i, item in enumerate(chunks):
+        exact(item, {"sequence", "file", "bytes", "sha256"})
+        raw = (journal / f"raw-{i:06d}.bin").read_bytes()
+        require(type(item["sequence"]) is int and item["sequence"] == i and item["file"] == f"raw-{i:06d}.bin"
+                and item["bytes"] == len(raw) and len(raw) > 0 and item["sha256"] == digest(raw), "Original interrupted journal bytes changed")
+    require(gen["through_chunk"] in chunks
+            and not any((journal / name).exists() for name in ("eof.json", "complete.json", "invalid.json"))
+            and not (journal.parent / (sid + "-response.json")).exists(),
+            "Original interrupted stream remains incomplete; never invent a terminal answer")
+    require(receipt.get("executed") is True and type(receipt.get("ledger_writes")) is int and receipt["ledger_writes"] == 1
+            and receipt.get("stage_id") == sid and receipt.get("generation_id") == generation
+            and receipt.get("status") == "failed" and receipt.get("actual_usd") == EIGHT_ACTUAL_USD
+            and receipt.get("budget_usd") == 1000 and receipt.get("reserve_usd") == EIGHT_RESERVE_USD
+            and receipt.get("answer_status") == "unknown"
+            and receipt.get("provider_metadata_sha256") == EIGHT_ARTIFACT_PINS["metadata_body"]["sha256"]
+            and receipt.get("ledger_after_sha256") == EIGHT_ACCOUNTING_PINS["whole_after"]["sha256"],
+            "Exact ONE normal FAILED accounting receipt and whole postimage required; answer stays unknown")
+    spend = stages.summary(after)
+    exact(receipt.get("summary"), {"budget_usd", "actual_usd", "held_usd", "committed_usd", "remaining_usd"})
+    require(all(receipt["summary"][key] == spend[key] for key in receipt["summary"]), "Normal finish receipt whole-ledger summary differs")
+    readback, process, accounting_intent = (docs[name] for name in ("readback", "accounting_process", "accounting_intent"))
+    def absolute_ref(name):
+        return {"path": str(repo / EIGHT_ACCOUNTING_PINS[name]["path"]), "sha256": EIGHT_ACCOUNTING_PINS[name]["sha256"]}
+    require(readback.get("accounting_receipt") == absolute_ref("receipt")
+            and readback.get("accounting_process") == absolute_ref("accounting_process")
+            and readback.get("ledger_after_copy") == absolute_ref("whole_after")
+            and readback.get("before_ledger_sha256") == EIGHT_ACCOUNTING_PINS["whole_before"]["sha256"]
+            and readback.get("after_ledger_sha256") == EIGHT_ACCOUNTING_PINS["whole_after"]["sha256"]
+            and readback.get("target_stage_id") == sid and readback.get("target_snapshot_before") == old
+            and readback.get("target_snapshot_after") == expected
+            and readback.get("target_stage_canonical_sha256") == EIGHT_STAGE_SHA256
+            and readback.get("entire_other_204_stages_and_top_level_preserved") is True
+            and readback.get("seven_old_full_unknown_holds_unchanged") is True
+            and readback.get("stable_lock_unchanged") is True
+            and type(readback.get("normal_finish_calls")) is int and readback["normal_finish_calls"] == 1
+            and readback.get("answer_status") == "unknown" and readback.get("new_inference_calls") == 0
+            and readback.get("summary") == receipt["summary"], "Exact saved normal-finish readback closure differs")
+    argv = [str(repo / ".venv/bin/python"), "-u", str(repo / EIGHT_ACCOUNTING_PINS["finish_script"]["path"]),
+            "--case", str(repo / EIGHT_ACCOUNTING_PINS["proof"]["path"]),
+            "--case-sha256", EIGHT_ACCOUNTING_PINS["proof"]["sha256"],
+            "--source-sha256", EIGHT_ACCOUNTING_PINS["finish_script"]["sha256"], "--ledger", str(ledger), "--execute"]
+    require(process.get("returncode") == 0 and type(process.get("returncode")) is int
+            and process.get("argv") == accounting_intent.get("argv") == argv
+            and process.get("cwd") == accounting_intent.get("cwd") == str(repo)
+            and process.get("stdout") == absolute_ref("receipt") and process.get("stderr") == absolute_ref("accounting_stderr")
+            and process.get("automatic_retry") is False
+            and accounting_intent.get("source") == absolute_ref("finish_script")
+            and accounting_intent.get("case") == absolute_ref("proof")
+            and accounting_intent.get("ledger_before", {}).get("path") == str(ledger)
+            and accounting_intent["ledger_before"].get("sha256") == EIGHT_ACCOUNTING_PINS["whole_before"]["sha256"]
+            and accounting_intent.get("credentials_absent") is True
+            and accounting_intent.get("normal_finish_calls_authorized") == 1
+            and accounting_intent.get("status") == "failed" and accounting_intent.get("actual_usd") == EIGHT_ACTUAL_USD
+            and accounting_intent.get("answer_status") == "unknown" and accounting_intent.get("uncertain_retry_allowed") is False,
+            "Saved ONE successful accounting process/source/case/receipt join differs; never execute it again")
+    created = _time(metadata.get("created_at"))
+    require(created is not None and _time(old["started_at"]) <= created <= _time(old["finished_at"])
+            and money(metadata.get("generation_time"))
+            and created.timestamp() + metadata["generation_time"] / 1000 <= _time(old["finished_at"]).timestamp() + 1
+            and _time(metadata_receipt.get("at")) is not None and _time(metadata_receipt["at"]) >= _time(old["finished_at"]),
+            "Original provider/stage/read timing differs; local signal alone does not prove billing")
+    original = (_path(repo, EIGHT_ARTIFACT_PINS["original_config"]["path"])).parent
+    future = repo / binding["run_directory"]
+    require(not future.is_relative_to(original) and not original.is_relative_to(future),
+            "Original004 cannot be replayed or overlap future normal continuation")
+    return stage
+
+
+def _eight_authorization(repo, review, ledger, budget, binding):
+    _, authorization = _artifact(repo, review["restart_authorization"])
+    exact(authorization, EIGHT_SCOPE_FIELDS)
+    exact(authorization["acknowledgements"], EIGHT_ACKNOWLEDGEMENTS)
+    for name in ("owner_request", "parent_owner_request"):
+        require(authorization[name] == SEVEN_ARTIFACT_PINS[name], "Original003/parent002 provenance remains exact")
+    resume = EIGHT_ACCOUNTING_PINS["owner_resume"]
+    require(review["continuation_owner_request"] == authorization["continuation_owner_request"] == resume,
+            "Exact supplied hourly43 resume/sameUSD1000/no resend/stop-real-unknown scope required")
+    _, resume_value = _artifact(repo, resume)
+    require(resume_value.get("resume_authorized") is True and resume_value.get("budget_total_usd") == 1000
+            and resume_value.get("ledger") == str(ledger) and resume_value.get("unknown_limit_increase_authorized") is False
+            and resume_value.get("saved_reply_replays_authorized") is False
+            and resume_value.get("new_numeric_rerating_authorized") is False
+            and resume_value.get("replacement_target_trials_authorized") is False
+            and resume_value.get("original_goal_preserved") is True
+            and _time(resume_value.get("at")) is not None, "Hourly43 exact same-cap/no-resend/no-new-unknown scope required")
+    require(authorization["original_v5_scope"]["sha256"] == FAILED_SCAN_V5_SCOPE_SHA256,
+            "Old v5 declaration remains provenance only")
+    _, old = _artifact(repo, authorization["original_v5_scope"])
+    exact(old, INTERACTION_SCOPE_FIELDS)
+    require(old["version"] == INTERACTION_VERSION, "Original v5 provenance differs")
+    require(authorization["version"] == EIGHT_VERSION
+            and authorization["declaration_kind"] == "coordinator_seven_holds_known_failed004_interpretation"
+            and type(authorization["declared_by"]) is str and bool(authorization["declared_by"].strip())
+            and _time(authorization["declared_at"]) is not None
+            and _time(authorization["declared_at"]) >= _time(resume_value["at"])
+            and _time(authorization["declared_at"]) >= _time(review["reconciled_failed_interaction"]["stage"]["snapshot"]["finished_at"])
+            and authorization["continuation_after_feedback_integration"] is True
+            and money(budget, positive=True) and authorization["budget_usd"] == budget == 1000
+            and authorization["ledger"] == review["ledger"]
+            and authorization["future_binding"] == binding == review["future_binding"]
+            and authorization["bounded_disposition_sha256"] == measurement._json_hash({
+                key: review[key] for key in EIGHT_FIELDS - {"restart_authorization"}})
+            and all(value is True for value in authorization["acknowledgements"].values()),
+            "Fresh exact-bound coordinator accounting declaration required, never old authority or an external review gate")
+
+def _freeze_eight_boundary(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
+                  snapshot, execution_fingerprint):
+    """Independent knownFAILED004 branch; old v1-v7 source/authority unchanged."""
+    fields, kind, acknowledgements = (EIGHT_FIELDS, "retained_seven_holds_known_failed004_disposition",
+                                      EIGHT_ACKNOWLEDGEMENTS)
+    exact(review, fields | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    require(type(review["stages"]) is list and len(review["stages"]) == 7, "Exactly seven ordered unknown descriptors required")
+    exact(binding, {"run_directory", "request_sha256"})
+    current, _ = snapshot
+    interrupted = _seven_scope(repo, review, current, ledger, binding)
+    retained_interaction = _seven_original_interaction(repo, review, ledger, binding, snapshot)
+    known = review["reconciled_failed_scans"]
+    require(type(known) is list and len(known) == 2
+            and [item["stage"]["id"] for item in known] == list(FAILED_SCAN_PINS), "Both exact knownFAILED scans required")
+    reconciled_failed_scans = [_reconciled_failed_scan(repo, item, current, ledger, binding) for item in known]
+    failed_interaction = _eight_failed_interaction(repo, review["reconciled_failed_interaction"], current, ledger, binding)
+    _eight_authorization(repo, review, ledger, budget, binding)
+    require(review["review_kind"] == kind and review["approved"] is True
+            and type(review["reviewer"]) is str and bool(review["reviewer"].strip())
+            and _time(review["reviewed_at"]) is not None,
+            "Exact independent three-hold approval required" if retained_interaction is None
+            else "Exact bounded continuation declaration required")
+    exact(review["acknowledgements"], acknowledgements)
+    require(all(value is True for value in review["acknowledgements"].values()),
+            "All three full holds require acknowledgement" if retained_interaction is None
+            else "All seven full holds require acknowledgement")
+    require(review["validator_sha256"] == digest(Path(__file__).read_bytes()), "Retained-hold validator source changed")
+    exact(binding, {"run_directory", "request_sha256"})
+    exact(review["future_binding"], {"run_directory", "request_sha256"})
+    require(type(binding["run_directory"]) is str and type(binding["request_sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}", binding["request_sha256"])
+            and review["future_binding"] == binding, "Three-hold approval binds a different future request")
+    exact(review["artifacts"], {"scope_review", "budget_review", "originals"})
+    exact(review["artifacts"]["scope_review"], {"path", "sha256"})
+    require(review["artifacts"]["scope_review"]["sha256"] == THREE_SCOPE_SHA256, "Exact three-original scope required")
+    scope_path, scope = _artifact(repo, review["artifacts"]["scope_review"])
+    require(scope.get("scope_approved") is True and scope.get("implementation_scope_supported") is True
+            and scope.get("protocol_proposal") == THREE_VERSION, "Exact three-original scope approval required")
+    references = _three_references(repo, scope_path, scope)
+    require(measurement._json_hash(review["artifacts"]) == measurement._json_hash(references),
+            "Only three scope-pinned proof chains allowed")
+    current, ledger_sha = snapshot
+    exact(review["ledger"], {"path", "sha256", "budget_usd", "amendment_id", "amendment_sha256"})
+    require(_path(repo, review["ledger"]["path"]) == ledger
+            and review["ledger"]["path"] == str(ledger.relative_to(repo))
+            and money(budget, positive=True) and budget == 1000
+            and review["ledger"]["sha256"] == ledger_sha and money(review["ledger"]["budget_usd"])
+            and review["ledger"]["budget_usd"] == budget, "Three-hold ledger approval is stale")
+    before, budget_proof = _three_budget(repo, scope_path, scope, current, ledger)
+    amendment = current["budget_amendments"][-1]
+    require(review["ledger"]["amendment_id"] == amendment["id"] == budget_proof["amendment_id"]
+            and review["ledger"]["amendment_sha256"] == measurement._json_hash(amendment), "Three-hold amendment differs")
+    future = repo / binding["run_directory"]
+    require(not Path(binding["run_directory"]).is_absolute() and future.resolve() == future
+            and future != repo / ".context/realism" and future.is_relative_to(repo / ".context/realism")
+            and str(future.relative_to(repo)) == binding["run_directory"], "Canonical private future directory required")
+    # Legacy helpers receive the exact historical amendment prefix; their strict
+    # failed-stage, seals and termination checks remain unchanged for v1/v2.
+    old_current = {**current, "budget_amendments": before["budget_amendments"]}
+    descriptors = []
+    for original, reference in zip(scope["originals"], references["originals"], strict=True):
+        if original["label"] == "016":
+            descriptor, directory = _three_original016(repo, original, reference["artifacts"], current, ledger,
+                                                        binding, before["budget_amendments"])
+        else:
+            descriptor, directory = _pair_original(repo, original, reference["artifacts"], old_current, ledger, binding)
+        require(not future.is_relative_to(directory) and not directory.is_relative_to(future),
+                "Original three runs cannot be replayed or modified")
+        descriptors.append(descriptor)
+    expected_descriptors = [*descriptors, retained_interaction, *({"id": item["id"], "sha256": item["sha256"]} for item in interrupted)]
+    require(len({item["id"] for item in descriptors}) == 3
+            and scope["exact_original_stages"] == [item["id"] for item in descriptors]
+            and measurement._json_hash(review["stages"]) == measurement._json_hash(expected_descriptors),
+            "Three exact ordered stages required" if retained_interaction is None
+            else "Seven exact ordered unknown stages required")
+    originals = {item["id"] for item in descriptors}
+    reconciled = _reconciled_nonattempt(repo, review["reconciled_nonattempt"], current, ledger, binding)
+    require(reconciled not in originals, "Reconciled case cannot replace an original full hold")
+    originals.add(reconciled)
+    if retained_interaction is not None:
+        require(retained_interaction["id"] not in originals, "Retained interaction cannot replace a native case")
+        originals.add(retained_interaction["id"])
+    if reconciled_failed_scans is not None:
+        for known_scan in reconciled_failed_scans:
+            require(known_scan["id"] not in originals, "Known scan cannot replace an original hold/nonattempt")
+            originals.add(known_scan["id"])
+    for item in interrupted:
+        require(item["id"] not in originals, "Interrupted case cannot replace any historical hold")
+        originals.add(item["id"])
+    require(failed_interaction["id"] not in originals, "KnownFAILED004 cannot replace any historical descriptor")
+    originals.add(failed_interaction["id"])
+    for name, stage in current["stages"].items():
+        if name not in originals:
+            require(stage.get("status") == "complete" and money(stage.get("actual_usd"))
+                    and _time(stage.get("finished_at")) is not None,
+                    "Every fourth unknown or unfinished stage blocks" if retained_interaction is None
+                    else "Every eighth unknown or foreign unfinished stage blocks")
+    marker = future / "execution-started.json"
+    require(not marker.is_symlink(), "Noncanonical future start marker")
+    if marker.exists():
+        require(marker.resolve() == marker and execution_fingerprint is not None
+                and _json(marker.read_bytes()).get("fingerprint") == execution_fingerprint,
+                "Future three-hold execution already started; never replay")
+    require(money(required_reserve, positive=True) and required_reserve <= stages.summary(current)["remaining_usd"] + 1e-9,
+            "New native and scan reserves do not fit after all three full holds" if retained_interaction is None
+            else "New reserves do not fit after all seven full holds")
+    return {**{key: review[key] for key in fields},
+            "review": {"path": str(review_path.relative_to(repo)), "sha256": digest(raw)}}
