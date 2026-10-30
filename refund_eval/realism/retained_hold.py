@@ -9,6 +9,7 @@ import re
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from refund_eval.realism import measurement, stages
@@ -60,6 +61,44 @@ INTERACTION_SCOPE_FIELDS = {
     "budget_usd", "ledger", "future_binding", "continuation_after_feedback_integration",
     "bounded_disposition_sha256", "acknowledgements",
 }
+
+
+# Finite historically reconciled FAILED scans, separate from unknown full holds.
+FAILED_SCAN_VERSION = "retained-four-holds-known-failed-scans-v6"
+FAILED_SCAN_OWNER_REQUEST_SHA256 = "6a82a23e063a46ad2b19a7932c0c507e465a03df288c5cb79784cbe4d2b26305"
+FAILED_SCAN_V5_SCOPE_SHA256 = "e43c0f39814bf9187c322fe3e1acb341bf19e3adb117a4be1ec019cf0b6f84fd"
+FAILED_SCAN_FIELDS = INTERACTION_FIELDS | {"reconciled_failed_scans"}
+FAILED_SCAN_SCOPE_FIELDS = INTERACTION_SCOPE_FIELDS | {"original_v5_scope"}
+FAILED_SCAN_ACKNOWLEDGEMENTS = INTERACTION_ACKNOWLEDGEMENTS | {
+    "known_scans_failed_and_all_attempt_costs_exact", "original_failed_coverage_unaccepted",
+    "old_v5_scope_provenance_only", "no_new_unknown_allowance",
+}
+FAILED_SCAN_PINS = {'loop-051047e3c5087e5c-candidate-tells': {'proof': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/claude-scan-accounting/normal-finish-proof-001.json',
+                                                     'sha256': 'b3f81508cf17e2adc8b434d68d5eab0a21ba16bf743eb1a47b9d4feb97d4624e'},
+                                           'receipt': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/claude-scan-accounting/normal-finish-receipt-001.json',
+                                                       'sha256': '2dcc27b0745f1d989983ee74a434a5a4c78c7d75f4f8513806feca140e5939de'},
+                                           'closure': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/claude-scan-accounting/attempt-closure-001.json',
+                                                       'sha256': '6295544c070e2510d2b2d40001078137617f1e97305cb3ab708a5db9c0cdc31b'},
+                                           'snapshot_sha256': '6bae19b6868af37c9238ea1e54c56355491ea7a64a84278a7f5379c766a1389c',
+                                           'raw_charge_closure_sha256': '70b6419ce538d6687d5f1a8eae9092eb4cb2e43c5f9a37ee53427c76dd53353b',
+                                           'actual_usd_decimal': '2.070124',
+                                           'closure_kind': 'claude_refusal',
+                                           'planned_parts': 4,
+                                           'total_tokens': 497863,
+                                           'original_run_directory': '.context/realism/20261030-continuous-001/loop-v4'},
+ 'deepseek-saved-native-001': {'proof': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/deepseek-scan-001-accounting/normal-finish-proof-001.json',
+                                         'sha256': 'e7e96c86639339b316fad9667d86e11fedb297b3623a3a03859d37c8046a46ce'},
+                               'receipt': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/deepseek-scan-001-accounting/normal-finish-receipt-001.json',
+                                           'sha256': 'b4d0a4294e46a479f16069f0dfc509a17b49134735bdabe7465572122c249b7c'},
+                               'closure': {'path': '.context/realism/20261030-continuous-001/deepseek-recovery-001/deepseek-scan-001-accounting/attempt-closure-001.json',
+                                           'sha256': '1b229c7c12554b7418acd692a5f29e355f95197dd2f84322dd212e3415c23bb7'},
+                               'snapshot_sha256': '6ba6e11ef0c6ea3886f57f0beba98a899ca568fdeb750704488df367d83a4656',
+                               'raw_charge_closure_sha256': 'bad7935dddbb38cd5e639ecc61a4c0a4e7609f6e17d677e27405b9e5f57a4a93',
+                               'actual_usd_decimal': '0.059002016',
+                               'closure_kind': 'deepseek_reasoning_length',
+                               'planned_parts': 3,
+                               'total_tokens': 356944,
+                               'original_run_directory': '.context/realism/20261030-continuous-001/deepseek-recovery-001/scan-001'}}
 
 
 def require(condition, message):
@@ -287,6 +326,10 @@ def _freeze(repo, review_path, *, ledger, budget, binding, required_reserve, sna
     _path(repo, str(review_path.relative_to(repo)))
     raw = review_path.read_bytes()
     review = _json(raw)
+    if review.get("version") == FAILED_SCAN_VERSION:
+        return _freeze_known_failed_scans(repo, review_path, review, raw, ledger=ledger, budget=budget,
+                                          binding=binding, required_reserve=required_reserve, snapshot=snapshot,
+                                          execution_fingerprint=execution_fingerprint)
     if review.get("version") == INTERACTION_VERSION:
         return _freeze_interaction(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                                    required_reserve=required_reserve, snapshot=snapshot,
@@ -925,13 +968,17 @@ def _reconciled_nonattempt(repo, descriptor, current, ledger, binding):
     return target
 
 def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
-                  snapshot, execution_fingerprint, retained_interaction=None):
+                  snapshot, execution_fingerprint, retained_interaction=None, reconciled_failed_scans=None):
     # Only the v5 handler supplies its already validated single descriptor. The
     # ledger image is never filtered, rewritten or represented as a v4 snapshot.
     fields = RECONCILED_FIELDS if retained_interaction is None else INTERACTION_FIELDS
     kind = ("retained_native_three_holds_reconciled_nonattempt_disposition_review" if retained_interaction is None
             else "retained_four_holds_continuation_disposition")
     acknowledgements = THREE_ACKNOWLEDGEMENTS if retained_interaction is None else INTERACTION_ACKNOWLEDGEMENTS
+    if reconciled_failed_scans is not None:
+        require(retained_interaction is not None, "Known scans cannot extend the three-hold protocol")
+        fields, kind, acknowledgements = (FAILED_SCAN_FIELDS, "retained_four_holds_known_failed_scans_disposition",
+                                          FAILED_SCAN_ACKNOWLEDGEMENTS)
     exact(review, fields | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
     require(review["review_kind"] == kind and review["approved"] is True
             and type(review["reviewer"]) is str and bool(review["reviewer"].strip())
@@ -998,6 +1045,10 @@ def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, bindin
     if retained_interaction is not None:
         require(retained_interaction["id"] not in originals, "Retained interaction cannot replace a native case")
         originals.add(retained_interaction["id"])
+    if reconciled_failed_scans is not None:
+        for known_scan in reconciled_failed_scans:
+            require(known_scan["id"] not in originals, "Known scan cannot replace an original hold/nonattempt")
+            originals.add(known_scan["id"])
     for name, stage in current["stages"].items():
         if name not in originals:
             require(stage.get("status") == "complete" and money(stage.get("actual_usd"))
@@ -1018,7 +1069,7 @@ def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, bindin
 
 
 def _freeze_interaction(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
-                        snapshot, execution_fingerprint):
+                        snapshot, execution_fingerprint, reconciled_failed_scans=None):
     """New continuation authority for one pinned unknown; never reconcile it.
 
     A coordinator declaration cites the owner's restart-after-integration request
@@ -1027,7 +1078,8 @@ def _freeze_interaction(repo, review_path, review, raw, *, ledger, budget, bindi
     coordinator's interpretation, never fabricated owner billing instructions.
     Original denied accounting remains uncertainty, not continuation authority.
     """
-    exact(review, INTERACTION_FIELDS | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    fields = INTERACTION_FIELDS if reconciled_failed_scans is None else FAILED_SCAN_FIELDS
+    exact(review, fields | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
     exact(binding, {"run_directory", "request_sha256"})
     require(type(binding["run_directory"]) is str, "Invalid continuation future directory")
     descriptor = review["retained_interaction"]
@@ -1082,19 +1134,46 @@ def _freeze_interaction(repo, review_path, review, raw, *, ledger, budget, bindi
                 for directory in (request_path.parent.parent, accounting_path.parent)),
             "Original interaction evidence cannot overlap new work")
     _, authorization = _artifact(repo, review["restart_authorization"])
-    exact(authorization, INTERACTION_SCOPE_FIELDS)
-    exact(authorization["acknowledgements"], INTERACTION_ACKNOWLEDGEMENTS)
+    scope_fields = INTERACTION_SCOPE_FIELDS if reconciled_failed_scans is None else FAILED_SCAN_SCOPE_FIELDS
+    acknowledgements = INTERACTION_ACKNOWLEDGEMENTS if reconciled_failed_scans is None else FAILED_SCAN_ACKNOWLEDGEMENTS
+    owner_pin = INTERACTION_OWNER_REQUEST_SHA256 if reconciled_failed_scans is None else FAILED_SCAN_OWNER_REQUEST_SHA256
+    version = INTERACTION_VERSION if reconciled_failed_scans is None else FAILED_SCAN_VERSION
+    kind = ("coordinator_bounded_continuation_interpretation" if reconciled_failed_scans is None
+            else "coordinator_known_failed_scans_continuation_interpretation")
+    exact(authorization, scope_fields)
+    exact(authorization["acknowledgements"], acknowledgements)
     exact(authorization["owner_request"], {"path", "sha256"})
-    require(authorization["owner_request"]["sha256"] == INTERACTION_OWNER_REQUEST_SHA256,
+    require(authorization["owner_request"]["sha256"] == owner_pin,
             "Exact original owner restart request required")
     _, owner_request = _artifact(repo, authorization["owner_request"])
-    require(owner_request.get("restart_authorized_after_integration") is True
+    resume_authorized = (owner_request.get("restart_authorized_after_integration") is True
+                         if reconciled_failed_scans is None else owner_request.get("resume_authorized") is True
+                         and owner_request.get("model_switch_authorized") is True
+                         and owner_request.get("no_unsubstantiated_hold_release") is True
+                         and owner_request.get("ledger") == str(ledger))
+    if reconciled_failed_scans is not None:
+        exact(authorization["original_v5_scope"], {"path", "sha256"})
+        require(authorization["original_v5_scope"]["sha256"] == FAILED_SCAN_V5_SCOPE_SHA256,
+                "Exact original v5 declaration is provenance only; never extend its authority")
+        _, old_scope = _artifact(repo, authorization["original_v5_scope"])
+        exact(old_scope, INTERACTION_SCOPE_FIELDS)
+        exact(old_scope["acknowledgements"], INTERACTION_ACKNOWLEDGEMENTS)
+        require(old_scope["version"] == INTERACTION_VERSION
+                and old_scope["declaration_kind"] == "coordinator_bounded_continuation_interpretation"
+                and old_scope["owner_request"]["sha256"] == INTERACTION_OWNER_REQUEST_SHA256
+                and all(value is True for value in old_scope["acknowledgements"].values()),
+                "Original v5 provenance differs")
+        _artifact(repo, old_scope["owner_request"])
+        require(_time(authorization["declared_at"]) is not None
+                and all(_time(authorization["declared_at"]) >= _time(item["snapshot"]["finished_at"])
+                        for item in reconciled_failed_scans), "Declaration must follow both accounting completions")
+    require(resume_authorized
             and money(owner_request.get("budget_total_usd"), positive=True)
             and owner_request["budget_total_usd"] == 1000
             and _time(owner_request.get("at")) is not None, "Owner request must preserve the existing restart scope and cap")
-    bounded = {key: review[key] for key in INTERACTION_FIELDS - {"restart_authorization"}}
-    require(authorization["version"] == INTERACTION_VERSION
-            and authorization["declaration_kind"] == "coordinator_bounded_continuation_interpretation"
+    bounded = {key: review[key] for key in fields - {"restart_authorization"}}
+    require(authorization["version"] == version
+            and authorization["declaration_kind"] == kind
             and type(authorization["declared_by"]) is str and bool(authorization["declared_by"].strip())
             and _time(authorization["declared_at"]) is not None
             and _time(authorization["declared_at"]) >= _time(owner_request["at"])
@@ -1108,4 +1187,168 @@ def _freeze_interaction(repo, review_path, review, raw, *, ledger, budget, bindi
             "New exact owner continuation-after-integration authorization required")
     return _freeze_reconciled(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                               required_reserve=required_reserve, snapshot=snapshot,
-                              execution_fingerprint=execution_fingerprint, retained_interaction=descriptors[-1])
+                              execution_fingerprint=execution_fingerprint, retained_interaction=descriptors[-1],
+                              reconciled_failed_scans=reconciled_failed_scans)
+
+def _reconciled_failed_scan(repo, descriptor, current, ledger, binding):
+    """Validate one explicitly pinned finite FAILED scan; never authorize unknown cost."""
+    exact(descriptor, {"stage", "proof", "receipt"})
+    stage = descriptor["stage"]
+    exact(stage, {"id", "sha256", "snapshot"})
+    require(type(stage["id"]) is str and stage["id"] in FAILED_SCAN_PINS,
+            "Only the two exact historically reconciled scans are eligible")
+    pin = FAILED_SCAN_PINS[stage["id"]]
+    expected = stage["snapshot"]
+    exact(expected, {"kind", "status", "reserve_usd", "actual_usd", "started_at", "finished_at", "detail"})
+    require(stage["sha256"] == pin["snapshot_sha256"] == measurement._json_hash(expected)
+            == measurement._json_hash(current["stages"].get(stage["id"]))
+            and expected["kind"] == "tells" and expected["status"] == "failed"
+            and money(expected["actual_usd"], positive=True)
+            and Decimal(str(expected["actual_usd"])) == Decimal(pin["actual_usd_decimal"])
+            and money(expected["reserve_usd"], positive=True) and expected["reserve_usd"] == 15.75
+            and _time(expected["started_at"]) is not None and _time(expected["finished_at"]) is not None
+            and _time(expected["finished_at"]) >= _time(expected["started_at"]),
+            "Exact finite known-cost FAILED scan snapshot required")
+    for name in ("proof", "receipt"):
+        exact(descriptor[name], {"path", "sha256"})
+        require(descriptor[name] == pin[name], "Original failed-scan proof/receipt identity differs")
+    proof_path, proof = _artifact(repo, descriptor["proof"])
+    receipt_path, receipt = _artifact(repo, descriptor["receipt"])
+    require(proof.get("target_stage") == receipt.get("target_stage") == stage["id"]
+            and proof.get("normal_finish_status") == "failed" and proof.get("accounting_only") is True
+            and proof.get("strict_scan_coverage_accepted") is False
+            and proof.get("semantic_measurement_accepted") is False
+            and receipt.get("status") == "accounting_reconciled_scan_still_failed"
+            and type(receipt.get("normal_finish_calls")) is int and receipt["normal_finish_calls"] == 1
+            and receipt.get("proof_sha256") == pin["proof"]["sha256"]
+            and receipt.get("actual_usd") == expected["actual_usd"]
+            and receipt.get("target_snapshot_after") == expected
+            and receipt.get("only_target_accounting_fields_changed") is True
+            and receipt.get("all_other_stages_and_old_seals_preserved") is True
+            and receipt.get("strict_scan_coverage_accepted") is False,
+            "Accounting closure cannot establish scan coverage or semantic success")
+    fields = proof.get("normal_finish_fields", {})
+    require(fields.get("path") == str(ledger) and fields.get("budget") == current.get("budget_usd") == 1000
+            and fields.get("stage") == stage["id"] and fields.get("status") == "failed"
+            and fields.get("actual") == expected["actual_usd"] and fields.get("detail") == expected["detail"],
+            "Original ordinary normal-finish fields differ")
+    preimage = proof["ledger_preimage"]
+    _, before = _artifact(repo, preimage["saved_copy"])
+    require(preimage["original_path"] == str(ledger)
+            and preimage["raw_sha256"] == preimage["saved_copy"]["sha256"] == receipt["before_sha256"]
+            and receipt["ledger_identity_after"]["path"] == str(ledger)
+            and receipt["ledger_identity_after"]["sha256"] == receipt["after_sha256"],
+            "Original whole-ledger accounting chain differs")
+    predicted = proof["expected_whole_postimage"]
+    _, normalized = _artifact(repo, {"path": predicted["path"], "sha256": predicted["raw_file_sha256"]})
+    normalization = predicted["normalization"]
+    require(normalization["target_stage"] == stage["id"] and normalization["only_field"] == "finished_at"
+            and type(normalization["placeholder"]) is str, "Exact target-only timestamp normalization required")
+    old = before["stages"].get(stage["id"], {})
+    require(old.get("kind") == "tells" and old.get("status") == "failed" and old.get("actual_usd") is None
+            and old.get("reserve_usd") == expected["reserve_usd"]
+            and old.get("started_at") == expected["started_at"], "Original scan full-hold preimage differs")
+    computed = deepcopy(before)
+    computed["stages"][stage["id"]] = {**expected, "finished_at": normalization["placeholder"]}
+    require(computed == normalized and measurement._json_hash(normalized)
+            == predicted["normalized_semantic_sha256"] == receipt["normalized_whole_postimage_sha256"],
+            "Entire original accounting postimage differs")
+    computed["stages"][stage["id"]] = expected
+    require(digest((json.dumps(computed, indent=2, allow_nan=False) + "\n").encode()) == receipt["after_sha256"],
+            "Exact original ordinary writer postimage bytes differ")
+    require(all(current.get(key) == value for key, value in before.items() if key != "stages")
+            and all(current["stages"].get(name) == value for name, value in before["stages"].items()
+                    if name != stage["id"]), "Historical preimage entries/top-level values changed")
+    exact(proof["attempt_closure"], {"path", "sha256"})
+    require(proof["attempt_closure"] == pin["closure"], "Exact all-attempt raw charge closure required")
+    _, closure = _artifact(repo, proof["attempt_closure"])
+    attempts = closure.get("attempts")
+    require(type(attempts) is list and len(attempts) == closure.get("attempted_parts") == 3
+            and closure.get("planned_parts") == pin["planned_parts"]
+            and closure.get("exact_total_usd_decimal") == pin["actual_usd_decimal"]
+            and measurement._json_hash(attempts) == pin["raw_charge_closure_sha256"],
+            "All exact original attempted charges must close")
+    checks = closure["all_attempted_charge_closure"]
+    require(checks.get("every_attempt_retains_original_response_id_and_finite_cost") is True
+            and checks.get("no_inferred_zero_or_missing_response") is True
+            and checks.get("frozen_source_verified") is True
+            and checks.get("no_retries") == {"sdk": 0, "model": 0, "refusals": 0, "answer_attempts": 1},
+            "All original attempts require finite no-retry closure")
+    charges, ids, tokens, refusals = [], set(), 0, 0
+    for attempt in attempts:
+        claude = pin["closure_kind"] == "claude_refusal"
+        identifier = attempt.get("response_generation_id" if claude else "genuine_response_generation_id")
+        usage = attempt.get("raw_usage", {})
+        require(type(identifier) is str and bool(identifier) and identifier not in ids
+                and money(usage.get("cost"), positive=True)
+                and attempt.get("exact_frozen_prompt_match" if claude else "request_matches_exact_only_planned_part") is True,
+                "Missing, duplicated, unknown or nonfinite original charge")
+        ids.add(identifier)
+        charge = Decimal(str(usage["cost"]))
+        require(charge == Decimal(attempt["actual_usd_decimal" if claude else "exact_cost_usd_decimal"]),
+                "Saved raw cost differs from charge closure")
+        charges.append(charge)
+        require(type(usage.get("total_tokens")) is int and usage["total_tokens"] > 0,
+                "Original token closure missing")
+        tokens += usage["total_tokens"]
+        if claude:
+            refusal = attempt["refusal_metadata"]
+            require(refusal["sdk_max_retries"] == refusal["model_config_max_retries"]
+                    == refusal["refusal_retry_count_allowed"] == 0, "Original retry policy differs")
+            refusals += refusal["is_refusal"] is True
+        else:
+            require(attempt["finish_reason"] == attempt["native_finish_reason"] == "length"
+                    and attempt["response_content"] is None and attempt["response_tool_calls"] is None
+                    and attempt["response_refusal"] is None
+                    and usage["completion_tokens"] == usage["completion_tokens_details"]["reasoning_tokens"] == 8192
+                    and attempt["event_config"]["max_retries"] == 0,
+                    "Exact original reasoning-exhaustion failure metadata differs")
+    require(sum(charges, Decimal(0)) == Decimal(pin["actual_usd_decimal"])
+            and tokens == pin["total_tokens"], "Original all-attempt charge/token closure differs")
+    if pin["closure_kind"] == "claude_refusal":
+        require(refusals == 2 and len(closure.get("not_attempted_after_refusal", [])) == 1
+                and closure.get("total_tokens") == tokens,
+                "Original Claude sequential refusal/unattempted closure differs")
+        parquet = closure["original_scan_parquet"]
+    else:
+        require(closure.get("unattempted_parts") == 0 and closure.get("usable_results") == 0
+                and closure.get("raw_model_events") == closure.get("unique_response_generation_ids") == 3
+                and closure["token_totals"]["total"] == tokens
+                and closure["token_totals"]["reasoning"] == 24576,
+                "Original DeepSeek three-planned/three-attempted closure differs")
+        parquet = closure["parquet"]
+    _, preserved = _artifact(repo, proof["preservation"]["inventory"])
+    for name, identity in preserved.items():
+        path = Path(name)
+        require(path.is_relative_to(repo), "Original evidence must remain inside repository")
+        require(path.resolve() == path and path.is_file()
+                and digest(path.read_bytes()) == identity["sha256"]
+                and oct(path.stat().st_mode & 0o7777) == identity["mode"], "Original scan proof/source/seal changed")
+    original = _path(repo, parquet["path"])
+    require(digest(original.read_bytes()) == parquet["sha256"], "Original raw scan responses changed")
+    original_run = repo / pin["original_run_directory"]
+    require(original_run.resolve() == original_run and original_run.is_dir(), "Original run directory differs")
+    future = repo / binding["run_directory"]
+    require(original.is_relative_to(original_run)
+            and all(not future.is_relative_to(old_dir) and not old_dir.is_relative_to(future)
+                    for old_dir in (original_run, proof_path.parent, receipt_path.parent)),
+            "Original failed scans/accounting cannot be replayed or overwritten")
+    return stage
+
+
+def _freeze_known_failed_scans(repo, review_path, review, raw, *, ledger, budget, binding,
+                              required_reserve, snapshot, execution_fingerprint):
+    """Separate one/two known FAILED scans from the same four unknown full holds."""
+    exact(review, FAILED_SCAN_FIELDS | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    descriptors = review["reconciled_failed_scans"]
+    require(type(descriptors) is list and 1 <= len(descriptors) <= 2,
+            "One or two exact known FAILED scan descriptors required")
+    current, _ = snapshot
+    validated = [_reconciled_failed_scan(repo, item, current, ledger, binding) for item in descriptors]
+    require(len({item["id"] for item in validated}) == len(validated), "Duplicate known failed scan")
+    require([item["id"] for item in validated] == [name for name in FAILED_SCAN_PINS
+                                                if name in {item["id"] for item in validated}],
+            "Canonical historical known-scan order required")
+    return _freeze_interaction(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                               required_reserve=required_reserve, snapshot=snapshot,
+                               execution_fingerprint=execution_fingerprint, reconciled_failed_scans=validated)
