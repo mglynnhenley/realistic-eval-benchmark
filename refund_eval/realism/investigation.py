@@ -8,6 +8,7 @@ Only explicit model IDs are accepted; models and settings are frozen on disk.
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import hashlib
 import inspect
@@ -550,6 +551,17 @@ class OpenRouterAdapter:
                                          follow_redirects=False) as client:
                 response = await client.post("https://openrouter.ai/api/v1/chat/completions",
                                             headers={"Authorization": f"Bearer {key}"}, json=payload)
+                if response.is_error:
+                    # Retain the original rejection before raising. HTTP status
+                    # alone does not establish a zero charge or permit replay.
+                    _save(self.directory / (stage_id + "-error-response.json"), {
+                        "stage_id": stage_id, "model": name,
+                        "request_sha256": hashlib.sha256(request_path.read_bytes()).hexdigest(),
+                        "status_code": response.status_code,
+                        "headers": {header: response.headers[header] for header in
+                                    ("content-type", "x-request-id", "cf-ray") if header in response.headers},
+                        "body_base64": base64.b64encode(response.content).decode("ascii"),
+                    }, exclusive=True)
                 response.raise_for_status()
                 result = response.json()
         except BaseException as error:

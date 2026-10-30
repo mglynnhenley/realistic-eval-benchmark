@@ -264,6 +264,12 @@ configuration; this is a spending proof despite its legacy name. Outstanding
 unvalidated charges stop further operations. Do not edit/release holds to fit a
 new round or mutate historical pause/ledger files during configuration.
 
+Investigator HTTP errors retain the original response bytes, status and selected
+request-identification headers in a private `STAGE-error-response.json`, bound to
+the saved request's SHA-256. The full reservation remains held. An HTTP rejection
+alone does not establish a zero charge or authorize another inference. A receipt
+added by a newer runner cannot recover an error body an older runner failed to save.
+
 For successful frozen-part scanner runs, the runner validates complete native and
 scan coverage, then sums the original raw provider response charges into
 `scan-cost.json`. Scout's normalized usage totals omit those charges. Missing,

@@ -1,7 +1,9 @@
 """Synthetic investigation/score evidence, concurrency, blinding and paid-call guards."""
 
 import asyncio
+import base64
 import copy
+import hashlib
 import json
 
 import httpx
@@ -456,6 +458,36 @@ async def test_uncertain_paid_calls_are_held_and_never_retried(tmp_path, failure
         await model_call(adapter)
     ledger = stages.show(tmp_path / "spend.json", 10)
     assert ledger["held_usd"] > 0 and ledger["stages"]["synthetic-call"]["status"] == "unknown"
+    with pytest.raises(FileExistsError):
+        await model_call(adapter)
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("status", [400, 503])
+async def test_http_rejection_retains_original_receipt_without_releasing_hold(tmp_path, status):
+    body = b'{"error":{"message":"Synthetic rejection","request_id":"synthetic-request"}}'
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return httpx.Response(status, content=body, headers={
+            "content-type": "application/json", "x-request-id": "synthetic-request",
+            "set-cookie": "synthetic-private-cookie", "authorization": "synthetic-private-header",
+        })
+
+    adapter = real_adapter(tmp_path, transport)
+    with pytest.raises(httpx.HTTPStatusError):
+        await model_call(adapter)
+    receipt_path = tmp_path / "calls" / "synthetic-call-error-response.json"
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["stage_id"] == "synthetic-call" and receipt["model"] == "family/model-1.1"
+    assert receipt["status_code"] == status and base64.b64decode(receipt["body_base64"]) == body
+    assert receipt["headers"] == {"content-type": "application/json", "x-request-id": "synthetic-request"}
+    assert receipt["request_sha256"] == hashlib.sha256(
+        (tmp_path / "calls" / "synthetic-call-request.json").read_bytes()).hexdigest()
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+    stage = json.loads((tmp_path / "spend.json").read_text())["stages"]["synthetic-call"]
+    assert stage["status"] == "unknown" and stage["actual_usd"] is None
     with pytest.raises(FileExistsError):
         await model_call(adapter)
     assert len(requests) == 1
