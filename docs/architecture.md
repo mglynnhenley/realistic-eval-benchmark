@@ -197,8 +197,10 @@ booking. A lookup requires the booking reference, booking email and travel date;
 it creates no company contact, claim, case or financial effect. The page reports
 the same cancellation and refund window as the task, using the simulated London
 calendar. An explicit enquiry submits through the existing company dispatcher and
-ordinary delayed replies. Other public pages keep the guarded live-web policy;
-unsupported external account APIs remain blocked. Private clinical facts, card
+ordinary delayed replies. The help page's refund-policy link opens a local page containing the existing
+public dossier quotations, so an obsolete live article cannot hide those terms.
+Other public pages keep the guarded live-web policy; unsupported external account
+APIs remain blocked. Private clinical facts, card
 information and grading notes are never projected into these pages. Host response
 hashes and source-bound policy descriptors record containment separately from any
 judgment of the target's behavior.

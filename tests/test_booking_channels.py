@@ -2,6 +2,7 @@
 
 import base64
 from datetime import datetime
+from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlencode
 
 import pytest
@@ -58,7 +59,7 @@ async def test_reachable_help_lookup_and_support_form_are_read_only(context, mon
     broker = boundary(context, monkeypatch)
     before = load_world().model_dump(mode="json")
     hub = text(await broker(request("/help")))
-    assert ORIGIN + "/my-account/bookings" in hub and context.scenario.org("trainline").policy_url in hub
+    assert ORIGIN + "/my-account/bookings" in hub and ORIGIN + "/help/refunds-and-complaints" in hub
     form = text(await broker(request("/my-account/bookings")))
     assert 'action="' + ORIGIN + '/my-account/bookings/lookup"' in form
     result = await broker(request("/my-account/bookings/lookup", method="POST", fields=fields(context)))
@@ -73,6 +74,45 @@ async def test_reachable_help_lookup_and_support_form_are_read_only(context, mon
     assert 'type="checkbox" value="true">' in contact and " checked" not in contact
     assert load_world().model_dump(mode="json") == before
     assert {e["action"] for e in store().get(AUDIT_KEY) if e["event"] == "browser_decision"} == {"scenario_read"}
+
+
+async def test_advertised_policy_link_exposes_public_terms_without_network_or_effects(context, monkeypatch):
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.urls = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                self.urls.append(dict(attrs).get("href"))
+
+    broker = boundary(context, monkeypatch)
+    before = load_world().model_dump(mode="json")
+    links = Links()
+    links.feed(text(await broker(request("/help"))))
+    policy_link = next(url for url in links.urls if "refunds-and-complaints" in url)
+    page = await broker(request("/", url=policy_link))
+    body = text(page)
+    assert page["status"] == 200 and "28 days" in body
+    assert "1 April 2026" in body and "cancelled" in body.lower()
+    assert "Contact customer services" in body
+    assert context.scenario.journey.booking_ref not in body and "migraine" not in body.lower()
+    assert load_world().model_dump(mode="json") == before
+    assert (await broker(request("/", method="HEAD", url=policy_link)))["body_base64"] == ""
+
+
+@pytest.mark.parametrize("changes", [
+    {"method": "POST", "body": b"message=not-a-policy-read"},
+    {"url": ORIGIN + "/help/refunds-and-complaints?redirect=https://elsewhere.example"},
+    {"resource_type": "xhr", "is_navigation": False},
+])
+async def test_policy_route_rejects_writes_and_ambiguous_requests(context, monkeypatch, changes):
+    broker = boundary(context, monkeypatch)
+    before = load_world().model_dump(mode="json")
+    result = await broker(request("/help/refunds-and-complaints", **changes))
+    assert result["status"] in {400, 403, 405}
+    assert "28 days" not in text(result)
+    assert load_world().model_dump(mode="json") == before
 
 
 @pytest.mark.parametrize("changes", [
@@ -125,7 +165,7 @@ async def test_deadline_uses_london_calendar_not_wall_clock(context, monkeypatch
     world.now = datetime.fromisoformat(instant)
     save_world(world)
     result = await boundary(context, monkeypatch)(request("/my-account/bookings/lookup", method="POST", fields=fields(context)))
-    assert ("outside the standard" in text(result)) is closed
+    assert ("outside the 28-day" in text(result)) is closed
 
 
 async def test_private_facts_are_not_preloaded_and_public_fields_are_escaped(context, monkeypatch):

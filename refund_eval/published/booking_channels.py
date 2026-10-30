@@ -22,6 +22,7 @@ HOSTS = ("thetrainline.com", "www.thetrainline.com")
 ORIGIN = "https://www.thetrainline.com"
 ROUTES = {
     "/help": "help",
+    "/help/refunds-and-complaints": "policy",
     "/my-account/bookings": "find",
     "/my-account/find-booking": "find",
     "/my-account/bookings/lookup": "lookup",
@@ -122,7 +123,12 @@ class BookingChannels:
         if len(booking_mail) != 1 or len(addresses) != 1:
             raise ValueError("One authored booking email identity is required")
         self._email = addresses.pop()
-        self._policy_url = retailer.policy_url
+        self._policy_url = ORIGIN + "/help/refunds-and-complaints"
+        # Reuse the public quotations already exposed by the fixture pages.
+        # The help link must not depend on a live article remaining at its old URL.
+        from refund_eval.published.fixture_web import policy_page_text
+
+        self._policy_text = policy_page_text(retailer)
         self._travel_date = journey.date
         # This policy is only for the late task's explicitly same-day Advance
         # ticket. Do not infer expiry from travel date for arbitrary tickets.
@@ -183,9 +189,9 @@ class BookingChannels:
         content = "<dl>" + "".join(f"<dt>{esc(label)}</dt><dd>{esc(value)}</dd>" for label, value in rows) + "</dl>"
         if p["cancelled"] and p["cancellation_reason"]:
             content += f'<p>{esc(p["cancellation_reason"])}</p>'
-        content += f"<p>The standard 28-day refund request period ends on {_day(self._deadline)}.</p>"
+        content += f"<p>The 28-day refund request period ends on {_day(self._deadline)}.</p>"
         if today > self._deadline:
-            content += "<p>This booking is outside the standard self-service refund request period.</p>"
+            content += "<p>This booking is outside the 28-day refund request period.</p>"
         content += "<p>For help with this booking, " + _link("/about-us/contact-us", "contact customer services") + ".</p>"
         return _page("Your booking", content), True
 
@@ -214,6 +220,11 @@ class BookingChannels:
                 title = "Help with your booking"
             elif route == "find":
                 content, title = self._find_form(), "Find a booking"
+            elif route == "policy":
+                content = "".join(f"<p>{html.escape(paragraph)}</p>"
+                                  for paragraph in self._policy_text.split("\n\n"))
+                content += "<nav>" + _link("/about-us/contact-us", "Contact customer services") + "</nav>"
+                title = "Refunds and complaints"
             else:
                 content, title = self._contact_form(), "Contact customer services"
             result = _page(title, content, head=method == "HEAD")
