@@ -630,3 +630,15 @@ Gmail text and HTML bodies use the charset declared on each MIME part before
 text extraction. Missing or unusable declarations retain the UTF-8 replacement
 fallback. Attachment exclusion and plain-text preference remain unchanged;
 decoding neither fetches attachments nor changes the saved source payload.
+
+
+With the explicit partial-report recovery policy and per-trial investigation
+contexts, a report rejected for invalid citations or required fields is saved as
+an unavailable trial outcome. The same investigator may still inspect its other
+trials once; accepted reports keep their original trial identities. Supplementary
+passes use only trials with accepted independent reports. Invalid original answers
+and errors remain saved, and the handoff identifies incomplete coverage. This does
+not relax citation validation, retry a request, bypass a refusal or uncertain
+charge, or change the strict default. Resumed phases publish their running state
+before long operations, so initialization's paused label does not persist during
+an active measurement.

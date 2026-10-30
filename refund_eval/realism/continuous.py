@@ -720,6 +720,8 @@ def advance(run_dir, *, execute=False, resume=False, bindings=None):
                     state.update(status="budget_exhausted", next_action="stop", reason="Authorized model budget exhausted")
                     break
                 phase = state["phase"]
+                state.update(status="running", next_action=phase)
+                atomic_json(directory / "checkpoint.json", {**state, "updated_at": now()})
                 if phase == "measure":
                     if not (folder / "model-preflight.json").exists():
                         _require(callable(bindings.preflight), "All pinned models require a preflight binding")

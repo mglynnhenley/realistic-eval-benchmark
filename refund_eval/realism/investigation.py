@@ -999,6 +999,7 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
         prefix = stage_namespace + "-" + prefix
     slots = asyncio.Semaphore(3)
     histories = {}
+    trial_failures = {}
     groups = [[trial] for trial in trials] if trial_contexts else [trials]
 
     async def initial(item):
@@ -1014,12 +1015,26 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                     report, history = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
                         messages=_investigator_messages(item, group, trials, trial_contexts), tools=tools, directory=part,
                         stage_prefix=f"{prefix}-{name}{suffix}-initial", check_paused=check_paused)
-                    report = _report(report, trials)
+                    try:
+                        report = _report(report, trials)
+                    except OwnerPaused:
+                        raise
+                    except InvestigationError as error:
+                        if not (allow_partial and trial_contexts):
+                            raise
+                        failure = {"trial_id": group[0]["trial_id"], "error": type(error).__name__, "detail": str(error)}
+                        _save(part / "failure.json", failure, exclusive=True)
+                        trial_failures.setdefault((name, "initial"), []).append(failure)
+                        continue
                     if trial_contexts:
                         _save(part / "report.json", {"model": item["model"], "trial_id": group[0]["trial_id"], "report": report}, exclusive=True)
                     reports.append(report)
-                    history_parts.append(history)
+                    history_parts.append((number, history))
+                if not reports:
+                    raise InvestigationError("No usable initial trial reports; original answers are preserved")
                 report = _merge_reports(reports)
+                if (name, "initial") in trial_failures:
+                    report["unavailable_trials"] = trial_failures[name, "initial"]
                 _save(folder / "report.json", {"model": item["model"], "lens": item["lens"], "report": report}, exclusive=True)
                 histories[name] = history_parts
                 return report
@@ -1038,9 +1053,11 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
         _save(directory / "failure.json", {"phase": "initial", "errors": [str(error) for error in failures]}, exclusive=True)
         if not allow_partial:
             raise failures[0]
-    # This barrier is published only after every initial report is fsynced.
+    # Each initial outcome is durable before any supplementary information is released.
     _save(directory / "independent-pass-complete.json", {"investigators": [item["name"] for item in config["investigators"]],
-          **({"partial": True, "failures": [type(error).__name__ for error in failures]} if failures else {})}, exclusive=True)
+          **({"partial": True, "failures": [type(error).__name__ for error in failures],
+              "unavailable_trials": {name: rows for (name, phase), rows in trial_failures.items() if phase == "initial"}}
+             if failures or trial_failures else {})}, exclusive=True)
     _save(directory / "supplementary-input.json", {"scanner_annotations": scanner_annotations, "backlog": backlog}, exclusive=True)
 
     async def supplementary(item):
@@ -1052,7 +1069,7 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                 if name not in histories:
                     raise InvestigationError("Initial report unavailable; no supplementary inference")
                 reports = []
-                for number, history in enumerate(histories[name], 1):
+                for number, history in histories[name]:
                     part = folder / "trials" / f"{number:03d}" if trial_contexts else folder
                     suffix = f"-trial-{number:03d}" if trial_contexts else ""
                     report, _ = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
@@ -1060,11 +1077,25 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                         "instruction": "Your independent initial report is saved unchanged. Inspect these supplementary annotations critically. Return your own additional findings, contrary evidence and uncertainty in the same report schema, including evaluation_validity for material findings. Apply the same cited choice/exposure, causal attribution, measurement impact, preserved meaning and falsifiable repair prediction reasoning. Keep operational validity, realism and target behavior separate; unknown or ungraded stays unknown. Do not erase or rewrite the initial annotations. No finding quota.",
                         "scanner_annotations": scanner_annotations, "unresolved_backlog": backlog})}],
                         tools=tools, directory=part, stage_prefix=f"{prefix}-{name}{suffix}-supplement", check_paused=check_paused)
-                    report = _report(report, trials)
+                    try:
+                        report = _report(report, trials)
+                    except OwnerPaused:
+                        raise
+                    except InvestigationError as error:
+                        if not (allow_partial and trial_contexts):
+                            raise
+                        failure = {"trial_id": trials[number - 1]["trial_id"], "error": type(error).__name__, "detail": str(error)}
+                        _save(part / "failure.json", failure, exclusive=True)
+                        trial_failures.setdefault((name, "supplementary"), []).append(failure)
+                        continue
                     if trial_contexts:
                         _save(part / "report.json", {"model": item["model"], "trial_id": trials[number - 1]["trial_id"], "report": report}, exclusive=True)
                     reports.append(report)
+                if not reports:
+                    raise InvestigationError("No usable supplementary trial reports; original answers are preserved")
                 report = _merge_reports(reports)
+                if (name, "supplementary") in trial_failures:
+                    report["unavailable_trials"] = trial_failures[name, "supplementary"]
                 _save(folder / "report.json", {"model": item["model"], "report": report}, exclusive=True)
                 return report
             except BaseException as error:
@@ -1110,8 +1141,14 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
         failed = {key: {"error": type(value).__name__, "detail": str(value)}
                   for key, value in (("initial", initial_report), ("supplementary", supplement))
                   if isinstance(value, BaseException)}
-        reports.append({**item, "initial": None if "initial" in failed else initial_report,
-                        "supplementary": None if "supplementary" in failed else supplement,
+        initial_missing, supplementary_missing = "initial" in failed, "supplementary" in failed
+        for phase in ("initial", "supplementary"):
+            if (item["name"], phase) in trial_failures:
+                failed.setdefault(phase, {"error": "PartialTrialReports",
+                    "detail": "Invalid trial reports remain unavailable; no request was repeated"})
+                failed[phase]["trials"] = trial_failures[item["name"], phase]
+        reports.append({**item, "initial": None if initial_missing else initial_report,
+                        "supplementary": None if supplementary_missing else supplement,
                         **({"failure": failed} if failed else {})})
     partial = any("failure" in report for report in reports)
     result = {"status": "partial_investigation" if partial else "complete" if valid else "incomplete_scores", "investigators": reports, "scores": scores,

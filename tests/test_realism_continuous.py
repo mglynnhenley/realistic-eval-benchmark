@@ -815,3 +815,20 @@ def test_sealed_budget_blocked_result_stops_without_claiming_uncertain_paid_work
     assert loop._read(case.directory / "rounds/0001/operations/measurement.json")["result"]["status"] == "budget_blocked"
     assert loop.advance(case.directory, execute=True, bindings=offline.bindings)["status"] == "budget_exhausted"
     assert blocked == [case.initial]
+
+
+
+def test_resumed_phase_is_visible_as_running_during_measurement(case):
+    offline = Offline(case)
+    observed = []
+    original = offline.bindings.measure
+
+    def measure(request):
+        checkpoint = loop._read(case.directory / "checkpoint.json")
+        observed.append((checkpoint["status"], checkpoint["phase"], checkpoint["next_action"]))
+        return original(request)
+
+    offline.bindings.measure = measure
+    result = start(case, offline)
+    assert result["status"] == "no_repair"
+    assert observed == [("running", "measure", "measure"), ("running", "measure", "measure")]

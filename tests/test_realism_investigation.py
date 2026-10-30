@@ -890,3 +890,103 @@ async def test_uncertain_judge_keeps_completed_reports_and_null_scores_without_r
     assert adapter.judge_attempts == 1
     assert all(row['initial'] and row['supplementary'] for row in result['investigators'])
     assert result['round_mean'] is None and all(row['score'] is None for row in result['scores'])
+
+
+@pytest.mark.parametrize("phase", ["initial", "supplement"])
+async def test_invalid_trial_report_does_not_discard_other_trial_investigations(
+    tmp_path, trials, investigators, judge, phase,
+):
+    directory = tmp_path / "invalid-trial"
+
+    class InvalidTrial(SyntheticAdapter):
+        async def call(self, **request):
+            result = await super().call(**request)
+            if f"-investigator-2-trial-002-{phase}-" in request["stage_id"]:
+                value = report(finding=True)
+                value["findings"][0]["evidence"][0]["quote"] = "invented quotation"
+                result["message"]["content"] = json.dumps(value)
+            return result
+
+    adapter = InvalidTrial(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+        adapter=adapter, directory=directory, allow_partial=True, trial_contexts=True,
+        scanner_annotations={"text": "SCANNER-SECRET"}, backlog=["BACKLOG-SECRET"])
+    assert result["status"] == "partial_investigation" and result["round_mean"] == 8
+    partial = result["investigators"][1]
+    phase_name = "initial" if phase == "initial" else "supplementary"
+    assert partial["initial"] is not None and partial["supplementary"] is not None
+    assert partial[phase_name]["unavailable_trials"][0]["trial_id"] == "trial-2"
+    assert partial["failure"][phase_name]["error"] == "PartialTrialReports"
+    folder = directory / "investigators/investigator-2" / phase_name / "trials"
+    assert (folder / "001/report.json").exists() and (folder / "003/report.json").exists()
+    assert not (folder / "002/report.json").exists()
+    assert json.loads((folder / "002/failure.json").read_text())["trial_id"] == "trial-2"
+    original = json.loads((folder / "002/call-01.json").read_text())
+    assert "invented quotation" in original["message"]["content"]
+    stage_ids = [call["stage_id"] for call in adapter.calls]
+    assert len(stage_ids) == len(set(stage_ids))
+    assert sum("-initial-" in name for name in stage_ids) == 12
+    assert sum("-supplement-" in name for name in stage_ids) == (11 if phase == "initial" else 12)
+    for number in (1, 3):
+        assert any(f"-investigator-2-trial-{number:03d}-supplement-" in name for name in stage_ids)
+    if phase == "initial":
+        assert not any("-investigator-2-trial-002-supplement-" in name for name in stage_ids)
+        barrier = json.loads((directory / "independent-pass-complete.json").read_text())
+        assert barrier["partial"] is True
+        assert barrier["unavailable_trials"]["investigator-2"][0]["trial_id"] == "trial-2"
+
+
+async def test_strict_trial_report_validation_still_stops_without_partial_opt_in(
+    tmp_path, trials, investigators, judge,
+):
+    directory = tmp_path / "strict"
+
+    class InvalidTrial(SyntheticAdapter):
+        async def call(self, **request):
+            result = await super().call(**request)
+            if "-investigator-2-trial-001-initial-" in request["stage_id"]:
+                value = report(finding=True)
+                value["findings"][0]["evidence"][0]["quote"] = "invented quotation"
+                result["message"]["content"] = json.dumps(value)
+            return result
+
+    adapter = InvalidTrial(directory)
+    with pytest.raises(inv.InvestigationError, match="Citation"):
+        await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+            adapter=adapter, directory=directory, trial_contexts=True)
+    assert not any("-supplement-" in call["stage_id"] for call in adapter.calls)
+    assert not any("-investigator-2-trial-002-" in call["stage_id"] for call in adapter.calls)
+
+
+
+async def test_paid_uncertainty_after_invalid_trial_is_preserved_and_never_bypassed(
+    tmp_path, trials, investigators, judge,
+):
+    directory = tmp_path / "uncertain-after-invalid"
+
+    class Interrupted(SyntheticAdapter):
+        _uncertain_stage = None
+
+        async def call(self, **request):
+            if self._uncertain_stage:
+                raise inv.PaidCallUncertain("Prior request remains held")
+            if "-investigator-2-trial-002-initial-" in request["stage_id"]:
+                self._uncertain_stage = request["stage_id"]
+                raise inv.PaidCallUncertain("Synthetic interrupted second trial report")
+            value = await super().call(**request)
+            if "-investigator-2-trial-001-initial-" in request["stage_id"]:
+                invalid = report(finding=True)
+                invalid["findings"][0]["evidence"][0]["quote"] = "invented quotation"
+                value["message"]["content"] = json.dumps(invalid)
+            return value
+
+    adapter = Interrupted(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+        adapter=adapter, directory=directory, allow_partial=True, trial_contexts=True)
+    failed = result["investigators"][1]["failure"]["initial"]
+    assert failed["error"] == "PaidCallUncertain"
+    assert failed["trials"][0]["trial_id"] == "trial-1"
+    assert result["investigators"][1]["initial"] is None
+    assert all(score["score"] is None for score in result["scores"])
+    assert not any("-judge-" in call["stage_id"] for call in adapter.calls)
+    assert not (directory / "investigators/investigator-2/initial/trials/003").exists()
