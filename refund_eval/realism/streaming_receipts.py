@@ -153,7 +153,8 @@ class SSECollector:
 
     Repeated text fragments are real deltas and are concatenated, never deduped.
     Same-index unsigned reasoning.text fragments append in order only with stable
-    type/id/format. Signed or encrypted fragment merging remains unsupported.
+    type/id/format. One opaque signature-only update may seal a completed text
+    item; repeated/split signatures, later text and encrypted merging are refused.
     Content errors are deferred while raw transport and terminal usage are collected;
     a known billed invalid answer is never reconstructed as a usable response.
     """
@@ -273,9 +274,8 @@ class SSECollector:
         choices = value.get("choices")
         _require(isinstance(choices, list) and len(choices) <= 1, "Missing/multiple stream choices")
         if choices:
-            _require(self.finish_reason is None, "Choice data after terminal finish")
             choice = choices[0]
-            _require(isinstance(choice, dict) and not (set(choice) - {"index", "delta", "finish_reason", "logprobs"})
+            _require(isinstance(choice, dict) and not (set(choice) - {"index", "delta", "finish_reason", "native_finish_reason", "logprobs"})
                      and type(choice.get("index")) is int and choice["index"] == 0,
                      "Unsupported/duplicate stream choice")
             _require(choice.get("logprobs") is None, "Nonempty streamed logprobs unsupported")
@@ -283,8 +283,29 @@ class SSECollector:
                 self.choice_extra["logprobs"] = None
             delta = choice.get("delta")
             _require(isinstance(delta, dict), "Missing stream delta")
-            self._delta(delta)
             finish = choice.get("finish_reason")
+            if self.finish_reason is not None:
+                usage_trailer = (isinstance(value.get("usage"), dict) and finish == self.finish_reason
+                                 and not (set(delta) - {"role", "content"})
+                                 and delta.get("role", "assistant") == "assistant"
+                                 and delta.get("content", "") == "")
+                native_trailer = (delta == {} and finish is None
+                                  and isinstance(choice.get("native_finish_reason"), str)
+                                  and bool(choice["native_finish_reason"]))
+                _require(usage_trailer or native_trailer, "Choice data after terminal finish")
+                if usage_trailer:
+                    self._delta(delta)  # Empty strings still preserve field presence.
+            else:
+                self._delta(delta)
+            if "native_finish_reason" in choice:
+                native = choice["native_finish_reason"]
+                _require(native is None or (isinstance(native, str) and bool(native)),
+                         "Invalid native finish reason")
+                previous = self.choice_extra.get("native_finish_reason")
+                _require(previous is None or native == previous, "Native finish reason changed or regressed")
+                _require(native is None or self.finish_reason is not None
+                         or (isinstance(finish, str) and bool(finish)), "Premature native finish reason")
+                self.choice_extra["native_finish_reason"] = native
             if finish is not None:
                 _require(isinstance(finish, str) and bool(finish), "Invalid terminal finish")
                 self.finish_reason = finish
@@ -349,13 +370,21 @@ class SSECollector:
                 if index in self.details:
                     prior = self.details[index]
                     identity = ("type", "id", "format")
-                    _require(kind == prior.get("type") == "reasoning.text"
-                             and "signature" not in prior and "signature" not in detail
-                             and all((field in prior) == (field in detail) and prior.get(field) == detail.get(field)
-                                     for field in identity)
-                             and isinstance(prior.get("text"), str) and isinstance(detail.get("text"), str),
-                             "Ambiguous signed/encrypted/identity-changing reasoning fragments; retain raw chunks")
-                    prior["text"] += detail["text"]
+                    stable = (kind == prior.get("type") == "reasoning.text"
+                              and all((field in prior) == (field in detail) and prior.get(field) == detail.get(field)
+                                      for field in identity))
+                    signature_only = (stable and "signature" not in prior and "text" not in detail
+                                      and isinstance(detail.get("signature"), str) and bool(detail["signature"])
+                                      and isinstance(prior.get("text"), str))
+                    if signature_only:
+                        # One complete opaque signature value, assigned once. Never
+                        # concatenate signatures or permit later text on a sealed item.
+                        prior["signature"] = detail["signature"]
+                    else:
+                        _require(stable and "signature" not in prior and "signature" not in detail
+                                 and isinstance(prior.get("text"), str) and isinstance(detail.get("text"), str),
+                                 "Ambiguous signed/encrypted/identity-changing reasoning fragments; retain raw chunks")
+                        prior["text"] += detail["text"]
                 else:
                     _require(kind != "reasoning.text" or isinstance(detail.get("text"), str),
                              "Incomplete reasoning text detail")
@@ -396,6 +425,127 @@ class SSECollector:
         return {"id": self.identifier, "object": "chat.completion", "created": self.created,
                 "model": self.model, **self.extra, "usage": copy.deepcopy(self.usage),
                 "choices": [{"index": 0, "finish_reason": self.finish_reason, "message": message, **self.choice_extra}]}
+
+
+def replay_stream_journal(directory, *, expected_sha256):
+    """Reparse a pinned known-billed INVALID journal, without writes or dispatch.
+
+    Caller pins six exact raw hashes: request, manifest, headers, generation_id,
+    eof, terminal (invalid.json). Old receipts and costs remain unchanged. This
+    returns a newly parsed response plus additive source proof, never a ledger
+    transition, report validation, or permission to replay an HTTP request.
+    """
+    directory = Path(directory)
+    _require(directory.is_dir() and not directory.is_symlink(), "Invalid replay journal directory")
+    names = {"manifest": "manifest.json", "headers": "headers.json",
+             "generation_id": "generation-id.json", "eof": "eof.json", "terminal": "invalid.json"}
+    _require(isinstance(expected_sha256, dict) and set(expected_sha256) == set(names) | {"request"}
+             and all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                     for value in expected_sha256.values()), "Exact six source SHA256 pins required")
+    observed = {}
+
+    def read(path, digest):
+        _require(path.is_file() and not path.is_symlink(), "Replay source missing or symlinked")
+        raw = path.read_bytes()
+        _require(_sha(raw) == digest, "Replay source SHA256 mismatch")
+        observed[path] = digest
+        return raw
+
+    docs = {key: _object(read(directory / name, expected_sha256[key])) for key, name in names.items()}
+    manifest = docs["manifest"]
+    fields = {"transport_profile", "stage_id", "model", "request_sha256"}
+    _require(set(manifest) == fields | {"streaming_source_sha256", "base_adapter_source_sha256"},
+             "Unsupported journal manifest fields")
+    binding = {key: manifest[key] for key in fields}
+    stage = binding["stage_id"]
+    _require(isinstance(stage, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,180}", stage)
+             and directory.name == stage + "-stream" and binding["transport_profile"] == PROFILE
+             and isinstance(binding["model"], str) and bool(binding["model"])
+             and binding["request_sha256"] == expected_sha256["request"], "Replay request/stage/profile binding differs")
+    for field in ("streaming_source_sha256", "base_adapter_source_sha256"):
+        _require(isinstance(manifest[field], str) and re.fullmatch(r"[0-9a-f]{64}", manifest[field]),
+                 "Invalid original source hash")
+    request_path = directory.parent / (stage + "-request.json")
+    request = _object(read(request_path, expected_sha256["request"]))
+    _require(set(request) == {"transport_profile", "payload", "bound", "reserve_usd"}
+             and request["transport_profile"] == PROFILE and isinstance(request["payload"], dict)
+             and request["payload"].get("model") == binding["model"]
+             and request["payload"].get("stream") is True
+             and request["payload"].get("stream_options") == {"include_usage": True}, "Not an exact future stream request")
+    expected_fields = {
+        "headers": fields | {"status_code", "headers"},
+        "generation_id": fields | {"generation_id", "source", "through_chunk"},
+        "eof": fields | {"normal_eof", "done_observed", "chunks"},
+        "terminal": fields | {"normal_eof", "done_observed", "generation_id", "chunks",
+                               "response_valid", "billing", "validation_errors", "cost_status"},
+    }
+    for key, extra in expected_fields.items():
+        _require(set(docs[key]) == extra and all(docs[key][field] == binding[field] for field in fields),
+                 "Replay receipt fields/binding differ")
+    headers, eof, terminal, identity = (docs[key] for key in ("headers", "eof", "terminal", "generation_id"))
+    selected = headers["headers"]
+    _require(type(headers["status_code"]) is int and headers["status_code"] == 200
+             and isinstance(selected, dict) and not (set(selected) - set(HEADER_ALLOWLIST))
+             and all(isinstance(value, str) for value in selected.values())
+             and selected.get("content-type", "").split(";")[0].strip().lower() == "text/event-stream"
+             and selected.get("content-encoding", "identity").lower() == "identity", "Not a successful uncompressed SSE journal")
+    for receipt in (eof, terminal):
+        _require(receipt["normal_eof"] is True and receipt["done_observed"] is True,
+                 "Replay requires normal EOF and DONE")
+    _require(terminal["response_valid"] is False and terminal["cost_status"] == "known"
+             and isinstance(terminal["validation_errors"], list)
+             and all(isinstance(value, str) for value in terminal["validation_errors"])
+             and isinstance(terminal["billing"], dict) and set(terminal["billing"]) == {"generation_id", "usage"},
+             "Replay requires known billed invalid receipt; unknown holds cannot be adopted")
+    chunks = eof["chunks"]
+    _require(isinstance(chunks, list) and bool(chunks) and inv._json(chunks) == inv._json(terminal["chunks"]),
+             "Replay inventories differ")
+    _require({path.name for path in directory.glob("raw-*.bin")} == {f"raw-{i:06d}.bin" for i in range(len(chunks))},
+             "Unlisted or missing replay raw chunk")
+    first_id = None
+    through_chunk = None
+    current = None
+
+    def identify(identifier):
+        nonlocal first_id, through_chunk
+        if first_id is None:
+            first_id, through_chunk = identifier, current
+        _require(identifier == first_id, "Replay generation ID changed")
+
+    collector = SSECollector(model=binding["model"], identify=identify)
+    for i, descriptor in enumerate(chunks):
+        _require(isinstance(descriptor, dict) and set(descriptor) == {"sequence", "file", "bytes", "sha256"}
+                 and type(descriptor["sequence"]) is int and descriptor["sequence"] == i
+                 and descriptor["file"] == f"raw-{i:06d}.bin" and type(descriptor["bytes"]) is int
+                 and descriptor["bytes"] > 0 and isinstance(descriptor["sha256"], str)
+                 and re.fullmatch(r"[0-9a-f]{64}", descriptor["sha256"]), "Invalid replay chunk sequence/descriptor")
+        raw = read(directory / descriptor["file"], descriptor["sha256"])
+        _require(len(raw) == descriptor["bytes"], "Replay raw chunk size differs")
+        current = descriptor
+        collector.feed(raw)
+    collector.end_of_stream()
+    response, billing = collector.response(), collector.accounting()
+    _require(identity["source"] == "complete SSE JSON event id"
+             and identity["generation_id"] == terminal["generation_id"] == first_id == billing["generation_id"]
+             and inv._json(identity["through_chunk"]) == inv._json(through_chunk)
+             and inv._json(terminal["billing"]) == inv._json(billing), "Replay identity/terminal usage differs")
+    cost = billing["usage"].get("cost")
+    _require(type(cost) in (int, float) and math.isfinite(cost) and cost >= 0, "Replay cannot reinterpret unknown cost")
+    # Recheck after parsing: concurrent changes cannot silently alter the sources
+    # behind this proof. No source artifact is opened for writing.
+    for path, digest in list(observed.items()):
+        read(path, digest)
+    proof = {"operation": "offline-stream-reparse-v1", **binding,
+             "journal_directory": str(directory.resolve()), "request_file": str(request_path.resolve()),
+             "source_sha256": copy.deepcopy(expected_sha256), "chunks": copy.deepcopy(chunks),
+             "original_streaming_source_sha256": manifest["streaming_source_sha256"],
+             "original_base_adapter_source_sha256": manifest["base_adapter_source_sha256"],
+             "corrected_parser_source_sha256": _sha(Path(__file__).read_bytes()),
+             "generation_id": first_id, "normal_eof": True, "done_observed": True,
+             "usage": copy.deepcopy(billing["usage"]), "actual_cost": cost,
+             "response_canonical_sha256": _sha(inv._json(response).encode()),
+             "ledger_write": False, "network_dispatch": False}
+    return {"response": response, "source_proof": proof}
 
 
 def stream_payload(model, settings, messages, tools):
