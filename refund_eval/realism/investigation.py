@@ -487,6 +487,19 @@ class OpenRouterAdapter:
         required = set(payload) & {"max_tokens", "temperature", "top_p", "seed", "reasoning", "tools", "tool_choice"}
         if not isinstance(supported, list) or required - set(supported):
             raise InvestigationError("Pinned model lacks the required declared settings/tool support")
+        reasoning = payload.get("reasoning", {})
+        capabilities = metadata.get("reasoning") or {}
+        if isinstance(capabilities, dict):
+            if capabilities.get("mandatory") is True and (
+                reasoning.get("enabled") is False or reasoning.get("effort") == "none"
+                or reasoning.get("max_tokens") == 0
+            ):
+                raise InvestigationError("Pinned model requires reasoning; it cannot be disabled")
+            efforts = capabilities.get("supported_efforts")
+            if "effort" in reasoning and isinstance(efforts, list) and reasoning["effort"] not in efforts:
+                raise InvestigationError("Pinned model does not support the requested reasoning effort")
+            if "max_tokens" in reasoning and capabilities.get("supports_max_tokens") is False:
+                raise InvestigationError("Pinned model does not support a reasoning token budget")
         if type(metadata.get("context_length")) is not int or metadata["context_length"] <= 0:
             raise InvestigationError("Unknown model context window")
         # Conservative byte bound + explicit chat/tool framing; no context chopping.

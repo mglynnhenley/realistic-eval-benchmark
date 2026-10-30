@@ -59,6 +59,10 @@ settings support `temperature`, `top_p`, `seed` and `reasoning`, defaulting
 `temperature` to zero. Settings must be supported by the pinned model.
 For a model with fixed sampling that rejects `temperature`, explicitly set
 `"temperature": null` to pin omission of that parameter.
+Preflight also checks declared reasoning capabilities: mandatory reasoning cannot
+be disabled, and an effort or token budget must match the catalog's supported
+values when those limits are provided. For a mandatory-reasoning model, use a
+declared lower effort to limit reasoning rather than `"enabled": false`.
 
 ```json
 {

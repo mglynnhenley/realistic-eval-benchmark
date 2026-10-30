@@ -493,6 +493,44 @@ async def test_http_rejection_retains_original_receipt_without_releasing_hold(tm
     assert len(requests) == 1
 
 
+@pytest.mark.parametrize("reasoning", [
+    {"enabled": False}, {"effort": "none"}, {"max_tokens": 0}, {"effort": "xhigh"}, {"max_tokens": 100},
+])
+async def test_declared_reasoning_limits_reject_before_request_or_reservation(tmp_path, reasoning):
+    model = "family/reasoning-1.1"
+    entry = metadata(model)
+    entry["supported_parameters"].append("reasoning")
+    entry["reasoning"] = {"mandatory": True, "supported_efforts": ["low", "minimal"],
+                          "supports_max_tokens": False}
+    requests = []
+    adapter = real_adapter(tmp_path, lambda request: requests.append(request), model=model, catalog={model: entry})
+    with pytest.raises(inv.InvestigationError):
+        await adapter.call(model=model, settings={"max_tokens": 1000, "reasoning": reasoning},
+                           messages=[{"role": "user", "content": "Synthetic evidence"}],
+                           tools=[], stage_id="unsupported-reasoning")
+    assert not requests and not (tmp_path / "spend.json").exists()
+    assert not (tmp_path / "calls" / "unsupported-reasoning-request.json").exists()
+
+
+async def test_declared_minimal_reasoning_is_forwarded_without_substitution(tmp_path):
+    model = "family/reasoning-1.1"
+    entry = metadata(model)
+    entry["supported_parameters"].append("reasoning")
+    entry["reasoning"] = {"mandatory": True, "supported_efforts": ["low", "minimal"]}
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        assert json.loads(request.content)["reasoning"] == {"effort": "minimal"}
+        return provider_response(request)
+
+    adapter = real_adapter(tmp_path, transport, model=model, catalog={model: entry})
+    result = await adapter.call(model=model, settings={"max_tokens": 1000, "reasoning": {"effort": "minimal"}},
+                                messages=[{"role": "user", "content": "Synthetic evidence"}],
+                                tools=[], stage_id="minimal-reasoning")
+    assert result["model"] == model and len(requests) == 1
+
+
 @pytest.mark.parametrize("mutation", ["overflow", "unknown_price", "unknown_tariff", "unsupported_settings"])
 async def test_pre_dispatch_failures_launch_no_inference(tmp_path, mutation):
     model = "family/model-1.1"
