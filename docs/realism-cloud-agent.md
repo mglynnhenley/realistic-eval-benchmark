@@ -382,6 +382,14 @@ saved evidence and must record the missing coverage. This does not authorize
 replaying a failed report, rerating an invalid score, changing models or replacing
 a target trial. Legacy configurations retain their original stricter behavior.
 
+An owner may explicitly acknowledge one exact, settled scanner failure through
+an optional `settled_scan_failure` artifact. It binds the unchanged entire parent
+policy, the failed stage's canonical hash and its accounting readback, and records
+`continue_saved_trials`, `retain_failed_coverage` and `retain_unknown_holds` as true.
+The stage remains failed and scan coverage remains incomplete. This permits using
+saved original trials without replaying the scanner or changing the historical
+snapshot, namespace, uncertainty bounds or budget. Other failures still stop.
+
 Historical analysis reservations left `started` by a killed process require an
 exact raw-hashed interruption observation and original request pins in
 `historical_interruptions`. This permits retaining the unchanged unknown hold;

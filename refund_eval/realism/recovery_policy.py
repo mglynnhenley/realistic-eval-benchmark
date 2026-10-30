@@ -35,7 +35,7 @@ def artifact(reference):
 
 
 def validate(policy, current, *, ledger, budget, enforce_limits=True):
-    require(set(policy) == {"version", "ledger", "budget_usd", "authorization", "snapshot",
+    require(set(policy) - {"settled_scan_failure"} == {"version", "ledger", "budget_usd", "authorization", "snapshot",
                             "max_unresolved_usd", "max_new_unknowns", "analysis_stage_namespace",
                             "historical_interruptions"},
             "Unknown or missing recovery policy field")
@@ -50,6 +50,29 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
             == {k: v for k, v in original.items() if k != "stages"}, "Historical budget metadata changed")
     require(all(current["stages"].get(k) == v for k, v in original["stages"].items()),
             "Historical charges/holds changed; reconcile separately")
+    acknowledged = None
+    if "settled_scan_failure" in policy:
+        exception = artifact(policy["settled_scan_failure"])
+        parent = artifact(exception["original_policy"])
+        require("settled_scan_failure" not in parent and parent == {
+            key: value for key, value in policy.items() if key != "settled_scan_failure"},
+            "Scan exception must preserve the entire original recovery policy")
+        require(exception.get("continue_saved_trials") is True
+                and exception.get("retain_failed_coverage") is True
+                and exception.get("retain_unknown_holds") is True,
+                "Explicit narrow scan continuation authorization required")
+        readback = artifact(exception["accounting_readback"])
+        acknowledged = exception.get("stage_id")
+        item = current["stages"].get(acknowledged)
+        require(acknowledged not in original["stages"] and isinstance(item, dict)
+                and item == readback.get("target_after") and readback.get("target") == acknowledged
+                and readback.get("strict_scan_coverage") is False
+                and readback.get("all_other_stages_and_budget_metadata_unchanged") is True
+                and digest(item) == exception.get("stage_sha256")
+                and item.get("kind") == "tells" and item.get("status") == "failed"
+                and item.get("finished_at") and type(item.get("actual_usd")) in (int, float)
+                and math.isfinite(item["actual_usd"]) and item["actual_usd"] >= 0,
+                "Only the exact settled failed scan may be acknowledged")
     abandoned = {}
     for reference in policy["historical_interruptions"]:
         observation = artifact(reference)
@@ -80,6 +103,8 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
         status, actual = stage.get("status"), stage.get("actual_usd")
         if status == "complete" and actual is not None:
             continue
+        if name == acknowledged:
+            continue  # Keep FAILED in the actual ledger and returned disposition.
         # A provider refusal or a failed native/scan is a real stop, not an
         # invitation to manufacture a replacement trial or switch models.
         require(status == "unknown" and actual is None and stage.get("kind") == "interaction"

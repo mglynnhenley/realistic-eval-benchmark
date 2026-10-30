@@ -123,3 +123,78 @@ def test_lost_analysis_may_be_retained_only_with_exact_interruption_evidence(fix
     current['stages']['lost-analysis']['actual_usd'] = 0
     with pytest.raises(ValueError, match='Historical charges'):
         check(fixture)
+
+
+def authorize_scan(fixture, tmp_path):
+    value, current, _ = fixture
+    item = stage(status="failed", kind="tells", actual=0.06, reserve=15)
+    current["stages"]["saved-scan"] = item
+    parent = pin(tmp_path / "parent-policy.json", copy.deepcopy(value))
+    readback = pin(tmp_path / "scan-readback.json", {
+        "target": "saved-scan", "target_after": item, "strict_scan_coverage": False,
+        "all_other_stages_and_budget_metadata_unchanged": True})
+    authorization = {"original_policy": parent, "accounting_readback": readback,
+                     "stage_id": "saved-scan", "stage_sha256": policy.digest(item),
+                     "continue_saved_trials": True, "retain_failed_coverage": True,
+                     "retain_unknown_holds": True}
+    value["settled_scan_failure"] = pin(tmp_path / "scan-exception.json", authorization)
+    return authorization
+
+
+def test_exact_known_scan_exception_preserves_failed_status_holds_and_policy(fixture, tmp_path):
+    authorize_scan(fixture, tmp_path)
+    value, current, ledger = fixture
+    before = copy.deepcopy(current)
+    pending = check(fixture)
+    assert current == before and pending["saved-scan"]["status"] == "failed"
+    assert pending["old-native"]["actual_usd"] is None
+    assert not ledger.exists()  # Validation performs no accounting write.
+    del value["settled_scan_failure"]
+    with pytest.raises(ValueError, match="Unresolved native/scan"):
+        check(fixture)
+
+
+@pytest.mark.parametrize("mutation", ["charge", "unknown", "status", "kind", "detail",
+                                    "cap", "count", "namespace", "snapshot", "other_scan",
+                                    "native", "second_unknown", "exposure", "refusal"])
+def test_scan_exception_does_not_broaden_recovery(fixture, tmp_path, mutation):
+    authorize_scan(fixture, tmp_path)
+    value, current, _ = fixture
+    item = current["stages"]["saved-scan"]
+    if mutation == "charge":
+        item["actual_usd"] += 0.01
+    elif mutation == "unknown":
+        item["actual_usd"] = None
+    elif mutation in {"status", "kind", "detail"}:
+        item[mutation] = "changed"
+    elif mutation in {"cap", "count", "namespace"}:
+        field, changed = {"cap": ("max_unresolved_usd", 99),
+                          "count": ("max_new_unknowns", 3),
+                          "namespace": ("analysis_stage_namespace", "reset-stream-v1")}[mutation]
+        value[field] = changed
+    elif mutation == "snapshot":
+        value["snapshot"] = pin(tmp_path / "reset.json", current)
+    elif mutation == "other_scan":
+        current["stages"]["other-scan"] = copy.deepcopy(item)
+    elif mutation == "native":
+        current["stages"]["new-native"] = stage(status="failed", kind="trials", actual=0)
+    elif mutation == "second_unknown":
+        current["stages"].update({"new-stream-v1-a": stage(), "new-stream-v1-b": stage()})
+    elif mutation == "exposure":
+        current["stages"]["new-stream-v1-a"] = stage(reserve=40)
+    elif mutation == "refusal":
+        current["stages"]["new-stream-v1-refusal"] = stage(status="failed", actual=0.01)
+    before = copy.deepcopy(current)
+    with pytest.raises(ValueError):
+        check(fixture)
+    assert current == before
+
+
+@pytest.mark.parametrize("field", ["continue_saved_trials", "retain_failed_coverage", "retain_unknown_holds"])
+def test_scan_exception_requires_explicit_authorization(fixture, tmp_path, field):
+    authorization = authorize_scan(fixture, tmp_path)
+    value, _, _ = fixture
+    authorization[field] = False
+    value["settled_scan_failure"] = pin(tmp_path / "declined.json", authorization)
+    with pytest.raises(ValueError, match="authorization"):
+        check(fixture)
