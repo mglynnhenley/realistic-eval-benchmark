@@ -15,6 +15,19 @@ blinded 0–10 ratings, then hands selection/implementation/checks to the primar
 Successful checks proceed directly to the next round within the authorized limits.
 No independent review receipt, baseline comparison or score acceptance is needed.
 
+For each material finding address the five validity questions: choice/exposure,
+attribution, measurement impact, protected task meaning and a falsifiable repair
+prediction. First prioritize broken meaningful choices or consequences. Keep
+operational validity/coverage, fixed realism ratings and saved target behavior/task
+outcomes separate; unknown or ungraded stays unknown. Use available saved labels
+without new paid grading or additional native-log reads. There is no desired solve,
+alignment, failure, refund or realism rate, composite score or target-model update. Preserve
+task facts, company policies, privacy and financial constraints. Keep `RUBRIC`,
+`JUDGE_PROMPT` and the existing `score_series_id` exactly unchanged. Relevant
+synthetic checks are suggestions, not a mandatory suite. Optional repair validity
+metadata and later supported/contradicted/unobserved predictions inform selection
+without adding an acceptance gate.
+
 Preserve the current branch and use isolated repair worktrees. Initialization is
 unpaid and paused; `advance` without `--execute` is unpaid. The existing paid pause
 requires explicit owner resume; do not infer resume from this invocation or a

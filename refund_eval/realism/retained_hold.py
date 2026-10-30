@@ -42,6 +42,25 @@ RECONCILED_VERSION = "retained-native-holds-v4"
 RECONCILED_SCOPE_SHA256 = "de4db1c371968e68daa514dd46d12e960e2b8b19c360247f7709c3dbb2bde5b0"
 RECONCILED_FIELDS = PAIR_FIELDS | {"reconciled_nonattempt"}
 
+# One additional, request-bound terminal interaction, never arbitrary unknowns.
+# These are original evidence digests, not billing or continuation approvals.
+INTERACTION_VERSION = "retained-four-holds-continuation-v5"
+INTERACTION_REQUEST_SHA256 = "87f249a06c05ac33d67e73cb575924986707a7a9e0af5e206b3e97c480955db9"
+INTERACTION_ACCOUNTING_SHA256 = "ad0a207f6c9b3fc8c2cd89142efb531eadd2d887d7b612d6ed4666ba0ad9f25b"
+INTERACTION_OWNER_REQUEST_SHA256 = "b649ec2e205797c407a4c2d4200511e6d512b65e19b7189b80951071255e88f7"
+INTERACTION_FIELDS = RECONCILED_FIELDS | {"retained_interaction", "restart_authorization"}
+INTERACTION_ACKNOWLEDGEMENTS = {
+    "retained_all_four_full_holds", "actual_and_invoice_unknown", "new_work_only",
+    "no_original_replay_recovery_or_rescan", "reservation_is_not_provider_cap",
+    "no_cost_inference_or_hold_release", "fifth_unknown_blocks",
+    "continuation_after_feedback_integration_only", "old_approvals_not_extended",
+}
+INTERACTION_SCOPE_FIELDS = {
+    "version", "declaration_kind", "declared_by", "declared_at", "owner_request",
+    "budget_usd", "ledger", "future_binding", "continuation_after_feedback_integration",
+    "bounded_disposition_sha256", "acknowledgements",
+}
+
 
 def require(condition, message):
     if not condition:
@@ -268,6 +287,10 @@ def _freeze(repo, review_path, *, ledger, budget, binding, required_reserve, sna
     _path(repo, str(review_path.relative_to(repo)))
     raw = review_path.read_bytes()
     review = _json(raw)
+    if review.get("version") == INTERACTION_VERSION:
+        return _freeze_interaction(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                                   required_reserve=required_reserve, snapshot=snapshot,
+                                   execution_fingerprint=execution_fingerprint)
     if review.get("version") == RECONCILED_VERSION:
         return _freeze_reconciled(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                                   required_reserve=required_reserve, snapshot=snapshot,
@@ -902,13 +925,23 @@ def _reconciled_nonattempt(repo, descriptor, current, ledger, binding):
     return target
 
 def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
-                  snapshot, execution_fingerprint):
-    exact(review, RECONCILED_FIELDS | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
-    require(review["review_kind"] == "retained_native_three_holds_reconciled_nonattempt_disposition_review" and review["approved"] is True
+                  snapshot, execution_fingerprint, retained_interaction=None):
+    # Only the v5 handler supplies its already validated single descriptor. The
+    # ledger image is never filtered, rewritten or represented as a v4 snapshot.
+    fields = RECONCILED_FIELDS if retained_interaction is None else INTERACTION_FIELDS
+    kind = ("retained_native_three_holds_reconciled_nonattempt_disposition_review" if retained_interaction is None
+            else "retained_four_holds_continuation_disposition")
+    acknowledgements = THREE_ACKNOWLEDGEMENTS if retained_interaction is None else INTERACTION_ACKNOWLEDGEMENTS
+    exact(review, fields | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    require(review["review_kind"] == kind and review["approved"] is True
             and type(review["reviewer"]) is str and bool(review["reviewer"].strip())
-            and _time(review["reviewed_at"]) is not None, "Exact independent three-hold approval required")
-    exact(review["acknowledgements"], THREE_ACKNOWLEDGEMENTS)
-    require(all(value is True for value in review["acknowledgements"].values()), "All three full holds require acknowledgement")
+            and _time(review["reviewed_at"]) is not None,
+            "Exact independent three-hold approval required" if retained_interaction is None
+            else "Exact bounded continuation declaration required")
+    exact(review["acknowledgements"], acknowledgements)
+    require(all(value is True for value in review["acknowledgements"].values()),
+            "All three full holds require acknowledgement" if retained_interaction is None
+            else "All four full holds require acknowledgement")
     require(review["validator_sha256"] == digest(Path(__file__).read_bytes()), "Retained-hold validator source changed")
     exact(binding, {"run_directory", "request_sha256"})
     exact(review["future_binding"], {"run_directory", "request_sha256"})
@@ -952,17 +985,25 @@ def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, bindin
         require(not future.is_relative_to(directory) and not directory.is_relative_to(future),
                 "Original three runs cannot be replayed or modified")
         descriptors.append(descriptor)
+    expected_descriptors = descriptors if retained_interaction is None else [*descriptors, retained_interaction]
     require(len({item["id"] for item in descriptors}) == 3
             and scope["exact_original_stages"] == [item["id"] for item in descriptors]
-            and measurement._json_hash(review["stages"]) == measurement._json_hash(descriptors), "Three exact ordered stages required")
+            and measurement._json_hash(review["stages"]) == measurement._json_hash(expected_descriptors),
+            "Three exact ordered stages required" if retained_interaction is None
+            else "Three exact ordered native stages and only the scoped interaction required")
     originals = {item["id"] for item in descriptors}
     reconciled = _reconciled_nonattempt(repo, review["reconciled_nonattempt"], current, ledger, binding)
     require(reconciled not in originals, "Reconciled case cannot replace an original full hold")
     originals.add(reconciled)
+    if retained_interaction is not None:
+        require(retained_interaction["id"] not in originals, "Retained interaction cannot replace a native case")
+        originals.add(retained_interaction["id"])
     for name, stage in current["stages"].items():
         if name not in originals:
             require(stage.get("status") == "complete" and money(stage.get("actual_usd"))
-                    and _time(stage.get("finished_at")) is not None, "Every fourth unknown or unfinished stage blocks")
+                    and _time(stage.get("finished_at")) is not None,
+                    "Every fourth unknown or unfinished stage blocks" if retained_interaction is None
+                    else "Every fifth unknown or unfinished stage blocks")
     marker = future / "execution-started.json"
     require(not marker.is_symlink(), "Noncanonical future start marker")
     if marker.exists():
@@ -970,6 +1011,101 @@ def _freeze_reconciled(repo, review_path, review, raw, *, ledger, budget, bindin
                 and _json(marker.read_bytes()).get("fingerprint") == execution_fingerprint,
                 "Future three-hold execution already started; never replay")
     require(money(required_reserve, positive=True) and required_reserve <= stages.summary(current)["remaining_usd"] + 1e-9,
-            "New native and scan reserves do not fit after all three full holds")
-    return {**{key: review[key] for key in RECONCILED_FIELDS},
+            "New native and scan reserves do not fit after all three full holds" if retained_interaction is None
+            else "New native and scan reserves do not fit after all four full holds")
+    return {**{key: review[key] for key in fields},
             "review": {"path": str(review_path.relative_to(repo)), "sha256": digest(raw)}}
+
+
+def _freeze_interaction(repo, review_path, review, raw, *, ledger, budget, binding, required_reserve,
+                        snapshot, execution_fingerprint):
+    """New continuation authority for one pinned unknown; never reconcile it.
+
+    A coordinator declaration cites the owner's restart-after-integration request
+    and binds all substantive disposition fields, including the whole ledger SHA,
+    validator and exact future request. Its full-hold acknowledgements are the
+    coordinator's interpretation, never fabricated owner billing instructions.
+    Original denied accounting remains uncertainty, not continuation authority.
+    """
+    exact(review, INTERACTION_FIELDS | {"review_kind", "approved", "reviewer", "reviewed_at", "acknowledgements"})
+    exact(binding, {"run_directory", "request_sha256"})
+    require(type(binding["run_directory"]) is str, "Invalid continuation future directory")
+    descriptor = review["retained_interaction"]
+    exact(descriptor, {"stage", "original_request", "failure_accounting"})
+    stage = descriptor["stage"]
+    exact(stage, {"id", "sha256", "snapshot"})
+    require(type(stage["id"]) is str and bool(stage["id"]), "Exact retained interaction identity required")
+    expected = stage["snapshot"]
+    exact(expected, {"kind", "status", "reserve_usd", "actual_usd", "started_at", "finished_at", "detail"})
+    require(expected["kind"] == "interaction" and expected["status"] == "unknown"
+            and expected["actual_usd"] is None and money(expected["reserve_usd"], positive=True)
+            and _time(expected["started_at"]) is not None and _time(expected["finished_at"]) is not None
+            and _time(expected["finished_at"]) >= _time(expected["started_at"])
+            and type(expected["detail"]) is str, "Only a finished terminal unknown full interaction hold is eligible")
+    current, _ = snapshot
+    require(stage["sha256"] == measurement._json_hash(expected)
+            == measurement._json_hash(current["stages"].get(stage["id"])), "Retained interaction stage changed")
+    for name, sha256 in (("original_request", INTERACTION_REQUEST_SHA256),
+                         ("failure_accounting", INTERACTION_ACCOUNTING_SHA256)):
+        exact(descriptor[name], {"path", "sha256"})
+        require(descriptor[name]["sha256"] == sha256, "Only the pinned original interaction evidence is eligible")
+    request_path, request = _artifact(repo, descriptor["original_request"])
+    accounting_path, accounting = _artifact(repo, descriptor["failure_accounting"])
+    require(request_path.parent.name == "model-calls" and request_path.name == stage["id"] + "-request.json",
+            "Exact original interaction request artifact required")
+    require(accounting.get("review_kind") == "independent_original_http400_accounting_recovery"
+            and accounting.get("approved") is False and accounting.get("outcome") == "unresolved_original_charge"
+            and accounting.get("stage_id") == stage["id"]
+            and accounting.get("original_request_sha256") == descriptor["original_request"]["sha256"]
+            and accounting.get("ledger_path") == str(ledger.relative_to(repo))
+            and accounting.get("ledger_before_sha256") == accounting.get("ledger_after_sha256")
+            and "exact_actual_cost_usd" in accounting and accounting["exact_actual_cost_usd"] is None
+            and accounting.get("one_time_normal_stages_finish_justified") is False
+            and "supported_stage_update" in accounting and accounting["supported_stage_update"] is None
+            and accounting.get("inference_retry_permitted") is False
+            and accounting.get("old036_failed_zero_preserved") is True
+            and money(request.get("reserve_usd"), positive=True)
+            and request["reserve_usd"] == expected["reserve_usd"], "Original interaction accounting must remain unresolved")
+    descriptors = review["stages"]
+    require(type(descriptors) is list and len(descriptors) == 4, "Exactly three native holds and one interaction required")
+    for item in descriptors:
+        exact(item, {"id", "sha256"})
+        require(type(item["id"]) is str, "Invalid retained-hold stage identity")
+    require(descriptors[-1] == {"id": stage["id"], "sha256": stage["sha256"]}
+            and len({item["id"] for item in descriptors}) == 4, "Interaction must be the sole fourth retained hold")
+    originals = accounting.get("all_four_unknown_stage_snapshots")
+    exact(originals, {item["id"] for item in descriptors})
+    require(all(measurement._json_hash(originals[item["id"]]) == item["sha256"] for item in descriptors),
+            "All four original accounting snapshots must remain exact")
+    future = repo / binding["run_directory"]
+    require(all(not future.is_relative_to(directory) and not directory.is_relative_to(future)
+                for directory in (request_path.parent.parent, accounting_path.parent)),
+            "Original interaction evidence cannot overlap new work")
+    _, authorization = _artifact(repo, review["restart_authorization"])
+    exact(authorization, INTERACTION_SCOPE_FIELDS)
+    exact(authorization["acknowledgements"], INTERACTION_ACKNOWLEDGEMENTS)
+    exact(authorization["owner_request"], {"path", "sha256"})
+    require(authorization["owner_request"]["sha256"] == INTERACTION_OWNER_REQUEST_SHA256,
+            "Exact original owner restart request required")
+    _, owner_request = _artifact(repo, authorization["owner_request"])
+    require(owner_request.get("restart_authorized_after_integration") is True
+            and money(owner_request.get("budget_total_usd"), positive=True)
+            and owner_request["budget_total_usd"] == 1000
+            and _time(owner_request.get("at")) is not None, "Owner request must preserve the existing restart scope and cap")
+    bounded = {key: review[key] for key in INTERACTION_FIELDS - {"restart_authorization"}}
+    require(authorization["version"] == INTERACTION_VERSION
+            and authorization["declaration_kind"] == "coordinator_bounded_continuation_interpretation"
+            and type(authorization["declared_by"]) is str and bool(authorization["declared_by"].strip())
+            and _time(authorization["declared_at"]) is not None
+            and _time(authorization["declared_at"]) >= _time(owner_request["at"])
+            and _time(authorization["declared_at"]) >= _time(expected["finished_at"])
+            and authorization["continuation_after_feedback_integration"] is True
+            and money(authorization["budget_usd"], positive=True) and authorization["budget_usd"] == budget == 1000
+            and authorization["ledger"] == review["ledger"]
+            and authorization["future_binding"] == binding == review["future_binding"]
+            and authorization["bounded_disposition_sha256"] == measurement._json_hash(bounded)
+            and all(value is True for value in authorization["acknowledgements"].values()),
+            "New exact owner continuation-after-integration authorization required")
+    return _freeze_reconciled(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
+                              required_reserve=required_reserve, snapshot=snapshot,
+                              execution_fingerprint=execution_fingerprint, retained_interaction=descriptors[-1])

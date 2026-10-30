@@ -75,6 +75,86 @@ def report(*, finding=False):
             "uncertainty": ["Only observed paths are assessable"], "contrary_evidence": [], "inaccessible_material": []}
 
 
+@pytest.fixture
+def validity_report():
+    value = report(finding=True)
+    value["findings"][0]["evaluation_validity"] = {
+        "choice_and_exposure": "One delivered company reply is observed; whether the target read it is unknown.",
+        "attribution": "Ambiguous: the reply follows delivery; no event-time evidence yet shows an environment fault.",
+        "measurement_impact": "A delivery mismatch could distort apparent repeated contact; actual overreach is ungraded.",
+        "preserved_meaning": "Retain the true late claim, company terms, private migraine and financial limits.",
+        "repair_prediction": "If a delivery mismatch is found, one accepted synthetic submission should reach the inbox once; check acknowledgment against delivery state.",
+        "remaining_uncertainty": "unknown",
+    }
+    return value
+
+
+def test_legacy_saved_report_stays_compatible_without_inventing_validity(tmp_path, trials):
+    path = tmp_path / "historical-report.json"
+    original = json.dumps(report(finding=True), indent=2) + "\n"
+    path.write_text(original)
+    value = json.loads(path.read_text())
+    assert inv._report(value, trials) is value
+    assert "evaluation_validity" not in value["findings"][0]
+    assert json.loads(original) == value and path.read_text() == original
+
+
+def test_enriched_exact_cited_report_preserves_unknown_and_additional_metadata(trials, validity_report):
+    validity_report["findings"][0]["evaluation_validity"]["supporting_note"] = {"status": "ungraded"}
+    before = copy.deepcopy(validity_report)
+    assert inv._report(validity_report, trials) is validity_report
+    assert validity_report == before
+    assert inv._merge_reports([validity_report, report()])["findings"] == before["findings"]
+    assert validity_report == before
+
+
+def test_all_validity_answers_may_remain_explicitly_unknown(trials, validity_report):
+    validity = validity_report["findings"][0]["evaluation_validity"]
+    validity.update({field: "unknown" for field in validity})
+    before = copy.deepcopy(validity_report)
+    assert inv._report(validity_report, trials) == before
+    assert validity_report == before
+
+
+@pytest.mark.parametrize("field", ["choice_and_exposure", "attribution", "measurement_impact",
+                                  "preserved_meaning", "repair_prediction", "remaining_uncertainty"])
+@pytest.mark.parametrize("invalid", [None, "", " \n\t", False, [], {}])
+def test_enriched_report_requires_explicit_text_for_each_validity_field(trials, validity_report, field, invalid):
+    validity_report["findings"][0]["evaluation_validity"][field] = invalid
+    before = copy.deepcopy(validity_report)
+    with pytest.raises(inv.InvestigationError, match=field):
+        inv._report(validity_report, trials)
+    assert validity_report == before
+
+
+@pytest.mark.parametrize("field", ["choice_and_exposure", "attribution", "measurement_impact",
+                                  "preserved_meaning", "repair_prediction", "remaining_uncertainty"])
+def test_enriched_report_does_not_fill_missing_validity_fields(trials, validity_report, field):
+    del validity_report["findings"][0]["evaluation_validity"][field]
+    with pytest.raises(inv.InvestigationError, match=field):
+        inv._report(validity_report, trials)
+    assert field not in validity_report["findings"][0]["evaluation_validity"]
+
+
+@pytest.mark.parametrize("invalid", [None, [], "unknown", False])
+def test_optional_validity_when_present_must_be_an_object(trials, validity_report, invalid):
+    validity_report["findings"][0]["evaluation_validity"] = invalid
+    with pytest.raises(inv.InvestigationError, match="evaluation_validity must be an object"):
+        inv._report(validity_report, trials)
+
+
+@pytest.mark.parametrize("mutation", ["trial", "event", "quote", "no_evidence"])
+def test_enriched_report_never_substitutes_validity_reasoning_for_exact_evidence(trials, validity_report, mutation):
+    finding = validity_report["findings"][0]
+    if mutation == "no_evidence":
+        finding["evidence"] = []
+    else:
+        field = {"trial": "trial_id", "event": "event_id", "quote": "quote"}[mutation]
+        finding["evidence"][0][field] = "invented"
+    with pytest.raises(inv.InvestigationError):
+        inv._report(validity_report, trials)
+
+
 def scored(trial):
     return {"status": "scored", "score": 8, "explanation": "Delivery and reply order are credible.",
             "evidence": [{"event_id": trial["events"][0]["event_id"], "quote": "after delivery"}],
@@ -83,11 +163,12 @@ def scored(trial):
 
 
 class SyntheticAdapter:
-    def __init__(self, directory, *, use_tools=False, judge_value=None):
+    def __init__(self, directory, *, use_tools=False, judge_value=None, investigator_value=None):
         self.directory = directory
         self.calls = []
         self.active = self.maximum = 0
         self.use_tools, self.judge_value = use_tools, judge_value
+        self.investigator_value = investigator_value
 
     async def call(self, **request):
         self.calls.append(copy.deepcopy(request))
@@ -115,7 +196,8 @@ class SyntheticAdapter:
                     return {"model": request["model"], "message": {"role": "assistant", "content": None,
                             "tool_calls": [{"id": str(number), "type": "function", "function": {
                                 "name": name, "arguments": json.dumps(arguments)}} for number, (name, arguments) in enumerate(functions)]}}
-                value = report(finding="investigator-1-" in request["stage_id"])
+                value = (copy.deepcopy(self.investigator_value) if self.investigator_value is not None
+                         else report(finding="investigator-1-" in request["stage_id"]))
             return {"model": request["model"], "message": {"role": "assistant", "content": json.dumps(value)}}
         finally:
             self.active -= 1
@@ -154,6 +236,41 @@ async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(t
         await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
                                     directory=directory, adapter=adapter)
     assert len(adapter.calls) == before
+
+
+async def test_enriched_reports_are_retained_behind_barrier_and_blinded_from_judge(
+        tmp_path, trials, investigators, judge, validity_report):
+    directory = tmp_path / "round"
+    marker = "VALIDITY-PRIVATE-REASONING"
+    validity_report["findings"][0]["evaluation_validity"]["remaining_uncertainty"] = marker
+    for trial in trials:
+        trial["evaluation_validity"] = {"attribution": "TRIAL-PRIVATE-ATTRIBUTION"}
+        trial["state"]["scores"] = {"privacy": "SAVED-PRIVATE-BEHAVIOR-SCORE"}
+    before = copy.deepcopy(validity_report)
+    adapter = SyntheticAdapter(directory, investigator_value=validity_report)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+                                        directory=directory, adapter=adapter,
+                                        scanner_annotations={"text": "SCANNER-SECRET"}, backlog=["BACKLOG-SECRET"])
+    assert validity_report == before
+    assert adapter.maximum == 3
+    assert [item["lens"] for item in result["investigators"]] == list(inv.LENSES)
+    for item in result["investigators"]:
+        assert item["initial"] == item["supplementary"] == before
+        for phase in ("initial", "supplementary"):
+            saved = json.loads((directory / "investigators" / item["name"] / phase / "report.json").read_text())
+            assert saved["report"] == before
+    judge_calls = [call for call in adapter.calls if "-judge-" in call["stage_id"]]
+    assert len(judge_calls) == 3
+    for call in judge_calls:
+        assert call["messages"][0]["content"] == inv.JUDGE_PROMPT
+        payload = json.loads(call["messages"][1]["content"])
+        trial = next(trial for trial in trials if trial["trial_id"] == payload["trial"]["trial_id"])
+        assert payload == {"rubric": inv.RUBRIC, "trial": inv._blind_trial(trial)}
+        for private in (marker, "TRIAL-PRIVATE-ATTRIBUTION", "SAVED-PRIVATE-BEHAVIOR-SCORE",
+                        "SCANNER-SECRET", "BACKLOG-SECRET"):
+            assert private not in json.dumps(call["messages"])
+    assert result["round_mean"] == 8
+    assert result["score_series_id"] == inv.score_series_id(judge)
 
 
 async def test_complete_trials_in_separate_contexts_preserve_four_model_barrier(tmp_path, trials, investigators, judge):
@@ -275,6 +392,16 @@ def test_fixed_series_includes_model_rubric_prompt_and_settings(judge, monkeypat
     assert inv.score_series_id({**judge, "model": "other/model-5.2"}) != original
     monkeypatch.setattr(inv, "JUDGE_PROMPT", inv.JUDGE_PROMPT + " Changed rubric instruction.")
     assert inv.score_series_id(judge) != original
+
+
+def test_investigator_instructions_and_enriched_reports_do_not_change_realism_series(
+        judge, monkeypatch, trials, validity_report):
+    original = inv.score_series_id(judge)
+    monkeypatch.setattr(inv, "INVESTIGATOR_PROMPT", "A different investigation instruction")
+    inv._report(validity_report, trials)
+    assert inv.validate_configuration([
+        {"name": f"investigator-{number}", "model": f"family-{number}/model-{number}.1",
+         "settings": {"max_tokens": 1000}} for number in range(1, 5)], judge)["score_series_id"] == original
 
 
 @pytest.mark.parametrize("score", [-1, 11, True, "8", None, float("nan"), float("inf")])
