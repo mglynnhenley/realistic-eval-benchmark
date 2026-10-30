@@ -166,6 +166,11 @@ uses the exact frozen measurement worktree for source access. Public retrieval
 is unauthenticated; local reproductions use disposable source and private scratch.
 Unavailable or incomplete evidence remains explicit.
 
+Each investigative pass reserves its final model call for the report, with further
+tools disabled and all obtained evidence retained. Reports may contain one JSON
+object enclosed in a single Markdown code fence; raw responses remain saved and
+the same schema and exact-citation checks still apply.
+
 After investigation, `advance` returns `awaiting_selection` with
 `rounds/0001/primary-request.json`. Read the handoff and saved reports, resolve
 conflicts using evidence and write its requested `selection.json`:

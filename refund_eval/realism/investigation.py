@@ -255,6 +255,12 @@ def _report(value: dict, trials: list[dict]) -> dict:
 
 
 def _object(content: Any) -> dict:
+    if isinstance(content, str):
+        # Preserve the raw response on disk; accept one enclosing JSON fence,
+        # without extracting a preferred object from prose or multiple answers.
+        fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n```", content.strip())
+        if fenced:
+            content = fenced[1]
     try:
         result = json.loads(content) if isinstance(content, str) else None
     except (ValueError, TypeError) as error:
@@ -574,8 +580,14 @@ async def _conversation(*, adapter, model: str, settings: dict, messages: list[d
     history = copy.deepcopy(messages)
     for turn in range(1, max_calls + 1):
         _check(check_paused)
+        final_report = tools is not None and turn == max_calls
+        if final_report:
+            history.append({"role": "user", "content":
+                "This is the final model call in this investigation pass. Return your JSON report now, "
+                "using the evidence already obtained. Report remaining uncertainty and inaccessible material. "
+                "Do not request more tools or invent observations."})
         response = await adapter.call(model=model, settings=copy.deepcopy(settings), messages=copy.deepcopy(history),
-                                      tools=copy.deepcopy(tools.schemas) if tools else [],
+                                      tools=copy.deepcopy(tools.schemas) if tools and not final_report else [],
                                       stage_id=f"{stage_prefix}-{turn:02d}")
         _save(directory / f"call-{turn:02d}.json", response, exclusive=True)
         if _model(response.get("model")) != _model(model):

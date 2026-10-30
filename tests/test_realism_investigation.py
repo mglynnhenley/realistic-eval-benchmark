@@ -11,6 +11,39 @@ from refund_eval.realism import investigation as inv
 from refund_eval.realism import stages
 
 
+@pytest.mark.parametrize("text", ['{"findings": []}', '```json\n{"findings": []}\n```',
+                                 '```\n{"findings": []}\n```'])
+def test_accept_one_original_json_object_with_optional_enclosing_fence(text):
+    assert inv._object(text) == {"findings": []}
+
+
+@pytest.mark.parametrize("text", ['Here is a report: {"findings": []}',
+                                 '```json\n{}\n```\n```json\n{}\n```', '```json\n[]\n```'])
+def test_reject_ambiguous_or_nonobject_reports(text):
+    with pytest.raises(inv.InvestigationError):
+        inv._object(text)
+
+
+async def test_last_investigation_call_concludes_from_complete_obtained_evidence(tmp_path, trials):
+    calls = []
+    class Adapter:
+        async def call(self, **request):
+            calls.append(request)
+            if len(calls) == 1:
+                return {"model": request["model"], "message": {"role": "assistant", "content": None,
+                    "tool_calls": [{"id": "read-state", "type": "function", "function": {
+                        "name": "state", "arguments": '{"trial_id":"trial-1"}'}}]}}
+            assert request["tools"] == []
+            assert any(message.get("tool_call_id") == "read-state" for message in request["messages"])
+            assert "final model call" in request["messages"][-1]["content"]
+            return {"model": request["model"], "message": {"role": "assistant", "content": json.dumps(report())}}
+    result, _ = await inv._conversation(adapter=Adapter(), model="family/model-1.1", settings={"max_tokens": 1000},
+        messages=[{"role": "user", "content": "Investigate synthetic delivery"}],
+        tools=inv.EvidenceTools(trials=trials), directory=tmp_path, stage_prefix="synthetic-final",
+        check_paused=None, max_calls=2)
+    assert result == report() and len(calls) == 2
+
+
 @pytest.fixture
 def trials():
     return [{"trial_id": f"trial-{number}", "task_context": {"goal": "Synthetic refund inquiry"},
