@@ -154,6 +154,40 @@ async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(t
     assert len(adapter.calls) == before
 
 
+async def test_complete_trials_in_separate_contexts_preserve_four_model_barrier(tmp_path, trials, investigators, judge):
+    directory = tmp_path / "round"
+    adapter = SyntheticAdapter(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+        directory=directory, adapter=adapter, scanner_annotations={"text": "SCANNER-SECRET"},
+        backlog=["BACKLOG-SECRET"], trial_contexts=True)
+    assert adapter.maximum == 3 and len(result["investigators"]) == 4
+    assert len(list(directory.glob("investigators/*/initial/trials/*/report.json"))) == 12
+    assert len(list(directory.glob("investigators/*/supplementary/trials/*/report.json"))) == 12
+    for model in investigators:
+        initial = [call for call in adapter.calls if call["model"] == model["model"] and "-initial-" in call["stage_id"]]
+        assert len(initial) == 3
+        supplied = [json.loads(call["messages"][1]["content"])["trials"] for call in initial]
+        assert supplied == [[inv._investigator_trial(trial)] for trial in trials]
+        assert all(call["tools"] == inv.EvidenceTools.schemas for call in initial)
+    assert result["round_mean"] == 8
+
+
+async def test_separate_context_preflight_fits_every_complete_trial_without_cutting(tmp_path, trials, investigators, judge):
+    for trial in trials:
+        trial["events"][0]["text"] = "x" * 30000 + "complete final evidence"
+    catalog = {item["model"]: {**metadata(item["model"]), "context_length": 65000} for item in investigators}
+    adapter = real_adapter(tmp_path, lambda _: pytest.fail("Preflight is unpaid"), catalog=catalog)
+    configured = inv.validate_configuration(investigators, judge)
+    with pytest.raises(inv.ContextOverflow):
+        await adapter.preflight(investigators=configured["investigators"], judge=configured["judge"], trials=trials)
+    await adapter.preflight(investigators=configured["investigators"], judge=configured["judge"], trials=trials,
+                            trial_contexts=True)
+    trials[0]["events"][0]["text"] *= 3
+    with pytest.raises(inv.ContextOverflow):
+        await adapter.preflight(investigators=configured["investigators"], judge=configured["judge"], trials=trials,
+                                trial_contexts=True)
+
+
 async def test_equivalent_complete_tools_private_scratch_and_full_trajectories(tmp_path, trials, investigators, judge):
     root = tmp_path / "source"
     (root / "refund_eval").mkdir(parents=True)

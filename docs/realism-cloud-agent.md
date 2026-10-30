@@ -171,6 +171,14 @@ tools disabled and all obtained evidence retained. Reports may contain one JSON
 object enclosed in a single Markdown code fence; raw responses remain saved and
 the same schema and exact-citation checks still apply.
 
+Set the optional initialization field `investigation_trial_contexts` to `true`
+when complete trials fit the models separately but their combined input does not.
+Every investigator then reviews each complete trial in a separate context using
+the same pinned identity, settings and evidence tools. All original per-trial
+reports are saved and combined without dropping findings. The four-model barrier
+still precedes all scanner/backlog supplements. This policy is frozen in the
+configuration; it does not truncate a trial or change the blinded judge's rubric.
+
 After investigation, `advance` returns `awaiting_selection` with
 `rounds/0001/primary-request.json`. Read the handoff and saved reports, resolve
 conflicts using evidence and write its requested `selection.json`:

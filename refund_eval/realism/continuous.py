@@ -123,7 +123,7 @@ def _exclusive(directory):
 
 def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
                investigation, checks=None, backlog=None, pause_file=None,
-               last_tested_source=None, prior_unknown_review=None):
+               last_tested_source=None, prior_unknown_review=None, investigation_trial_contexts=False):
     """Freeze a new authorization/configuration. New loops always start paused.
 
     This does not modify the existing ledger, historical evidence, pause file, or
@@ -142,6 +142,7 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
              type(settings.get("trials", 3)) is int, "Each continuous round requires exactly three trials")
     _require(isinstance(investigation, dict), "Investigation configuration is required")
     models = validate_configuration(investigation.get("investigators"), investigation.get("judge"))
+    _require(type(investigation_trial_contexts) is bool, "Explicit boolean investigation context policy required")
     checks = _commands(checks)
     source = measurement._commit(repo, source)
     tested = measurement._commit(repo, last_tested_source) if last_tested_source else None
@@ -152,6 +153,7 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
               "runner_commit": measurement._commit(repo, "HEAD"), "ledger": str(ledger),
               "budget_usd": budget, "max_rounds": max_rounds,
               "settings": {**settings, "trials": 3}, "investigation": models,
+              "investigation_trial_contexts": investigation_trial_contexts,
               "checks": checks, "initial_backlog": backlog or [],
               "pause_file": str(pause_file) if pause_file else None,
               "prior_unknown_review": str(Path(prior_unknown_review).resolve()) if prior_unknown_review else None,
@@ -359,7 +361,8 @@ class ProductionBindings(Bindings):
         return asyncio.run(investigation.investigate_round(trials=extracted["trials"],
                 investigators=config["investigation"]["investigators"], judge=config["investigation"]["judge"],
                 directory=directory / "investigation", adapter=self._adapter(request), evidence_tools=tools,
-                scanner_annotations=annotations, backlog=request["backlog"], check_paused=request["check_paused"]))
+                scanner_annotations=annotations, backlog=request["backlog"], check_paused=request["check_paused"],
+                trial_contexts=config.get("investigation_trial_contexts", False)))
 
     @staticmethod
     def _check(request):

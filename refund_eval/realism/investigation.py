@@ -457,7 +457,7 @@ class OpenRouterAdapter:
             payload["tool_choice"] = "auto"
         return payload
 
-    async def preflight(self, *, investigators: list[dict], judge: dict, trials: list[dict]) -> dict:
+    async def preflight(self, *, investigators: list[dict], judge: dict, trials: list[dict], trial_contexts=False) -> dict:
         """Check every model and full initial/judge context before any paid call."""
         _check(self.check_paused)
         snapshots = {}
@@ -466,10 +466,10 @@ class OpenRouterAdapter:
             if name not in snapshots:
                 snapshots[name] = await self._metadata(item["model"])
         for item in investigators:
-            messages = [{"role": "system", "content": INVESTIGATOR_PROMPT},
-                        {"role": "user", "content": _json({"starting_lens": item["lens"], "trials": trials})}]
-            self._bound(snapshots[_model(item["model"])], self._payload(
-                item["model"], item["settings"], messages, EvidenceTools.schemas))
+            for group in ([[trial] for trial in trials] if trial_contexts and trials else [trials]):
+                messages = _investigator_messages(item, group, trials, trial_contexts)
+                self._bound(snapshots[_model(item["model"])], self._payload(
+                    item["model"], item["settings"], messages, EvidenceTools.schemas))
         # The round controller also calls this before trials exist. Validate the
         # judge's settings/tariffs then, even though full evidence comes later.
         for trial in trials or [{"trial_id": "preflight", "events": [], "task_context": {}}]:
@@ -682,9 +682,26 @@ async def judge_trial(*, trial: dict, judge: dict, adapter, directory: Path,
     return result
 
 
+def _investigator_messages(item, group, trials, trial_contexts):
+    payload = {"starting_lens": item["lens"], "trials": group}
+    if trial_contexts:
+        payload.update(all_trial_ids=[trial["trial_id"] for trial in trials],
+            context_policy="Each trial is supplied COMPLETE in its own context. You review every trial in separate passes; all saved trials remain accessible through the same evidence tools. No evidence is truncated. Report on this context's trial; cross-trial concerns may remain uncertain until primary synthesis.")
+    return [{"role": "system", "content": INVESTIGATOR_PROMPT}, {"role": "user", "content": _json(payload)}]
+
+
+def _merge_reports(reports):
+    if len(reports) == 1:
+        return reports[0]
+    merged = {field: [value for report in reports for value in report[field]] for field in
+              ("findings", "uncertainty", "contrary_evidence", "inaccessible_material")}
+    merged["uncertainty"].append("Complete trials were investigated in separate contexts by this same pinned model; original per-trial reports are preserved. Cross-trial synthesis belongs to the primary.")
+    return merged
+
+
 async def investigate_round(*, trials: list[dict], investigators: list[dict], judge: dict,
                             directory: Path, adapter, evidence_tools: EvidenceTools | None = None,
-                            scanner_annotations=None, backlog=None, check_paused=None) -> dict:
+                            scanner_annotations=None, backlog=None, check_paused=None, trial_contexts=False) -> dict:
     """Persist four independent initial passes, then a scanner/backlog supplement.
 
     At most three investigators run concurrently. The fourth starts as soon as a
@@ -692,6 +709,8 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
     Failures are saved and propagated; callers must never repeat an uncertain call.
     """
     _check(check_paused)
+    if type(trial_contexts) is not bool:
+        raise InvestigationError("Explicit boolean investigation context policy required")
     _validate_trials(trials)
     config = validate_configuration(investigators, judge)
     directory = Path(directory)
@@ -701,15 +720,18 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
     tools = evidence_tools or EvidenceTools(trials=trials)
     if _json(tools.trials) != _json(trials):
         raise InvestigationError("All investigators must have access to the same complete trial evidence")
-    _save(directory / "configuration.json", {**config, "evidence_sha256": _identity(trials)}, exclusive=True)
+    _save(directory / "configuration.json", {**config, "evidence_sha256": _identity(trials),
+          "trial_contexts": trial_contexts}, exclusive=True)
     _save(directory / "trials.json", trials, exclusive=True)
     preflight = getattr(adapter, "preflight", None)
     if preflight is not None:
-        metadata = await preflight(investigators=config["investigators"], judge=config["judge"], trials=trials)
+        metadata = await preflight(investigators=config["investigators"], judge=config["judge"], trials=trials,
+                                   **({"trial_contexts": True} if trial_contexts else {}))
         _save(directory / "model-preflight.json", metadata, exclusive=True)
     prefix = "investigate-" + _identity({"directory": str(directory.resolve()), "configuration": config})[:16]
     slots = asyncio.Semaphore(3)
     histories = {}
+    groups = [[trial] for trial in trials] if trial_contexts else [trials]
 
     async def initial(item):
         async with slots:
@@ -717,13 +739,21 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
             name = item["name"]
             folder = directory / "investigators" / name / "initial"
             try:
-                report, history = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
-                    messages=[{"role": "system", "content": INVESTIGATOR_PROMPT},
-                              {"role": "user", "content": _json({"starting_lens": item["lens"], "trials": trials})}],
-                    tools=tools, directory=folder, stage_prefix=f"{prefix}-{name}-initial", check_paused=check_paused)
-                report = _report(report, trials)
+                reports, history_parts = [], []
+                for number, group in enumerate(groups, 1):
+                    part = folder / "trials" / f"{number:03d}" if trial_contexts else folder
+                    suffix = f"-trial-{number:03d}" if trial_contexts else ""
+                    report, history = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
+                        messages=_investigator_messages(item, group, trials, trial_contexts), tools=tools, directory=part,
+                        stage_prefix=f"{prefix}-{name}{suffix}-initial", check_paused=check_paused)
+                    report = _report(report, trials)
+                    if trial_contexts:
+                        _save(part / "report.json", {"model": item["model"], "trial_id": group[0]["trial_id"], "report": report}, exclusive=True)
+                    reports.append(report)
+                    history_parts.append(history)
+                report = _merge_reports(reports)
                 _save(folder / "report.json", {"model": item["model"], "lens": item["lens"], "report": report}, exclusive=True)
-                histories[name] = history
+                histories[name] = history_parts
                 return report
             except BaseException as error:
                 _save(folder / "failure.json", {"error": type(error).__name__, "detail": str(error)}, exclusive=True)
@@ -744,12 +774,20 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
             name = item["name"]
             folder = directory / "investigators" / name / "supplementary"
             try:
-                report, _ = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
-                    messages=histories[name] + [{"role": "user", "content": _json({
+                reports = []
+                for number, history in enumerate(histories[name], 1):
+                    part = folder / "trials" / f"{number:03d}" if trial_contexts else folder
+                    suffix = f"-trial-{number:03d}" if trial_contexts else ""
+                    report, _ = await _conversation(adapter=adapter, model=item["model"], settings=item["settings"],
+                        messages=history + [{"role": "user", "content": _json({
                         "instruction": "Your independent initial report is saved unchanged. Inspect these supplementary annotations critically. Return your own additional findings, contrary evidence and uncertainty in the same report schema. Do not erase or rewrite the initial annotations. No finding quota.",
                         "scanner_annotations": scanner_annotations, "unresolved_backlog": backlog})}],
-                    tools=tools, directory=folder, stage_prefix=f"{prefix}-{name}-supplement", check_paused=check_paused)
-                report = _report(report, trials)
+                        tools=tools, directory=part, stage_prefix=f"{prefix}-{name}{suffix}-supplement", check_paused=check_paused)
+                    report = _report(report, trials)
+                    if trial_contexts:
+                        _save(part / "report.json", {"model": item["model"], "trial_id": trials[number - 1]["trial_id"], "report": report}, exclusive=True)
+                    reports.append(report)
+                report = _merge_reports(reports)
                 _save(folder / "report.json", {"model": item["model"], "report": report}, exclusive=True)
                 return report
             except BaseException as error:
