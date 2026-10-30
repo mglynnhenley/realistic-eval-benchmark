@@ -251,6 +251,13 @@ configuration; this is a spending proof despite its legacy name. Outstanding
 unvalidated charges stop further operations. Do not edit/release holds to fit a
 new round or mutate historical pause/ledger files during configuration.
 
+For successful frozen-part scanner runs, the runner validates complete native and
+scan coverage, then sums the original raw provider response charges into
+`scan-cost.json`. Scout's normalized usage totals omit those charges. Missing,
+invalid or duplicate charge evidence leaves the reservation held; this reader
+does not estimate costs or call the provider again. Older sealed measurements
+remain unchanged and need reconciliation of their original saved evidence.
+
 Inspect cleanup evidence and remote Modal jobs independently of local process
 state. Unknown discovery, unreadable configurations, unresolved jobs and missing
 or stale cleanup receipts do not establish that remote work stopped. Cancellation

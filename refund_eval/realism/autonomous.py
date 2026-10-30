@@ -296,9 +296,20 @@ def _run_scan(context, protocol, logs, scans, cwd, tag):
     _command(context, ["uv", "run", "python", "scout/run.py", *logs, "--scanners", "tells", "--yes",
                        "--scans", str(scans), "--judges", protocol["judge"], "--bounded-tells", "--max-tokens", str(protocol["scan_max_tokens"]), *extra],
              name=f"{tag}-scan", cwd=getattr(context, "measurement_worktree", cwd), timeout=protocol["time_limit"])
-    # Scout does not expose a reliable aggregate bill in its CLI result. Hold the
-    # estimate until usage can be reconciled; an absent charge is never zero.
-    return {"cost_usd": None}
+    if protocol.get("scan_protocol") is None:
+        return {"cost_usd": None}
+    # Scout's normalized usage omits charges. Its saved raw provider responses
+    # retain them; validate every frozen part before summing those original bills.
+    output = scans.parent / "scan-cost.json"
+    program = ("import json,sys; from pathlib import Path; "
+               "from refund_eval.realism.scan_cost import saved_cost; "
+               "p=json.loads(sys.argv[1]); "
+               "r=saved_cost(json.loads(sys.argv[2]),sys.argv[3],judge=p['judge'],expected_trials=p['trials']); "
+               "Path(sys.argv[4]).write_text(json.dumps(r,allow_nan=False))")
+    _command(context, ["uv", "run", "python", "-c", program, json.dumps(protocol),
+                       json.dumps(logs), str(scans), str(output)], name=f"{tag}-scan-cost",
+             cwd=getattr(context, "measurement_worktree", cwd))
+    return json.loads(output.read_text())
 
 
 def _score(context, protocol, logs, scans, cwd, out, tag, *, source_map=None):
