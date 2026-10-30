@@ -88,7 +88,7 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
         unknown.append((name, stage))
     recent = [v for k, v in current["stages"].items() if k not in original["stages"] and v.get("status") != "started"]
     if enforce_limits:
-        require(len(unknown) <= count, "New unknown-charge count limit reached")
+        require(not unknown or len(unknown) < count, "New unknown-charge count limit reached")
         require(sum(v["reserve_usd"] for v in current["stages"].values() if v.get("actual_usd") is None)
                 <= limit + 1e-9, "Unresolved dollar exposure limit reached")
         require(len(recent) < 2 or not all(v.get("status") == "unknown" for v in recent[-2:]),

@@ -182,7 +182,10 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
     if recovery_policy is not None:
         from refund_eval.realism import recovery_policy as recovery
         reference = {"path": str(Path(recovery_policy).resolve()), "sha256": _sha(recovery_policy)}
-        recovery.validate(recovery.artifact(reference), _read(config["ledger"]),
+        policy = recovery.artifact(reference)
+        _require(config.get("analysis_transport", {}).get("stage_namespace") == policy["analysis_stage_namespace"],
+                 "Recovery policy requires its exact streaming namespace")
+        recovery.validate(policy, _read(config["ledger"]),
                           ledger=config["ledger"], budget=budget)
         config["recovery_policy"] = reference
         config["prior_unknown_review"] = reference["path"]

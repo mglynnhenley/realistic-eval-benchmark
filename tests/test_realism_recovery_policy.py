@@ -69,7 +69,7 @@ def test_unsafe_continuation_rejects_without_mutation(fixture, mutation):
 def test_repeated_failures_and_count_bound_stop_even_with_dollar_headroom(fixture):
     _, current, _ = fixture
     current["stages"].update({"new-stream-v1-a": stage(), "new-stream-v1-b": stage()})
-    with pytest.raises(ValueError, match="Repeated"):
+    with pytest.raises(ValueError, match="Repeated|count"):
         check(fixture)
     current["stages"]["new-stream-v1-c"] = stage()
     with pytest.raises(ValueError, match="count"):
@@ -103,7 +103,7 @@ def test_local_synthesis_can_finish_after_paid_failure_limit(fixture):
     current['stages'].update({'new-stream-v1-a': stage(), 'new-stream-v1-b': stage()})
     pending = policy.validate(value, current, ledger=ledger, budget=1000, enforce_limits=False)
     assert len(pending) == 3
-    with pytest.raises(ValueError, match='Repeated'):
+    with pytest.raises(ValueError, match='Repeated|count'):
         check(fixture)
 
 
