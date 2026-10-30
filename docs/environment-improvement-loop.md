@@ -189,6 +189,28 @@ factual checker. Use labels already saved when available; these instructions add
 no new paid grading, additional native-log read or replacement trial. Any later
 paid grading requires its existing authorization, reservation and accounting.
 
+New continuous configurations can explicitly opt into `behavior_analysis`. A
+separate DeepSeek v4.1 Flash judge uses high reasoning, a 65,536-token completion
+allowance and temperature zero. Five separate calls per complete saved trial use
+the existing deception, spamming, escalation, task-alignment and persuasion
+rubrics. `include_claims: true` adds one factual-check call per usable frozen
+pre-contact observation. The full finite inventory and all context checks precede
+dispatch. Missing notes, incompatible scenarios, incomplete evidence and missing
+snapshots remain unavailable; no current scenario or final World fills a gap.
+
+This operation reuses the normal evidence extraction and runs separately before
+investigator analysis. Every call uses the existing shared ledger, a unique
+reservation and a single attempt. Invalid finite-cost outputs remain paid and
+invalid; an uncertain charge stops further dispatch. Results retain raw answers,
+exact original-field citations, action/result links, individual grades and
+coverage limitations. Mechanical citation checks do not establish the semantic
+truth of a judgment. Claims checking never controls company belief or decisions.
+The private `conduct-analysis.json` sidecar joins reporting only through its
+sealed operation, exact source, trial, visible-input hash and configuration.
+Absent opt-in, historical behavior remains unchanged and missing labels stay
+ungraded. Conduct and factual checking have their own series identities; neither
+changes the realism rubric or creates a composite reward.
+
 ### Fixed independent realism scores
 
 Record one blinded 0–10 realism score for each trial, with the same judge model,
@@ -343,6 +365,26 @@ This bounded command extends the existing measurement machinery; no permanent
 orchestration service is needed. Saved configuration, checkpoints and file-based
 handoffs preserve progress across sessions. It does not schedule itself after a
 cloud workspace sleeps or a process stops.
+
+For an explicitly owned invocation, `refund_eval.realism.durable_worker` provides
+a single-use detached Python worker with private file-backed logs, process
+identities, pause controls and exit receipts. Pin its entry script and inputs in
+the launch configuration, and retain the payload's source, budget and
+pre-dispatch pause guards. It survives local launcher process-group termination;
+it cannot guarantee survival of workspace or VM teardown. A missing terminal
+receipt remains unknown and never permits replay. Status distinguishes a Python
+finalizer, an observed direct-child exit and unsettled remote work.
+
+Future continuous configurations can separately select
+`analysis_transport: {"profile": "openrouter-chat-sse-receipts-v1",
+"stage_namespace": "chosen-run-stream-v1"}`. This pins an explicit streaming
+profile for investigation and post-run grading, with fresh stage IDs. It journals
+received chunks before parsing and saves the generation ID as soon as observed.
+Only a complete supported stream produces an answer. Finite terminal billing can
+be retained for an invalid answer; incomplete billing keeps the full hold.
+Unsupported reasoning formats remain raw and invalid. This does not change the
+native runner or tells-scanner transport, migrate old requests, or recover bytes
+that were never saved. Ordinary non-streaming configurations remain compatible.
 
 See the [cloud operating guide](realism-cloud-agent.md) for the JSON configuration,
 exact CLI and selection/implementation schemas. The public API is

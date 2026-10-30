@@ -960,7 +960,8 @@ def _merge_reports(reports):
 
 async def investigate_round(*, trials: list[dict], investigators: list[dict], judge: dict,
                             directory: Path, adapter, evidence_tools: EvidenceTools | None = None,
-                            scanner_annotations=None, backlog=None, check_paused=None, trial_contexts=False) -> dict:
+                            scanner_annotations=None, backlog=None, check_paused=None, trial_contexts=False,
+                            stage_namespace: str | None = None) -> dict:
     """Persist four independent initial passes, then a scanner/backlog supplement.
 
     At most three investigators run concurrently. The fourth starts as soon as a
@@ -970,6 +971,9 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
     _check(check_paused)
     if type(trial_contexts) is not bool:
         raise InvestigationError("Explicit boolean investigation context policy required")
+    if stage_namespace is not None and (not isinstance(stage_namespace, str) or
+            not re.fullmatch(r"[A-Za-z0-9_-]{1,40}-stream-v1", stage_namespace)):
+        raise InvestigationError("An explicit safe future streaming stage namespace is required")
     _validate_trials(trials)
     config = validate_configuration(investigators, judge)
     directory = Path(directory)
@@ -980,7 +984,8 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
     if _json(tools.trials) != _json(trials):
         raise InvestigationError("All investigators must have access to the same complete trial evidence")
     _save(directory / "configuration.json", {**config, "evidence_sha256": _identity(trials),
-          "trial_contexts": trial_contexts}, exclusive=True)
+          "trial_contexts": trial_contexts,
+          **({"stage_namespace": stage_namespace} if stage_namespace is not None else {})}, exclusive=True)
     _save(directory / "trials.json", trials, exclusive=True)
     preflight = getattr(adapter, "preflight", None)
     if preflight is not None:
@@ -988,6 +993,8 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                                    **({"trial_contexts": True} if trial_contexts else {}))
         _save(directory / "model-preflight.json", metadata, exclusive=True)
     prefix = "investigate-" + _identity({"directory": str(directory.resolve()), "configuration": config})[:16]
+    if stage_namespace is not None:
+        prefix = stage_namespace + "-" + prefix
     slots = asyncio.Semaphore(3)
     histories = {}
     groups = [[trial] for trial in trials] if trial_contexts else [trials]

@@ -92,8 +92,13 @@ cleanup, available evidence, exercised channels, failures and contamination);
 environment realism (fixed ratings and exposure); and target behavior/task outcome
 (available saved factual/behavior labels, disclosures, contacts and delivered money).
 Unknown or ungraded stays unknown; unexercised opportunities stay unobserved.
-Use saved labels only when available; this integration adds no paid alignment
-grading or additional native-log reads. There is no desired solve, alignment,
+Use saved labels only when available; the default integration adds no paid
+alignment grading or additional native-log reads. New configurations can
+explicitly opt into `behavior_analysis` for bounded single-attempt conduct and
+frozen pre-contact factual checking under the same authorized ledger. Freeze the
+finite inventory first; preserve unavailable coverage and raw invalid answers.
+Do not enable this optional paid lane merely by resuming an old configuration.
+There is no desired solve, alignment,
 failure, refund or realism rate, no composite score and no target-model training.
 Three trials do not establish
 a population failure rate. Retain failed/incomplete evidence without replacement
@@ -154,6 +159,16 @@ proofs, not candidate review gates. A stopped coding process does not prove remo
 Modal jobs stopped; inspect cleanup/discovery errors and reconcile outstanding work.
 Do not delete markers or mutate history to resume. Preserve checkpoint handoffs;
 cloud sleep/process interruption is not guaranteed automatic recovery.
+
+Use the single-use `refund_eval.realism.durable_worker` for separately owned
+long-running Python invocations when transport interruption is possible. Pin its
+entrypoint/inputs, preserve payload pre-dispatch guards and use durable file
+pause/status/exit receipts. A dead launcher, missing receipt or local exit does
+not settle remote charges. Never relaunch a consumed invocation. A fresh explicit
+`analysis_transport` streaming profile can persist chunks and generation IDs for
+future investigator/grade calls; it does not migrate or replay old requests and
+does not cover the native runner or tells scanner. Unsupported or incomplete
+stream billing retains the full hold and stops new calls.
 
 Write manifests, reports, source/model identities, trial evidence, selection,
 checks, scores, backlog, spending and operational IDs privately under

@@ -123,7 +123,8 @@ def _exclusive(directory):
 
 def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
                investigation, checks=None, backlog=None, pause_file=None,
-               last_tested_source=None, prior_unknown_review=None, investigation_trial_contexts=False):
+               last_tested_source=None, prior_unknown_review=None, investigation_trial_contexts=False,
+               behavior_analysis=None, analysis_transport=None):
     """Freeze a new authorization/configuration. New loops always start paused.
 
     This does not modify the existing ledger, historical evidence, pause file, or
@@ -159,6 +160,24 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
               "prior_unknown_review": str(Path(prior_unknown_review).resolve()) if prior_unknown_review else None,
               "initial_last_tested_source": tested,
               "separate_billing": "Coding sessions and compute are outside the model-stage ledger"}
+    if analysis_transport is not None:
+        import re
+
+        from refund_eval.realism.streaming_receipts import PROFILE
+        _require(isinstance(analysis_transport, dict) and set(analysis_transport) == {"profile", "stage_namespace"} and
+                 analysis_transport["profile"] == PROFILE and isinstance(analysis_transport["stage_namespace"], str) and
+                 re.fullmatch(r"[A-Za-z0-9_-]{1,40}-stream-v1", analysis_transport["stage_namespace"]),
+                 "Use an explicit future streaming profile and safe fresh stage namespace")
+        config["analysis_transport"] = dict(analysis_transport)
+    if behavior_analysis is not None:
+        from refund_eval.realism import conduct_analysis
+        _require(isinstance(behavior_analysis, dict), "Explicit behavior analysis configuration required")
+        profile = dict(behavior_analysis)
+        _require(profile.get("transport") is None or profile["transport"] == config.get("analysis_transport"),
+                 "Conduct transport must match the shared frozen analysis transport")
+        if config.get("analysis_transport"):
+            profile["transport"] = config["analysis_transport"]
+        config["behavior_analysis"] = conduct_analysis.validate_configuration(profile)
     initial_spend = _spend(config)
     config["initial_pending_stages"] = {name: item for name, item in initial_spend["stages"].items()
                                         if item.get("actual_usd") is None or item.get("status") != "complete"}
@@ -295,9 +314,17 @@ class ProductionBindings(Bindings):
         config = request["configuration"]
         preflight = Path(request["round_dir"]) / "model-preflight.json"
         metadata = _read(preflight)["models"] if preflight.is_file() else None
-        return OpenRouterAdapter(ledger=Path(config["ledger"]), budget_usd=config["budget_usd"],
-                                 directory=Path(request["round_dir"]) / "model-calls",
-                                 check_paused=request["check_paused"], metadata=metadata)
+        options = {"ledger": Path(config["ledger"]), "budget_usd": config["budget_usd"],
+                   "directory": Path(request["round_dir"]) / "model-calls",
+                   "check_paused": request["check_paused"], "metadata": metadata}
+        transport = config.get("analysis_transport")
+        if transport:
+            from refund_eval.realism.streaming_receipts import (
+                StreamingOpenRouterAdapter,
+            )
+            return StreamingOpenRouterAdapter(transport_profile=transport["profile"],
+                stage_namespace=transport["stage_namespace"], **options)
+        return OpenRouterAdapter(**options)
 
     def _preflight(self, request):
         from refund_eval.realism.investigation import validate_configuration
@@ -311,6 +338,9 @@ class ProductionBindings(Bindings):
         async def inspect_models():
             snapshots = await adapter.preflight(investigators=models["investigators"],
                                                judge=models["judge"], trials=[])
+            if config.get("behavior_analysis"):
+                extra = await adapter.preflight(investigators=[], judge=config["behavior_analysis"]["judge"], trials=[])
+                snapshots.update(extra)
             return {"models": snapshots, "score_series_id": models["score_series_id"]}
 
         return asyncio.run(inspect_models())
@@ -374,11 +404,21 @@ class ProductionBindings(Bindings):
                      reproduce=evidence_runtime.isolated_reproducer(source, directory / "scratch"))
         from scout.scanners import load_tells
         annotations = {"counts": saved["score"], "findings": load_tells(saved["scans"], judge=batch["protocol"]["judge"])}
+        adapter = self._adapter(request)
+        if config.get("behavior_analysis"):
+            from refund_eval.realism import conduct_analysis
+            plan = conduct_analysis.prepare_analysis(trials=extracted["trials"], state=extracted["state"],
+                source_commit=request["source_commit"], configuration=config["behavior_analysis"])
+            outcome = _operation(directory, "conduct", {**request, "conduct_plan_sha256": _hash(plan)},
+                lambda _: asyncio.run(conduct_analysis.analyze_prepared(plan=plan, adapter=adapter,
+                    directory=directory / "conduct", check_paused=request["check_paused"])))
+            _save_once(directory / "conduct-analysis.json", outcome)
         return asyncio.run(investigation.investigate_round(trials=extracted["trials"],
                 investigators=config["investigation"]["investigators"], judge=config["investigation"]["judge"],
-                directory=directory / "investigation", adapter=self._adapter(request), evidence_tools=tools,
+                directory=directory / "investigation", adapter=adapter, evidence_tools=tools,
                 scanner_annotations=annotations, backlog=request["backlog"], check_paused=request["check_paused"],
-                trial_contexts=config.get("investigation_trial_contexts", False)))
+                trial_contexts=config.get("investigation_trial_contexts", False),
+                stage_namespace=config.get("analysis_transport", {}).get("stage_namespace")))
 
     @staticmethod
     def _check(request):
@@ -458,6 +498,10 @@ def _round_request(directory, config, state, execute):
              "source_base": state["source_base"], "runner_commit": config["runner_commit"],
              "configuration_sha256": _hash(config), "investigation": config["investigation"],
              "backlog": state["backlog"]}
+    if config.get("behavior_analysis"):
+        saved["behavior_analysis"] = config["behavior_analysis"]
+    if config.get("analysis_transport"):
+        saved["analysis_transport"] = config["analysis_transport"]
     _save_once(folder / "request.json", saved)
     accounting = folder / "prior-unknown-review.json"
     if state["round"] == 1 and config.get("prior_unknown_review"):

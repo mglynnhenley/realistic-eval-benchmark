@@ -203,7 +203,8 @@ class SyntheticAdapter:
             self.active -= 1
 
 
-async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(tmp_path, trials, investigators, judge):
+@pytest.mark.parametrize("namespace", [None, "future-analysis-stream-v1"])
+async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(tmp_path, trials, investigators, judge, namespace):
     directory = tmp_path / "round"
     adapter = SyntheticAdapter(directory)
     for trial in trials:
@@ -211,7 +212,9 @@ async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(t
                      scanner_annotations="SCANNER-SECRET", backlog="BACKLOG-SECRET")
     result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
         directory=directory, adapter=adapter, scanner_annotations={"counts": {"tells": 17}, "text": "SCANNER-SECRET"},
-        backlog=["BACKLOG-SECRET"])
+        backlog=["BACKLOG-SECRET"], stage_namespace=namespace)
+    assert all(call["stage_id"].startswith((namespace + "-") if namespace else "investigate-")
+               for call in adapter.calls)
     assert adapter.maximum == 3
     assert len(result["investigators"]) == 4
     assert result["investigators"][0]["initial"]["findings"]

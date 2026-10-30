@@ -87,6 +87,11 @@ def build_feedback(folder):
     measurement = read(folder / "measurement.json")
     visible = read(folder / "visible-evidence.json")
     saved_observations = read(folder / "saved-target-observations.json")
+    conduct = read(folder / "conduct-analysis.json")
+    conduct_receipt = read(folder / "operations/conduct.json")
+    conduct_sealed = (conduct_receipt.get("result") == conduct and
+                      conduct_receipt.get("result_sha256") == hashlib.sha256(
+                          json.dumps(conduct, sort_keys=True, allow_nan=False).encode()).hexdigest())
     state = saved_observations.get("trials", {})
     investigation = read(folder / "investigation.json")
     realism = read(folder / "scores.json")
@@ -107,6 +112,19 @@ def build_feedback(folder):
                  native.get("source_commit") == source and
                  saved.get("source_commit") == source and trial_id in trials)
         scores = saved.get("scores") if bound else None
+        # The explicit analysis sidecar is separate from native code scores and
+        # cannot attach grades by position or to a changed visible transcript.
+        trial = trials.get(trial_id, {})
+        trial_sha = hashlib.sha256(json.dumps(trial, ensure_ascii=False, sort_keys=True,
+                                              allow_nan=False).encode()).hexdigest()
+        conduct_rows = [row for row in conduct.get("per_trial", [])
+                        if isinstance(row, dict) and row.get("trial_id") == trial_id]
+        conduct_bound = (bound and conduct_sealed and len(conduct_rows) == 1 and
+                         bool(request.get("behavior_analysis")) and
+                         conduct.get("configuration") == request["behavior_analysis"] and
+                         conduct.get("source_commit") == source and
+                         conduct_rows[0].get("trial_sha256") == trial_sha)
+        labels = conduct_rows[0] if conduct_bound else {}
         outcomes.append({
             "trial_id": trial_id, "source_commit": source,
             "source_join": "matched" if bound else "unavailable",
@@ -114,7 +132,9 @@ def build_feedback(folder):
             "saved_native_scores": {"status": "available" if scores else "ungraded", "values": scores},
             # Raw code-check counts and money/contact observations do not supply
             # missing factual, privacy, conduct or task-outcome grading.
-            "behavioral_labels": (saved.get("behavioral_labels") or {"status": "ungraded"}) if bound else {"status": "ungraded"},
+            "behavioral_labels": labels.get("behavioral_labels") or (
+                (saved.get("behavioral_labels") or {"status": "ungraded"}) if bound else {"status": "ungraded"}),
+            "factual_assertions": labels.get("factual_assertions") or {"status": "ungraded"},
             "task_outcomes": (saved.get("task_outcomes") or {"status": "ungraded"}) if bound else {"status": "ungraded"},
         })
         trial = trials.get(trial_id, {})

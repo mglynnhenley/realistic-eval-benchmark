@@ -65,6 +65,43 @@ def test_saved_feedback_separates_scores_outcomes_and_validity_with_provenance(t
     assert "alignment_verdict" not in rows["trial-1"]
 
 
+@pytest.mark.parametrize("mismatch", [None, "source", "trial", "transcript", "configuration", "unsealed", "duplicate"])
+def test_conduct_sidecar_requires_exact_source_trial_input_configuration_and_seal(tmp_path, mismatch):
+    import hashlib
+
+    folder = feedback_round(tmp_path)
+    request = loop._read(folder / "request.json")
+    config = {"judge": {"model": "synthetic/judge", "settings": {"max_tokens": 100}}, "include_claims": True}
+    atomic_json(folder / "request.json", {**request, "behavior_analysis": config})
+    trial = loop._read(folder / "visible-evidence.json")["trials"][0]
+    trial_sha = hashlib.sha256(json.dumps(trial, ensure_ascii=False, sort_keys=True, allow_nan=False).encode()).hexdigest()
+    row = {"trial_id": "trial-1", "trial_sha256": trial_sha,
+           "behavioral_labels": {"deception": {"value": "unknown", "status": "insufficient_evidence"}},
+           "factual_assertions": {"status": "partial", "findings": []}}
+    result = {"source_commit": "a" * 40, "configuration": config, "per_trial": [row]}
+    if mismatch == "source":
+        result["source_commit"] = "b" * 40
+    elif mismatch == "trial":
+        row["trial_id"] = "another-trial"
+    elif mismatch == "transcript":
+        row["trial_sha256"] = "0" * 64
+    elif mismatch == "configuration":
+        result["configuration"] = {**config, "include_claims": False}
+    elif mismatch == "duplicate":
+        result["per_trial"].append(row.copy())
+    atomic_json(folder / "conduct-analysis.json", result)
+    if mismatch != "unsealed":
+        atomic_json(folder / "operations/conduct.json", {"result": result, "result_sha256": loop._hash(result)})
+    feedback = loop.alignment_feedback.build_feedback(folder)
+    target = next(item for item in feedback["target_behavior"]["per_trial"] if item["trial_id"] == "trial-1")
+    if mismatch is None:
+        assert target["behavioral_labels"] == row["behavioral_labels"]
+        assert target["factual_assertions"] == row["factual_assertions"]
+    else:
+        assert target["behavioral_labels"] == target["factual_assertions"] == {"status": "ungraded"}
+    assert target["saved_native_scores"]["values"]["resource_use"]["value"]["refund_received"] == 100
+
+
 @pytest.mark.parametrize("mismatch", ["measurement", "visible", "provenance", "observations", "sample", "trial_id"])
 def test_feedback_does_not_join_unbound_source_or_positional_trial_labels(tmp_path, mismatch):
     folder = feedback_round(tmp_path)
@@ -638,7 +675,8 @@ def test_production_preflight_checks_judge_and_investigator_tool_capabilities(ca
         bindings._preflight(request)
 
 
-def test_production_investigation_uses_frozen_source_and_validated_exported_scans(case, monkeypatch):
+@pytest.mark.parametrize("conduct_mode", [False, True, "uncertain"])
+def test_production_investigation_uses_frozen_source_and_validated_exported_scans(case, monkeypatch, conduct_mode):
     from refund_eval.realism import evidence, evidence_runtime, investigation
     from scout import scanners
 
@@ -665,20 +703,47 @@ def test_production_investigation_uses_frozen_source_and_validated_exported_scan
         assert path == "validated-exported-scans"
         return [{"id": "scanner-observation"}]
     monkeypatch.setattr(scanners, "load_tells", load_tells)
+    calls = []
+    if conduct_mode:
+        from refund_eval.realism import conduct_analysis
+        request["configuration"]["behavior_analysis"] = {"judge": {"model": "synthetic/conduct"}}
+        monkeypatch.setattr(conduct_analysis, "prepare_analysis", lambda **kwargs: {"source_commit": kwargs["source_commit"]})
+        async def analyze(**kwargs):
+            calls.append("conduct")
+            assert kwargs["plan"]["source_commit"] == case.initial
+            assert kwargs["check_paused"] is request["check_paused"]
+            if conduct_mode == "uncertain":
+                raise investigation.PaidCallUncertain("Original request cost missing")
+            return {"source_commit": case.initial, "per_trial": [], "private": "CONDUCT-SECRET"}
+        monkeypatch.setattr(conduct_analysis, "analyze_prepared", analyze)
     async def run(**kwargs):
+        calls.append("investigate")
         tools = kwargs["evidence_tools"]
         assert tools.source_root == source.resolve()
         assert tools.public_reference is evidence_runtime.public_reference
         assert callable(tools.reproduce)
         assert kwargs["trials"] == trials
         assert "private grade" not in json.dumps(kwargs["trials"])
+        assert "CONDUCT-SECRET" not in json.dumps(kwargs["trials"]) + json.dumps(kwargs["evidence_tools"].state)
         assert tools.state["t0"]["scores"]["resource_use"]["value"]["contacts"] == 9
         assert kwargs["scanner_annotations"]["counts"] == {"tells": 2}
         return {"status": "complete"}
     monkeypatch.setattr(investigation, "investigate_round", run)
     request["measurement"] = {"candidate": {"evidence": str(manifest), "protocol": {"judge": "fixed-scanner"},
                                              "logs": ["original-native.eval"], "scans": "original-scans", "score": {}}}
+    if conduct_mode == "uncertain":
+        with pytest.raises(investigation.PaidCallUncertain):
+            loop.ProductionBindings()._investigate(request)
+        assert calls == ["conduct"]
+        assert (folder / "operations/conduct-started.json").is_file()
+        assert not (folder / "conduct-analysis.json").exists()
+        with pytest.raises(loop.UnsafeExecution, match="never retry"):
+            loop.ProductionBindings()._investigate(request)
+        assert calls == ["conduct"]
+        return
     assert loop.ProductionBindings()._investigate(request)["status"] == "complete"
+    assert calls == (["conduct", "investigate"] if conduct_mode else ["investigate"])
+    assert (folder / "conduct-analysis.json").exists() is bool(conduct_mode)
     observations = loop._read(folder / "saved-target-observations.json")
     assert observations["source_commit"] == case.initial
     assert observations["trials"]["t0"]["scores"]["resource_use"]["value"]["contacts"] == 9
@@ -701,6 +766,37 @@ def test_historical_tested_source_is_reporting_provenance_not_initial_change_bou
     first = loop._read(case.directory / "rounds/0001/request.json")
     assert first["source_base"] == first["source_commit"] == candidate
     assert result["status"] == "round_limit" and result["last_tested_source"] == candidate
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_conduct_opt_in_freezes_profiles_and_transport_without_dispatch(case, streaming):
+    from refund_eval.realism import conduct_analysis
+    from refund_eval.realism.streaming_receipts import (
+        PROFILE,
+        StreamingOpenRouterAdapter,
+    )
+
+    options = {**case.options, "behavior_analysis": {
+        "judge": {"model": conduct_analysis.MODEL, "settings": conduct_analysis.SETTINGS}, "include_claims": True}}
+    transport = {"profile": PROFILE, "stage_namespace": "future-round-stream-v1"}
+    if streaming:
+        options["analysis_transport"] = transport
+    before = case.ledger.read_bytes()
+    initialized = loop.initialize(**options)
+    assert initialized["status"] == "paused" and case.ledger.read_bytes() == before
+    config = loop._config(case.directory)
+    assert config["behavior_analysis"]["include_claims"] is True
+    request = loop._round_request(case.directory, config, loop._read(case.directory / "checkpoint.json"), False)
+    saved = loop._read(Path(request["round_dir"]) / "request.json")
+    assert saved["behavior_analysis"] == config["behavior_analysis"]
+    adapter = loop.ProductionBindings._adapter(request)
+    assert isinstance(adapter, StreamingOpenRouterAdapter) is streaming
+    if streaming:
+        assert config["analysis_transport"] == config["behavior_analysis"]["transport"] == transport
+        assert saved["analysis_transport"] == transport
+    else:
+        assert "transport" not in config["behavior_analysis"] and "analysis_transport" not in config
+    assert not (Path(request["round_dir"]) / "model-calls").exists()
 
 
 def test_sealed_budget_blocked_result_stops_without_claiming_uncertain_paid_work(case):
