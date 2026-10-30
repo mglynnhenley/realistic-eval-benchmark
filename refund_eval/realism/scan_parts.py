@@ -94,16 +94,28 @@ def checked_policy(checked):
         _price,
         bounded_tells_config,
         input_price_bound,
+        validate_profile_metadata,
     )
 
     judge, cap = checked["judge"], checked["max_tokens"]
-    bounded_tells_config(cap, judge=judge)
+    bounded_tells_config(cap, judge=judge, profile=checked.get("scan_profile"))
     require(checked["single_attempt"] is True and isinstance(judge, str)
             and judge.startswith("openrouter/") and judge.removeprefix("openrouter/") in SUPPORTED_WINDOWS,
             "Unsupported frozen judge policy")
     window = checked["context_window"]
     require(type(window) is int and 0 < window <= SUPPORTED_WINDOWS[judge.removeprefix("openrouter/")],
             "Invalid frozen context window")
+    if "scan_profile" in checked:
+        require(checked["scan_profile"] is not None, "Explicit scan profile cannot be null")
+        metadata = checked.get("profile_metadata")
+        require(isinstance(metadata, dict) and digest(metadata) == checked.get("profile_metadata_sha256"),
+                "Prospective profile metadata/hash differs")
+        validate_profile_metadata(metadata, judge=judge, max_tokens=cap, profile=checked["scan_profile"])
+        require(window == min(metadata["context_length"], metadata["top_provider"]["context_length"],
+                              SUPPORTED_WINDOWS[judge.removeprefix("openrouter/")])
+                and digest(checked["tariff"]) == digest(metadata.get("pricing")), "Prospective metadata policy differs")
+    else:
+        require(not ({"profile_metadata", "profile_metadata_sha256"} & set(checked)), "Unlisted profile metadata")
     pricing = checked["tariff"]
     known = {"prompt", "input_cache_write", "input_cache_read", "input_cache_write_1h", "completion",
              "overrides", "request", "image", "web_search", "internal_reasoning"}
@@ -125,7 +137,7 @@ def generation_policy(checked):
 
     from refund_eval.realism.scan_budget import bounded_tells_config
 
-    return {"config": bounded_tells_config(checked["max_tokens"], judge=checked["judge"]).merge(
+    return {"config": bounded_tells_config(checked["max_tokens"], judge=checked["judge"], profile=checked.get("scan_profile")).merge(
                 GenerateConfig(parallel_tool_calls=False)).model_dump(exclude_none=True),
             "sdk_args": {"max_retries": 0}, "answer_attempts": 1, "refusal_retries": 0,
             "context_tools": []}
@@ -225,10 +237,11 @@ async def build(logs, checked, *, max_parts_per_transcript, max_parts_total, ali
             "per_transcript": rows, "required_usd": sum(p["required_usd"] for r in rows for p in r["parts"])}
 
 
-async def plan(logs, judge, *, max_tokens, max_parts_per_transcript, max_parts_total):
+async def plan(logs, judge, *, max_tokens, max_parts_per_transcript, max_parts_total, profile=None):
     from refund_eval.realism.scan_budget import preflight
 
-    checked = await preflight(judge, max_tokens=max_tokens, single_attempt=True)
+    checked = await preflight(judge, max_tokens=max_tokens, single_attempt=True,
+                              **({"profile": profile} if profile is not None else {}))
     return await build(logs, checked, max_parts_per_transcript=max_parts_per_transcript, max_parts_total=max_parts_total)
 
 
@@ -244,6 +257,10 @@ def load(path, expected):
     require(hashlib.sha256(raw).hexdigest() == expected, "Frozen scan plan bytes changed")
     plan = json.loads(raw)
     require(plan.get("scan_protocol") == VERSION and plan.get("runtime") == runtime(), "Frozen scan runtime differs")
+    if "scan_profile" in plan["checked"]:
+        checked_policy(plan["checked"])
+        require(digest(plan["generation_policy"]) == digest(generation_policy(plan["checked"])),
+                "Frozen generation policy differs from checked profile")
     return plan
 
 
@@ -292,10 +309,10 @@ async def scan_transcript(transcript, plan, plan_sha256):
     checked, results, records = plan["checked"], [], []
     model = get_model(role="judge")
     require(str(model) == checked["judge"] and model.model_args.get("max_retries") == 0
-            and model.config == bounded_tells_config(checked["max_tokens"], judge=checked["judge"]), "Frozen judge role/config differs")
+            and model.config == bounded_tells_config(checked["max_tokens"], judge=checked["judge"], profile=checked.get("scan_profile")), "Frozen judge role/config differs")
     for part in row["parts"]:
         result = await generate_answer(part["prompt"], answer_spec(), model=model,
-                                       config=bounded_tells_config(checked["max_tokens"], judge=checked["judge"]),
+                                       config=bounded_tells_config(checked["max_tokens"], judge=checked["judge"], profile=checked.get("scan_profile")),
                                        retry_refusals=0, context_tools=())
         require(isinstance(result.value, dict), "Missing part answer; no retry permitted")
         value = citations({**result.value, "explanation": result.explanation}, row, part)
@@ -313,7 +330,11 @@ def validate_answer(row, plan, plan_sha256):
     """Strict complete part/answer/raw-charge coverage before publishing a score."""
     from refund_eval.realism.scan_budget import bounded_tells_config
 
-    expected_body = bounded_tells_config(plan["checked"]["max_tokens"], judge=plan["checked"]["judge"]).extra_body
+    if "scan_profile" in plan["checked"]:
+        checked_policy(plan["checked"])
+        require(digest(plan["generation_policy"]) == digest(generation_policy(plan["checked"])),
+                "Frozen generation policy differs from checked profile")
+    expected_body = bounded_tells_config(plan["checked"]["max_tokens"], judge=plan["checked"]["judge"], profile=plan["checked"].get("scan_profile")).extra_body
     def obj(value):
         return json.loads(value) if isinstance(value, str) else value
 

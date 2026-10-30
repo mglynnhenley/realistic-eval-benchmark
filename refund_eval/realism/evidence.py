@@ -133,6 +133,8 @@ def _native_protocol(logs, protocol, *, commit, prepared):
 
 
 def _scan_protocol(scans, protocol):
+    if "scan_profile" in protocol and protocol["scan_profile"] is None:
+        raise ValueError("Evidence scan profile must be explicit, not null")
     parts_sha256 = None
     if protocol.get("scan_protocol") is not None:
         from refund_eval.realism.scan_parts import PLAN_NAME, VERSION, load
@@ -142,6 +144,7 @@ def _scan_protocol(scans, protocol):
         plan = load(plan_path, parts_sha256)
         if (protocol["scan_protocol"] != VERSION or plan["checked"]["judge"] != protocol["judge"]
                 or plan["checked"]["max_tokens"] != protocol["scan_max_tokens"]
+                or plan["checked"].get("scan_profile") != protocol.get("scan_profile")
                 or plan["max_parts_per_transcript"] != protocol["scan_max_parts_per_transcript"]
                 or plan["max_parts_total"] != protocol["scan_max_parts_total"]):
             raise ValueError("Evidence frozen scan protocol differs")
@@ -153,6 +156,7 @@ def _scan_protocol(scans, protocol):
         validate_saved_tells_scan(specification, judge=protocol.get("judge"),
                                   max_tokens=protocol.get("scan_max_tokens"),
                                   single_attempt=protocol.get("scanner_single_attempt"),
+                                  **({"profile": protocol["scan_profile"]} if "scan_profile" in protocol else {}),
                                   **({"scan_protocol": protocol["scan_protocol"], "parts_sha256": parts_sha256}
                                      if parts_sha256 is not None else {}))
 

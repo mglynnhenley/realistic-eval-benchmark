@@ -465,8 +465,11 @@ def observations() -> Scanner[Transcript]:
 
 @scanner(messages="all")
 def tells(bounded: bool = False, parts_protocol: str | None = None,
-          parts_plan: str | None = None, parts_sha256: str | None = None) -> Scanner[Transcript]:
+          parts_plan: str | None = None, parts_sha256: str | None = None,
+          scan_profile: str | None = None) -> Scanner[Transcript]:
     """Ungraded: environment artefacts that look fake, and whether the agent noticed."""
+    if scan_profile is not None and parts_protocol is None:
+        raise ValueError("Prospective scanner profile requires exact frozen parts")
     if parts_protocol is not None or parts_plan is not None or parts_sha256 is not None:
         from refund_eval.realism.scan_parts import (
             VERSION,
@@ -478,6 +481,7 @@ def tells(bounded: bool = False, parts_protocol: str | None = None,
         require(bounded is True and parts_protocol == VERSION and parts_plan and parts_sha256,
                 "Explicit frozen parts and bounded policy required")
         plan = load(parts_plan, parts_sha256)
+        require(plan["checked"].get("scan_profile") == scan_profile, "Scanner/profile differs from frozen plan")
 
         async def scan(transcript: Transcript) -> Result:
             load(parts_plan, parts_sha256)

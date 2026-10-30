@@ -128,6 +128,10 @@ class InvestigationError(ValueError):
     """An unusable configuration, evidence set or independent report."""
 
 
+class PaidCallUncertain(RuntimeError):
+    """Fatal new paid-call uncertainty; never a recoverable invalid rating."""
+
+
 class ContextOverflow(InvestigationError):
     """Complete evidence exceeds the declared model context; nothing was cut."""
 
@@ -508,6 +512,14 @@ class OpenRouterAdapter:
         self.directory, self.check_paused = Path(directory), check_paused
         self.metadata = copy.deepcopy(metadata) if metadata is not None else {}
         self.transport, self.api_key = transport, api_key
+        self._uncertain_stage: str | None = None
+
+    def _check_ready(self) -> None:
+        _check(self.check_paused)
+        if self._uncertain_stage is not None:
+            raise PaidCallUncertain(
+                f"Paid call {self._uncertain_stage} is uncertain; preserve its hold and receipts, no further dispatch"
+            )
 
     async def _metadata(self, model: str) -> dict:
         name = _model(model)
@@ -634,7 +646,7 @@ class OpenRouterAdapter:
         return bound, {"input_token_bound": input_bound, "metadata": metadata}
 
     async def call(self, *, model: str, settings: dict, messages: list[dict], tools: list[dict], stage_id: str) -> dict:
-        _check(self.check_paused)
+        self._check_ready()
         name = _model(model)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,180}", stage_id):
             raise InvestigationError("Invalid durable model-call stage ID")
@@ -644,21 +656,34 @@ class OpenRouterAdapter:
         payload = self._payload(model, settings, messages, tools)
         metadata = await self._metadata(model)
         amount, bound = self._bound(metadata, payload)
-        _check(self.check_paused)
+        self._check_ready()
         request_path = self.directory / (stage_id + "-request.json")
         _save(request_path, {"payload": payload, "bound": bound, "reserve_usd": amount}, exclusive=True)
         stages.reserve(self.ledger, self.budget_usd, stage_id, "interaction", amount,
-                       validate=lambda _: _check(self.check_paused))
+                       validate=lambda _: self._check_ready())
         try:
-            _check(self.check_paused)
+            self._check_ready()
         except BaseException:
             stages.finish(self.ledger, self.budget_usd, stage_id, "failed", 0, "Paused before dispatch")
             raise
+        dispatched = False
         try:
             async with httpx.AsyncClient(timeout=180, transport=self.transport or httpx.AsyncHTTPTransport(retries=0),
                                          follow_redirects=False) as client:
+                # Entering the client may yield after reservation. Recheck at
+                # the actual send boundary; cancellation here is known zero.
+                self._check_ready()
+                dispatched = True
                 response = await client.post("https://openrouter.ai/api/v1/chat/completions",
                                             headers={"Authorization": f"Bearer {key}"}, json=payload)
+                # Preserve the original wire body even if JSON or its cost is
+                # malformed/nonfinite and cannot be saved as normalized JSON.
+                _save(self.directory / (stage_id + "-wire-response.json"), {
+                    "stage_id": stage_id, "model": name,
+                    "request_sha256": hashlib.sha256(request_path.read_bytes()).hexdigest(),
+                    "status_code": response.status_code,
+                    "body_base64": base64.b64encode(response.content).decode("ascii"),
+                }, exclusive=True)
                 if response.is_error:
                     # Retain the original rejection before raising. HTTP status
                     # alone does not establish a zero charge or permit replay.
@@ -672,14 +697,27 @@ class OpenRouterAdapter:
                     }, exclusive=True)
                 response.raise_for_status()
                 result = response.json()
+                if not isinstance(result, dict):
+                    raise PaidCallUncertain("Provider returned a nonobject response; charge is unknown, no retry")
         except BaseException as error:
+            if not dispatched:
+                stages.finish(self.ledger, self.budget_usd, stage_id, "failed", 0, "Stopped before dispatch")
+                raise
+            self._uncertain_stage = self._uncertain_stage or stage_id
             stages.finish(self.ledger, self.budget_usd, stage_id, "unknown", detail=type(error).__name__)
             raise
         raw_cost = result.get("usage", {}).get("cost") if isinstance(result.get("usage"), dict) else None
         actual = raw_cost if type(raw_cost) in (int, float) and math.isfinite(raw_cost) and raw_cost >= 0 else None
+        if actual is None:
+            self._uncertain_stage = self._uncertain_stage or stage_id
         stages.finish(self.ledger, self.budget_usd, stage_id, "complete", actual)
-        _save(self.directory / (stage_id + "-response.json"), result, exclusive=True)
-        _check(self.check_paused)
+        try:
+            _save(self.directory / (stage_id + "-response.json"), result, exclusive=True)
+        except (TypeError, ValueError):
+            if actual is not None:
+                raise
+            # The full original wire response above retains nonfinite costs.
+        self._check_ready()
         if result.get("model") != name:
             raise InvestigationError("Provider response model differs from pinned model; no substitution accepted")
         choices = result.get("choices")

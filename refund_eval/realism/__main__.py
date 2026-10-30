@@ -200,6 +200,10 @@ def _measure(args) -> int:
 
         settings["trial_deadline_policy"] = args.trial_deadline_policy
         settings["trial_wallclock_limit"] = trial_deadlines(args.time_limit, args.trial_deadline_policy)["command_hard_seconds"]
+    if args.scan_profile is not None:
+        settings["scan_profile"] = args.scan_profile
+    if args.scan_max_tokens is not None:
+        settings["scan_max_tokens"] = args.scan_max_tokens
     if args.scan_protocol is not None:
         settings.update(scan_protocol=args.scan_protocol,
                         scan_max_parts_per_transcript=(4 if args.scan_max_parts_per_transcript is None else args.scan_max_parts_per_transcript),
@@ -361,6 +365,9 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--token-budget", type=int, default=1_000_000)
     measure.add_argument("--cost-limit", type=float, default=.5)
     measure.add_argument("--scan-reserve", type=float, default=2)
+    measure.add_argument("--scan-max-tokens", type=int, help="Explicit tells output allowance; historical default8192")
+    measure.add_argument("--scan-profile", choices=["deepseek-flash-reasoning-high-v1"],
+                         help="Prospective Flash high reasoning; opt in with frozen parts and explicit cap")
     measure.add_argument("--scan-protocol", choices=["frozen-parts-v1"], help="Opt in to exhaustive, frozen whole-message scan parts")
     measure.add_argument("--scan-max-parts-per-transcript", type=int)
     measure.add_argument("--scan-max-parts-total", type=int)

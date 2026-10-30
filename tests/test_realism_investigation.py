@@ -562,7 +562,8 @@ async def test_fixed_sampling_model_explicitly_omits_unsupported_temperature(tmp
 @pytest.mark.parametrize("cost", [None, "0.0", True, -1])
 async def test_unknown_costs_keep_full_hold(tmp_path, cost):
     adapter = real_adapter(tmp_path, lambda request: provider_response(request, cost=cost))
-    await model_call(adapter)
+    with pytest.raises(inv.PaidCallUncertain):
+        await model_call(adapter)
     result = stages.show(tmp_path / "spend.json", 10)
     assert result["actual_usd"] == 0 and result["held_usd"] > 0
     assert result["stages"]["synthetic-call"]["actual_usd"] is None
@@ -585,7 +586,7 @@ async def test_uncertain_paid_calls_are_held_and_never_retried(tmp_path, failure
         await model_call(adapter)
     ledger = stages.show(tmp_path / "spend.json", 10)
     assert ledger["held_usd"] > 0 and ledger["stages"]["synthetic-call"]["status"] == "unknown"
-    with pytest.raises(FileExistsError):
+    with pytest.raises(inv.PaidCallUncertain):
         await model_call(adapter)
     assert len(requests) == 1
 
@@ -615,7 +616,7 @@ async def test_http_rejection_retains_original_receipt_without_releasing_hold(tm
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     stage = json.loads((tmp_path / "spend.json").read_text())["stages"]["synthetic-call"]
     assert stage["status"] == "unknown" and stage["actual_usd"] is None
-    with pytest.raises(FileExistsError):
+    with pytest.raises(inv.PaidCallUncertain):
         await model_call(adapter)
     assert len(requests) == 1
 

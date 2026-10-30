@@ -168,7 +168,8 @@ def validated_samples(logs: list[str], scans: str | Path, *, expected_trials: in
 
             validate_saved_tells_scan(row["_parts_spec"], judge=plan["checked"]["judge"],
                                       max_tokens=plan["checked"]["max_tokens"], single_attempt=True,
-                                      scan_protocol=VERSION, parts_sha256=plan_sha256)
+                                      scan_protocol=VERSION, parts_sha256=plan_sha256,
+                                      **({"profile": plan["checked"]["scan_profile"]} if "scan_profile" in plan["checked"] else {}))
             generations.extend(validate_answer(row, plan, plan_sha256))
         require(len(set(generations)) == len(generations), "Reused generation across frozen transcripts")
     for row in rows:

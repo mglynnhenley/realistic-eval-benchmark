@@ -14,7 +14,9 @@ from datetime import UTC, datetime
 
 import httpx
 
-OUTPUT_CAP = 8192
+OUTPUT_CAP = 8192  # Historical profiles retain their exact cap and wire settings.
+FLASH_REASONING_PROFILE = "deepseek-flash-reasoning-high-v1"
+FLASH_REASONING_OUTPUT_CAP = 65_536
 FRAMING_TOKENS = 16_384
 # These mirror the explicitly registered scanner window, never expand it.
 DEEPSEEK_FLASH = "deepseek/deepseek-v4.1-flash"
@@ -100,25 +102,53 @@ def input_price_bound(judge: str, pricing: dict) -> float:
     return max(_price(pricing, field) for field in INPUT_TARIFFS if field in pricing)
 
 
-def bounded_tells_config(max_tokens: int, *, judge: str | None = None):
+def validate_profile_metadata(metadata: dict, *, judge: str, max_tokens: int, profile: str) -> None:
+    """Require explicit capability proof for the new profile, including high effort."""
+    bounded_tells_config(max_tokens, judge=judge, profile=profile)
+    parameters = metadata.get("supported_parameters")
+    reasoning = metadata.get("reasoning")
+    provider = metadata.get("top_provider")
+    output = provider.get("max_completion_tokens") if isinstance(provider, dict) else None
+    context = metadata.get("context_length")
+    provider_context = provider.get("context_length") if isinstance(provider, dict) else None
+    if (metadata.get("id") != DEEPSEEK_FLASH or not isinstance(parameters, list)
+            or not all(isinstance(item, str) for item in parameters)
+            or not {"max_tokens", "tools", "tool_choice", "structured_outputs", "response_format", "reasoning", "parallel_tool_calls"} <= set(parameters)
+            or not isinstance(reasoning, dict) or reasoning.get("mandatory") is not False
+            or not isinstance(reasoning.get("supported_efforts"), list)
+            or not all(isinstance(effort, str) for effort in reasoning["supported_efforts"])
+            or "high" not in reasoning["supported_efforts"]
+            or type(output) is not int or output < max_tokens
+            or type(context) is not int or context <= max_tokens
+            or type(provider_context) is not int or provider_context <= max_tokens
+            or metadata.get("per_request_limits") is not None):
+        raise ValueError("Prospective Flash reasoning capabilities/output/context are unavailable")
+
+
+def bounded_tells_config(max_tokens: int, *, judge: str | None = None, profile: str | None = None):
     """Bounded generation settings; the judge's SDK constructor also needs max_retries=0."""
     from inspect_ai.model import GenerateConfig
 
-    if type(max_tokens) is not int or max_tokens <= 0 or max_tokens > OUTPUT_CAP:
-        raise ValueError(f"Scanner output cap must be between 1 and {OUTPUT_CAP}")
+    if profile is not None and (profile != FLASH_REASONING_PROFILE
+            or judge not in (DEEPSEEK_FLASH, "openrouter/" + DEEPSEEK_FLASH)):
+        raise ValueError("Unsupported explicit scanner profile/model")
+    cap = OUTPUT_CAP if profile is None else FLASH_REASONING_OUTPUT_CAP
+    if type(max_tokens) is not int or max_tokens <= 0 or max_tokens > cap:
+        raise ValueError(f"Scanner output cap must be between 1 and {cap}")
     # No plugin is enabled, including OpenRouter's opt-in native web search.
     # Scout declares only its structured answer tool (no context/web tools).
     extra_body = {"plugins": []}
     if judge in (DEEPSEEK_FLASH, "openrouter/" + DEEPSEEK_FLASH):
         # Flash defaults to reasoning on. Persist its explicit off switch in
         # both the frozen policy and SDK wire request, not just numeric judging.
-        extra_body["reasoning"] = {"enabled": False}
+        extra_body["reasoning"] = ({"enabled": False} if profile is None else
+                                   {"enabled": True, "effort": "high"})
     return GenerateConfig(cache_prompt=False, max_tokens=max_tokens, max_retries=0,
                           extra_body=extra_body)
 
 
 def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: int,
-                             single_attempt: bool, scan_protocol=None, parts_sha256=None) -> None:
+                             single_attempt: bool, scan_protocol=None, parts_sha256=None, profile: str | None = None) -> None:
     """Require saved scans to match the bounded policy before evidence reuse.
 
     Missing settings are unknown, not safe defaults. Compare exact JSON types
@@ -127,7 +157,7 @@ def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: in
     """
     if single_attempt is not True:
         raise ValueError("Saved evidence requires an explicitly single-attempt scanner protocol")
-    expected = bounded_tells_config(max_tokens, judge=judge).model_dump(exclude_none=True)
+    expected = bounded_tells_config(max_tokens, judge=judge, profile=profile).model_dump(exclude_none=True)
     if (not isinstance(judge, str) or not judge.startswith("openrouter/")
             or judge.removeprefix("openrouter/") not in SUPPORTED_WINDOWS):
         raise ValueError("Saved evidence uses an unsupported bounded judge")
@@ -146,6 +176,10 @@ def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: in
     scanners = specification.get("scanners")
     tells = scanners.get("tells") if isinstance(scanners, dict) else None
     expected_params = {"bounded": True}
+    if profile is not None:
+        if scan_protocol is None:
+            raise ValueError("Prospective reasoning profile requires frozen scan parts")
+        expected_params["scan_profile"] = profile
     if scan_protocol is not None:
         import re
         from pathlib import Path
@@ -165,19 +199,21 @@ def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: in
 
 
 async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
-                    single_attempt: bool = False) -> dict:
+                    single_attempt: bool = False, profile: str | None = None) -> dict:
     """Check the fixed no-web judge protocol and public tariffs before trials.
 
     This does not know future transcript sizes; ``plan`` must still render and
     bound the actual saved logs before judging. No inference request is made.
     """
-    if not single_attempt:
+    if not single_attempt or (profile is not None and single_attempt is not True):
         raise ValueError("Scan planning requires an explicitly single-attempt scanner protocol")
-    bounded_tells_config(max_tokens, judge=judge)
+    bounded_tells_config(max_tokens, judge=judge, profile=profile)
     name = judge.removeprefix("openrouter/")
     if not judge.startswith("openrouter/") or name not in SUPPORTED_WINDOWS:
         raise ValueError("Judge context/segmentation policy is unsupported by the reservation planner")
     metadata = await model_metadata(judge)
+    if profile is not None:
+        validate_profile_metadata(metadata, judge=judge, max_tokens=max_tokens, profile=profile)
     if name == DEEPSEEK_FLASH:
         parameters = metadata.get("supported_parameters")
         reasoning = metadata.get("reasoning")
@@ -216,9 +252,18 @@ async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
     except (KeyError, ValueError, TypeError) as error:
         raise ValueError("Unknown official judge context window") from error
     window = min(official_window, SUPPORTED_WINDOWS[name])
+    if profile is not None:
+        window = min(window, metadata["top_provider"]["context_length"])
     if window <= 0:
         raise ValueError("Invalid official judge context window")
-    return {"judge": judge, "max_tokens": max_tokens, "single_attempt": True,
+    prospective = {}
+    if profile is not None:
+        import hashlib
+
+        canonical = json.dumps(metadata, ensure_ascii=False, sort_keys=True, allow_nan=False).encode()
+        prospective = {"scan_profile": profile, "profile_metadata": metadata,
+                       "profile_metadata_sha256": hashlib.sha256(canonical).hexdigest()}
+    return {**prospective, "judge": judge, "max_tokens": max_tokens, "single_attempt": True,
             "context_window": window, "tariff": pricing, "prompt_price_bound": prompt_price,
             "output_price": output_price, "tariff_source": "https://openrouter.ai/api/v1/models",
             "tariff_applicability": {"web_search": {"applicable": False,
@@ -227,7 +272,7 @@ async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
 
 
 async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
-               single_attempt: bool = False) -> dict:
+               single_attempt: bool = False, profile: str | None = None) -> dict:
     """Bound actual logs for the same fixed protocol as ``bounded_tells_config``.
 
     Caller must bind that config directly to the judge model, disable its SDK
@@ -236,7 +281,8 @@ async def plan(logs: list[str], judge: str, *, max_tokens: int = OUTPUT_CAP,
     """
     if not logs or len(set(logs)) != len(logs):
         raise ValueError("Distinct saved trial logs are required")
-    checked = await preflight(judge, max_tokens=max_tokens, single_attempt=single_attempt)
+    checked = await preflight(judge, max_tokens=max_tokens, single_attempt=single_attempt,
+                              **({"profile": profile} if profile is not None else {}))
     window = checked["context_window"]
     rows = await rendered_inputs(logs)
     if not rows or len({r["transcript_id"] for r in rows}) != len(rows):

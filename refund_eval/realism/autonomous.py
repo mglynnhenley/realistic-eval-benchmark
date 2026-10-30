@@ -67,6 +67,14 @@ def _protocol(settings):
         protocol.update(scan_protocol=VERSION, scan_max_parts_per_transcript=per_trial, scan_max_parts_total=total)
     elif any(settings.get(key) is not None for key in ("scan_max_parts_per_transcript", "scan_max_parts_total")):
         raise ValueError("Part limits require the explicit frozen scan protocol")
+    if "scan_profile" in settings:
+        from refund_eval.realism.scan_budget import bounded_tells_config
+
+        if (settings["scan_profile"] is None or protocol.get("scan_protocol") is None
+                or "scan_max_tokens" not in settings):
+            raise ValueError("Explicit prospective scan profile requires frozen scan parts and an explicit output cap")
+        bounded_tells_config(protocol["scan_max_tokens"], judge=protocol["judge"], profile=settings["scan_profile"])
+        protocol["scan_profile"] = settings["scan_profile"]
     if settings.get("trial_deadline_policy") is not None:
         from refund_eval.harbor.deadlines import trial_deadlines
 
@@ -240,7 +248,7 @@ def _scan_preflight(protocol, context=None):
         program = ("import asyncio,json,sys; from pathlib import Path; "
                    "from refund_eval.realism.scan_budget import preflight; p=json.loads(sys.argv[1]); "
                    "Path(sys.argv[2]).write_text(json.dumps(asyncio.run(preflight(p['judge'],"
-                   "max_tokens=p['scan_max_tokens'],single_attempt=True))))")
+                   "max_tokens=p['scan_max_tokens'],single_attempt=True,**({'profile':p['scan_profile']} if 'scan_profile' in p else {})))))")
         output = context.directory / "judge-preflight.json"
         output.unlink(missing_ok=True)
         _command(context, ["uv", "run", "--frozen", "--python", sys.executable, "python", "-c", program,
@@ -248,7 +256,8 @@ def _scan_preflight(protocol, context=None):
                  cwd=context.measurement_worktree)
         return json.loads(output.read_text())
     from refund_eval.realism.scan_budget import preflight
-    return asyncio.run(preflight(protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True))
+    return asyncio.run(preflight(protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True,
+        **({"profile": protocol["scan_profile"]} if "scan_profile" in protocol else {})))
 
 
 def _scan_plan(protocol, logs, context=None):
@@ -258,7 +267,7 @@ def _scan_plan(protocol, logs, context=None):
                        "from refund_eval.realism.scan_parts import plan; p=json.loads(sys.argv[1]); "
                        "Path(sys.argv[3]).write_text(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
                        "max_tokens=p['scan_max_tokens'],max_parts_per_transcript=p['scan_max_parts_per_transcript'],"
-                       "max_parts_total=p['scan_max_parts_total']))))")
+                       "max_parts_total=p['scan_max_parts_total'],**({'profile':p['scan_profile']} if 'scan_profile' in p else {})))))")
             identity = hashlib.sha256(json.dumps(logs).encode()).hexdigest()[:12]
             output = context.directory / f"scan-plan-{identity}.json"
             _command(context, ["uv", "run", "--frozen", "--python", sys.executable, "python", "-c", program,
@@ -269,12 +278,13 @@ def _scan_plan(protocol, logs, context=None):
 
         return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"],
                                max_parts_per_transcript=protocol["scan_max_parts_per_transcript"],
-                               max_parts_total=protocol["scan_max_parts_total"]))
+                               max_parts_total=protocol["scan_max_parts_total"],
+                               **({"profile": protocol["scan_profile"]} if "scan_profile" in protocol else {})))
     if context is not None and getattr(context, "measurement_worktree", None) is not None:
         program = ("import asyncio,json,sys; from pathlib import Path; "
                    "from refund_eval.realism.scan_budget import plan; p=json.loads(sys.argv[1]); "
                    "Path(sys.argv[3]).write_text(json.dumps(asyncio.run(plan(json.loads(sys.argv[2]),p['judge'],"
-                   "max_tokens=p['scan_max_tokens'],single_attempt=True))))")
+                   "max_tokens=p['scan_max_tokens'],single_attempt=True,**({'profile':p['scan_profile']} if 'scan_profile' in p else {})))))")
         identity = hashlib.sha256(json.dumps(logs).encode()).hexdigest()[:12]
         output = context.directory / f"scan-plan-{identity}.json"
         output.unlink(missing_ok=True)
@@ -285,14 +295,15 @@ def _scan_plan(protocol, logs, context=None):
                  name=f"scan-plan-{identity}", cwd=context.measurement_worktree)
         return json.loads(output.read_text())
     from refund_eval.realism.scan_budget import plan
-    return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True))
+    return asyncio.run(plan(logs, protocol["judge"], max_tokens=protocol["scan_max_tokens"], single_attempt=True,
+        **({"profile": protocol["scan_profile"]} if "scan_profile" in protocol else {})))
 
 
 def _run_scan(context, protocol, logs, scans, cwd, tag):
-    extra = []
+    extra = (["--scan-profile", protocol["scan_profile"]] if "scan_profile" in protocol else [])
     if protocol.get("scan_protocol") is not None:
         path = scans.parent / "scan-budget.json"
-        extra = ["--parts-plan", str(path), "--parts-sha256", hashlib.sha256(path.read_bytes()).hexdigest()]
+        extra += ["--parts-plan", str(path), "--parts-sha256", hashlib.sha256(path.read_bytes()).hexdigest()]
     _command(context, ["uv", "run", "python", "scout/run.py", *logs, "--scanners", "tells", "--yes",
                        "--scans", str(scans), "--judges", protocol["judge"], "--bounded-tells", "--max-tokens", str(protocol["scan_max_tokens"]), *extra],
              name=f"{tag}-scan", cwd=getattr(context, "measurement_worktree", cwd), timeout=protocol["time_limit"])
@@ -396,7 +407,8 @@ def _batch(context, protocol, commit, hashes, tag, *, cwd, trial_reserve, scan_r
                 or scan_plan.get("max_parts_per_transcript") != protocol["scan_max_parts_per_transcript"]
                 or scan_plan.get("max_parts_total") != protocol["scan_max_parts_total"]
                 or scan_plan.get("checked", {}).get("judge") != protocol["judge"]
-                or scan_plan.get("checked", {}).get("max_tokens") != protocol["scan_max_tokens"]):
+                or scan_plan.get("checked", {}).get("max_tokens") != protocol["scan_max_tokens"]
+                or scan_plan.get("checked", {}).get("scan_profile") != protocol.get("scan_profile")):
             raise ValueError("Frozen scan plan differs from the requested protocol")
     if not math.isfinite(scan_plan["required_usd"]) or scan_plan["required_usd"] <= 0:
         raise ValueError("Cannot establish a scan cost bound from current pricing")

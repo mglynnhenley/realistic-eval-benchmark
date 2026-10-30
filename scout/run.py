@@ -29,7 +29,10 @@ from inspect_scout import (
 )
 
 from refund_eval.output_paths import validate_private_output
-from refund_eval.realism.scan_budget import bounded_tells_config
+from refund_eval.realism.scan_budget import (
+    FLASH_REASONING_PROFILE,
+    bounded_tells_config,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 JUDGES = ["openrouter/anthropic/claude-opus-5.5", "openrouter/openai/gpt-6.1-sol"]
@@ -208,13 +211,23 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--scanners", nargs="+", default=SCANNERS, choices=SCANNERS, help="Scanners to run (default: all)")
     parser.add_argument("--limit", type=int, help="Scan only the first N transcripts")
     parser.add_argument("--max-tokens", type=positive_int, help="Explicit maximum output tokens per scanner call (default unchanged)")
-    parser.add_argument("--bounded-tells", action="store_true", help="Tells only: one answer attempt, no refusal/API retries; requires explicit --max-tokens <=8192")
+    parser.add_argument("--bounded-tells", action="store_true", help="Tells only: one answer attempt, no refusal/API retries; explicit output cap; historical <=8192, prospective profile <=65536")
+    parser.add_argument("--scan-profile", choices=[FLASH_REASONING_PROFILE],
+                        help="Prospective Flash high-reasoning profile; requires a frozen parts plan")
     parser.add_argument("--parts-plan", type=Path, help="Explicit frozen-parts-v1 plan; never automatically splits or retries")
     parser.add_argument("--parts-sha256", help="Exact frozen plan file digest")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
     args = parser.parse_args(argv)
-    if args.bounded_tells and (args.scanners != ["tells"] or args.max_tokens is None or args.max_tokens > 8192):
-        parser.error("--bounded-tells requires --scanners tells and explicit --max-tokens between 1 and 8192")
+    if args.bounded_tells:
+        if args.scanners != ["tells"] or args.max_tokens is None:
+            parser.error("--bounded-tells requires --scanners tells and explicit --max-tokens")
+        try:
+            for judge in args.judges:
+                bounded_tells_config(args.max_tokens, judge=judge, profile=args.scan_profile)
+        except ValueError as error:
+            parser.error(str(error))
+    if args.scan_profile is not None and (not args.bounded_tells or not args.parts_plan):
+        parser.error("--scan-profile requires bounded tells and an exact frozen parts plan")
     if bool(args.parts_plan) != bool(args.parts_sha256) or (args.parts_plan and
             (not args.bounded_tells or len(args.judges) != 1 or args.limit is not None)):
         parser.error("Frozen parts require exact plan/digest, one bounded judge, and complete transcripts")
@@ -237,7 +250,8 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         plan = load(args.parts_plan, args.parts_sha256)
-        require(plan["checked"]["judge"] == args.judges[0] and plan["checked"]["max_tokens"] == args.max_tokens,
+        require(plan["checked"]["judge"] == args.judges[0] and plan["checked"]["max_tokens"] == args.max_tokens
+                and plan["checked"].get("scan_profile") == args.scan_profile,
                 "Frozen plan differs from selected judge/output cap")
         asyncio.run(validate(plan, args.logs))
         scans.mkdir(parents=True, exist_ok=True)
@@ -258,12 +272,14 @@ def main(argv: list[str] | None = None) -> None:
             print("Not scanning.")
             return
 
+    if args.scan_profile is not None:
+        part_options["scan_profile"] = args.scan_profile
     locations = {}
     for judge in args.judges:
         # Scout's global model_config does not configure a named judge role.
         # Bind the bounded generation policy directly to that role's model.
         # SDK retries are separate from Inspect's GenerateConfig.max_retries.
-        judge_model = (get_model(judge, config=bounded_tells_config(args.max_tokens, judge=judge),
+        judge_model = (get_model(judge, config=bounded_tells_config(args.max_tokens, judge=judge, profile=args.scan_profile),
                                  max_retries=0, memoize=False)
                        if args.bounded_tells else judge)
         status = scan(
@@ -273,7 +289,7 @@ def main(argv: list[str] | None = None) -> None:
             scans=str(scan_dirs[judge]),
             model_roles={"judge": judge_model},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
-            model_config=(bounded_tells_config(args.max_tokens, judge=judge) if args.bounded_tells else
+            model_config=(bounded_tells_config(args.max_tokens, judge=judge, profile=args.scan_profile) if args.bounded_tells else
                           GenerateConfig(cache_prompt=False,
                               **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}))),
             limit=args.limit,
