@@ -169,6 +169,10 @@ async def published_tools(
             "public_read_policy": "public_web", "search_provider": "exa",
             "inbox": inbox_provenance,
         }
+    if scenario_channel_policy is None and data_mode == "hybrid" and scenario.id == "train_refund_late":
+        from refund_eval.published.booking_channels import POLICY
+
+        scenario_channel_policy = POLICY
     if scenario_channel_policy is not None:
         boundary_config["scenario_channel_policy"] = scenario_channel_policy
     boundary = BrowserBoundary(ctx, **boundary_config)
