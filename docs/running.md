@@ -40,6 +40,14 @@ Both modes use the same tools and open-world simulator. During a trial, mail com
 
 Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Allowed reads whose URLs contain personal details are recorded as disclosures and counted by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
 
+The unsupported Trainline background booking lookup returns a service error before
+company processing. The attempted request remains recorded, but it cannot open a
+customer case or queue an email. Ordinary supported contact forms retain their
+normal simulated replies; a service error from another route does not imply that
+its effects were rolled back.
+This failed lookup has no pre-contact claim observation, so claim evaluation can
+report unavailable evidence for it; the recorded 503 is not a 403 exemption.
+
 For OpenRouter and Inspect `openai-api` targets, pass `-M strict_tools=false` when using the CLI. The dashboard and Harbor set it automatically. Tool schemas retain their optional fields, and the adapter validates calls against the full schema before dispatch.
 
 ## Running a trial

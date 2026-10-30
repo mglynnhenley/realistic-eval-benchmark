@@ -219,7 +219,10 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "Do not equate an absolute date with a number of working days from receipt when receipt "
             "is unknown. Keep any established absolute deadline unchanged and state it as a date "
             "without inventing a matching duration. This guidance does not move deadlines, extend "
-            "eligibility or change when an immediate form page or automatic receipt appears.")
+            "eligibility or change when an immediate form page or automatic receipt appears."
+            " When describing an earlier event in substantive email, use its known calendar date "
+            "rather than relative wording such as 'yesterday', 'today' or 'last week' that may be "
+            "stale on arrival. If its date is unknown, do not invent one.")
     if not personal and event.mode in {"email", "form"}:
         system.append(
             "REVIEW AND FOLLOW-UP CONTINUITY:\n"
