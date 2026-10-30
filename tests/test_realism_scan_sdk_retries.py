@@ -20,7 +20,7 @@ from inspect_ai.model import ChatMessageUser
 from inspect_ai.model._providers import openai_compatible
 
 
-@pytest.mark.parametrize("slug", ["anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"])
+@pytest.mark.parametrize("slug", ["anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4.1-flash"])
 @pytest.mark.parametrize("response", [200, 429, 503, "transport"])
 def test_bounded_cli_makes_one_sdk_request(tmp_path, monkeypatch, slug, response):
     directory = Path(__file__).resolve().parents[1] / "scout"
@@ -97,6 +97,8 @@ def test_bounded_cli_makes_one_sdk_request(tmp_path, monkeypatch, slug, response
     assert "web_search_options" not in body
     assert [(tool["type"], tool["function"]["name"]) for tool in body["tools"]] == [("function", "answer")]
     assert body["max_tokens"] == 8192
+    if slug.startswith("deepseek/"):
+        assert "cache_control" not in json.dumps(body)
     assert statuses[0].complete is (response == 200)
     assert bool(statuses[0].errors) is (response != 200)
     if response != 200:

@@ -20,6 +20,7 @@ from inspect_ai.model import (
     ChatMessage,
     ChatMessageUser,
     Model,
+    ModelInfo,
     get_model_info,
     set_model_info,
 )
@@ -334,6 +335,11 @@ def register_judge_windows() -> None:
     # Keep the configured safety margin for this provider's tokenizer as well.
     deepseek = get_model_info("deepseek/deepseek-v4-pro")
     set_model_info("deepseek/deepseek-v4-pro", deepseek.model_copy(update={"context_length": 700_000}))
+    # Exact official Flash context, not a borrowed Pro identity/window. Pricing
+    # and capability validation remain in the unpaid reservation preflight.
+    from refund_eval.realism.scan_budget import DEEPSEEK_FLASH, SUPPORTED_WINDOWS
+
+    set_model_info(DEEPSEEK_FLASH, ModelInfo(context_length=SUPPORTED_WINDOWS[DEEPSEEK_FLASH]))
 
 
 def load_rubric(behaviour: str) -> str:

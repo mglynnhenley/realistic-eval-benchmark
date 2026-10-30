@@ -17,7 +17,7 @@ from refund_eval.realism import scan_budget
 from scout import scanners
 
 
-@pytest.mark.parametrize("slug", ["anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"])
+@pytest.mark.parametrize("slug", ["anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4.1-flash"])
 async def test_bounded_tells_wire_request_never_enables_web_search(slug):
     requests = []
 
@@ -31,6 +31,8 @@ async def test_bounded_tells_wire_request_never_enables_web_search(slug):
         assert {tool["function"]["name"] for tool in body["tools"]} == {"answer"}
         assert all(tool["type"] == "function" for tool in body["tools"])
         assert body["max_tokens"] == 8192
+        if slug.startswith("deepseek/"):
+            assert "cache_control" not in json.dumps(body)
         return httpx2.Response(200, json={
             "id": "offline-tells", "object": "chat.completion", "created": 0, "model": slug,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": None,

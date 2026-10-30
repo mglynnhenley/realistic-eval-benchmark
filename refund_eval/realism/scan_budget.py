@@ -17,7 +17,10 @@ import httpx
 OUTPUT_CAP = 8192
 FRAMING_TOKENS = 16_384
 # These mirror the explicitly registered scanner window, never expand it.
-SUPPORTED_WINDOWS = {"anthropic/claude-opus-5.5": 600_000, "deepseek/deepseek-v4-pro": 700_000}
+DEEPSEEK_FLASH = "deepseek/deepseek-v4.1-flash"
+SUPPORTED_WINDOWS = {"anthropic/claude-opus-5.5": 600_000, "deepseek/deepseek-v4-pro": 700_000,
+                     DEEPSEEK_FLASH: 1_048_576}
+INPUT_TARIFFS = ("prompt", "input_cache_write", "input_cache_read", "input_cache_write_1h")
 
 
 async def model_metadata(judge: str) -> dict:
@@ -77,6 +80,24 @@ def _price(pricing: dict, field: str, *, required: bool = True) -> float:
     if not math.isfinite(price) or price < 0:
         raise ValueError(f"Invalid judge {field} pricing")
     return price
+
+
+def input_price_bound(judge: str, pricing: dict) -> float:
+    """Cover every published applicable input tariff without inventing entries.
+
+    Exact Flash requests have no explicit cache-write route in the installed
+    OpenRouter adapter (markers are Anthropic-only). Its published prompt and
+    automatic cache-read rates are required; an absent cache-write tariff stays
+    absent. Any published write/TTL tariff still participates in the bound.
+    Other supported models retain their existing required cache-write tariff.
+    """
+    name = judge.removeprefix("openrouter/")
+    if not judge.startswith("openrouter/") or name not in SUPPORTED_WINDOWS:
+        raise ValueError("Unsupported judge input tariff policy")
+    required = {"prompt", "input_cache_read" if name == DEEPSEEK_FLASH else "input_cache_write"}
+    for field in required:
+        _price(pricing, field)
+    return max(_price(pricing, field) for field in INPUT_TARIFFS if field in pricing)
 
 
 def bounded_tells_config(max_tokens: int):
@@ -152,11 +173,23 @@ async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
     if not judge.startswith("openrouter/") or name not in SUPPORTED_WINDOWS:
         raise ValueError("Judge context/segmentation policy is unsupported by the reservation planner")
     metadata = await model_metadata(judge)
+    if name == DEEPSEEK_FLASH:
+        parameters = metadata.get("supported_parameters")
+        reasoning = metadata.get("reasoning")
+        provider = metadata.get("top_provider")
+        output = provider.get("max_completion_tokens") if isinstance(provider, dict) else None
+        if (metadata.get("id") != name or not isinstance(parameters, list)
+                or not all(isinstance(parameter, str) for parameter in parameters)
+                or not {"max_tokens", "tools", "tool_choice", "structured_outputs", "response_format", "reasoning"} <= set(parameters)
+                or not isinstance(reasoning, dict) or reasoning.get("mandatory") is not False
+                or type(output) is not int or output < max_tokens
+                or type(metadata.get("context_length")) is not int):
+            raise ValueError("Exact Flash judge capabilities or output/context limits are unavailable")
     pricing = metadata.get("pricing")
     if (not isinstance(pricing, dict)
             or ("overrides" in pricing and pricing["overrides"] != [])):
         raise ValueError("Unknown or tiered judge pricing is unsupported")
-    input_rates = ("prompt", "input_cache_write", "input_cache_read", "input_cache_write_1h")
+    input_rates = INPUT_TARIFFS
     known = {*input_rates, "completion", "overrides", "request", "image", "web_search", "internal_reasoning"}
     if set(pricing) - known:
         raise ValueError("Unknown judge tariff fields are unsupported")
@@ -171,8 +204,7 @@ async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
     # Scout's split-template call config can request caching even when the run
     # config disables it. Cover every published cache rate conservatively, even
     # the longer TTL, without inventing a zero for unknown cache-write pricing.
-    prompt_price = max(_price(pricing, field, required=field in {"prompt", "input_cache_write"})
-                       for field in input_rates)
+    prompt_price = input_price_bound(judge, pricing)
     output_price = _price(pricing, "completion")
     try:
         official_window = int(metadata["context_length"])

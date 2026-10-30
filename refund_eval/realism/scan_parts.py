@@ -93,6 +93,7 @@ def checked_policy(checked):
         SUPPORTED_WINDOWS,
         _price,
         bounded_tells_config,
+        input_price_bound,
     )
 
     judge, cap = checked["judge"], checked["max_tokens"]
@@ -111,8 +112,7 @@ def checked_policy(checked):
     for key in ("request", "image", "internal_reasoning"):
         require(not _price(pricing, key, required=False), "Additional frozen tariff")
     _price(pricing, "web_search", required=False)
-    rate = max(_price(pricing, key, required=key in {"prompt", "input_cache_write"})
-               for key in ("prompt", "input_cache_write", "input_cache_read", "input_cache_write_1h"))
+    rate = input_price_bound(judge, pricing)
     require(type(checked["prompt_price_bound"]) in (int, float)
             and checked["prompt_price_bound"] == rate
             and type(checked["output_price"]) in (int, float)

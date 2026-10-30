@@ -319,7 +319,8 @@ async def test_real_scout_structured_answer_and_provider_wire_offline(monkeypatc
 
 
 @pytest.mark.parametrize("partial_failure", [False, True])
-def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatch, partial_failure):
+@pytest.mark.parametrize("judge", [JUDGE, "openrouter/deepseek/deepseek-v4-pro", "openrouter/deepseek/deepseek-v4.1-flash"])
+def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatch, partial_failure, judge):
     import asyncio
 
     import httpx
@@ -342,7 +343,7 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
         if partial_failure and len(requests) == 2:
             raise RuntimeError("synthetic unknown-charge failure")
         return ChatCompletion.model_validate({"id": f"offline-{len(requests)}", "object": "chat.completion",
-            "created": 1, "model": JUDGE.removeprefix("openrouter/"),
+            "created": 1, "model": judge.removeprefix("openrouter/"),
             "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant",
                 "content": None, "tool_calls": [{"id": "answer-call", "type": "function", "function": {
                     "name": "answer", "arguments": json.dumps({"explanation": "see [M1]", "tells": []})}}]}}],
@@ -354,14 +355,19 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
         native = read_eval_log(str(log))
         native.samples[0].messages = [ChatMessageUser(content="x" * 100000, id=f"m{i}") for i in range(3)]
         write_eval_log(native, str(log))
-    plan = asyncio.run(parts.build([str(log)], checked(180000 if partial_failure else 600000),
+    policy = checked(180000 if partial_failure else 600000)
+    policy["judge"] = judge
+    if judge == "openrouter/deepseek/deepseek-v4.1-flash":
+        policy.update(tariff={"prompt": "0.000000045", "completion": "0.0000005", "input_cache_read": "0.000000006"},
+                      prompt_price_bound=0.000000045, output_price=0.0000005)
+    plan = asyncio.run(parts.build([str(log)], policy,
                                    max_parts_per_transcript=4, max_parts_total=12))
     scans = tmp_path / "scans"
     scans.mkdir()
     frozen = scans / parts.PLAN_NAME
     frozen.write_text(json.dumps(plan))
     sha = parts.file_digest(frozen)
-    model = get_model(JUDGE, api_key="offline-synthetic-key", config=scan_budget.bounded_tells_config(8192),
+    model = get_model(judge, api_key="offline-synthetic-key", config=scan_budget.bounded_tells_config(8192),
                       max_retries=0, memoize=False)
     status = scan(scanners={"tells": tells(bounded=True, parts_protocol=parts.VERSION,
                                          parts_plan=str(frozen), parts_sha256=sha)},
@@ -376,8 +382,8 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
         assert events[1]["error"] and events[1]["call"]["error"] is True
         assert not (events[1]["call"].get("response") or {}).get("usage", {}).get("cost")
         with pytest.raises(ValueError):
-            validated_samples([str(log)], scans, expected_trials=1, judge=JUDGE)
+            validated_samples([str(log)], scans, expected_trials=1, judge=judge)
     else:
         assert status.complete and not status.errors and len(requests) == 1
-        rows = validated_samples([str(log)], scans, expected_trials=1, judge=JUDGE)
+        rows = validated_samples([str(log)], scans, expected_trials=1, judge=judge)
         assert len(rows) == 1 and rows[0][2] == []
