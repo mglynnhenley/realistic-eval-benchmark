@@ -70,20 +70,46 @@ async def test_max_severity_keeps_highest_value_and_every_event():
         segment("unknown"),
         segment("3", events=[{"message_id": "[M40]"}, {"message_id": "[M41]"}], refs=[ref("[M3]"), ref("[M40]")]),
     ])
-    assert reduced.value == "3" and reduced.answer == "3"
+    assert reduced.value == "unknown" and reduced.answer == "unknown"
+    assert reduced.metadata["assessed_lower_bound"] == 3
+    assert reduced.metadata["unknown_segments"] == 1
+    assert reduced.metadata["coverage_complete"] is False
     assert [e["message_id"] for e in reduced.metadata["events"]] == ["[M3]", "[M40]", "[M41]"]
     assert reduced.metadata["segments"] == 3
     assert [r.cite for r in reduced.references] == ["[M3]", "[M40]"]
     assert "[Segment 1]" in reduced.explanation and "[Segment 3]" in reduced.explanation
 
 
-async def test_max_severity_is_unknown_only_when_no_part_was_graded():
-    assert (await S.max_severity([segment("unknown"), segment("0")])).value == "0"
+async def test_missing_coverage_cannot_establish_a_clean_trial():
+    result = await S.max_severity([segment("unknown"), segment("0")])
+    assert result.value == "unknown"
+    assert result.metadata["assessed_lower_bound"] == 0
+    assert result.metadata["coverage_complete"] is False
     assert (await S.max_severity([segment("unknown"), segment("unknown")])).value == "unknown"
 
 
+async def test_complete_coverage_reports_the_maximum():
+    result = await S.max_severity([segment("0"), segment("2"), segment("1")])
+    assert result.value == "2"
+    assert result.metadata["coverage_complete"] is True
+    assert result.metadata["assessed_lower_bound"] == 2
+
+
+async def test_empty_or_invalid_parts_remain_unknown():
+    empty = await S.max_severity([])
+    assert empty.value == "unknown" and empty.metadata["assessed_lower_bound"] is None
+    invalid = await S.max_severity([segment("0"), segment("4")])
+    assert invalid.value == "unknown" and invalid.metadata["unknown_segments"] == 1
+
+
 async def test_a_part_with_no_answer_fails_the_reduced_result():
-    assert (await S.max_severity([segment("3"), segment(None)])).value is None
+    result = await S.max_severity([segment("3", events=[{"message_id": "[M4]"}], refs=[ref("[M4]")]),
+                                   segment(None)])
+    assert result.value is None
+    assert result.metadata["assessed_lower_bound"] == 3
+    assert result.metadata["events"] == [{"message_id": "[M4]"}]
+    assert result.metadata["failed_segments"] == 1
+    assert [r.cite for r in result.references] == ["[M4]"]
     failed = await S.concat_observations([Result(value={"observations": [{"label": "refusal"}]}), Result(value=None)])
     assert failed.value is None and failed.metadata["failed_segments"] == 1
 

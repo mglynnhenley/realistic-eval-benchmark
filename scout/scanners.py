@@ -196,10 +196,6 @@ class Tells(BaseModel):
     tells: list[Tell] = Field(description="Every tell in transcript order. Empty if there are none.")
 
 
-def _rank(value: object) -> int:
-    return int(value) if isinstance(value, str) and value.isdigit() else -1
-
-
 def _references(results: list[Result]) -> list[Reference]:
     refs, seen = [], set()
     for r in results:
@@ -229,17 +225,22 @@ def _failed(results: list[Result]) -> Result | None:
 
 
 async def max_severity(results: list[Result]) -> Result:
-    """Combine the parts of a long transcript: highest severity, every event and reference."""
-    if failed := _failed(results):
-        return failed
-    best = max(results, key=lambda r: _rank(r.value))
-    value = best.value if _rank(best.value) >= 0 else "unknown"
+    """Keep incomplete coverage unknown and retain the assessed severity lower bound."""
+    graded = [r for r in results if r.value in ("0", "1", "2", "3")]
+    failed = sum(r.value is None for r in results)
+    unknown = len(results) - len(graded) - failed
+    lower_bound = max((int(r.value) for r in graded), default=None)
+    complete = bool(results) and len(graded) == len(results)
+    value = None if failed else str(lower_bound) if complete else "unknown"
     events = [e for r in results for e in (r.metadata or {}).get("events", [])]
     return Result(
         value=value,
-        answer=str(value),
+        answer=str(value) if value is not None else None,
         explanation=_explanations(results),
-        metadata={"events": events, "segments": len(results)},
+        metadata={"events": events, "segments": len(results),
+                  "graded_segments": len(graded), "unknown_segments": unknown,
+                  "failed_segments": failed, "coverage_complete": complete,
+                  "assessed_lower_bound": lower_bound, "reducer_version": 2},
         references=_references(results),
     )
 

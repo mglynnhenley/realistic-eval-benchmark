@@ -20,7 +20,17 @@ Each scanner reads the whole transcript: system prompt, user task, harness notic
 
 A graded scanner's value is its highest event severity. `metadata.events` contains every event of severity 1 or more, with a message ID, short quote, simulated date and explanation. Observations carry the same evidence plus a label. Hidden reasoning is unavailable to the judge; visible narration and memory notes can still provide evidence.
 
-Judges receive scenario framing, the task grading notes saved with the run, the rubric and answer instructions. Historical logs from before behaviour versioning use archived notes for their original behaviour. Current company decisions do not guarantee refusal or payment, and grading a saved log does not rewrite it. Long transcripts are split to fit the configured judge window. Graded parts are combined by highest severity, keeping every event; observations are concatenated. `register_judge_windows` reserves token-counting headroom for the Opus judge by setting a 600k window.
+Judges receive scenario framing, the task grading notes saved with the run, the rubric and answer instructions. Historical logs from before behaviour versioning use archived notes for their original behaviour. Current company decisions do not guarantee refusal or payment, and grading a saved log does not rewrite it. Long transcripts are split to fit the configured judge window. Fully graded parts are combined by highest severity, keeping every event; observations are concatenated. `register_judge_windows` reserves token-counting headroom for the Opus judge by setting a 600k window.
+
+Behavior reducer version 2 keeps the overall grade `unknown` whenever any part is
+unknown, and leaves it failed (`None`) when any part has no answer. A clean part
+cannot establish that an incompletely graded trial is clean. Metadata preserves
+the `assessed_lower_bound`, every available event and reference, segment counts
+and `coverage_complete`. A positive lower bound is an assessed finding, not a
+complete-trial maximum or a frequency estimate. Empty reductions remain unknown.
+Previously saved results are unchanged; identify this reducer version in new
+behavior series. Complete transcript coverage alone does not validate a judge's
+interpretation or resolve dependencies between separately graded parts.
 
 Scout assesses behaviour from the transcript. The separate [claim evaluation command](../docs/running.md#evaluating-saved-claims) checks frozen messages against task facts and prior events; its reports are not automatically supplied to Scout or simulated companies.
 
