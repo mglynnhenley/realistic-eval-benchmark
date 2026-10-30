@@ -319,7 +319,7 @@ async def test_real_scout_structured_answer_and_provider_wire_offline(monkeypatc
     assert actual["retry_refusals"] == 0 and actual["config"].parallel_tool_calls is False
 
 
-@pytest.mark.parametrize("partial_failure", [False, True, "length"])
+@pytest.mark.parametrize("partial_failure", [False, True, "length", "compound_citation"])
 @pytest.mark.parametrize("judge", [JUDGE, "openrouter/deepseek/deepseek-v4-pro", "openrouter/deepseek/deepseek-v4.1-flash"])
 def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatch, partial_failure, judge):
     import asyncio
@@ -350,11 +350,16 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
                           "completion_tokens_details": {"reasoning_tokens": 8192}}})
         if partial_failure is True and len(requests) == 2:
             raise RuntimeError("synthetic unknown-charge failure")
+        answer = {"explanation": "see [M1]", "tells": []}
+        if partial_failure == "compound_citation":
+            answer["tells"] = [{"factor": "sandbox", "org": "", "message_id": "[M1]/[M2]",
+                "quote": "x", "what_is_off": "Repeated text.", "real_would": "Varied content.",
+                "noticed": "possible", "cue": "environment", "impact": "low", "reaction": "", "date": ""}]
         return ChatCompletion.model_validate({"id": f"offline-{len(requests)}", "object": "chat.completion",
             "created": 1, "model": judge.removeprefix("openrouter/"),
             "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant",
                 "content": None, "tool_calls": [{"id": "answer-call", "type": "function", "function": {
-                    "name": "answer", "arguments": json.dumps({"explanation": "see [M1]", "tells": []})}}]}}],
+                    "name": "answer", "arguments": json.dumps(answer)}}]}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost": .2}})
     monkeypatch.setattr(OpenRouterAPI, "_generate_completion", fake_completion)
     log = tmp_path / "source.eval"
@@ -381,13 +386,19 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
                                          parts_plan=str(frozen), parts_sha256=sha)},
                   transcripts=transcripts_from([str(log)]), scans=str(scans),
                   model_roles={"judge": model}, max_processes=1, display="none")
-    if partial_failure == "length":
-        assert status.errors and len(requests) == 1  # No retry or next part after a truncated answer.
+    citation_schema = requests[0]["tools"][0]["function"]["parameters"]["properties"]["tells"]["items"]["properties"]["message_id"]
+    assert citation_schema["enum"] == [f"[{block['ordinal']}]" for block in plan["per_transcript"][0]["messages"]]
+    if partial_failure in ("length", "compound_citation"):
+        assert status.errors and len(requests) == 1  # No retry or next part after an unusable answer.
         frame = scan_results_df(status.location, scanner="tells", exclude_columns=[]).scanners["tells"]
         events = [event for event in json.loads(frame.iloc[0]["scan_events"]) if event["event"] == "model"]
         assert len(events) == 1
         response = events[0]["call"]["response"]
-        assert response["choices"][0]["finish_reason"] == "length"
+        if partial_failure == "length":
+            assert response["choices"][0]["finish_reason"] == "length"
+        else:
+            raw_answer = json.loads(response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])
+            assert raw_answer["tells"][0]["message_id"] == "[M1]/[M2]"
         assert response["usage"]["cost"] == .2
         with pytest.raises(ValueError):
             validated_samples([str(log)], scans, expected_trials=1, judge=judge)

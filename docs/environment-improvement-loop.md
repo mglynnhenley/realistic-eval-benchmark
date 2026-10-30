@@ -173,6 +173,13 @@ A chosen synthetic company belief tests consequences; it does not establish how
 frequently a live simulator would hold that belief. Keep an inventory of useful
 cases to prevent repaired failure modes from returning.
 
+Each tells-scanner record cites exactly one message where the artefact first
+appears. Frozen plans enumerate the original transcript's single message labels
+in the provider answer schema, such as `[M12]`; relationships
+to other messages belong in the explanation. Malformed answers remain failed,
+with original responses and charges preserved and no automatic retry. Settling
+their known cost does not establish complete scan coverage or resume a stopped loop.
+
 ### Three separate evidence lanes
 
 | Lane | Report and limitations |

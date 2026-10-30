@@ -53,25 +53,40 @@ def runtime():
                 "compatible": openai_compatible}.items()}}
 
 
-def answer_spec():
+def answer_spec(message_ids=None):
+    import copy
+    from typing import Literal
+
     from inspect_scout import AnswerStructured
+    from pydantic import create_model
 
-    from scout.scanners import ANSWER_FORMAT, Tells
+    from scout.scanners import ANSWER_FORMAT, Tell, Tells
 
-    return AnswerStructured(type=Tells, answer_format=ANSWER_FORMAT, max_attempts=1)
+    answer_type = Tells
+    if message_ids is not None:
+        labels = tuple(message_ids)
+        require(labels and len(labels) == len(set(labels)) and all(
+            isinstance(label, str) and re.fullmatch(r"\[M[1-9][0-9]*\]", label) for label in labels),
+            "Frozen answer requires unique original message labels")
+        # The compatible provider strips regex constraints, but preserves enum.
+        # Keep its actual wire schema and local validation aligned on one label.
+        tell_type = create_model("FrozenTell", __base__=Tell,
+            message_id=(Literal[labels], copy.deepcopy(Tell.model_fields["message_id"])))
+        answer_type = create_model("FrozenTells", __base__=Tells,
+            tells=(list[tell_type], copy.deepcopy(Tells.model_fields["tells"])))
+    return AnswerStructured(type=answer_type, answer_format=ANSWER_FORMAT, max_attempts=1)
 
 
-def schema():
+def schema(message_ids=None):
     from types import SimpleNamespace
 
     from inspect_ai.model._providers.openai_compatible import OpenAICompatibleAPI
     from inspect_ai.tool import ToolInfo, ToolParams
     from inspect_scout._llm_scanner.structured import structured_schema
 
-    from scout.scanners import Tells
-
-    raw = Tells.model_json_schema()
-    resolved = structured_schema(answer_spec())
+    answer = answer_spec(message_ids)
+    raw = answer.type.model_json_schema()
+    resolved = structured_schema(answer)
     # Mirror structured_generate's tool declaration, then use the installed
     # provider's pure serializer. No model/client construction or token counting.
     tool = ToolInfo(name="answer", description="Use this tool to submit your final answer.",
@@ -150,7 +165,6 @@ async def transcript_plan(transcript, source_hash, checked, per_trial):
 
     require(not transcript.events and not transcript.timelines, "Event/timeline scan parts are unsupported")
     framing, window = checked_policy(checked)
-    frozen_schema = schema()
     question = scanners.tells_question(scanners.scenario_notes(transcript), scanners.scenario_intent(transcript))
     formatter, references = message_numbering(preprocessor=scanners.PREPROCESSOR)
     blocks, spans, calls = [], [], {}
@@ -178,13 +192,16 @@ async def transcript_plan(transcript, source_hash, checked, per_trial):
         else:
             groups.append({"start": start, "stop": stop})
     require(bool(blocks), "Empty original transcript")
+    labels = [f"[{block['ordinal']}]" for block in blocks]
+    frozen_schema = schema(labels)
+    answer = answer_spec(labels)
     meta = transcript.metadata
     require(all(meta.get(key) is not None for key in ("eval_id", "id", "epoch")), "Missing native scan identity")
     identity = {"eval_id": str(meta["eval_id"]), "sample_id": str(meta["id"]), "epoch": str(meta["epoch"]),
                 "transcript_id": transcript.transcript_id}
 
     def part(start, stop):
-        prompt = scanner_prompt("\n".join(block["text"] for block in blocks[start:stop]), question, answer_spec())
+        prompt = scanner_prompt("\n".join(block["text"] for block in blocks[start:stop]), question, answer)
         bound = len(prompt.encode()) + frozen_schema["allowance_bytes"] + framing
         value = {"start": start, "stop": stop, "prompt": prompt, "input_token_bound": bound,
                  "rendered_input_bytes": len(prompt.encode()), "output_token_bound": checked["max_tokens"],
@@ -307,11 +324,12 @@ async def scan_transcript(transcript, plan, plan_sha256):
     rebuilt = await transcript_plan(transcript, row["source_sha256"], plan["checked"], plan["max_parts_per_transcript"])
     require(digest({**rebuilt, "source": row["source"]}) == digest(row), "Original scan messages/parts changed")
     checked, results, records = plan["checked"], [], []
+    answer = answer_spec([f"[{block['ordinal']}]" for block in row["messages"]])
     model = get_model(role="judge")
     require(str(model) == checked["judge"] and model.model_args.get("max_retries") == 0
             and model.config == bounded_tells_config(checked["max_tokens"], judge=checked["judge"], profile=checked.get("scan_profile")), "Frozen judge role/config differs")
     for part in row["parts"]:
-        result = await generate_answer(part["prompt"], answer_spec(), model=model,
+        result = await generate_answer(part["prompt"], answer, model=model,
                                        config=bounded_tells_config(checked["max_tokens"], judge=checked["judge"], profile=checked.get("scan_profile")),
                                        retry_refusals=0, context_tools=())
         require(isinstance(result.value, dict), "Missing part answer; no retry permitted")
