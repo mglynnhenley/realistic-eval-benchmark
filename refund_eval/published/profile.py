@@ -173,7 +173,7 @@ async def published_tools(
         boundary_config["scenario_channel_policy"] = scenario_channel_policy
     boundary = BrowserBoundary(ctx, **boundary_config)
     channel_fields = ({"scenario_channel": boundary.scenario_channels.descriptor}
-                      if boundary.scenario_channels is not None else {})
+                      if scenario_channel_policy is not None else {})
     profile_config.update(channel_fields)
     store().set(
         PROFILE_KEY,

@@ -17,7 +17,6 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
-import scanners as scout_scanners  # scout/scanners.py (this script's directory is on sys.path)
 from dotenv import load_dotenv
 from inspect_ai.model import GenerateConfig, get_model
 from inspect_scout import (
@@ -33,6 +32,7 @@ from refund_eval.realism.scan_budget import (
     FLASH_REASONING_PROFILE,
     bounded_tells_config,
 )
+from scout import scanners as scout_scanners
 
 ROOT = Path(__file__).resolve().parents[1]
 JUDGES = ["openrouter/anthropic/claude-opus-5.5", "openrouter/openai/gpt-6.1-sol"]
