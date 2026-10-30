@@ -30,6 +30,7 @@ from urllib.parse import (
     urlsplit,
     urlunsplit,
 )
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from aiohttp.abc import AbstractResolver
@@ -41,7 +42,7 @@ from refund_eval.scenario.schema import Scenario
 from refund_eval.world.guards import check_destination, check_url
 from refund_eval.world.interception import ToolContext, intercept, log_interception
 from refund_eval.world.orgs import resolve_org
-from refund_eval.world.state import Disclosure, world_tx
+from refund_eval.world.state import Disclosure, load_world, world_tx
 
 # What live sites see on every public read (the realism probe reports it).
 FETCH_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "*/*"}
@@ -476,6 +477,7 @@ class BrowserBoundary:
         public_read_policy: Literal["reviewed_urls", "public_web"] = "reviewed_urls",
         fetch: Callable | None = None,
         fixtures: dict[str, dict] | None = None,
+        scenario_channel_policy: str | None = None,
     ):
         if public_read_policy not in {"reviewed_urls", "public_web"}:
             raise ValueError("Unknown public read policy")
@@ -489,6 +491,13 @@ class BrowserBoundary:
         self.fetch = fetch or public_read
         self.fixtures = fixtures or {}
         self.pages: dict[str, dict] = {}
+        self.scenario_channels = None
+        if scenario_channel_policy is not None:
+            from refund_eval.published.booking_channels import BookingChannels
+
+            if public_read_policy != "public_web":
+                raise ValueError("Local scenario channels require the hybrid public-web profile")
+            self.scenario_channels = BookingChannels(ctx.scenario, policy=scenario_channel_policy)
 
     def _record_disclosure(self, url: str, call_id: str) -> None:
         """The user's details in a page-load URL leave with the read. Graders see
@@ -506,7 +515,8 @@ class BrowserBoundary:
         payload = {**request, "tool_call_id": call_id}
         audit({"event": "browser_request", "call_id": call_id, "request": payload})
 
-        def done(action: str, result: dict, *, reason: str | None = None) -> dict:
+        def done(action: str, result: dict, *, reason: str | None = None,
+                 scenario_read: dict | None = None) -> dict:
             audit(
                 {
                     "event": "browser_decision",
@@ -521,6 +531,7 @@ class BrowserBoundary:
                     **({"read_policy_checks": dict(PUBLIC_WEB_CHECKS)}
                        if self.public_read_policy == "public_web" and action in {"public_read", "read_error"} else {}),
                     **({"policy_reason": reason} if reason else {}),
+                    **({"scenario_read": scenario_read} if scenario_read is not None else {}),
                 }
             )
             return result
@@ -546,6 +557,13 @@ class BrowserBoundary:
         except (ValueError, TypeError, OSError, UnicodeError):
             return done("blocked", response(403, NAVIGATION_BLOCKED_PAGE if navigation else "Forbidden"),
                         reason="url_guard")
+        if self.scenario_channels is not None:
+            local = self.scenario_channels.handle(
+                payload, body, today=load_world().now.astimezone(ZoneInfo("Europe/London")).date())
+            if local is not None:
+                result = local["response"]
+                return done("scenario_read" if result["status"] == 200 else "blocked", result,
+                            reason="scenario_channel", scenario_read=local["receipt"])
         if method in {"GET", "HEAD"} and not body:
             if url in self.fixtures:
                 return done("fixture", self.fixtures[url])

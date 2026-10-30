@@ -12,6 +12,7 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -189,6 +190,13 @@ def published_containment_check(
         fail("browser readiness read policy differs from profile")
     if public_policy == "public_web" and profile.get("public_read_urls") != []:
         fail("public_web profile must have an empty reviewed URL list")
+    channel = profile.get("scenario_channel")
+    if channel is not None or readiness.get("scenario_channel") is not None:
+        provenance = profile.get("fixture_provenance")
+        if (public_policy != "public_web" or readiness.get("scenario_channel") != channel
+                or not isinstance(provenance, dict) or provenance.get("scenario_channel") != channel
+                or profile.get("config_sha256") != _fingerprint(provenance)):
+            fail("local scenario channel profile/readiness provenance differs")
     manifest = readiness.get("browser_boundary")
     network_containment = _network_containment(manifest)
     mode = network_containment["mode"]
@@ -585,6 +593,56 @@ def _denied_booking_lookup(
     )
 
 
+def _scenario_read_evidence(call, request, decision, events, world, profile, fail):
+    """Recognize local read containment; do not grade the page or target conduct."""
+    from refund_eval.published import booking_channels as channels
+
+    descriptor = profile.get("scenario_channel")
+    receipt = decision.get("scenario_read")
+    expected = {"policy", "schema_version", "hosts", "routes", "renderer_sha256", "projection_sha256"}
+    def digest(value):
+        return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+    if (not isinstance(descriptor, dict) or set(descriptor) != expected
+            or descriptor.get("policy") != channels.POLICY or type(descriptor.get("schema_version")) is not int
+            or descriptor["schema_version"] != 1 or descriptor.get("hosts") != list(channels.HOSTS)
+            or descriptor.get("routes") != channels.ROUTES
+            or descriptor.get("renderer_sha256") != hashlib.sha256(Path(channels.__file__).read_bytes()).hexdigest()
+            or not digest(descriptor.get("projection_sha256"))):
+        fail("local scenario read lacks its exact trusted source policy", call.id)
+        return
+    keys = {"policy", "schema_version", "route", "request_sha256", "response_sha256",
+            "projection_sha256", "matched", "company_dispatch"}
+    if (not isinstance(receipt, dict) or set(receipt) != keys or receipt.get("policy") != channels.POLICY
+            or type(receipt.get("schema_version")) is not int or receipt["schema_version"] != 1
+            or receipt.get("company_dispatch") is not False
+            or receipt.get("projection_sha256") != descriptor["projection_sha256"]
+            or not channels.valid_read_request(request, receipt.get("route"))
+            or receipt.get("request_sha256") != channels.fingerprint(request)
+            or not digest(receipt.get("response_sha256"))
+            or (type(receipt.get("matched")) is not bool if receipt.get("route") == "lookup"
+                else receipt.get("matched") is not None)):
+        fail("local scenario read request/receipt differs", call.id)
+        return
+    responses = [event for event in events if event.get("event") == "response"
+                 and event.get("request_id") == request.get("request_id")]
+    if len(responses) != 1:
+        fail("local scenario read lacks one host response receipt", call.id)
+        return
+    response = responses[0]
+    starts = [event for event in events if event.get("event") == "browser_request" and event.get("request") == request]
+    ends = [event for event in events if event.get("event") == "browser_tool_end"]
+    if (response.get("tool_call_id") != call.id or response.get("status") != 200
+            or decision.get("status") != 200 or response.get("aborted") is not False
+            or response.get("request_sha256") != receipt["request_sha256"]
+            or response.get("response_sha256") != receipt["response_sha256"]
+            or len(starts) != 1 or len(ends) != 1
+            or not events.index(starts[0]) < events.index(decision) < events.index(response) < events.index(ends[0])):
+        fail("local scenario read host response identity/hash/order differs", call.id)
+    if world and any(item.payload.get("request_id") == request.get("request_id")
+                     and item.payload.get("tool_call_id") == call.id for item in world.interceptions):
+        fail("local scenario read unexpectedly created a company interception", call.id)
+
+
 def _browser_evidence(
     call: ToolCallRecord, events: list[dict], world: World | None, profile: dict,
     outcome: dict, fail: Any, requests_seen: set[str],
@@ -648,6 +706,8 @@ def _browser_evidence(
                 )
             if not approved:
                 fail("browser forwarded an unapproved public read", call.id)
+        elif action == "scenario_read":
+            _scenario_read_evidence(call, request, decision, events, world, profile, fail)
         elif action == "simulated":
             # Any navigation write on any host is answered by the simulator. The
             # proof it never left is the form interception that carries this

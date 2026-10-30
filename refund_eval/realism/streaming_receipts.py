@@ -597,6 +597,12 @@ class StreamingOpenRouterAdapter(inv.OpenRouterAdapter):
         stages.reserve(self.ledger, self.budget_usd, stage_id, "interaction", amount,
                        validate=lambda _: self._check_ready())
         dispatched = False
+        network_events = []
+
+        async def trace(event, _info):
+            # Event names only. Trace info can contain credentials or bodies.
+            network_events.append(event)
+
         collector = SSECollector(model=name, identify=journal.identify)
         try:
             self._check_ready()
@@ -606,7 +612,7 @@ class StreamingOpenRouterAdapter(inv.OpenRouterAdapter):
                 dispatched = True
                 async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions",
                     headers={"Authorization": f"Bearer {key}", "Accept": "text/event-stream", "Accept-Encoding": "identity"},
-                    json=payload) as response:
+                    json=payload, extensions={"trace": trace}) as response:
                     journal.headers(response)
                     is_sse = (response.status_code == 200
                               and response.headers.get("content-type", "").split(";")[0].strip().lower() == "text/event-stream"
@@ -641,6 +647,11 @@ class StreamingOpenRouterAdapter(inv.OpenRouterAdapter):
                 stages.finish(self.ledger, self.budget_usd, stage_id, "failed", 0, "Stopped before stream dispatch")
                 raise
             self._uncertain_stage = self._uncertain_stage or stage_id
+            inv._save(journal.directory / "interrupted.json", {**journal.binding,
+                "error": type(error).__name__, "network_events": network_events,
+                "response_headers_saved": (journal.directory / "headers.json").exists(),
+                "saved_chunk_count": len(journal.chunks), "generation_id": journal.generation_id,
+                "actual_usd": None, "full_hold_retained": True, "retry": False}, exclusive=True)
             stages.finish(self.ledger, self.budget_usd, stage_id, "unknown", detail=type(error).__name__)
             raise inv.PaidCallUncertain("Stream interrupted/unsupported; retain full hold and receipts, no retry") from error
         if actual is None:

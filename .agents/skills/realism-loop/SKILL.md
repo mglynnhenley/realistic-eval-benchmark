@@ -177,3 +177,10 @@ why, individual scores/mean and limitations, spend, outstanding holds and next
 action, keeping the three evidence lanes distinct. At stop distinguish the last
 tested version from any newly implemented, checked but untrialled next version;
 never assign earlier scores to new code.
+
+An explicitly authorized restart may use the documented immutable
+`recovery_policy` opt-in instead of hardcoded historical exception lists. Preserve
+all historical stage bytes and full holds. A fresh uncertain call still stops
+that adapter's dispatches; save partial reports and hand off local synthesis.
+Only a subsequent invocation within the pinned dollar/count bounds may begin new
+work. Repeated failures or unsafe native/scan work remain real stop conditions.

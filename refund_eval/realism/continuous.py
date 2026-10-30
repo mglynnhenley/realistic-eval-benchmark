@@ -124,7 +124,7 @@ def _exclusive(directory):
 def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
                investigation, checks=None, backlog=None, pause_file=None,
                last_tested_source=None, prior_unknown_review=None, investigation_trial_contexts=False,
-               behavior_analysis=None, analysis_transport=None):
+               behavior_analysis=None, analysis_transport=None, recovery_policy=None):
     """Freeze a new authorization/configuration. New loops always start paused.
 
     This does not modify the existing ledger, historical evidence, pause file, or
@@ -179,6 +179,13 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
             profile["transport"] = config["analysis_transport"]
         config["behavior_analysis"] = conduct_analysis.validate_configuration(profile)
     initial_spend = _spend(config)
+    if recovery_policy is not None:
+        from refund_eval.realism import recovery_policy as recovery
+        reference = {"path": str(Path(recovery_policy).resolve()), "sha256": _sha(recovery_policy)}
+        recovery.validate(recovery.artifact(reference), _read(config["ledger"]),
+                          ledger=config["ledger"], budget=budget)
+        config["recovery_policy"] = reference
+        config["prior_unknown_review"] = reference["path"]
     config["initial_pending_stages"] = {name: item for name, item in initial_spend["stages"].items()
                                         if item.get("actual_usd") is None or item.get("status") != "complete"}
     with _exclusive(directory):
@@ -423,7 +430,8 @@ class ProductionBindings(Bindings):
                 directory=directory / "investigation", adapter=adapter, evidence_tools=tools,
                 scanner_annotations=annotations, backlog=request["backlog"], check_paused=request["check_paused"],
                 trial_contexts=config.get("investigation_trial_contexts", False),
-                stage_namespace=config.get("analysis_transport", {}).get("stage_namespace")))
+                stage_namespace=config.get("analysis_transport", {}).get("stage_namespace"),
+                allow_partial=bool(config.get("recovery_policy"))))
 
     @staticmethod
     def _check(request):
@@ -511,6 +519,10 @@ def _round_request(directory, config, state, execute):
     accounting = folder / "prior-unknown-review.json"
     if state["round"] == 1 and config.get("prior_unknown_review"):
         accounting = Path(config["prior_unknown_review"])
+    if config.get("recovery_policy"):
+        from refund_eval.realism.recovery_policy import artifact
+        artifact(config["recovery_policy"])
+        accounting = Path(config["recovery_policy"]["path"])
     return {**saved, "round_dir": str(folder), "configuration": config, "execute": execute,
             "prior_unknown_review": str(accounting) if accounting.is_file() else None,
             "check_paused": lambda: _check_pause(directory, config)}
@@ -533,8 +545,9 @@ def _scores(result, config):
              "Four independent investigator reports are required")
     expected = config["investigation"]["investigators"]
     for report, model in zip(result["investigators"], expected, strict=True):
-        _require(report.get("model") == model["model"] and report.get("initial") is not None and
-                 report.get("supplementary") is not None, "Missing independent or supplementary investigator report")
+        partial = bool(config.get("recovery_policy")) and isinstance(report.get("failure"), dict)
+        _require(report.get("model") == model["model"] and (partial or report.get("initial") is not None and
+                 report.get("supplementary") is not None), "Missing independent or supplementary investigator report")
     _require(result.get("score_series_id") == config["investigation"]["score_series_id"], "Judge series changed")
     rows = result.get("scores")
     _require(isinstance(rows, list) and len(rows) == 3 and len({row.get("trial_id") for row in rows}) == 3,
@@ -681,8 +694,16 @@ def advance(run_dir, *, execute=False, resume=False, bindings=None):
                 _require(all(spend["stages"].get(name) == item for name, item in retained.items()),
                          "A validated retained hold changed")
                 unvalidated = set(pending) - set(retained)
+                if config.get("recovery_policy"):
+                    from refund_eval.realism import recovery_policy as recovery
+                    retained = recovery.validate(recovery.artifact(config["recovery_policy"]),
+                                                 _read(config["ledger"]), ledger=config["ledger"],
+                                                 budget=config["budget_usd"],
+                                                 enforce_limits=state["phase"] in {"measure", "investigate"})
+                    state["retained_holds"] = retained
+                    unvalidated = set()
                 if pending and state["phase"] == "measure":
-                    _require(all(config["initial_pending_stages"].get(name) == item for name, item in pending.items()),
+                    _require(config.get("recovery_policy") or all(config["initial_pending_stages"].get(name) == item for name, item in pending.items()),
                              "A new or changed uncertain paid action requires reconciliation, never replay")
                     if not request["prior_unknown_review"]:
                         state.update(status="awaiting_accounting", next_action="supply_exact_retained_hold_disposition",

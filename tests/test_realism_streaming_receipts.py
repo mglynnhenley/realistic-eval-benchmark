@@ -556,3 +556,15 @@ async def test_invalid_complete_answer_with_unknown_cost_keeps_full_reservation(
     with pytest.raises(inv.PaidCallUncertain):
         await call(value, stage_id=NAMESPACE + '-02')
     assert len(requests) == 1
+
+
+async def test_interruption_records_network_phase_without_secrets_or_zero_cost(tmp_path, monkeypatch):
+    value, requests, reserved, finished = adapter(tmp_path, monkeypatch, [httpx.ReadError('private transport detail')])
+    with pytest.raises(inv.PaidCallUncertain):
+        await call(value)
+    receipt = json.loads((tmp_path / 'calls' / (STAGE + '-stream') / 'interrupted.json').read_bytes())
+    assert receipt['error'] == 'ReadError' and receipt['response_headers_saved'] is True
+    assert receipt['actual_usd'] is None and receipt['retry'] is False
+    assert receipt['saved_chunk_count'] == 0 and receipt['generation_id'] is None
+    assert 'private transport detail' not in json.dumps(receipt) and KEY not in json.dumps(receipt)
+    assert len(requests) == len(reserved) == len(finished) == 1 and finished[0]['actual'] is None

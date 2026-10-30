@@ -110,6 +110,7 @@ async def published_tools(
     scenario: Scenario, *, data_mode: str = RunConfig.model_fields["data_mode"].default,
     fixture_path: str | None = None, browser_runtime: str = "docker",
     artifact_dir: str | None = None,
+    scenario_channel_policy: str | None = None,
 ):
     from refund_eval.published.browser import PublishedBrowserService
     from refund_eval.published.fixtures import (
@@ -168,12 +169,19 @@ async def published_tools(
             "public_read_policy": "public_web", "search_provider": "exa",
             "inbox": inbox_provenance,
         }
+    if scenario_channel_policy is not None:
+        boundary_config["scenario_channel_policy"] = scenario_channel_policy
+    boundary = BrowserBoundary(ctx, **boundary_config)
+    channel_fields = ({"scenario_channel": boundary.scenario_channels.descriptor}
+                      if boundary.scenario_channels is not None else {})
+    profile_config.update(channel_fields)
     store().set(
         PROFILE_KEY,
         {
             "name": "published",
             "data_mode": data_mode,
             "fixture_provenance": profile_config,
+            **channel_fields,
             **mode_details,
             "config_sha256": fingerprint(profile_config),
             "browser_network": "unverified",
@@ -211,7 +219,7 @@ async def published_tools(
         network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
         emit_snapshot(phase="starting_browser")
         browser = PublishedBrowserService(
-            BrowserBoundary(ctx, **boundary_config),
+            boundary,
             spool_dir=spool,
             image=browser_image,
             runtime=browser_runtime,
@@ -237,6 +245,7 @@ async def published_tools(
         audit(
             {
                 "event": "profile_ready",
+                **channel_fields,
                 "data_mode": data_mode,
                 **mode_details,
                 "public_read_policy": boundary_config.get("public_read_policy", "reviewed_urls"),

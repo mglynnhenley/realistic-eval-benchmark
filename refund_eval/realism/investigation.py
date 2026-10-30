@@ -961,7 +961,7 @@ def _merge_reports(reports):
 async def investigate_round(*, trials: list[dict], investigators: list[dict], judge: dict,
                             directory: Path, adapter, evidence_tools: EvidenceTools | None = None,
                             scanner_annotations=None, backlog=None, check_paused=None, trial_contexts=False,
-                            stage_namespace: str | None = None) -> dict:
+                            stage_namespace: str | None = None, allow_partial=False) -> dict:
     """Persist four independent initial passes, then a scanner/backlog supplement.
 
     At most three investigators run concurrently. The fourth starts as soon as a
@@ -969,6 +969,8 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
     Failures are saved and propagated; callers must never repeat an uncertain call.
     """
     _check(check_paused)
+    if type(allow_partial) is not bool:
+        raise InvestigationError("Explicit boolean partial-evidence policy required")
     if type(trial_contexts) is not bool:
         raise InvestigationError("Explicit boolean investigation context policy required")
     if stage_namespace is not None and (not isinstance(stage_namespace, str) or
@@ -1026,12 +1028,16 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                 raise
 
     initial_results = await asyncio.gather(*(initial(item) for item in config["investigators"]), return_exceptions=True)
+    if any(isinstance(result, OwnerPaused) for result in initial_results):
+        raise next(result for result in initial_results if isinstance(result, OwnerPaused))
     failures = [result for result in initial_results if isinstance(result, BaseException)]
     if failures:
         _save(directory / "failure.json", {"phase": "initial", "errors": [str(error) for error in failures]}, exclusive=True)
-        raise failures[0]
+        if not allow_partial:
+            raise failures[0]
     # This barrier is published only after every initial report is fsynced.
-    _save(directory / "independent-pass-complete.json", {"investigators": [item["name"] for item in config["investigators"]]}, exclusive=True)
+    _save(directory / "independent-pass-complete.json", {"investigators": [item["name"] for item in config["investigators"]],
+          **({"partial": True, "failures": [type(error).__name__ for error in failures]} if failures else {})}, exclusive=True)
     _save(directory / "supplementary-input.json", {"scanner_annotations": scanner_annotations, "backlog": backlog}, exclusive=True)
 
     async def supplementary(item):
@@ -1040,6 +1046,8 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
             name = item["name"]
             folder = directory / "investigators" / name / "supplementary"
             try:
+                if name not in histories:
+                    raise InvestigationError("Initial report unavailable; no supplementary inference")
                 reports = []
                 for number, history in enumerate(histories[name], 1):
                     part = folder / "trials" / f"{number:03d}" if trial_contexts else folder
@@ -1061,21 +1069,46 @@ async def investigate_round(*, trials: list[dict], investigators: list[dict], ju
                 raise
 
     supplements = await asyncio.gather(*(supplementary(item) for item in config["investigators"]), return_exceptions=True)
+    if any(isinstance(result, OwnerPaused) for result in supplements):
+        raise next(result for result in supplements if isinstance(result, OwnerPaused))
     failures = [result for result in supplements if isinstance(result, BaseException)]
     if failures:
-        _save(directory / "failure.json", {"phase": "supplementary", "errors": [str(error) for error in failures]}, exclusive=True)
-        raise failures[0]
+        _save(directory / "supplementary-failure.json" if allow_partial else directory / "failure.json",
+              {"phase": "supplementary", "errors": [str(error) for error in failures]}, exclusive=True)
+        if not allow_partial:
+            raise failures[0]
     scores = []
     for number, trial in enumerate(trials):
         _check(check_paused)
-        score = await judge_trial(trial=trial, judge=config["judge"], adapter=adapter,
-                                  directory=directory / "judge" / f"{number + 1:03d}", check_paused=check_paused,
-                                  stage_prefix=f"{prefix}-judge-{number + 1:03d}")
+        if allow_partial and getattr(adapter, "_uncertain_stage", None):
+            score = {"trial_id": trial["trial_id"], "score_series_id": config["score_series_id"],
+                     "status": "unavailable", "score": None,
+                     "exposure_limitations": ["Investigation transport stopped; no judge request dispatched"]}
+            _save(directory / "judge" / f"{number + 1:03d}" / "score.json", score, exclusive=True)
+            scores.append(score)
+            continue
+        try:
+            score = await judge_trial(trial=trial, judge=config["judge"], adapter=adapter,
+                                      directory=directory / "judge" / f"{number + 1:03d}", check_paused=check_paused,
+                                      stage_prefix=f"{prefix}-judge-{number + 1:03d}")
+        except PaidCallUncertain as error:
+            if not allow_partial:
+                raise
+            score = {"trial_id": trial["trial_id"], "score_series_id": config["score_series_id"],
+                     "status": "unavailable", "score": None, "exposure_limitations": [str(error)]}
+            _save(directory / "judge" / f"{number + 1:03d}" / "score.json", score, exclusive=True)
         scores.append(score)
     valid = all(score["status"] == "scored" for score in scores)
-    reports = [{**item, "initial": initial_report, "supplementary": supplement} for item, initial_report, supplement in
-               zip(config["investigators"], initial_results, supplements, strict=True)]
-    result = {"status": "complete" if valid else "incomplete_scores", "investigators": reports, "scores": scores,
+    reports = []
+    for item, initial_report, supplement in zip(config["investigators"], initial_results, supplements, strict=True):
+        failed = {key: {"error": type(value).__name__, "detail": str(value)}
+                  for key, value in (("initial", initial_report), ("supplementary", supplement))
+                  if isinstance(value, BaseException)}
+        reports.append({**item, "initial": None if "initial" in failed else initial_report,
+                        "supplementary": None if "supplementary" in failed else supplement,
+                        **({"failure": failed} if failed else {})})
+    partial = any("failure" in report for report in reports)
+    result = {"status": "partial_investigation" if partial else "complete" if valid else "incomplete_scores", "investigators": reports, "scores": scores,
               "round_mean": sum(score["score"] for score in scores) / len(scores) if valid else None,
               "score_series_id": config["score_series_id"],
               "scanner_counts": copy.deepcopy(scanner_annotations.get("counts")) if isinstance(scanner_annotations, dict) else None,

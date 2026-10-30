@@ -448,6 +448,10 @@ def _freeze(repo, review_path, *, ledger, budget, binding, required_reserve, sna
     _path(repo, str(review_path.relative_to(repo)))
     raw = review_path.read_bytes()
     review = _json(raw)
+    if review.get("version") == "retained-snapshot-v1":
+        from refund_eval.realism.recovery_policy import freeze
+        return freeze(repo, review_path, review, ledger=ledger, budget=budget, binding=binding,
+                      required_reserve=required_reserve, snapshot=snapshot)
     if review.get("version") == EIGHT_VERSION:
         return _freeze_eight_boundary(repo, review_path, review, raw, ledger=ledger, budget=budget, binding=binding,
                                       required_reserve=required_reserve, snapshot=snapshot,

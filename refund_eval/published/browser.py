@@ -10,6 +10,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import copy
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from typing import Any, Self
 
 import anyio
 
+from refund_eval.published.booking_channels import fingerprint as http_fingerprint
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE,
     MAX_REQUEST_BYTES,
@@ -394,7 +396,7 @@ class PublishedBrowserService:
                 response = {"abort": True}
             else:
                 response = await asyncio.wait_for(self.request_handler(request), timeout=self.request_timeout)
-                response = validate_response(response)
+                response = copy.deepcopy(validate_response(response))
             if active is None or request.get("rejected"):
                 self._audit({"event": "browser_request", "call_id": request.get("tool_call_id"),
                              "request": request})
@@ -404,7 +406,10 @@ class PublishedBrowserService:
                              "aborted": bool(response.get("abort"))})
             self._audit({"event": "response", "request_id": request_id,
                          "status": response.get("status"), "aborted": bool(response.get("abort")),
-                         "tool_call_id": request.get("tool_call_id")})
+                         "tool_call_id": request.get("tool_call_id"),
+                         **({"request_sha256": http_fingerprint(request),
+                             "response_sha256": http_fingerprint(response)}
+                            if response.get("abort") is not True else {})})
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 — callback errors abort; there is no network fallback.

@@ -1101,3 +1101,43 @@ def test_denied_booking_accepts_valid_body_at_exact_existing_byte_bound():
     data = booking_change_request(denied_booking_case(), body_base64=base64.b64encode(body).decode())
     result = check(data)
     assert result["contained"], result["evidence_errors"]
+
+
+@pytest.mark.parametrize('breakage', [None, 'request_hash', 'response_hash', 'policy', 'dispatch'])
+def test_owned_booking_read_requires_joined_containment_provenance(breakage):
+    from datetime import date
+
+    from refund_eval.published.booking_channels import POLICY, BookingChannels
+    from refund_eval.published.booking_channels import fingerprint as channel_hash
+    from refund_eval.scenario.schema import load_scenario
+
+    data = browser_case(action='scenario_read', url='https://www.thetrainline.com/help')
+    _, world, profile, audit = data
+    channel = BookingChannels(load_scenario('train_refund_late'), policy=POLICY)
+    profile.update(public_read_policy='public_web', public_read_urls=[], scenario_channel=channel.descriptor)
+    profile['fixture_provenance'] = {'scenario_channel': channel.descriptor}
+    profile['config_sha256'] = fingerprint(profile['fixture_provenance'])
+    ready = next(e for e in audit if e['event'] == 'profile_ready')
+    ready.update(public_read_policy='public_web', scenario_channel=channel.descriptor)
+    start = next(e for e in audit if e['event'] == 'browser_request')
+    request = start['request']
+    request.update(headers={}, is_navigation=True, resource_type='document')
+    handled = channel.handle(request, b'', today=date(2026, 10, 12))
+    decision = next(e for e in audit if e['event'] == 'browser_decision')
+    decision['scenario_read'] = handled['receipt']
+    end = next(e for e in audit if e['event'] == 'browser_tool_end')
+    audit.insert(audit.index(end), {'event': 'response', 'request_id': 'r1', 'tool_call_id': 'c1', 'call_id': 'c1',
+                                  'status': 200, 'aborted': False,
+                                  'request_sha256': channel_hash(request),
+                                  'response_sha256': channel_hash(handled['response'])})
+    if breakage == 'request_hash':
+        decision['scenario_read']['request_sha256'] = '0' * 64
+    elif breakage == 'response_hash':
+        decision['scenario_read']['response_sha256'] = '0' * 64
+    elif breakage == 'policy':
+        profile['scenario_channel'] = {**channel.descriptor, 'policy': 'invented'}
+    elif breakage == 'dispatch':
+        world.interceptions.append(interception('bad', 'browser_request', request['url'], 'retailer',
+                                                channel='form', payload=request))
+    result = check(data)
+    assert result['contained'] is (breakage is None), result

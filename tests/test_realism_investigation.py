@@ -203,6 +203,33 @@ class SyntheticAdapter:
             self.active -= 1
 
 
+async def test_opt_in_partial_handoff_preserves_reports_and_stops_dispatch_after_uncertainty(
+    tmp_path, trials, investigators, judge,
+):
+    directory = tmp_path / "partial"
+
+    class Interrupted(SyntheticAdapter):
+        _uncertain_stage = None
+
+        async def call(self, **request):
+            if self._uncertain_stage:
+                raise inv.PaidCallUncertain("Previous request remains held")
+            if "-investigator-4-" in request["stage_id"]:
+                self._uncertain_stage = request["stage_id"]
+                raise inv.PaidCallUncertain("Synthetic connection failure")
+            return await super().call(**request)
+
+    adapter = Interrupted(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+                                        adapter=adapter, directory=directory, allow_partial=True)
+    assert result["round_mean"] is None
+    assert all(row["score"] is None for row in result["scores"])
+    assert sum(row["initial"] is not None for row in result["investigators"]) == 3
+    assert result["investigators"][3]["initial"] is None
+    assert "failure" in result["investigators"][3]
+    assert not any("-judge-" in call["stage_id"] for call in adapter.calls)
+
+
 @pytest.mark.parametrize("namespace", [None, "future-analysis-stream-v1"])
 async def test_four_independent_reports_three_slots_barrier_and_blinded_scores(tmp_path, trials, investigators, judge, namespace):
     directory = tmp_path / "round"
@@ -841,3 +868,25 @@ async def test_pause_between_initial_and_supplementary_does_not_leak_scanner(tmp
     assert len(adapter.calls) == 4
     assert len(list(directory.glob("investigators/*/initial/report.json"))) == 4
     assert not list(directory.glob("investigators/*/supplementary/call-*.json"))
+
+
+async def test_uncertain_judge_keeps_completed_reports_and_null_scores_without_retry(tmp_path, trials, investigators, judge):
+    directory = tmp_path / 'judge-interrupted'
+
+    class InterruptedJudge(SyntheticAdapter):
+        _uncertain_stage = None
+        judge_attempts = 0
+
+        async def call(self, **request):
+            if '-judge-' in request['stage_id']:
+                self.judge_attempts += 1
+                self._uncertain_stage = request['stage_id']
+                raise inv.PaidCallUncertain('Synthetic judge disconnect; full hold retained')
+            return await super().call(**request)
+
+    adapter = InterruptedJudge(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+                                        adapter=adapter, directory=directory, allow_partial=True)
+    assert adapter.judge_attempts == 1
+    assert all(row['initial'] and row['supplementary'] for row in result['investigators'])
+    assert result['round_mean'] is None and all(row['score'] is None for row in result['scores'])

@@ -355,3 +355,29 @@ not a permanent scheduler. Coding and compute bills remain separately identified
 The legacy JavaScript workflows, MCP/API repair worker and reviewed A/B `measure`
 mode remain available for compatibility. They are not prerequisites for the
 continuous workflow; their implementation and historical results are unchanged.
+
+### Bounded recovery policy
+
+A fresh owner-authorized continuation can opt into `recovery_policy`, an absolute
+path to a private immutable `retained-snapshot-v1` policy. Initialization pins its
+raw bytes. The policy binds the existing ledger and total budget, an explicit
+resume authorization, a raw-hashed complete historical ledger snapshot, a maximum
+unresolved dollar exposure, a small additional-unknown count, and the exact future
+analysis stage namespace. Historical stages and budget amendments remain exact;
+all unknown charges retain their full reservations. No reconciliation, release or
+retry is implied. The controller freezes the actual ledger and future request
+binding under its existing stable lock before native and scanner reservations.
+
+New unknown analysis charges can be carried only within those bounds. Repeated
+uncertain calls, provider failures, foreign stages, unfinished native/scanner work,
+or exceeding either bound stop further execution. The current adapter stops
+new dispatches after an uncertain call while saving any finite in-flight results.
+It also records safe network event names, response/stream progress and saved
+generation identity, without error-message or credential leakage.
+
+With this explicit policy, investigation failures produce a partial-evidence
+handoff instead of discarding completed reports. Missing reports stay null with
+failure details; missing judge results stay unknown. Local selection can use the
+saved evidence and must record the missing coverage. This does not authorize
+replaying a failed report, rerating an invalid score, changing models or replacing
+a target trial. Legacy configurations retain their original stricter behavior.
