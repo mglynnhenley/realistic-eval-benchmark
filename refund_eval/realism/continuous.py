@@ -124,7 +124,8 @@ def _exclusive(directory):
 def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
                investigation, checks=None, backlog=None, pause_file=None,
                last_tested_source=None, prior_unknown_review=None, investigation_trial_contexts=False,
-               behavior_analysis=None, analysis_transport=None, recovery_policy=None):
+               behavior_analysis=None, analysis_transport=None, recovery_policy=None,
+               analysis_evidence_profile=None):
     """Freeze a new authorization/configuration. New loops always start paused.
 
     This does not modify the existing ledger, historical evidence, pause file, or
@@ -144,6 +145,7 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
     _require(isinstance(investigation, dict), "Investigation configuration is required")
     models = validate_configuration(investigation.get("investigators"), investigation.get("judge"))
     _require(type(investigation_trial_contexts) is bool, "Explicit boolean investigation context policy required")
+    _require(analysis_evidence_profile in (None, "readable-native-v1"), "Unknown analysis evidence profile")
     checks = _commands(checks)
     source = measurement._commit(repo, source)
     tested = measurement._commit(repo, last_tested_source) if last_tested_source else None
@@ -160,6 +162,8 @@ def initialize(*, repo, run_dir, source, ledger, budget, max_rounds, settings,
               "prior_unknown_review": str(Path(prior_unknown_review).resolve()) if prior_unknown_review else None,
               "initial_last_tested_source": tested,
               "separate_billing": "Coding sessions and compute are outside the model-stage ledger"}
+    if analysis_evidence_profile is not None:
+        config["analysis_evidence_profile"] = analysis_evidence_profile
     if analysis_transport is not None:
         import re
 
@@ -252,7 +256,7 @@ class Bindings:
     check: Callable | None = None
 
 
-def extract_evidence(batch):
+def extract_evidence(batch, *, profile=None):
     """Extract full visible messages; hidden simulator state stays in tool access.
 
     Native sample messages are the target's visible trajectory. Native events,
@@ -260,6 +264,8 @@ def extract_evidence(batch):
     Exact native message IDs are preserved, with stable ordinal IDs if absent.
     """
     from inspect_ai.log import read_eval_log
+
+    _require(profile in (None, "readable-native-v1"), "Unknown analysis evidence profile")
 
     def serial(value):
         if hasattr(value, "model_dump"):
@@ -281,7 +287,7 @@ def extract_evidence(batch):
             trial_id = f"{evaluation.eval.eval_id}:{sample.id}:{sample.epoch}"
             _require(trial_id not in seen, "Duplicate native trial")
             seen.add(trial_id)
-            events, event_ids, missing = [], set(), []
+            events, event_ids, missing, opaque = [], set(), [], []
             for number, message in enumerate(sample.messages or [], 1):
                 value = serial(message)
                 _require(isinstance(value, dict), "Invalid native visible message")
@@ -291,7 +297,20 @@ def extract_evidence(batch):
                 events.append({**value, "event_id": event_id})
                 content = value.get("content")
                 if isinstance(content, list):
-                    for part in content:
+                    for index, part in enumerate(content):
+                        if profile == "readable-native-v1" and isinstance(part, dict) and part.get("type") == "reasoning":
+                            # Opaque transport fields are not readable evidence.
+                            # Keep every summary/plaintext field and the original
+                            # redacted flag; native bytes remain hash-pinned below.
+                            omitted = []
+                            for key in ("signature", "reasoning"):
+                                if (part.get(key) is not None
+                                        and (key == "signature" or part.get("redacted") is True)):
+                                    part.pop(key)
+                                    omitted.append(key)
+                            if omitted:
+                                opaque.append({"event_id": event_id, "content_index": index,
+                                               "fields": omitted})
                         if not isinstance(part, dict) or part.get("type") not in {"text", "reasoning"}:
                             kind = part.get("type", "unknown") if isinstance(part, dict) else "unknown"
                             missing.append(f"Event {event_id}: {kind} content is preserved but cannot be rendered by this text evidence adapter")
@@ -307,6 +326,8 @@ def extract_evidence(batch):
             provenance[trial_id] = {"native_log": str(path), "native_log_sha256": _sha(path),
                                     "sample_id": str(sample.id), "epoch": sample.epoch,
                                     "source_commit": batch.get("commit", batch.get("source_commit"))}
+            if profile is not None:
+                provenance[trial_id].update(analysis_evidence_profile=profile, opaque_transport_fields_omitted=opaque)
     _require(len(trials) == 3, "Exactly three independent native trials are required")
     return {"trials": trials, "state": state, "provenance": provenance}
 
@@ -399,7 +420,8 @@ class ProductionBindings(Bindings):
                               hashes=_read(manifest)["measurement_hashes"])
         # Use the validated exported logs, retaining its complete coverage checks.
         exported = {**batch, "logs": saved["logs"]}
-        extracted = extract_evidence(exported)
+        profile = config.get("analysis_evidence_profile")
+        extracted = extract_evidence(exported, **({"profile": profile} if profile is not None else {}))
         directory = Path(request["round_dir"])
         _save_once(directory / "visible-evidence.json", {"source_commit": request["source_commit"],
                    "trials": extracted["trials"], "provenance": extracted["provenance"]})

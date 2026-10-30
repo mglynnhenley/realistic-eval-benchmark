@@ -530,14 +530,21 @@ def test_checks_have_no_provider_credentials_or_dotenv_and_are_pauseable(case, m
     assert result["status"] == "round_limit"
 
 
-def test_full_visible_native_evidence_excludes_hidden_context_and_marks_images(tmp_path, monkeypatch):
+@pytest.mark.parametrize("profile", [None, "readable-native-v1"])
+def test_full_visible_native_evidence_excludes_hidden_context_and_marks_images(tmp_path, monkeypatch, profile):
     from inspect_ai import log
 
     native = tmp_path / "native.eval"
     native.write_bytes(b"synthetic native bytes")
     messages = [{"id": "native-user", "role": "user", "content": "Refund task"},
                 {"id": "native-tool", "role": "tool", "content": [{"type": "text", "text": "visible text"},
-                    {"type": "image", "image": "data:image/png;base64,AAAA"}]}]
+                    {"type": "image", "image": "data:image/png;base64,AAAA"}]},
+                {"id": "native-assistant", "role": "assistant", "content": [
+                    {"type": "reasoning", "reasoning": "opaque-ciphertext-sentinel", "signature": "opaque-signature",
+                     "redacted": True, "summary": "Available reasoning summary"},
+                    {"type": "reasoning", "reasoning": "Readable reasoning witness", "redacted": False,
+                     "signature": "transport-signature"},
+                    {"type": "text", "text": "Signature and ciphertext are words in this visible answer."}]}]
     sample = SimpleNamespace(id=1, epoch=1, completed_at="now", error=None, invalidation=None,
                              messages=messages, input="refund request", store={"secret": "hidden simulator context"},
                              metadata={}, events=[{"internal": "hidden simulator prompt"}],
@@ -554,7 +561,7 @@ def test_full_visible_native_evidence_excludes_hidden_context_and_marks_images(t
         other.write_bytes(b"synthetic")
         paths.append(str(other))
     result = loop.extract_evidence({"logs": paths, "commit": "a" * 40,
-                                    "protocol": {"scenario": "train_refund_late"}})
+                                    "protocol": {"scenario": "train_refund_late"}}, profile=profile)
     assert len(result["trials"]) == 3
     first = result["trials"][0]
     assert first["events"][1]["event_id"] == "native-tool"
@@ -565,6 +572,32 @@ def test_full_visible_native_evidence_excludes_hidden_context_and_marks_images(t
     assert result["state"][first["trial_id"]]["scores"] == sample.scores
     assert result["provenance"][first["trial_id"]]["source_commit"] == "a" * 40
     assert first["events"][1]["content"] == messages[1]["content"]
+    assistant = first["events"][2]
+    assert assistant["event_id"] == "native-assistant"
+    assert assistant["content"][0]["summary"] == "Available reasoning summary"
+    assert assistant["content"][1]["reasoning"] == "Readable reasoning witness"
+    assert assistant["content"][2] == messages[2]["content"][2]
+    assert messages[2]["content"][0]["reasoning"] == "opaque-ciphertext-sentinel"
+    if profile is None:
+        assert assistant["content"] == messages[2]["content"]
+        assert "analysis_evidence_profile" not in result["provenance"][first["trial_id"]]
+    else:
+        assert "reasoning" not in assistant["content"][0]
+        assert assistant["content"][0]["redacted"] is True
+        assert not any("signature" in part for part in assistant["content"])
+        closure = result["provenance"][first["trial_id"]]
+        assert closure["analysis_evidence_profile"] == profile
+        assert closure["opaque_transport_fields_omitted"] == [
+            {"event_id": "native-assistant", "content_index": 0, "fields": ["signature", "reasoning"]},
+            {"event_id": "native-assistant", "content_index": 1, "fields": ["signature"]}]
+        assert native.read_bytes() == b"synthetic native bytes"
+
+
+def test_readable_evidence_profile_is_explicit_immutable_and_rejects_unknown(case):
+    loop.initialize(**case.options, analysis_evidence_profile="readable-native-v1")
+    assert loop._config(case.directory)["analysis_evidence_profile"] == "readable-native-v1"
+    with pytest.raises(ValueError, match="evidence profile"):
+        loop.extract_evidence({"logs": []}, profile="silently-shortened")
 
 
 def test_module_cli_init_status_and_pause_are_unpaid(case, tmp_path, capsys):
@@ -676,11 +709,12 @@ def test_production_preflight_checks_judge_and_investigator_tool_capabilities(ca
 
 
 @pytest.mark.parametrize("conduct_mode", [False, True, "uncertain"])
-def test_production_investigation_uses_frozen_source_and_validated_exported_scans(case, monkeypatch, conduct_mode):
+@pytest.mark.parametrize("evidence_profile", [None, "readable-native-v1"])
+def test_production_investigation_uses_frozen_source_and_validated_exported_scans(case, monkeypatch, conduct_mode, evidence_profile):
     from refund_eval.realism import evidence, evidence_runtime, investigation
     from scout import scanners
 
-    loop.initialize(**case.options)
+    loop.initialize(**case.options, analysis_evidence_profile=evidence_profile)
     config = loop._config(case.directory)
     request = loop._round_request(case.directory, config, loop._read(case.directory / "checkpoint.json"), True)
     request["check_paused"] = lambda: None
@@ -692,8 +726,9 @@ def test_production_investigation_uses_frozen_source_and_validated_exported_scan
     trials = [{"trial_id": f"t{i}", "events": [{"event_id": "m1", "content": "visible"}], "task_context": {}} for i in range(3)]
     exported = {"logs": ["exported-native.eval"], "scans": "validated-exported-scans", "score": {"tells": 2}}
     monkeypatch.setattr(evidence, "load_evidence", lambda *a, **k: exported)
-    def extract(batch):
+    def extract(batch, *, profile=None):
         assert batch["logs"] == exported["logs"]
+        assert profile == evidence_profile
         return {"trials": trials,
                 "state": {"hidden": "simulator state", "t0": {"source_commit": case.initial,
                     "scores": {"resource_use": {"value": {"contacts": 9}, "metadata": {"marker": "private grade"}}}}},

@@ -202,6 +202,15 @@ reports are saved and combined without dropping findings. The four-model barrier
 still precedes all scanner/backlog supplements. This policy is frozen in the
 configuration; it does not truncate a trial or change the blinded judge's rubric.
 
+New configurations may set `analysis_evidence_profile` to `readable-native-v1`.
+This keeps all readable messages, tool arguments/results, event identities and
+available reasoning summaries. It excludes provider signature fields and reasoning
+payloads explicitly marked redacted from text analysis; original native bytes
+remain pinned and unchanged. Per-trial provenance lists every omitted opaque field.
+Images and other inaccessible substantive content still mark evidence incomplete.
+Existing configurations retain their original representation, and saved ratings
+are never regenerated. The judge, rubric and score-series identity stay fixed.
+
 After investigation, `advance` returns `awaiting_selection` with
 `rounds/0001/primary-request.json`. Read the handoff and saved reports, resolve
 conflicts using evidence and write its requested `selection.json`:
