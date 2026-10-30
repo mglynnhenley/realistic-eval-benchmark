@@ -99,6 +99,11 @@ def test_bounded_cli_makes_one_sdk_request(tmp_path, monkeypatch, slug, response
     assert body["max_tokens"] == 8192
     if slug.startswith("deepseek/"):
         assert "cache_control" not in json.dumps(body)
+    if slug == "deepseek/deepseek-v4.1-flash":
+        assert body.get("reasoning") == {"enabled": False}
+        assert body["reasoning"]["enabled"] is False
+    else:
+        assert "reasoning" not in body
     assert statuses[0].complete is (response == 200)
     assert bool(statuses[0].errors) is (response != 200)
     if response != 200:
@@ -113,4 +118,7 @@ def test_bounded_cli_makes_one_sdk_request(tmp_path, monkeypatch, slug, response
     assert role["config"]["max_retries"] == 0
     assert role["config"]["max_tokens"] == 8192
     assert role["config"]["cache_prompt"] is False
-    assert role["config"]["extra_body"] == {"plugins": []}
+    expected_body = {"plugins": []}
+    if slug == "deepseek/deepseek-v4.1-flash":
+        expected_body["reasoning"] = {"enabled": False}
+    assert role["config"]["extra_body"] == expected_body

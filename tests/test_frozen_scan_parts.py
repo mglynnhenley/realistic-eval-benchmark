@@ -148,10 +148,11 @@ def scan_row(plan):
             "scan_events": [{"event": "model", "completed": "now", "error": None,
                              "config": copy.deepcopy(plan["generation_policy"]["config"]),
                              "call": {"request": {"messages": [{"role": "user", "content": p["prompt"]}],
-                                "tools": copy.deepcopy(item["schema"]["tools"]), "extra_body": {"plugins": []},
+                                "tools": copy.deepcopy(item["schema"]["tools"]),
+                                "extra_body": copy.deepcopy(plan["generation_policy"]["config"]["extra_body"]),
                                 "tool_choice": "auto", "parallel_tool_calls": False,
-                                "model": JUDGE.removeprefix("openrouter/"), "max_tokens": 8192},
-                                "response": {"model": JUDGE, "id": f"generation-{i}", "usage": {"cost": .2},
+                                "model": plan["checked"]["judge"].removeprefix("openrouter/"), "max_tokens": 8192},
+                                "response": {"model": plan["checked"]["judge"], "id": f"generation-{i}", "usage": {"cost": .2},
                                     "choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": [{
                                         "function": {"name": "answer", "arguments": json.dumps({"explanation": "none", "tells": []})}}]}}]}}}
                             for i, p in enumerate(item["parts"])]}
@@ -318,7 +319,7 @@ async def test_real_scout_structured_answer_and_provider_wire_offline(monkeypatc
     assert actual["retry_refusals"] == 0 and actual["config"].parallel_tool_calls is False
 
 
-@pytest.mark.parametrize("partial_failure", [False, True])
+@pytest.mark.parametrize("partial_failure", [False, True, "length"])
 @pytest.mark.parametrize("judge", [JUDGE, "openrouter/deepseek/deepseek-v4-pro", "openrouter/deepseek/deepseek-v4.1-flash"])
 def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatch, partial_failure, judge):
     import asyncio
@@ -340,7 +341,14 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
     requests = []
     async def fake_completion(self, request, config):
         requests.append(copy.deepcopy(request))
-        if partial_failure and len(requests) == 2:
+        if partial_failure == "length":
+            return ChatCompletion.model_validate({"id": "offline-reasoning-only", "object": "chat.completion",
+                "created": 1, "model": judge.removeprefix("openrouter/"),
+                "choices": [{"index": 0, "finish_reason": "length", "message": {
+                    "role": "assistant", "content": None, "reasoning": "Synthetic reasoning only."}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 8192, "total_tokens": 8193, "cost": .2,
+                          "completion_tokens_details": {"reasoning_tokens": 8192}}})
+        if partial_failure is True and len(requests) == 2:
             raise RuntimeError("synthetic unknown-charge failure")
         return ChatCompletion.model_validate({"id": f"offline-{len(requests)}", "object": "chat.completion",
             "created": 1, "model": judge.removeprefix("openrouter/"),
@@ -367,13 +375,23 @@ def test_actual_sdk_scan_saved_wire_events_validate_offline(tmp_path, monkeypatc
     frozen = scans / parts.PLAN_NAME
     frozen.write_text(json.dumps(plan))
     sha = parts.file_digest(frozen)
-    model = get_model(judge, api_key="offline-synthetic-key", config=scan_budget.bounded_tells_config(8192),
+    model = get_model(judge, api_key="offline-synthetic-key", config=scan_budget.bounded_tells_config(8192, judge=judge),
                       max_retries=0, memoize=False)
     status = scan(scanners={"tells": tells(bounded=True, parts_protocol=parts.VERSION,
                                          parts_plan=str(frozen), parts_sha256=sha)},
                   transcripts=transcripts_from([str(log)]), scans=str(scans),
                   model_roles={"judge": model}, max_processes=1, display="none")
-    if partial_failure:
+    if partial_failure == "length":
+        assert status.errors and len(requests) == 1  # No retry or next part after a truncated answer.
+        frame = scan_results_df(status.location, scanner="tells", exclude_columns=[]).scanners["tells"]
+        events = [event for event in json.loads(frame.iloc[0]["scan_events"]) if event["event"] == "model"]
+        assert len(events) == 1
+        response = events[0]["call"]["response"]
+        assert response["choices"][0]["finish_reason"] == "length"
+        assert response["usage"]["cost"] == .2
+        with pytest.raises(ValueError):
+            validated_samples([str(log)], scans, expected_trials=1, judge=judge)
+    elif partial_failure:
         assert status.errors and len(requests) == 2  # No third part or retry.
         frame = scan_results_df(status.location, scanner="tells", exclude_columns=[]).scanners["tells"]
         events = json.loads(frame.iloc[0]["scan_events"])

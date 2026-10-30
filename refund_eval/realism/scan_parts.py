@@ -97,7 +97,7 @@ def checked_policy(checked):
     )
 
     judge, cap = checked["judge"], checked["max_tokens"]
-    bounded_tells_config(cap)
+    bounded_tells_config(cap, judge=judge)
     require(checked["single_attempt"] is True and isinstance(judge, str)
             and judge.startswith("openrouter/") and judge.removeprefix("openrouter/") in SUPPORTED_WINDOWS,
             "Unsupported frozen judge policy")
@@ -125,7 +125,7 @@ def generation_policy(checked):
 
     from refund_eval.realism.scan_budget import bounded_tells_config
 
-    return {"config": bounded_tells_config(checked["max_tokens"]).merge(
+    return {"config": bounded_tells_config(checked["max_tokens"], judge=checked["judge"]).merge(
                 GenerateConfig(parallel_tool_calls=False)).model_dump(exclude_none=True),
             "sdk_args": {"max_retries": 0}, "answer_attempts": 1, "refusal_retries": 0,
             "context_tools": []}
@@ -292,10 +292,10 @@ async def scan_transcript(transcript, plan, plan_sha256):
     checked, results, records = plan["checked"], [], []
     model = get_model(role="judge")
     require(str(model) == checked["judge"] and model.model_args.get("max_retries") == 0
-            and model.config == bounded_tells_config(checked["max_tokens"]), "Frozen judge role/config differs")
+            and model.config == bounded_tells_config(checked["max_tokens"], judge=checked["judge"]), "Frozen judge role/config differs")
     for part in row["parts"]:
         result = await generate_answer(part["prompt"], answer_spec(), model=model,
-                                       config=bounded_tells_config(checked["max_tokens"]),
+                                       config=bounded_tells_config(checked["max_tokens"], judge=checked["judge"]),
                                        retry_refusals=0, context_tools=())
         require(isinstance(result.value, dict), "Missing part answer; no retry permitted")
         value = citations({**result.value, "explanation": result.explanation}, row, part)
@@ -311,6 +311,9 @@ async def scan_transcript(transcript, plan, plan_sha256):
 
 def validate_answer(row, plan, plan_sha256):
     """Strict complete part/answer/raw-charge coverage before publishing a score."""
+    from refund_eval.realism.scan_budget import bounded_tells_config
+
+    expected_body = bounded_tells_config(plan["checked"]["max_tokens"], judge=plan["checked"]["judge"]).extra_body
     def obj(value):
         return json.loads(value) if isinstance(value, str) else value
 
@@ -358,7 +361,7 @@ def validate_answer(row, plan, plan_sha256):
                 and request.get("model") == plan["checked"]["judge"].removeprefix("openrouter/")
                 and type(request.get("max_tokens")) is int and request["max_tokens"] == config["max_tokens"]
                 and request.get("parallel_tool_calls") is False
-                and request.get("extra_body") == {"plugins": []}, "Unbounded or unexpected part request")
+                and digest(request.get("extra_body")) == digest(expected_body), "Unbounded or unexpected part request")
         messages = request.get("messages") or []
         require(len(messages) == 1 and messages[0].get("role") == "user", "Unexpected part input messages")
         content = messages[0].get("content")

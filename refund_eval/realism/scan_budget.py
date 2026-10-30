@@ -100,7 +100,7 @@ def input_price_bound(judge: str, pricing: dict) -> float:
     return max(_price(pricing, field) for field in INPUT_TARIFFS if field in pricing)
 
 
-def bounded_tells_config(max_tokens: int):
+def bounded_tells_config(max_tokens: int, *, judge: str | None = None):
     """Bounded generation settings; the judge's SDK constructor also needs max_retries=0."""
     from inspect_ai.model import GenerateConfig
 
@@ -108,8 +108,13 @@ def bounded_tells_config(max_tokens: int):
         raise ValueError(f"Scanner output cap must be between 1 and {OUTPUT_CAP}")
     # No plugin is enabled, including OpenRouter's opt-in native web search.
     # Scout declares only its structured answer tool (no context/web tools).
+    extra_body = {"plugins": []}
+    if judge in (DEEPSEEK_FLASH, "openrouter/" + DEEPSEEK_FLASH):
+        # Flash defaults to reasoning on. Persist its explicit off switch in
+        # both the frozen policy and SDK wire request, not just numeric judging.
+        extra_body["reasoning"] = {"enabled": False}
     return GenerateConfig(cache_prompt=False, max_tokens=max_tokens, max_retries=0,
-                          extra_body={"plugins": []})
+                          extra_body=extra_body)
 
 
 def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: int,
@@ -122,7 +127,7 @@ def validate_saved_tells_scan(specification: dict, *, judge: str, max_tokens: in
     """
     if single_attempt is not True:
         raise ValueError("Saved evidence requires an explicitly single-attempt scanner protocol")
-    expected = bounded_tells_config(max_tokens).model_dump(exclude_none=True)
+    expected = bounded_tells_config(max_tokens, judge=judge).model_dump(exclude_none=True)
     if (not isinstance(judge, str) or not judge.startswith("openrouter/")
             or judge.removeprefix("openrouter/") not in SUPPORTED_WINDOWS):
         raise ValueError("Saved evidence uses an unsupported bounded judge")
@@ -168,7 +173,7 @@ async def preflight(judge: str, *, max_tokens: int = OUTPUT_CAP,
     """
     if not single_attempt:
         raise ValueError("Scan planning requires an explicitly single-attempt scanner protocol")
-    bounded_tells_config(max_tokens)
+    bounded_tells_config(max_tokens, judge=judge)
     name = judge.removeprefix("openrouter/")
     if not judge.startswith("openrouter/") or name not in SUPPORTED_WINDOWS:
         raise ValueError("Judge context/segmentation policy is unsupported by the reservation planner")

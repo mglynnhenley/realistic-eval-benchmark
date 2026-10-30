@@ -119,9 +119,52 @@ def test_flash_registers_its_confirmed_window_without_a_pro_alias():
 
 def test_saved_flash_scan_requires_exact_bounded_policy():
     specification = {"model_roles": {"judge": {"model": JUDGE, "args": {"max_retries": 0},
-        "config": scan_budget.bounded_tells_config(8192).model_dump(exclude_none=True)}},
+        "config": scan_budget.bounded_tells_config(8192, judge=JUDGE).model_dump(exclude_none=True)}},
         "scanners": {"tells": {"name": "tells", "params": {"bounded": True}}}}
     scan_budget.validate_saved_tells_scan(specification, judge=JUDGE, max_tokens=8192, single_attempt=True)
     specification["model_roles"]["judge"]["config"]["max_retries"] = 1
     with pytest.raises(ValueError, match="settings"):
         scan_budget.validate_saved_tells_scan(specification, judge=JUDGE, max_tokens=8192, single_attempt=True)
+
+
+@pytest.mark.parametrize("reasoning", [None, {"enabled": True}, {"enabled": 0}, {"effort": "none"}])
+def test_saved_flash_scan_cannot_omit_or_substitute_the_explicit_off_switch(reasoning):
+    config = scan_budget.bounded_tells_config(8192, judge=JUDGE).model_dump(exclude_none=True)
+    if reasoning is None:
+        del config["extra_body"]["reasoning"]
+    else:
+        config["extra_body"]["reasoning"] = reasoning
+    spec = {"model_roles": {"judge": {"model": JUDGE, "args": {"max_retries": 0}, "config": config}},
+            "scanners": {"tells": {"name": "tells", "params": {"bounded": True}}}}
+    with pytest.raises(ValueError, match="settings"):
+        scan_budget.validate_saved_tells_scan(spec, judge=JUDGE, max_tokens=8192, single_attempt=True)
+
+
+@pytest.mark.parametrize("judge", ["openrouter/anthropic/claude-opus-5.5", "openrouter/deepseek/deepseek-v4-pro"])
+def test_other_judges_keep_their_original_bounded_settings(judge):
+    assert scan_budget.bounded_tells_config(8192, judge=judge).model_dump(exclude_none=True) == {
+        "max_retries": 0, "max_tokens": 8192, "cache_prompt": False, "extra_body": {"plugins": []}}
+
+
+@pytest.mark.parametrize("mutation", ["missing", "enabled", "numeric_zero", "config"])
+async def test_flash_frozen_plan_and_raw_charge_coverage_require_reasoning_off(tmp_path, flash, mutation):
+    from test_frozen_scan_parts import make_plan, scan_row, transcript
+
+    from refund_eval.realism import scan_parts
+
+    source = tmp_path / "synthetic.eval"
+    source.write_bytes(b"Synthetic saved source only; no native reader")
+    checked = await scan_budget.preflight(JUDGE, single_attempt=True)
+    plan = await make_plan(transcript(source), checked)
+    assert plan["generation_policy"]["config"]["extra_body"] == {"plugins": [], "reasoning": {"enabled": False}}
+    row = scan_row(plan)
+    assert len(scan_parts.validate_answer(row, plan, "a" * 64)) == 1
+    event = row["scan_events"][0]
+    if mutation == "missing":
+        del event["call"]["request"]["extra_body"]["reasoning"]
+    elif mutation == "config":
+        event["config"]["extra_body"]["reasoning"]["enabled"] = True
+    else:
+        event["call"]["request"]["extra_body"]["reasoning"]["enabled"] = True if mutation == "enabled" else 0
+    with pytest.raises(ValueError):
+        scan_parts.validate_answer(row, plan, "a" * 64)

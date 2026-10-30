@@ -263,7 +263,7 @@ def main(argv: list[str] | None = None) -> None:
         # Scout's global model_config does not configure a named judge role.
         # Bind the bounded generation policy directly to that role's model.
         # SDK retries are separate from Inspect's GenerateConfig.max_retries.
-        judge_model = (get_model(judge, config=bounded_tells_config(args.max_tokens),
+        judge_model = (get_model(judge, config=bounded_tells_config(args.max_tokens, judge=judge),
                                  max_retries=0, memoize=False)
                        if args.bounded_tells else judge)
         status = scan(
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> None:
             scans=str(scan_dirs[judge]),
             model_roles={"judge": judge_model},
             # Scanners run in parallel, so prompt-cache writes are never read back; skip the 25% write premium.
-            model_config=(bounded_tells_config(args.max_tokens) if args.bounded_tells else
+            model_config=(bounded_tells_config(args.max_tokens, judge=judge) if args.bounded_tells else
                           GenerateConfig(cache_prompt=False,
                               **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}))),
             limit=args.limit,
