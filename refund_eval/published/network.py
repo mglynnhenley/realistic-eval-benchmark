@@ -182,8 +182,18 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
     for _ in range(4):
         if re.search(r"[\x00-\x1f\x7f\\]", decoded):
             return "url_guard"
+        guard_url = decoded
+        if page_load and navigation_write_reason(request) == "write_bearing_url":
+            # These are submitted contact fields, not a real public GET. Check
+            # the destination and remaining URL controls without mistaking its
+            # email field or message prose for a tracked link or action token.
+            # The original URL/fields still go to local form interception only.
+            parts = urlsplit(decoded)
+            guarded_query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                             if re.sub(r"[^a-z0-9]", "", key.casefold()) not in _WRITE_PARAMS | {"email"}]
+            guard_url = urlunsplit(parts._replace(query=urlencode(guarded_query)))
         try:
-            validate_public_url(decoded, static_asset=static_asset_path(request, decoded))
+            validate_public_url(guard_url, static_asset=static_asset_path(request, guard_url))
         except (ValueError, TypeError, OSError):
             return "url_guard"
         next_url = unquote_plus(decoded)

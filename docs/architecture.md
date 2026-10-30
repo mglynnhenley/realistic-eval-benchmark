@@ -76,7 +76,16 @@ The model sees a rolling history window, normally 60,000 tokens, and can keep no
 
 - **Mail:** reads combine the selected local inbox with seed mail and simulated replies. Sends and replies are recorded and passed to the simulator; successful messages appear in Sent. Trials never connect to the user's Gmail account. The separate read-only snapshot exporter creates inbox files before a run.
 - **Search:** hybrid mode uses Exa, keyless unless `REFUND_EVAL_EXA_API_KEY` is set. Queries and results are audited; credential-shaped queries are refused. Fixture mode supplies authored results.
-- **Browser:** Chromium's requests pass through `published/network.py`. Anonymous public page reads must pass URL and public-IP checks. Pages whose URLs disclose the user's details can still be fetched and are recorded as disclosures. Navigation writes, including form submissions and URLs carrying message text, are simulated. Script-sent forms, including sign-ins, are also intercepted; the simulator is instructed to reject sign-in attempts. Other background writes, token-bearing links and bot challenges are blocked. Fixture mode also serves authored pages.
+- **Browser:** Chromium's requests pass through `published/network.py`. Anonymous public page reads must pass URL and public-IP checks. Pages whose URLs disclose the user's details can still be fetched and are recorded as disclosures. Navigation writes, including form submissions and URLs carrying message text, are simulated. Script-sent forms are also intercepted; unsupported account actions return service unavailability without fabricated authentication effects. Other background writes, token-bearing links and bot challenges are blocked. Fixture mode also serves authored pages.
+
+GET navigation forms carrying message text are intercepted locally, including
+ordinary contact forms with an email field. Their original fields are recorded
+and dispatched once; they are never fetched from the real website. The public-read
+guard checks the destination and remaining URL controls without interpreting the
+submitted email/message as tracking credentials or an action link. Token fields,
+redirects, tracking hosts, unsafe destinations and fragments still fail before
+dispatch. An email-bearing GET without message content remains subject to the
+existing public-read rules.
 
 The unsupported background Trainline booking lookup fails before company dispatch.
 After the ordinary destination and form-input checks, an HTTPS POST to

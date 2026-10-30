@@ -281,6 +281,8 @@ async def test_public_web_personal_identifier_fields_are_read_and_recorded_as_di
     "https://example.org/feedback?msg=Please+refund+me",
     "https://example.org/mail?subject=Refund&body=I+did+not+travel",
     "https://example.org/support?enquiry=Refund+for+cancelled+train",
+    "https://example.org/contact?email=customer%40example.org&message=Please+look+into+my+case",
+    "https://example.org/contact?email=customer%40example.org&message=Please+confirm+you+received+my+message",
 ])
 async def test_public_web_get_navigation_carrying_message_fields_is_simulated_as_a_form(ctx, monkeypatch, url):
     async def fetch(request):
@@ -306,6 +308,26 @@ async def test_public_web_get_navigation_carrying_message_fields_is_simulated_as
     pairs = parse_qsl(urlsplit(url).query)
     assert inbound.channel == "form" and inbound.fields == dict(pairs)
     assert inbound.body == "\n".join(f"{key}: {value}" for key, value in pairs)
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.org/contact?message=Hello&email=customer%40example.org&token=one-time-token",
+    "https://example.org/contact?message=Hello&email=customer%40example.org&next=https%3A%2F%2Fexample.net",
+    "https://click.sendgrid.net/contact?message=Hello&email=customer%40example.org",
+    "https://example.org/contact?message=Hello&email=customer%40example.org#token=one-time-token",
+    "https://example.org/contact?message=Hello&email=customer%40example.org&u=recipient",
+    "http://127.0.0.1/contact?message=Hello&email=customer%40example.org",
+])
+async def test_get_contact_fields_do_not_bypass_other_url_guards(ctx, monkeypatch, url):
+    async def unexpected(*args, **kwargs):
+        pytest.fail("Guarded form reached a network fetch or company dispatch")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", unexpected)
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=unexpected)
+    assert (await boundary(public_req(url)))["status"] == 403
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "url_guard"
+    assert load_world().interceptions == []
+    assert load_world().disclosures == []
 
 
 async def test_public_web_still_refuses_tracked_links_keyed_by_recipient(ctx):
