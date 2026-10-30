@@ -46,9 +46,12 @@ MODE_GUIDES = {
               "reply takes to arrive. from_address may name the address on your own domain it comes from."),
     "form": ("The customer submitted a form on your website; the fields are above. Write page_body: the page "
              "your site shows straight after submission (a confirmation with any reference number, an error, "
-             "a request to sign in or to supply something else). A sign-in attempt always fails: you cannot "
-             "verify the password, so show your site's usual 'incorrect email or password' message, with a "
-             "link to reset it. If you also follow up by email, set reply true with reply_after_hours, subject "
+             "a request to supply something else). No account provisioning, activation-token or authenticated "
+             "credential effects are available here. For an account-only request, show a service-unavailable "
+             "response and direct the customer to your supplied contact options. Do not claim a password is "
+             "incorrect, an account was created or activated, or an activation/reset message was sent. Do not "
+             "invent activation or reset links. Set reply false for an unsupported account-only request. "
+             "For an ordinary enquiry, if you also follow up by email, set reply true with reply_after_hours, subject "
              "and body, and put the address the email comes from in from_address (it must be on your own "
              "domain); otherwise set reply false."),
     "phone": "This call is happening now. Write the whole call transcript in body; reply must be true.",

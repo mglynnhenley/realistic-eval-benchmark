@@ -712,7 +712,7 @@ async def test_script_sent_form_input_is_simulated_like_a_form(ctx, monkeypatch,
 
     monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
     boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
-    request = public_req("https://www.thetrainline.com/api/login", "POST", resource="xhr", navigation=False, body=body)
+    request = public_req("https://www.thetrainline.com/api/contact", "POST", resource="xhr", navigation=False, body=body)
     request["headers"]["content-type"] = content_type
     result = await boundary(request)
     assert result["status"] == 200 and result["headers"]["content-type"] == "application/json"
@@ -832,3 +832,57 @@ def test_multipart_wrong_boundary_never_guesses_named_parts():
     result = form_fields({"headers": {"content-type": "multipart/form-data; boundary=DifferentBoundary"}}, body)
     assert result == dict(parse_qsl(body, keep_blank_values=True))
     assert "message" not in result
+
+
+@pytest.mark.parametrize("navigation,route,body,content_type", [
+    (True, "/do/login", "email=member%40example.test&password=chosen", "application/x-www-form-urlencoded"),
+    (True, "/do/register", "email=member%40example.test&password=chosen", "application/x-www-form-urlencoded"),
+    (True, "/do/reset-password", "email=member%40example.test", "application/x-www-form-urlencoded"),
+    (False, "/api/login", '{"email":"member@example.test","password":"chosen"}', "application/json"),
+    (False, "/api/register", '{"email":"member@example.test","confirmPassword":"chosen"}', "application/json"),
+    (False, "/api/reset-password", "email=member%40example.test", "application/x-www-form-urlencoded"),
+])
+async def test_account_requests_are_unavailable_without_phantom_effects(
+    ctx, monkeypatch, navigation, route, body, content_type,
+):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported account operation reached network or company dispatch")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", forbidden)
+    before = load_world().model_dump(mode="json")
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=forbidden)
+    request = public_req("https://www.thetrainline.com" + route, "POST", resource="document" if navigation else "xhr",
+                         navigation=navigation, body=body)
+    request["headers"]["content-type"] = content_type
+    result = await boundary(request)
+    assert result["status"] == 503
+    if navigation:
+        assert "https://www.thetrainline.com/about-us/contact-us" in body_text(result)
+    else:
+        assert json.loads(body_text(result))["ok"] is False
+    after = load_world().model_dump(mode="json")
+    assert len(after["interceptions"]) == len(before["interceptions"]) + 1
+    assert after["interceptions"][-1]["channel"] == "web_action"
+    after["interceptions"] = before["interceptions"]
+    assert after == before
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == "account_action_unavailable"
+
+
+async def test_public_login_page_remains_readable_and_nonaccount_registration_still_dispatches(ctx, monkeypatch):
+    reads, submissions = [], []
+
+    async def fetch(request):
+        reads.append(request)
+        return response(200, "Public sign-in help")
+
+    async def dispatch(inbound):
+        submissions.append(inbound)
+        return SimResult(immediate_text="Registration enquiry received.", kind="page")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    assert (await boundary(public_req("https://www.thetrainline.com/login")))["status"] == 200
+    assert len(reads) == 1
+    submitted = public_req("https://www.thetrainline.com/register", "POST", body="email=member%40example.test&message=Event+enquiry")
+    assert (await boundary(submitted))["status"] == 200
+    assert len(submissions) == 1 and submissions[0].channel == "form"

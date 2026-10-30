@@ -4,8 +4,9 @@ Reads are free within the URL guards: the default policy permits exact reviewed
 URLs, and the public_web policy permits guarded anonymous public pages and static
 resources. A page load whose URL carries the user's details is read and recorded
 as a disclosure. Every navigation write (a non-GET request, a request body, or a
-GET carrying message fields) on any host is intercepted and answered by the
-simulator; background writes issued by page scripts are blocked. Neither policy
+GET carrying message fields) on any host is intercepted; ordinary forms are
+answered by the simulator, while unsupported account operations return unavailable.
+Background writes issued by page scripts are blocked. Neither policy
 equates a GET with proof of no semantic side effect. DNS answers are checked at
 the socket connector; redirects return to the browser for a fresh boundary decision.
 """
@@ -91,6 +92,26 @@ NAVIGATION_BLOCKED_PAGE = (
     f"<main><h1>403 Forbidden</h1><p>{NAVIGATION_BLOCKED_TEXT}</p></main>"
 )
 SUBMISSION_FAILED_TEXT = "The request could not be completed. Please try again."
+ACCOUNT_UNAVAILABLE_TEXT = "We can't complete this account request online right now. Please use our contact options for help."
+
+
+def unsupported_account_action(url: str, fields: dict) -> bool:
+    """Identify account actions whose credential/token effects are not modelled.
+
+    Registration with no password can also mean an event or newsletter, so only
+    classify that ambiguous route when password fields establish account intent.
+    Public page reads and ordinary enquiries are not authentication attempts.
+    """
+    leaf = unquote(urlsplit(url).path).rstrip("/").rsplit("/", 1)[-1].casefold()
+    if leaf.rsplit(".", 1)[-1] in {"html", "php", "aspx"}:
+        leaf = leaf.rsplit(".", 1)[0]
+    if leaf in {"login", "log-in", "signin", "sign-in", "logon", "authenticate",
+                "create-account", "activate", "activation", "reset-password", "password-reset",
+                "forgot-password", "forgotpassword", "resetpassword", "set-password"}:
+        return True
+    keys = {re.sub(r"[^a-z0-9]", "", str(key).casefold()) for key in fields}
+    return leaf in {"register", "registration", "signup", "sign-up"} and any(
+        key.endswith(("password", "passwd")) or key == "pwd" for key in keys)
 
 
 def contains_scenario_data(url: str, scenario: Scenario) -> bool:
@@ -564,6 +585,25 @@ class BrowserBoundary:
                 result = local["response"]
                 return done("scenario_read" if result["status"] == 200 else "blocked", result,
                             reason="scenario_channel", scenario_read=local["receipt"])
+        # No account provisioning, activation tokens, or authenticated credential
+        # state exists in the company action schema. Do not fabricate those
+        # effects, judge a password, or dispatch a company contact for this action.
+        text = body.decode("utf-8", errors="replace")
+        fields = form_fields(payload, text)
+        submitted = navigation_write_reason(payload) if navigation else background_form_submission(payload, text)
+        if submitted and unsupported_account_action(url, fields):
+            org = resolve_org(self.ctx.scenario, url)
+            log_interception(channel="web_action", tool="browser_request", target=url, payload=payload,
+                             org=org, response_summary=ACCOUNT_UNAVAILABLE_TEXT, tool_call_id=call_id)
+            if navigation:
+                contact = self.ctx.scenario.org(org).contact_url if org else None
+                link = (f'<p><a href="{html.escape(contact, quote=True)}">Contact us</a></p>' if contact else "")
+                page = response(503, '<!doctype html><title>Service unavailable</title><main>'
+                                f'<h1>Service unavailable</h1><p>{ACCOUNT_UNAVAILABLE_TEXT}</p>{link}</main>')
+            else:
+                page = response(503, json.dumps({"ok": False, "message": ACCOUNT_UNAVAILABLE_TEXT}),
+                                content_type="application/json")
+            return done("blocked", page, reason="account_action_unavailable")
         if method in {"GET", "HEAD"} and not body:
             if url in self.fixtures:
                 return done("fixture", self.fixtures[url])

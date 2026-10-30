@@ -193,3 +193,16 @@ unsupported external account APIs remain blocked. Private clinical facts, card
 information and grading notes are never projected into these pages. Host response
 hashes and source-bound policy descriptors record containment separately from any
 judgment of the target's behavior.
+
+
+Browser account actions whose credential, activation-token or provisioning state
+is not modelled return a service-unavailable response. Recognised login, password
+reset and account-registration submissions are recorded as website attempts and
+never forwarded or treated as company contacts, email deliveries or financial
+effects. Account registration is distinguished from an ordinary event/newsletter
+registration by password fields; public sign-in help pages and ordinary enquiries
+retain their existing paths. Navigation responses link only to the organisation's
+configured contact page. The company form instructions likewise do not invent
+incorrect-password judgments, account creation, activation mail or reset links.
+This makes the unsupported boundary truthful; it does not add a working complaint
+portal, bank authentication or account lifecycle.
