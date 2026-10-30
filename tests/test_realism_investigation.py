@@ -990,3 +990,31 @@ async def test_paid_uncertainty_after_invalid_trial_is_preserved_and_never_bypas
     assert all(score["score"] is None for score in result["scores"])
     assert not any("-judge-" in call["stage_id"] for call in adapter.calls)
     assert not (directory / "investigators/investigator-2/initial/trials/003").exists()
+
+
+@pytest.mark.parametrize("phase", ["initial", "supplement"])
+async def test_context_overflow_keeps_other_trial_reports_without_cutting_or_retry(
+    tmp_path, trials, investigators, judge, monkeypatch, phase,
+):
+    directory = tmp_path / "overflow-trial"
+    original = inv._conversation
+    rejected = []
+
+    async def conversation(**kwargs):
+        if f"-investigator-2-trial-002-{phase}" in kwargs["stage_prefix"]:
+            rejected.append(kwargs["stage_prefix"])
+            raise inv.ContextOverflow("Complete evidence does not fit; no inference launched")
+        return await original(**kwargs)
+
+    monkeypatch.setattr(inv, "_conversation", conversation)
+    adapter = SyntheticAdapter(directory)
+    result = await inv.investigate_round(trials=trials, investigators=investigators, judge=judge,
+        adapter=adapter, directory=directory, allow_partial=True, trial_contexts=True)
+    model = result["investigators"][1]
+    field = "initial" if phase == "initial" else "supplementary"
+    assert model[field] is not None and len(rejected) == 1
+    assert model[field]["unavailable_trials"][0]["error"] == "ContextOverflow"
+    assert not any(f"-investigator-2-trial-002-{phase}-" in call["stage_id"] for call in adapter.calls)
+    for number in (1, 3):
+        assert (directory / "investigators/investigator-2" / field / "trials" / f"{number:03d}/report.json").exists()
+    assert result["round_mean"] == 8 and result["status"] == "partial_investigation"
