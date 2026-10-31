@@ -406,6 +406,16 @@ The stage remains failed and scan coverage remains incomplete. This permits usin
 saved original trials without replaying the scanner or changing the historical
 snapshot, namespace, uncertainty bounds or budget. Other failures still stop.
 
+An explicit owner decision may also retain one exact completed native stage with
+an unknown charge through `retained_native_failure`. Its immutable artifact binds
+the entire parent policy, exact stage/readback, sealed result, three successful
+original trials, cleanup and the single cancelled simulator event with missing
+usage. The stage remains unknown for accounting and its full reservation stays
+held; it counts against both original uncertainty limits. This exception permits
+analysis of the saved trials and subsequent bounded rounds, never a native replay,
+invented bill or a reset of the historical snapshot. Original native accounting
+and measurement seals remain unchanged. Any later native failure still stops.
+
 Historical analysis reservations left `started` by a killed process require an
 exact raw-hashed interruption observation and original request pins in
 `historical_interruptions`. This permits retaining the unchanged unknown hold;

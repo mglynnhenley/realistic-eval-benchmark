@@ -198,3 +198,127 @@ def test_scan_exception_requires_explicit_authorization(fixture, tmp_path, field
     value["settled_scan_failure"] = pin(tmp_path / "declined.json", authorization)
     with pytest.raises(ValueError, match="authorization"):
         check(fixture)
+
+
+def authorize_native(fixture, tmp_path, *, reserve=7):
+    value, current, _ = fixture
+    item = stage(status="complete", kind="trials", reserve=reserve)
+    current["stages"]["saved-native"] = item
+    cleanup = {"sessions": ["one", "two", "three"], "terminated": [], "unresolved": []}
+    result = {"status": "reconciliation_required", "fingerprint": "frozen", "cleanup": cleanup}
+    exception = {
+        "original_policy": pin(tmp_path / "native-parent.json", copy.deepcopy(value)),
+        "stage_id": "saved-native", "stage_sha256": policy.digest(item),
+        "accounting_readback": pin(tmp_path / "native-readback.json", {
+            "stage_id": "saved-native", "stage": item, "all_preexisting_stages_preserved": True}),
+        "result": pin(tmp_path / "native-result.json", result),
+        "completion": pin(tmp_path / "native-completion.json", {
+            "fingerprint": "frozen", "result_sha256": policy.digest(result)}),
+        "cleanup": pin(tmp_path / "native-cleanup.json", cleanup),
+        "job": pin(tmp_path / "native-job.json", {"id": "original-job", "finished_at": "saved",
+            "n_total_trials": 3, "stats": {"n_completed_trials": 3, "n_errored_trials": 0,
+                "n_running_trials": 0, "n_pending_trials": 0, "n_cancelled_trials": 0, "n_retries": 0}}),
+        "native_accounting": pin(tmp_path / "native-accounting.json", {"status": "unknown", "logs": [
+            {"status": "verified"}, {"status": "verified"},
+            {"status": "unknown", "source": "original.eval", "sha256": "original-sha"}]}),
+        "missing_usage": pin(tmp_path / "native-missing.json", {
+            "original_charge_hold_retained": True,
+            "native": {"path": "original.eval", "sha256": "original-sha"},
+            "missing_events": [{"event_uuid": "cancelled-one", "role": "simulator",
+                "error_present": True, "error": "RuntimeError('model call cancelled')"}]}),
+        "request_fingerprint": "frozen", "job_id": "original-job", "cancelled_event_uuid": "cancelled-one",
+        "continue_saved_trials": True, "resume_loop_within_original_limits": True,
+        "retain_full_reservation": True, "preserve_native_accounting_unknown": True, "no_replay": True,
+    }
+    value["retained_native_failure"] = pin(tmp_path / "native-exception.json", exception)
+    return exception
+
+
+def test_owner_native_exception_composes_with_scan_exception_without_reset(fixture, tmp_path):
+    authorize_scan(fixture, tmp_path)
+    authorize_native(fixture, tmp_path)
+    value, current, ledger = fixture
+    before = copy.deepcopy((value, current))
+    pending = check(fixture)
+    assert pending["saved-native"]["actual_usd"] is None
+    assert pending["saved-native"]["reserve_usd"] == 7
+    assert pending["saved-scan"]["status"] == "failed"
+    assert (value, current) == before and not ledger.exists()
+    current["stages"]["new-stream-v1-settled"] = stage(status="complete", actual=0.5)
+    assert "saved-native" in check(fixture)
+
+
+@pytest.mark.parametrize("field", ["continue_saved_trials", "resume_loop_within_original_limits",
+    "retain_full_reservation", "preserve_native_accounting_unknown", "no_replay"])
+def test_native_exception_requires_each_explicit_owner_condition(fixture, tmp_path, field):
+    exception = authorize_native(fixture, tmp_path)
+    exception[field] = False
+    fixture[0]["retained_native_failure"] = pin(tmp_path / "declined-native.json", exception)
+    with pytest.raises(ValueError, match="authorization"):
+        check(fixture)
+
+
+@pytest.mark.parametrize("mutation", ["charge", "status", "kind", "reserve", "finished_at", "detail",
+    "cap", "count", "namespace", "snapshot", "another_native", "another_scan", "new_unknown"])
+def test_native_exception_preserves_original_boundaries(fixture, tmp_path, mutation):
+    authorize_native(fixture, tmp_path)
+    value, current, _ = fixture
+    if mutation in {"charge", "status", "kind", "reserve", "finished_at", "detail"}:
+        field, changed = {"charge": ("actual_usd", 0), "status": ("status", "failed"),
+            "kind": ("kind", "interaction"), "reserve": ("reserve_usd", 1),
+            "finished_at": ("finished_at", None), "detail": ("detail", "changed")}[mutation]
+        current["stages"]["saved-native"][field] = changed
+    elif mutation in {"cap", "count", "namespace"}:
+        field, changed = {"cap": ("max_unresolved_usd", 99), "count": ("max_new_unknowns", 3),
+            "namespace": ("analysis_stage_namespace", "reset-stream-v1")}[mutation]
+        value[field] = changed
+    elif mutation == "snapshot":
+        value["snapshot"] = pin(tmp_path / "new-snapshot.json", current)
+    elif mutation == "another_native":
+        current["stages"]["another-native"] = stage(status="complete", kind="trials")
+    elif mutation == "another_scan":
+        current["stages"]["another-scan"] = stage(status="failed", kind="tells", actual=0.1)
+    else:
+        current["stages"]["new-stream-v1-unknown"] = stage()
+    before = copy.deepcopy(current)
+    with pytest.raises(ValueError):
+        check(fixture)
+    assert current == before
+
+
+def test_retained_native_charge_counts_toward_unchanged_dollar_limit(fixture, tmp_path):
+    authorize_native(fixture, tmp_path, reserve=40)
+    with pytest.raises(ValueError, match="dollar exposure"):
+        check(fixture)
+
+
+@pytest.mark.parametrize("mutation", ["unresolved", "result_seal", "retry", "errored", "inflight",
+    "uncompleted", "wrong_job", "wrong_event", "wrong_native", "second_missing", "verified_bill"])
+def test_native_exception_rejects_incomplete_or_different_receipts(fixture, tmp_path, mutation):
+    exception = authorize_native(fixture, tmp_path)
+    key = {"unresolved": "cleanup", "result_seal": "completion", "retry": "job", "errored": "job",
+        "inflight": "job", "uncompleted": "job", "wrong_job": "job", "wrong_event": "missing_usage",
+        "wrong_native": "missing_usage", "second_missing": "missing_usage", "verified_bill": "native_accounting"}[mutation]
+    receipt = policy.artifact(exception[key])
+    if mutation == "unresolved":
+        receipt["unresolved"] = ["one"]
+    elif mutation == "result_seal":
+        receipt["result_sha256"] = "changed"
+    elif mutation in {"retry", "errored", "inflight", "uncompleted"}:
+        field, changed = {"retry": ("n_retries", 1), "errored": ("n_errored_trials", 1),
+            "inflight": ("n_running_trials", 1), "uncompleted": ("n_completed_trials", 2)}[mutation]
+        receipt["stats"][field] = changed
+    elif mutation == "wrong_job":
+        receipt["id"] = "replacement-job"
+    elif mutation == "wrong_event":
+        receipt["missing_events"][0]["event_uuid"] = "other"
+    elif mutation == "wrong_native":
+        receipt["native"]["sha256"] = "other"
+    elif mutation == "second_missing":
+        receipt["missing_events"].append(copy.deepcopy(receipt["missing_events"][0]))
+    else:
+        receipt["status"] = "verified"
+    exception[key] = pin(tmp_path / "changed-receipt.json", receipt)
+    fixture[0]["retained_native_failure"] = pin(tmp_path / "changed-exception.json", exception)
+    with pytest.raises(ValueError):
+        check(fixture)

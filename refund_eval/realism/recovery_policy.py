@@ -34,8 +34,58 @@ def artifact(reference):
     return json.loads(raw)
 
 
+def _retained_native(policy, current, original):
+    """One explicit owner exception; preserve its full hold and unknown status."""
+    if "retained_native_failure" not in policy:
+        return None
+    exception = artifact(policy["retained_native_failure"])
+    parent = artifact(exception["original_policy"])
+    require("retained_native_failure" not in parent and parent == {
+        key: value for key, value in policy.items() if key != "retained_native_failure"},
+        "Native exception must preserve the entire original recovery policy")
+    require(all(exception.get(key) is True for key in (
+        "continue_saved_trials", "resume_loop_within_original_limits",
+        "retain_full_reservation", "preserve_native_accounting_unknown", "no_replay")),
+        "Explicit narrow native continuation authorization required")
+    name = exception.get("stage_id")
+    item = current["stages"].get(name)
+    readback = artifact(exception["accounting_readback"])
+    require(name not in original["stages"] and isinstance(item, dict)
+            and item == readback.get("stage") and readback.get("stage_id") == name
+            and readback.get("all_preexisting_stages_preserved") is True
+            and digest(item) == exception.get("stage_sha256")
+            and item.get("kind") == "trials" and item.get("status") == "complete"
+            and item.get("finished_at") and item.get("actual_usd") is None,
+            "Only the exact completed native stage may retain its unknown charge")
+    result, completion = artifact(exception["result"]), artifact(exception["completion"])
+    cleanup, job = artifact(exception["cleanup"]), artifact(exception["job"])
+    require(result.get("status") == "reconciliation_required"
+            and result.get("fingerprint") == completion.get("fingerprint") == exception.get("request_fingerprint")
+            and completion.get("result_sha256") == digest(result)
+            and result.get("cleanup") == cleanup and cleanup.get("unresolved") == []
+            and len(cleanup.get("sessions", [])) == 3
+            and job.get("id") == exception.get("job_id") and job.get("finished_at")
+            and job.get("n_total_trials") == 3
+            and job.get("stats", {}).get("n_completed_trials") == 3
+            and all(job.get("stats", {}).get(key) == 0 for key in (
+                "n_errored_trials", "n_running_trials", "n_pending_trials", "n_cancelled_trials", "n_retries")),
+            "Native exception requires three completed original trials and clean terminal receipts")
+    accounting, diagnostic = artifact(exception["native_accounting"]), artifact(exception["missing_usage"])
+    logs, missing = accounting.get("logs", []), diagnostic.get("missing_events", [])
+    unknown = [row for row in logs if row.get("status") == "unknown"]
+    require(accounting.get("status") == "unknown" and len(logs) == 3 and len(unknown) == 1
+            and sum(row.get("status") == "verified" for row in logs) == 2
+            and len(missing) == 1 and missing[0].get("event_uuid") == exception.get("cancelled_event_uuid")
+            and missing[0].get("role") == "simulator" and missing[0].get("error_present") is True
+            and missing[0].get("error") == "RuntimeError('model call cancelled')"
+            and diagnostic.get("original_charge_hold_retained") is True
+            and diagnostic.get("native") == {"path": unknown[0].get("source"), "sha256": unknown[0].get("sha256")},
+            "Native exception must bind the exact single cancelled simulator generation")
+    return name
+
+
 def validate(policy, current, *, ledger, budget, enforce_limits=True):
-    require(set(policy) - {"settled_scan_failure"} == {"version", "ledger", "budget_usd", "authorization", "snapshot",
+    require(set(policy) - {"settled_scan_failure", "retained_native_failure"} == {"version", "ledger", "budget_usd", "authorization", "snapshot",
                             "max_unresolved_usd", "max_new_unknowns", "analysis_stage_namespace",
                             "historical_interruptions"},
             "Unknown or missing recovery policy field")
@@ -50,12 +100,13 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
             == {k: v for k, v in original.items() if k != "stages"}, "Historical budget metadata changed")
     require(all(current["stages"].get(k) == v for k, v in original["stages"].items()),
             "Historical charges/holds changed; reconcile separately")
+    retained_native = _retained_native(policy, current, original)
     acknowledged = None
     if "settled_scan_failure" in policy:
         exception = artifact(policy["settled_scan_failure"])
         parent = artifact(exception["original_policy"])
         require("settled_scan_failure" not in parent and parent == {
-            key: value for key, value in policy.items() if key != "settled_scan_failure"},
+            key: value for key, value in policy.items() if key not in {"settled_scan_failure", "retained_native_failure"}},
             "Scan exception must preserve the entire original recovery policy")
         require(exception.get("continue_saved_trials") is True
                 and exception.get("retain_failed_coverage") is True
@@ -105,6 +156,9 @@ def validate(policy, current, *, ledger, budget, enforce_limits=True):
             continue
         if name == acknowledged:
             continue  # Keep FAILED in the actual ledger and returned disposition.
+        if name == retained_native:
+            unknown.append((name, stage))  # Counts against BOTH original uncertainty limits.
+            continue
         # A provider refusal or a failed native/scan is a real stop, not an
         # invitation to manufacture a replacement trial or switch models.
         require(status == "unknown" and actual is None and stage.get("kind") == "interaction"
