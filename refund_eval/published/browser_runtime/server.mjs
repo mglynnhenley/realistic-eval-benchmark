@@ -14,7 +14,7 @@ const output = process.env.REFUND_EVAL_BROWSER_OUTPUT || '/tmp/output';
 const workspace = process.env.REFUND_EVAL_BROWSER_WORKSPACE || '/tmp/workspace';
 const MAX_BODY = 2_000_000;
 const MAX_RESPONSE = 8_000_000;
-const REQUEST_TIMEOUT = 45_000;
+const REQUEST_TIMEOUT = 130_000;
 let activeCall = null;
 await mkdir(home, { recursive: true });
 await mkdir(output, { recursive: true });
@@ -190,9 +190,11 @@ const server = await createConnection({
   browser: { browserName: 'chromium', isolated: false },
   capabilities: ['core'],
   // Intercepted form navigation includes host-side simulator generation. Keep
-  // actions beyond the host's 35s request limit and this runtime's 45s exchange
-  // limit, while still below the MCP transport's 90s request deadline.
-  timeouts: { action: 60_000, navigation: 60_000 },
+  // actions beyond the host's 120s request limit and this runtime's 130s exchange
+  // limit, while still below the MCP transport's 180s request deadline. This
+  // permits the existing bounded proposal/validation sequence to finish; it
+  // does not add attempts or extend the trial's outer lifecycle limits.
+  timeouts: { action: 150_000, navigation: 150_000 },
   webmcp: false,
   saveSession: false,
   outputDir: output,

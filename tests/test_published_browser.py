@@ -79,6 +79,35 @@ async def test_request_is_audited_before_handler_and_preserves_body(tmp_path):
     assert [entry["sequence"] for entry in records] == [1, 2]
 
 
+async def test_slow_validated_form_response_is_not_cancelled_by_public_fetch_deadline(tmp_path):
+    attempts = []
+    cancelled = []
+
+    async def handler(request):
+        try:
+            # One form action can require several existing model/validation
+            # steps. Scale their wall time down for this offline check.
+            for number in range(3):
+                await asyncio.sleep(0.2)
+                attempts.append(number)
+            return response("Your message has been added to the existing case.")
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    service = prepare_service(tmp_path, handler)
+    service.request_timeout /= 100
+    service._active_call = {"tool": "browser_click", "tool_call_id": "call-1"}
+    filename = write_request(service)
+    await service._handle_request(filename)
+    stored = json.loads((tmp_path / "responses" / filename.name).read_text())
+    assert stored == response("Your message has been added to the existing case.")
+    assert attempts == [0, 1, 2] and not cancelled
+    records = [json.loads(line) for line in service.audit_path.read_text().splitlines()]
+    assert [entry["event"] for entry in records] == ["request", "response"]
+    assert records[-1]["tool_call_id"] == "call-1"
+
+
 @pytest.mark.parametrize("kind", ["background", "stale", "websocket"])
 async def test_background_stale_and_unsupported_requests_never_dispatch(tmp_path, kind):
     async def handler(_):

@@ -214,6 +214,16 @@ fields keep the normal guards, and every redirect is checked again. Opening a
 template establishes neither bank affiliation nor authentication or a successful
 dispute; submissions remain intercepted and account access remains unchanged.
 
+An intercepted browser request may include a company-model decision and its
+existing validation steps, rather than just an HTTP fetch. Its host callback has
+a 120-second deadline, followed by the browser exchange at 130 seconds, the
+Playwright action/navigation at 150 seconds, and the MCP transport at 180 seconds.
+Public HTTP fetches still have their separate 30-second limit. The longer callback
+budget avoids cancelling a valid slower company response at the fetch deadline;
+it adds no model attempts and does not extend the trial's outer lifecycle limits.
+A response that still times out remains a failed request with its outcome and any
+missing charge unresolved.
+
 The dashboard's **World → Company interactions** section shows the company's exact input, model attempts, validation failures, final decision and linked scheduled effects. These structured records distinguish intentional silence from a failed company call. Older runs retain their original case histories.
 
 ## Rerunning one company decision
