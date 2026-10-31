@@ -17,10 +17,14 @@ COMPONENTS = ('input_tokens', 'input_tokens_cache_read', 'input_tokens_cache_wri
 class AttributionValidationError(ValueError):
     """Evidence is incomplete or inconsistent; no attribution certificate is issued."""
 
+    def __init__(self, message, details=None):
+        self.reason = message
+        super().__init__(message if details is None else f'{message}: {details!r}')
+
 def require(condition, message, details=None):
     """Mandatory validation, effective with normal, -O and -OO interpreters."""
     if not condition:
-        raise AttributionValidationError(message if details is None else f'{message}: {details!r}')
+        raise AttributionValidationError(message, details)
 
 def normalized(name):
     return name.removeprefix('openrouter/')
@@ -113,6 +117,16 @@ def analyze(logs):
                 require(bool(targets), "Target boundary is missing")
                 usage = reconcile(targets, sample.store["world"]["token_ledger"])
                 billed = [event for event in events if event.output.usage is not None]
+                # Keep the exact unresolved identities in the saved accounting
+                # report. A cancelled call can have no provider response or ID;
+                # neither a successful trial nor its aggregates settle that bill.
+                missing = [event for event in events if event.output.usage is None]
+                if missing:
+                    row.setdefault("missing_usage_events", []).extend({
+                        "sample_uuid": sample.uuid, "event_uuid": event.uuid,
+                        "model": event.model, "role": event.role,
+                        "pending": event.pending, "error_present": bool(event.error),
+                    } for event in missing)
                 require(bool(billed) and all(event.output.usage is not None for event in events),
                         "Native generation usage is missing; pending/error charges remain unknown")
                 require(all(type(event.output.usage.total_cost) in (int, float)
@@ -141,6 +155,10 @@ def analyze(logs):
             row["status"] = "verified"
         except (ValueError, KeyError, TypeError, AttributeError, IndexError, OSError) as error:
             row.update(status="unknown", error_type=type(error).__name__)
+            if isinstance(error, AttributionValidationError):
+                # Only the validator's static label, never provider error text,
+                # request bodies, credentials or arbitrary exception details.
+                row["validation_failure"] = error.reason
         reports.append(row)
     return {"status": "verified" if reports and all(row["status"] == "verified" for row in reports)
             else "unknown", "logs": reports, "cognitive_reading_inferred": False}

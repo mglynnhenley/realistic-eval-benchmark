@@ -195,4 +195,22 @@ def test_incomplete_error_or_pending_native_call_keeps_cost_unknown(monkeypatch,
     extra.pending = pending
     extra.error = None if pending else "Synthetic provider error with unknown bill"
     sample.events.append(extra)
-    assert native.analyze([str(path)])["status"] == "unknown"
+    result = native.analyze([str(path)])
+    assert result["status"] == "unknown"
+    row = result["logs"][0]
+    assert row["validation_failure"] == "Native generation usage is missing; pending/error charges remain unknown"
+    assert row["missing_usage_events"] == [{
+        "sample_uuid": sample.uuid, "event_uuid": extra.uuid,
+        "model": extra.model, "role": extra.role,
+        "pending": pending, "error_present": not pending,
+    }]
+    assert "Synthetic provider error with unknown bill" not in json.dumps(result)
+
+
+def test_accounting_diagnostics_do_not_copy_arbitrary_validation_details(monkeypatch, tmp_path):
+    sample, path = native_sample(monkeypatch, tmp_path)
+    sample.store['world']['token_ledger']['accounting_error'] = 'private provider diagnostic'
+    result = native.analyze([str(path)])
+    assert result['status'] == 'unknown'
+    assert result['logs'][0]['validation_failure'] == 'Target ledger has an accounting error'
+    assert 'private provider diagnostic' not in json.dumps(result)

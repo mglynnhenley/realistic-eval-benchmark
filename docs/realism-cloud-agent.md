@@ -341,6 +341,13 @@ configuration; this is a spending proof despite its legacy name. Outstanding
 unvalidated charges stop further operations. Do not edit/release holds to fit a
 new round or mutate historical pause/ledger files during configuration.
 
+Native accounting reports save the failed validation label and the exact sample,
+event, model and role identities of generations with missing usage. These fields
+exclude request bodies and provider error text. A cancelled simulator call can
+lack both usage and a generation ID even when all trials finish successfully;
+aggregate costs do not settle that missing charge. Keep the full reservation and
+the original results, and stop further paid work until it is reconciled.
+
 Investigator HTTP errors retain the original response bytes, status and selected
 request-identification headers in a private `STAGE-error-response.json`, bound to
 the saved request's SHA-256. The full reservation remains held. An HTTP rejection
