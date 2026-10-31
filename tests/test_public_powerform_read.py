@@ -23,6 +23,7 @@ from refund_eval.world.state import load_world, save_world
 TEMPLATE = "01234567-89ab-4cde-8fab-0123456789ab"
 PUBLISHER = "12345678-90ab-4cde-8fab-1234567890ab"
 FORM = f"https://powerforms.docusign.net/{TEMPLATE}?env=eu&acct={PUBLISHER}"
+ARTICLE = "https://www.railombudsman.org/en/news/12abcdef34ghijk567lmnopq"
 
 
 @pytest.fixture
@@ -88,7 +89,8 @@ async def test_template_exception_does_not_admit_private_signing_or_other_urls(c
     assert not load_world().interceptions and not broker.pages
 
 
-async def test_redirect_into_envelope_keeps_separate_guard_and_no_following(context):
+@pytest.mark.parametrize("url", [FORM, ARTICLE])
+async def test_redirect_into_envelope_keeps_separate_guard_and_no_following(context, url):
     calls = []
     envelope = f"https://demo.docusign.net/Signing/?envelopeId={TEMPLATE}"
     redirect = {**response(302, "Moved"), "headers": {"location": envelope}}
@@ -98,7 +100,7 @@ async def test_redirect_into_envelope_keeps_separate_guard_and_no_following(cont
         return redirect
 
     broker = BrowserBoundary(context, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
-    assert await broker(request()) == redirect
+    assert await broker(request(url)) == redirect
     assert (await broker(request(envelope)))["status"] == 403
     assert len(calls) == 1
 
@@ -124,7 +126,8 @@ async def test_post_is_intercepted_with_original_fields_and_real_failure(context
     assert not broker.pages
 
 
-async def test_powerform_still_checks_actual_dns_answer(context, monkeypatch):
+@pytest.mark.parametrize("url", [FORM, ARTICLE])
+async def test_public_identifier_still_checks_actual_dns_answer(context, monkeypatch, url):
     class PrivateResolver:
         async def resolve(self, *args, **kwargs):
             return [{"host": "127.0.0.1"}]
@@ -133,8 +136,66 @@ async def test_powerform_still_checks_actual_dns_answer(context, monkeypatch):
             pass
 
     monkeypatch.setattr("refund_eval.published.network.aiohttp.resolver.ThreadedResolver", PrivateResolver)
-    validate_public_url(FORM)
+    validate_public_url(url)
     resolver = PublicResolver()
     with pytest.raises(OSError, match="Non-public DNS"):
         await resolver.resolve("powerforms.docusign.net", 443)
     await resolver.close()
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize("status", [200, 403])
+async def test_public_news_article_keeps_actual_response_without_company_effects(context, method, status):
+    calls = []
+    original = response(status, "Original public article or provider refusal")
+
+    async def fetch(value):
+        calls.append(value)
+        return copy.deepcopy(original)
+
+    before = load_world().model_dump(mode="json")
+    broker = BrowserBoundary(context, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    assert await broker(request(ARTICLE, method=method)) == original
+    assert calls == [{"url": ARTICLE, "method": method}]
+    assert load_world().model_dump(mode="json") == before and not broker.pages
+
+
+@pytest.mark.parametrize("url", [
+    ARTICLE + "?token=private-value",
+    ARTICLE + "?email=person%40example.org",
+    ARTICLE + "#session=private",
+    ARTICLE.replace("https://", "http://"),
+    ARTICLE.replace("www.railombudsman.org", "www.railombudsman.org.attacker.org"),
+    ARTICLE.replace("www.railombudsman.org", "user:pass@www.railombudsman.org"),
+    ARTICLE.replace("www.railombudsman.org", "www.railombudsman.org:8443"),
+    ARTICLE.replace("/news/", "/account/"),
+    ARTICLE.replace("/news/", "/news/signin/"),
+    ARTICLE.replace("/news/", "/news/token-"),
+    ARTICLE + "%2Fsign",
+])
+async def test_article_route_does_not_admit_private_or_unrelated_links(context, url):
+    async def forbidden(_):
+        pytest.fail("Private or unrelated URL reached public fetch")
+
+    broker = BrowserBoundary(context, public_read_urls=[], public_read_policy="public_web", fetch=forbidden)
+    assert (await broker(request(url)))["status"] in {400, 403}
+    assert not load_world().interceptions and not broker.pages
+
+
+async def test_public_article_post_is_still_a_write(context, monkeypatch):
+    calls = []
+
+    async def forbidden(_):
+        pytest.fail("Article POST reached real provider")
+
+    async def intercept(**kwargs):
+        calls.append(kwargs)
+        return None, None, "The request could not be completed."
+
+    monkeypatch.setattr("refund_eval.published.network.intercept", intercept)
+    broker = BrowserBoundary(context, public_read_urls=[], public_read_policy="public_web", fetch=forbidden)
+    result = await broker(request(ARTICLE, method="POST", body_base64=base64.b64encode(b"message=hello").decode(),
+                                  headers={"content-type": "application/x-www-form-urlencoded"}))
+    assert result["status"] == 503 and len(calls) == 1
+    assert calls[0]["target"] == ARTICLE and calls[0]["fields"] == {"message": "hello"}
+    assert not broker.pages

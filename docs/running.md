@@ -214,6 +214,12 @@ fields keep the normal guards, and every redirect is checked again. Opening a
 template establishes neither bank affiliation nor authentication or a successful
 dispute; submissions remain intercepted and account access remains unchanged.
 
+Public news articles at `railombudsman.org/en/news/` may likewise use opaque
+article IDs. Anonymous reads of that fixed news route retain the original URL
+and provider response. Query strings, fragments, private/account routes and
+lookalike hosts receive the normal guards; a news link grants no account or
+submission capability. This does not guarantee the upstream article is available.
+
 An intercepted browser request may include a company-model decision and its
 existing validation steps, rather than just an HTTP fetch. Its host callback has
 a 120-second deadline, followed by the browser exchange at 130 seconds, the

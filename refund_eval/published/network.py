@@ -452,6 +452,14 @@ def validate_public_url(url: str, *, static_asset: bool = False) -> None:
         form_url = _public_powerform_guard_url(url)
         if form_url is not None:
             verdict = check_url(form_url)
+    if not verdict.allowed and verdict.reason == "token-like path segment" and not static_asset:
+        parts = urlsplit(url)
+        # The public news route uses opaque article IDs. Keep the original URL
+        # and every other guard: these IDs confer no session or account access.
+        if (parts.scheme == "https" and parts.netloc in {"www.railombudsman.org", "railombudsman.org"}
+                and re.fullmatch(r"/en/news/[a-z0-9][a-z0-9-]{7,95}", parts.path)
+                and not parts.query and not parts.fragment):
+            verdict = check_url(url, hashed_path_ok=True)
     if not verdict.allowed or urlsplit(url).fragment:
         raise ValueError(f"Invalid public read URL: {url}")
     validate_public_destination(url)
