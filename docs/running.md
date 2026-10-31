@@ -205,6 +205,15 @@ Browser evidence distinguishes verified Docker/network-namespace isolation from 
 
 The browser broker rejects syntactically local/private destinations, numeric aliases and nonstandard ports before form simulation or cached-page reuse. Encoded authorities and IDNA hostnames receive the same checks, so a refused local form cannot manufacture a successful acknowledgement or a reloadable page. Public form actions and tokens remain available to the simulator. This destination classification performs no DNS lookup and does not establish that a public-looking name exists; actual public reads separately validate DNS answers at the socket connector. This check does not establish general browser or sandbox containment.
 
+Anonymous reads can open a DocuSign PowerForm template on `powerforms.docusign.net`
+when its only query fields are the publishing account UUID (`acct`) and a supported
+region (`env`). These public identifiers are not treated as private signing
+tokens. The original URL is read without browser credentials and the provider's
+actual response is preserved. Envelope, recipient, session and additional query
+fields keep the normal guards, and every redirect is checked again. Opening a
+template establishes neither bank affiliation nor authentication or a successful
+dispute; submissions remain intercepted and account access remains unchanged.
+
 The dashboard's **World → Company interactions** section shows the company's exact input, model attempts, validation failures, final decision and linked scheduled effects. These structured records distinguish intentional silence from a failed company call. Older runs retain their original case histories.
 
 ## Rerunning one company decision

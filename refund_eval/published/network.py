@@ -420,11 +420,36 @@ def _anonymous_form_guard_url(url: str) -> str | None:
     ])))
 
 
+def _public_powerform_guard_url(url: str) -> str | None:
+    """Classify public PowerForm template/publisher IDs without treating them
+    as a private envelope, recipient or session. This establishes neither bank
+    affiliation nor authentication, availability or a successful submission.
+    """
+    parts = urlsplit(url)
+    uuid = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    if (parts.scheme != "https" or parts.netloc != "powerforms.docusign.net"
+            or not re.fullmatch("/" + uuid, parts.path) or parts.fragment):
+        return None
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    fields = dict(pairs)
+    if (len(pairs) != 2 or set(fields) != {"env", "acct"}
+            or fields["env"] not in {"eu", "na", "au"}
+            or not re.fullmatch(uuid, fields["acct"])):
+        return None
+    return urlunsplit(parts._replace(path="/public-form", query=urlencode([
+        (key, "public-publisher" if key == "acct" else value) for key, value in pairs
+    ])))
+
+
 def validate_public_url(url: str, *, static_asset: bool = False) -> None:
-    """Validate a public read, with narrow passive-asset/questionnaire ID cases."""
+    """Validate public reads, with narrow passive-asset and public-form ID cases."""
     verdict = check_url(url, hashed_path_ok=static_asset)
     if not verdict.allowed and verdict.reason == "token-like value in parameter 'id'" and not static_asset:
         form_url = _anonymous_form_guard_url(url)
+        if form_url is not None:
+            verdict = check_url(form_url)
+    if not verdict.allowed and verdict.reason == "token-like value in parameter 'acct'" and not static_asset:
+        form_url = _public_powerform_guard_url(url)
         if form_url is not None:
             verdict = check_url(form_url)
     if not verdict.allowed or urlsplit(url).fragment:
