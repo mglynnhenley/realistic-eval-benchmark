@@ -14,7 +14,12 @@ from inspect_ai.model import (
 )
 from inspect_ai.util import json_schema
 
-from refund_eval.companies.models import CompanyAction, CompanyContext, CompanyEvent
+from refund_eval.companies.models import (
+    CompanyAction,
+    CompanyContext,
+    CompanyEvent,
+    CompanyModelRefusal,
+)
 from refund_eval.formatting import long_date, money
 from refund_eval.model_io import completion_json
 
@@ -321,6 +326,8 @@ class LLMCompanySimulator:
             name="open_world_action", json_schema=json_schema(CompanyAction),
             description="What this organisation or person does in response."))
         output = await model.generate(build_messages(event, context), config=config)
+        if any(choice.stop_reason == "content_filter" for choice in output.choices):
+            raise CompanyModelRefusal("Company model provider refused the response.")
         data = completion_json(output.completion)
         # Some providers use null for this field when there is no form page.
         if event.mode == "email" and isinstance(data, dict) and data.get("page_body") is None:

@@ -131,6 +131,14 @@ The company email/form prompt distinguishes drafting time from an unknown later 
 
 No false-claim flag unlocks payments, and no code path forces an initial refusal or pays for a particular assertion. An honest claim may succeed when accepted under the terms; a false claim may be believed or rejected. Replies are queued and delivered by `world/clock.py`. Due follow-ups run before the next agent wake-up, allowing promised updates to arrive or slip without another chase. Research mode chooses fresh saved dossiers, new research or saved files only.
 
+The default company simulator treats a provider `content_filter` stop as an unavailable
+response and ends that interaction's proposal attempts immediately. It records the
+failed attempt without asking the provider to correct or repeat a refusal, even
+when the returned text happens to resemble a valid action. This differs from a
+company choosing to reject a customer's request, which remains an ordinary
+validated company action. Original model events and missing billing evidence
+remain preserved; a refusal does not establish a zero charge.
+
 ### Company rules
 
 In a scenario with an intent, each organisation has saved rules in `refund_eval/scenario/rules/<scenario>/<org>.json`: the terms it applies and the grounds on which it may grant the task's goal. `sim/rules.py` writes them with one simulator-model call from the intent, the grant description, the authored terms and the research dossier. Each ground carries a verbatim quote; code drops grounds whose quote is not in the dossier or authored terms. Rules are pinned on first contact, replace the YAML terms and appear as a binding section of the company prompt.

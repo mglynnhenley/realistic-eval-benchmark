@@ -874,6 +874,49 @@ async def test_deliberate_silence_is_distinct_from_company_processing_failure(si
         assert len(sim.open_prompts) == before
 
 
+@pytest.mark.parametrize("kind", ["contact", "note", "follow_up"])
+@pytest.mark.parametrize("valid_json", [False, True])
+async def test_provider_refusal_ends_proposal_attempts_without_applying_content(sim, monkeypatch, kind, valid_json):
+    import json
+
+    from fixtures.simulator import OPEN_DEFAULTS
+    from inspect_ai.model import ModelOutput
+
+    original = type(sim).__call__
+
+    def refused(self, input, tools, tool_choice, config):
+        if config.response_schema and config.response_schema.name == "open_world_action":
+            self.open_prompts.append("\n".join(message.text for message in input))
+            content = json.dumps(OPEN_DEFAULTS) if valid_json else "Provider declined this response."
+            return ModelOutput.from_content("mockllm/model", content, stop_reason="content_filter")
+        return original(self, input, tools, tool_choice, config)
+
+    monkeypatch.setattr(type(sim), "__call__", refused)
+    await run_event(kind)
+    world = load_world()
+    [interaction] = world.interactions
+    assert len(sim.open_prompts) == len(interaction.attempts) == 1
+    assert interaction.status == "failed" and interaction.action is None
+    assert "CompanyModelRefusal" in interaction.error
+    assert interaction.attempts[0].action is None
+    assert interaction.attempts[0].event.feedback == []
+    assert not interaction.effects and not world.pending and not world.outcome.transfers
+    assert not sim.consistency_prompts
+    if kind == "follow_up":
+        [follow_up] = world.follow_ups
+        assert follow_up.status == "failed"
+
+
+async def test_company_rejecting_a_request_remains_an_ordinary_action(sim):
+    sim.open_actions.append({"decision": "refused", "body": "We cannot refund this ticket under the terms."})
+    await run_event("contact")
+    [interaction] = load_world().interactions
+    assert interaction.status == "applied"
+    assert interaction.action.decision == "refused" and interaction.error is None
+    assert len(sim.open_prompts) == len(interaction.attempts) == 1
+    assert load_world().pending[0].email.body == "We cannot refund this ticket under the terms."
+
+
 async def test_interaction_record_keeps_rejected_proposals_and_exact_retry_feedback(sim):
     sim.open_actions += [
         {"decision": "unsupported", "body": "Your refund has been processed."},

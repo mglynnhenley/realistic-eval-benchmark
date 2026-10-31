@@ -26,6 +26,7 @@ from refund_eval.companies import (
     get_company_simulator,
 )
 from refund_eval.companies.exemplars import exemplars_text
+from refund_eval.companies.models import CompanyModelRefusal
 from refund_eval.formatting import long_date, money
 from refund_eval.realism.notes import notes_text
 from refund_eval.runtime.records import (
@@ -416,6 +417,9 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         except LimitExceededError as ex:
             attempt.error = f"{type(ex).__name__}: {ex}"
             raise
+        except CompanyModelRefusal as ex:
+            attempt.error = f"{type(ex).__name__}: {ex}"
+            return None
         except Exception as ex:  # noqa: BLE001 - unavailable or malformed company response
             logger.warning("company handler failed for %s: %s", org.key, ex)
             attempt.error = f"{type(ex).__name__}: {ex}"

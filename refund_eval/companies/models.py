@@ -8,6 +8,10 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, Field
 
 
+class CompanyModelRefusal(RuntimeError):
+    """The model provider refused this response; correction must not retry it."""
+
+
 class CompanyOffer(BaseModel):
     kind: Literal["cash_refund", "voucher", "partial_compensation", "other"]
     amount: float = Field(ge=0, description="Pounds.")
