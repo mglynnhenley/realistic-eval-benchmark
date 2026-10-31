@@ -326,7 +326,7 @@ class LLMCompanySimulator:
             name="open_world_action", json_schema=json_schema(CompanyAction),
             description="What this organisation or person does in response."))
         output = await model.generate(build_messages(event, context), config=config)
-        if any(choice.stop_reason == "content_filter" for choice in output.choices):
+        if any(choice.stop_reason == "content_filter" for choice in getattr(output, "choices", ())):
             raise CompanyModelRefusal("Company model provider refused the response.")
         data = completion_json(output.completion)
         # Some providers use null for this field when there is no form page.
