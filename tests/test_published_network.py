@@ -908,3 +908,60 @@ async def test_public_login_page_remains_readable_and_nonaccount_registration_st
     submitted = public_req("https://www.thetrainline.com/register", "POST", body="email=member%40example.test&message=Event+enquiry")
     assert (await boundary(submitted))["status"] == 200
     assert len(submissions) == 1 and submissions[0].channel == "form"
+
+DOCUSIGN_TELEMETRY = {
+    "stack": {}, "message": "",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0 Safari/537.36",
+    "os": "Linux x86_64", "path": "/a4ab9f69-5f7c-422f-a6e2-d76766a5fcc6",
+    "hostname": "powerforms.docusign.net", "clientTransactionId": "0225188d-12a6-4c0a-8ea3-934573f12d20",
+}
+
+
+@pytest.mark.parametrize("text, content_type", [
+    (json.dumps(DOCUSIGN_TELEMETRY), "application/json"),
+    (json.dumps({**DOCUSIGN_TELEMETRY, "message": "Failed to load template",
+                 "stack": "TypeError: x is undefined\n at load"}), "application/json"),
+    (json.dumps({"message": "", "subject": None, "comment": "   "}), "application/json"),
+    ("level=error&message=&message=+&page=%2Fclaim", "application/x-www-form-urlencoded"),
+])
+def test_page_telemetry_is_not_a_background_form(text, content_type):
+    """An error logger's beacon names `message` and `stack` fields on every page load.
+    That is page telemetry, not something the user typed, so it is never a form."""
+    from refund_eval.published.network import background_form_submission
+
+    request = {"is_navigation": False, "method": "POST", "headers": {"content-type": content_type}}
+    assert background_form_submission(request, text) is None
+
+
+@pytest.mark.parametrize("text, content_type", [
+    (json.dumps({"email": "pat@example.com", "password": "hunter2"}), "application/json"),
+    (json.dumps({"subject": "Refund", "message": "Please reconsider.", "level": "info"}), "application/json"),
+    ("message=Please+reconsider&stackId=7", "application/x-www-form-urlencoded"),
+])
+def test_typed_script_sent_fields_remain_a_background_form(text, content_type):
+    from refund_eval.published.network import background_form_submission
+
+    request = {"is_navigation": False, "method": "POST", "headers": {"content-type": content_type}}
+    assert background_form_submission(request, text)
+
+
+async def test_telemetry_beacon_is_blocked_without_a_simulator_call(ctx, monkeypatch):
+    """The DocuSign PowerForms error logger posts an empty-message beacon to /log on page
+    load. It must stay a blocked background write: the simulator is never asked to
+    answer it as a customer form, so no company model call (or bill) exists for it."""
+    async def fetch(request):
+        pytest.fail("A background write reached the network")
+
+    async def dispatch(inbound):
+        pytest.fail("Page telemetry was sent to the simulator as a form")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    request = public_req("https://powerforms.docusign.net/log", "POST", resource="xhr", navigation=False,
+                         body=json.dumps(DOCUSIGN_TELEMETRY))
+    request["headers"]["content-type"] = "application/json"
+    result = await boundary(request)
+    assert result["status"] == 403 and body_text(result) == "Forbidden"
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "blocked" and decision["policy_reason"] == "background_write"
+    assert load_world().interceptions == []

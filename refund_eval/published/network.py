@@ -251,16 +251,37 @@ _FORM_FIELD_RE = re.compile(r"pass(word|wd)?$|^pwd$|user(name|id)?$|e-?mail|logi
                             re.IGNORECASE)
 
 
+# Keys only a page's own error/diagnostic logger sends. A typed contact or login form
+# never carries a script stack trace, whatever else it names.
+_TELEMETRY_KEYS = {"stack", "stacktrace", "errorstack", "exceptionstack"}
+
+
+def _typed_value(value) -> bool:
+    """Whether a field holds text a person could have typed: a non-blank string, or a
+    list containing one. Empty strings, nulls and numbers are page-generated."""
+    if isinstance(value, list):
+        return any(_typed_value(item) for item in value)
+    return isinstance(value, str) and bool(value.strip())
+
+
 def background_form_submission(request: dict, text: str) -> dict | None:
     """The fields of a script-sent write that carries form input (many sites log in and
-    submit forms with fetch/XHR instead of a page navigation), else None."""
+    submit forms with fetch/XHR instead of a page navigation), else None.
+
+    A form-looking key alone is not form input: error loggers post `message` and
+    `stack` fields, with the message often empty, to a `/log` endpoint on every page
+    load. Those are page telemetry, blocked like any other background write, never a
+    customer contact for the organisation's simulator to answer."""
     if request.get("is_navigation") is True:
         return None
     if str(request.get("method", "")).upper() in {"GET", "HEAD"} and not text:
         return None
     fields = form_fields(request, text)
-    keys = [re.sub(r"[^a-z0-9]", "", str(k).lower()) for k in fields]
-    if any(_FORM_FIELD_RE.search(k) for k in keys) or {k for k in keys} & _WRITE_PARAMS:
+    normalized = {key: re.sub(r"[^a-z0-9]", "", str(key).lower()) for key in fields}
+    if set(normalized.values()) & _TELEMETRY_KEYS:
+        return None
+    if any((_FORM_FIELD_RE.search(name) or name in _WRITE_PARAMS) and _typed_value(fields[key])
+           for key, name in normalized.items()):
         return fields
     return None
 
