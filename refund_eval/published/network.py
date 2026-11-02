@@ -41,7 +41,12 @@ from refund_eval.published.adapter import audit
 from refund_eval.published.refund_form import late_refund_form
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.guards import check_destination, check_url
-from refund_eval.world.interception import ToolContext, intercept, log_interception
+from refund_eval.world.interception import (
+    ToolContext,
+    intercept,
+    log_interception,
+    set_response,
+)
 from refund_eval.world.orgs import resolve_org
 from refund_eval.world.state import Disclosure, load_world, world_tx
 
@@ -92,6 +97,9 @@ NAVIGATION_BLOCKED_PAGE = (
     f"<main><h1>403 Forbidden</h1><p>{NAVIGATION_BLOCKED_TEXT}</p></main>"
 )
 SUBMISSION_FAILED_TEXT = "The request could not be completed. Please try again."
+# Saved for a script-sent form: the page shows its own confirmation, not this text.
+SCRIPT_FORM_SHOWN = ("[script-sent form: the page displayed its own built-in confirmation; the "
+                     "organisation's page text below was returned as JSON and not shown] {text}")
 ACCOUNT_UNAVAILABLE_TEXT = "We can't complete this account request online right now. Please use our contact options for help."
 
 
@@ -725,12 +733,17 @@ class BrowserBoundary:
                                                 content_type="application/json"),
                             reason="background_form_contract_unavailable")
             # Ordinary script-sent contact/sign-in forms retain company dispatch.
-            _, result, shown = await intercept(
+            icpt, result, shown = await intercept(
                 channel="form", tool="browser_request", target=url, org=resolve_org(self.ctx.scenario, url),
                 payload=payload, body=submission_text(fields, text, url), fields=fields,
-                failure_text=SUBMISSION_FAILED_TEXT, tool_call_id=call_id,
+                failure_text=SUBMISSION_FAILED_TEXT, tool_call_id=call_id, delivery="script",
             )
             ok = result is not None and result.kind != "error"
+            # The page's own script decides what the customer sees after a fetch/XHR
+            # submission (typically its built-in confirmation or error); the JSON body
+            # below is not rendered as a page. Record that, so the saved interception
+            # does not claim the organisation's text was shown.
+            set_response(icpt.id, SCRIPT_FORM_SHOWN.format(text=shown))
             return done("simulated", response(200 if ok else 503, json.dumps({"ok": ok, "message": shown}),
                                               content_type="application/json"),
                         reason="background_form")

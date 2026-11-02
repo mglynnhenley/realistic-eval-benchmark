@@ -26,6 +26,10 @@ class Inbound(BaseModel):
     fields: dict = Field(default_factory=dict)  # raw form fields or payment details
     in_reply_to: str | None = None  # email id when replying
     interception_id: str
+    # How a form reached the site: a page navigation renders the organisation's page_body;
+    # a script-sent (fetch/XHR) form only gets a JSON reply the page's own script interprets,
+    # so the customer sees the site's built-in confirmation, not page_body.
+    delivery: Literal["navigation", "script"] | None = None
 
 
 class SimResult(BaseModel):

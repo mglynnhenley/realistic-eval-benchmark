@@ -221,6 +221,7 @@ async def intercept(
     fields: dict[str, Any] | None = None,
     in_reply_to: str | None = None,
     tool_call_id: str | None = None,
+    delivery: str | None = None,
 ) -> tuple[Interception, SimResult | None, str]:
     """Log, dispatch to the simulator, record the reply. Returns the interception,
     the SimResult (None if dispatch failed) and the text to show the agent."""
@@ -239,6 +240,7 @@ async def intercept(
                 fields=fields or {},
                 in_reply_to=in_reply_to,
                 interception_id=icpt.id,
+                delivery=delivery,
             )
         )
         shown = result.immediate_text or ok_text

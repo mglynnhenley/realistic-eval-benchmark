@@ -50,7 +50,7 @@ from inspect_ai.model import (
     Model,
     get_model,
 )
-from inspect_ai.model._compaction.memory import MEMORY_TOOL, clear_memory_content
+from inspect_ai.model._compaction.memory import MEMORY_TOOL
 from inspect_ai.tool import (
     Tool,
     ToolDef,
@@ -182,7 +182,8 @@ MEMORY_WARNING_CYCLE_KEY = "history_warning_cycle"
 MEMORY_WARNING_TEXT = (
     "Older messages will soon be removed from your view. Use memory to save anything you "
     "will need later: who you have contacted and when, what each has replied, anything "
-    "promised by you or to you, reference numbers, and your next steps."
+    "promised by you or to you, reference numbers, and your next steps. Your memory notes "
+    "keep everything you wrote, whatever leaves your view: read a note back before you change it."
 )
 
 
@@ -193,7 +194,10 @@ class HistoryWindow(CompactionTrim):
     Trimming keeps going, down to the latest turn: Inspect retries a strategy three
     times and then fails the sample, which a run of large page snapshots can cause
     well before the real context window is full. Inspect's own pre-compaction
-    memory warning is off (memory=False); memory tool content is still cleared."""
+    memory warning is off (memory=False). Earlier memory tool calls keep their real
+    arguments: Inspect's clear_memory_content would show them as the literal
+    "(content saved to memory)", which a model can copy back into its notes file
+    and so wipe it."""
 
     def __init__(self, tokens: int):
         super().__init__(threshold=tokens, memory=False, preserve=HISTORY_PRESERVE)
@@ -214,7 +218,6 @@ class HistoryWindow(CompactionTrim):
                 if len(shorter) >= len(trimmed):
                     break
                 trimmed = shorter
-        trimmed = clear_memory_content(trimmed)
         world = store().get(WORLD_KEY)
         store().set(HISTORY_COMPACTIONS_KEY, [*(store().get(HISTORY_COMPACTIONS_KEY) or []), {
             "sim_time": load_world().now.isoformat() if world is not None else None,

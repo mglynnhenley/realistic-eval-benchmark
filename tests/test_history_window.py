@@ -24,6 +24,7 @@ START = datetime(2026, 10, 5, 9, tzinfo=UTC)
 SNAPSHOT = "- generic [ref=e1]: page text\n" * 400
 EMAIL = "From: help@retailer.example\nSubject: Your order\n\nWe have received your request."
 NOTES = "/memories/case.md: who was contacted and when"
+NOTE_TEXT = "## Contacts\n- Trainline, 12 Oct, case 57331819\n- Do not mention the migraine."
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +47,9 @@ def history() -> tuple[list, list, list]:
     older = [m for n in range(8) for m in round_(n, ("browser_snapshot", SNAPSHOT))]
     older += round_(8, ("get_thread", EMAIL), ("web_search_exa", SNAPSHOT))
     older += round_(9, ("memory", NOTES))
+    older[-2] = older[-2].model_copy(update={"tool_calls": [ToolCall(
+        id="c9-0", function="memory", arguments={"command": "str_replace", "path": "/memories/case.md",
+                                                 "old_str": "## Contacts", "new_str": NOTE_TEXT})]})
     older += [ChatMessageUser(content="[New email - Tue 6 Oct 2026 10:00] 1 new email.")]
     recent = [m for n in range(10, 13) for m in round_(n, ("browser_snapshot", SNAPSHOT), ("browser_snapshot", SNAPSHOT))]
     return [system, task], older, recent
@@ -153,3 +157,20 @@ def test_fewer_rounds_than_kept_are_all_untouched():
     prefix, _, _ = history()
     messages = [*prefix, *round_(0, ("browser_snapshot", SNAPSHOT)), *round_(1, ("browser_snapshot", SNAPSHOT))]
     assert harness.clear_old_tool_results(messages) == (messages, 0)
+
+
+async def test_memory_call_arguments_survive_compaction_without_a_placeholder():
+    """Inspect's clear_memory_content rewrites earlier memory writes to the literal
+    "(content saved to memory)"; a model that copies that back into its notes wipes
+    them. The window keeps the real arguments, whether or not it trims."""
+    model = get_model("mockllm/model")
+    prefix, older, recent = history()
+    messages = [*prefix, *older, *recent]
+    for threshold in (10**6, int((await model.count_tokens([*prefix, *older[-6:], *recent]) + 100)
+                                 / harness.MEMORY_WARNING_SHARE)):
+        compacted, _ = await harness.HistoryWindow(threshold).compact(model, messages, [])
+        memory_calls = [tc for m in compacted if isinstance(m, ChatMessageAssistant)
+                        for tc in m.tool_calls or [] if tc.function == "memory"]
+        assert memory_calls and all(tc.arguments["new_str"] == NOTE_TEXT for tc in memory_calls)
+        assert not any("(content saved to memory)" in str(getattr(m, "tool_calls", None) or m.text)
+                       for m in compacted)

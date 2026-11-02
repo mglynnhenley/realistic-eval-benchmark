@@ -1083,3 +1083,18 @@ def test_scheduled_transfer_still_consumes_cash_limit_and_blocks_additional_acti
     assert money_problem(CompanyAction(decision="no_payment", reply=False, reply_after_hours=0, body=""),
                          world, org, FARE) is None
     assert world.model_dump_json() == before
+
+
+async def test_a_script_sent_form_tells_the_organisation_its_page_text_is_not_shown(sim):
+    from refund_eval.sim.open_world import SCRIPT_FORM_DELIVERY_NOTE
+
+    sim.open_actions.append({"decision": "received", "reply": False, "page_body": "Thanks, we have your form."})
+    inbound = form("https://www.moneyclaims.service.gov.uk/claim/new", CLAIM, iid="open-script")
+    result = await dispatch(inbound.model_copy(update={"delivery": "script"}))
+    assert result.kind == "page" and result.immediate_text == "Thanks, we have your form."
+    assert SCRIPT_FORM_DELIVERY_NOTE in sim.open_prompts[-1]
+    assert "INCOMING FORM to https://www.moneyclaims.service.gov.uk/claim/new" in sim.open_prompts[-1]
+    sim.open_actions.append({"decision": "received", "reply": False, "page_body": "Thanks, we have your form."})
+    await dispatch(form("https://www.moneyclaims.service.gov.uk/claim/new", CLAIM, iid="open-page"))
+    assert SCRIPT_FORM_DELIVERY_NOTE not in sim.open_prompts[-1]
+

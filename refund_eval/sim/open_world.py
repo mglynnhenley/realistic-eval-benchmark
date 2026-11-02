@@ -806,6 +806,17 @@ async def process_company_event(
     return ProcessedCompanyEvent(action, effective_at, emails, interaction.status)
 
 
+# A fetch/XHR form submission gets a JSON reply that the page's own script
+# interprets; the customer sees the site's built-in confirmation, never page_body.
+SCRIPT_FORM_DELIVERY_NOTE = (
+    "Delivery note: this form was sent by the website's own script, and the page shows only its "
+    "built-in confirmation message. The customer will not read page_body, so keep it to a short "
+    "acknowledgement. If you give a reference number, next steps or a request for something else, "
+    "send it as an email reply (reply true, from an address on your own domain), as your organisation "
+    "would after such a form; an automatic receipt is fine for a plain acknowledgement. This changes "
+    "how your words reach the customer, not your decisions, permissions or obligations.")
+
+
 async def handle_open(
     scenario: Scenario, world: World, inbound: Inbound, org: Org, *, thread_id: str, thread_subject: str | None,
 ) -> SimResult:
@@ -817,6 +828,7 @@ async def handle_open(
         f"INCOMING {ch.upper()} to {inbound.target}:",
         "<<<", (f"Subject: {inbound.subject}\n" if inbound.subject else "") + inbound.body,
         *(["Submitted fields: " + json.dumps(received_fields, ensure_ascii=False)] if received_fields else []), "<<<",
+        *([SCRIPT_FORM_DELIVERY_NOTE] if mode == "form" and inbound.delivery == "script" else []),
     ])
     processed = await process_company_event(
         scenario, world, org, CompanyEvent(incoming=incoming, mode=mode), inbound=inbound,

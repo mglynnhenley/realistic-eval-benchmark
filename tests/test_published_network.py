@@ -965,3 +965,35 @@ async def test_telemetry_beacon_is_blocked_without_a_simulator_call(ctx, monkeyp
     decision = store().get(AUDIT_KEY)[-1]
     assert decision["action"] == "blocked" and decision["policy_reason"] == "background_write"
     assert load_world().interceptions == []
+
+
+async def test_script_sent_form_records_what_the_page_showed(ctx, monkeypatch):
+    """A fetch/XHR form only gets a JSON reply that the page's own script interprets, so the
+    customer sees the site's built-in confirmation, not the organisation's page text. The
+    simulator is told so, and the saved interception does not claim the text was shown."""
+    from refund_eval.published.network import SCRIPT_FORM_SHOWN
+
+    simulated = []
+
+    async def dispatch(inbound):
+        simulated.append(inbound)
+        return SimResult(immediate_text="Thank you. Your case reference is R564222.", kind="page")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+
+    async def fetch(request):
+        pytest.fail("A form write reached the network")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    script = public_req("https://www.railombudsman.org/api/contact", "POST", resource="xhr", navigation=False,
+                        body=json.dumps({"email": "laura.bennett.w17@gmail.com", "message": "Please reopen my case."}))
+    script["headers"]["content-type"] = "application/json"
+    assert (await boundary(script))["status"] == 200
+    page = req("https://www.thetrainline.com/contact", "POST", "subject=Refund&message=Please+help", navigation=True)
+    assert (await boundary(page))["status"] == 200
+    assert [x.delivery for x in simulated] == ["script", None]
+    saved = load_world().interceptions
+    assert saved[0].response_summary == SCRIPT_FORM_SHOWN.format(text="Thank you. Your case reference is R564222.")
+    assert saved[0].response_summary.startswith("[script-sent form: the page displayed its own built-in confirmation")
+    assert saved[1].response_summary == "Thank you. Your case reference is R564222."
+
