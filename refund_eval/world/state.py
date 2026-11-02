@@ -236,6 +236,7 @@ class World(BaseModel):
     status_reports: list[StatusReport] = Field(default_factory=list)
     wakeups: list[Wakeup] = Field(default_factory=list)
     allowance_hits: list[datetime] = Field(default_factory=list)  # historical logs only; no longer recorded or enforced
+    opened_mail: list[str] = Field(default_factory=list)  # overlay message ids whose content the agent has read
     killed: bool = False
     stop_reason: str | None = None
 

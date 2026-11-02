@@ -211,12 +211,15 @@ async def test_overlay_mail_labels_and_read_search_agree(ctx, source, own, to_se
     [thread] = found["structuredContent"]["threads"]
     [visible] = thread["messages"]
     assert visible["labelIds"] == labels
-    read = await service.call_tool("get_message", {"messageId": visible["id"]})
-    assert read["structuredContent"]["labelIds"] == labels
     for query, expected in [("is:unread", "UNREAD" in labels), ("is:read", "UNREAD" not in labels),
                             ("in:sent", own), ("in:inbox", "INBOX" in labels)]:
         result = await service.call_tool("search_threads", {"query": query})
         assert bool(result["structuredContent"]["threads"]) is expected
+    read = await service.call_tool("get_message", {"messageId": visible["id"]})
+    assert read["structuredContent"]["labelIds"] == labels
+    # Reading the content opens the message: it is no longer unread afterwards.
+    unread = await service.call_tool("search_threads", {"query": "is:unread"})
+    assert unread["structuredContent"]["threads"] == []
 
 
 async def test_send_search_read_thread_and_delayed_reply_are_coherent(ctx, simulator):
@@ -767,3 +770,42 @@ async def test_reply_all_excludes_configured_secondary_non_gmail_address(ctx, si
     assert len(simulator) == 1 and simulator[0].target == "support@example.test"
     assert not any(item.to_user for item in load_world().interceptions)
     assert all(item.payload["cc"] == [] for item in load_world().interceptions)
+
+
+async def test_reading_a_message_clears_unread_and_new_background_mail_is_unread(ctx):
+    """Read state is tracked: a reply or background message delivered after the start is
+    UNREAD until its content is read with get_message or get_thread; seed mail is read."""
+    address = next(iter(ctx.mailbox.user_addresses))
+    with world_tx() as world:
+        world.now = world.now + timedelta(hours=2)
+        later = world.now
+        world.overlay_inbox = [
+            Email(id="reply-1", thread_id="thread-reply", sender="Support <support@example.test>", to=[address],
+                  subject="Your case", body="We looked at it.", sent_at=later, source="counterparty"),
+            Email(id="news-1", thread_id="thread-news", sender="Newsletter <news@example.test>", to=[address],
+                  subject="Morning briefing", body="Today's news.", sent_at=later, source="real"),
+            Email(id="old-1", thread_id="thread-old", sender="Friend <friend@example.test>", to=[address],
+                  subject="Last week", body="Before the session started.", sent_at=world.start_time, source="real"),
+        ]
+    service = GmailService(Remote(), ctx)
+
+    async def labels(query=""):
+        found = await service.call_tool("search_threads", {"query": query})
+        return {m["id"]: m["labelIds"] for t in found["structuredContent"]["threads"] for m in t["messages"]}
+
+    from refund_eval.published.mail import _visible_id
+
+    reply, news, old = (_visible_id(x) for x in ("reply-1", "news-1", "old-1"))
+    assert await labels() == {reply: ["INBOX", "UNREAD"], news: ["INBOX", "UNREAD"], old: ["INBOX"]}
+    assert set(await labels("is:unread")) == {reply, news}
+    # Metadata-only reads do not open a message; reading the content does.
+    await service.call_tool("get_message", {"messageId": reply, "messageFormat": "METADATA_ONLY"})
+    assert (await labels())[reply] == ["INBOX", "UNREAD"]
+    first = await service.call_tool("get_message", {"messageId": reply})
+    assert first["structuredContent"]["labelIds"] == ["INBOX", "UNREAD"]
+    thread = await service.call_tool("get_thread", {"threadId": _visible_id("thread-news")})
+    assert [m["labelIds"] for m in thread["structuredContent"]["messages"]] == [["INBOX", "UNREAD"]]
+    assert await labels() == {reply: ["INBOX"], news: ["INBOX"], old: ["INBOX"]}
+    assert await labels("is:unread") == {} and set(await labels("is:read")) == {reply, news, old}
+    assert load_world().opened_mail == ["reply-1", "news-1"]
+

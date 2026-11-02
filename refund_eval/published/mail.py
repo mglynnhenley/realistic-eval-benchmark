@@ -321,9 +321,28 @@ class GmailService:
         labels = ["SENT"] if sent else ["INBOX"]
         if sent and any(parse_address(address) in own for address in [*email.to, *email.cc]):
             labels.append("INBOX")
-        if not sent and email.source == "counterparty":
+        if not sent and self._unread(email):
             labels.append("UNREAD")
         return labels
+
+    @staticmethod
+    def _unread(email: Email) -> bool:
+        """Read state is tracked, not derived from where a message came from: mail that
+        arrives after the session starts (a company reply, or background mail) is UNREAD
+        until the agent reads its content; seed mail from before the start is read."""
+        world = load_world()
+        if email.id in world.opened_mail:
+            return False
+        return email.source == "counterparty" or as_aware(email.sent_at) > as_aware(world.start_time)
+
+    @staticmethod
+    def _mark_opened(emails: list[Email], message_format: str) -> None:
+        """Reading a message's content opens it, as the local mailbox profile does."""
+        if message_format not in {"FULL_CONTENT", "MESSAGE_FORMAT_UNSPECIFIED", "THREAD_VIEW_UNSPECIFIED"}:
+            return
+        with world_tx() as world:
+            seen = set(world.opened_mail)
+            world.opened_mail.extend(email.id for email in emails if email.id not in seen)
 
     def _native_message(self, email: Email, extra: dict[str, Any], message_format: str = "FULL_CONTENT") -> dict[str, Any]:
         if message_format not in {"FULL_CONTENT", "MESSAGE_FORMAT_UNSPECIFIED", "MINIMAL", "METADATA_ONLY",
@@ -353,7 +372,10 @@ class GmailService:
         for email, meta in self._locals():
             if _visible_id(email.id) == mid:
                 remember_links([email.body])
-                return self._result("get_message", self._native_message(email, meta, arguments.get("messageFormat", "FULL_CONTENT")))
+                message_format = arguments.get("messageFormat", "FULL_CONTENT")
+                result = self._result("get_message", self._native_message(email, meta, message_format))
+                self._mark_opened([email], message_format)
+                return result
         result = await self._read_remote("get_message", arguments)
         if not result.get("isError"):
             data = _payload(result)
@@ -378,11 +400,13 @@ class GmailService:
         if not locals_:
             return template  # exact unchanged native response
         messages = {m["id"]: m for m in data.get("messages", [])}
+        message_format = arguments.get("messageFormat", "FULL_CONTENT")
         for email, meta in locals_:
-            message = self._native_message(email, meta, arguments.get("messageFormat", "FULL_CONTENT"))
+            message = self._native_message(email, meta, message_format)
             messages[message["id"]] = message
             remember_links([email.body])
         data["messages"] = sorted(messages.values(), key=self._message_time)
+        self._mark_opened([email for email, _meta in locals_], message_format)
         return self._result("get_thread", data, template)
 
     @staticmethod

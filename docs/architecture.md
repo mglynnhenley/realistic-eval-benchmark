@@ -1,8 +1,10 @@
 # Architecture
 
 The simulated Gmail view labels the account holder's outgoing mail as sent,
-historical seed inbox mail as read, and newly delivered counterparty mail as
-unread. Labels and local read/unread searches share the same classification.
+historical seed inbox mail as read, and mail delivered after the session starts
+(a counterparty reply or background mail) as unread until the agent reads its
+content with `get_message` or `get_thread`; opened message ids are kept in the
+world state. Labels and local read/unread searches share the same classification.
 The content-only fixture and intercepted messages have no Spam or Draft status.
 Searches accept `in:spam` and `is:draft` with no local matches; negation and
 alternatives still apply normally. A custom label named `spam` or `draft` does
