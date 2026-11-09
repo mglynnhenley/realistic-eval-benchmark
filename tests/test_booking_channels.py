@@ -227,6 +227,8 @@ async def test_only_explicit_enquiry_reaches_normal_company_effects(monkeypatch)
     result = await broker(request("/about-us/contact-us/submit", method="POST", fields=own))
     world = load_world()
     assert result["status"] == 200 and len(world.interactions) == len(world.pending) == 1
+    # The confirmation does not append a second, partial enquiry form.
+    assert "<form" not in text(result) and "Your enquiry has been received." in text(result)
     assert world.cases["trainline"].contacts == 1 and len(world.outcome.claims) == 1
     assert not world.outcome.offers and not world.outcome.transfers
     [interception] = world.interceptions
@@ -245,3 +247,21 @@ async def test_policy_page_shows_own_terms_and_links_other_organisations(context
     assert "By joining the Rail Ombudsman scheme" not in body
     assert 'href="https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"' in body
     assert 'href="https://www.nationalrail.co.uk/help-and-assistance/complaints/"' in body
+
+
+async def test_lookup_url_opened_directly_shows_the_find_form(context, monkeypatch):
+    broker = boundary(context, monkeypatch)
+    before = load_world().model_dump(mode="json")
+    result = await broker(request("/my-account/bookings/lookup"))
+    body = text(result)
+    assert result["status"] == 200 and "Method not allowed" not in body
+    assert 'action="' + ORIGIN + '/my-account/bookings/lookup"' in body
+    assert load_world().model_dump(mode="json") == before
+
+
+async def test_found_booking_repeats_the_confirmation_email_details(context, monkeypatch):
+    broker = boundary(context, monkeypatch)
+    body = text(await broker(request("/my-account/bookings/lookup", method="POST", fields=fields(context))))
+    for value in ("1 Adult", "Coach C, Seat 42 (window, table)", "eTicket, in the app under My Tickets",
+                  "Visa Debit ending 4821 on 31 August 2026"):
+        assert value in body

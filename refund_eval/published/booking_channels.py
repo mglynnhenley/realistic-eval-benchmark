@@ -10,6 +10,7 @@ import base64
 import hashlib
 import html
 import json
+import re
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
@@ -123,6 +124,16 @@ class BookingChannels:
         if len(booking_mail) != 1 or len(addresses) != 1:
             raise ValueError("One authored booking email identity is required")
         self._email = addresses.pop()
+        # Details the authored confirmation email already shows; nothing new is derived.
+        body = booking_mail[0].body
+        self._details = [(label, match.group(1).strip()) for label, pattern in (
+            ("Passengers", r"^\s*(\d+ Adults?)\s*$"),
+            ("Seat", r"^\s*Seat:\s*(.+?)\s*$"),
+            ("Ticket delivery", r"Your eTicket is ready (in the app under My Tickets)"),
+            ("Payment", r"^\s*Paid with (.+?)\.?\s*$"),
+        ) if (match := re.search(pattern, body, re.MULTILINE))]
+        self._details = [(label, "eTicket, " + value if label == "Ticket delivery" else value)
+                         for label, value in self._details]
         self._policy_url = ORIGIN + "/help/refunds-and-complaints"
         # Reuse the public quotations already exposed by the fixture pages.
         # The help link must not depend on a live article remaining at its old URL.
@@ -185,6 +196,7 @@ class BookingChannels:
         rows = [("Booking reference", p["booking_ref"]), ("Journey", f'{p["origin"]} to {p["destination"]}'),
                 ("Departure", f'{_day(self._travel_date)} at {p["departure_time"]}'),
                 ("Operator", p["operator"]), ("Ticket", p["ticket_type"]), ("Total paid", price),
+                *self._details,
                 ("Service status", "Cancelled" if p["cancelled"] else "Scheduled")]
         content = "<dl>" + "".join(f"<dt>{esc(label)}</dt><dd>{esc(value)}</dd>" for label, value in rows) + "</dl>"
         if p["cancelled"] and p["cancellation_reason"]:
@@ -210,6 +222,8 @@ class BookingChannels:
             result = _page("Request unavailable", "<p>This page could not be opened.</p>", status=400)
         elif route == "lookup" and method == "POST":
             result, matched = self._lookup(request, body, today)
+        elif route == "lookup" and method in {"GET", "HEAD"} and not body:
+            result = _page("Find a booking", self._find_form(), head=method == "HEAD")
         elif route != "lookup" and method in {"GET", "HEAD"} and not body:
             if route == "help":
                 content = "<p>Manage your booking or contact customer services.</p><nav>" + " | ".join([

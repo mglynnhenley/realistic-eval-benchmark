@@ -776,7 +776,9 @@ class BrowserBoundary:
             tool_call_id=call_id,
         )
         status = 200 if result is not None and result.kind != "error" else 503
-        form_action = (url if status == 200
+        # A confirmation page offers the claim fields only when the submitted form lacked them;
+        # after the full contact form it does not repeat a second, partial enquiry form.
+        form_action = (url if status == 200 and "earlier_claim_date" not in fields
                        and self.ctx.scenario.task.uses_refund_form(self.ctx.scenario, org) else None)
         site_name = self.ctx.scenario.org(org).name if org else ""
         page = response(status, simulated_page(shown, site_name=site_name, site_url=url,
