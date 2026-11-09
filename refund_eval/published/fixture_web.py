@@ -45,27 +45,84 @@ class FixturePage:
     policy_url: str | None = None
     form_action: str | None = None
     late_refund_fields: bool = False
+    body_html: str | None = None
 
 
-def policy_page_text(org: Org) -> str:
-    """Public quotations from the dossier, else the scenario's authored policy."""
+@dataclass(frozen=True)
+class PolicySection:
+    heading: str
+    source: str
+    quotes: tuple[str, ...]
+
+
+def _host(url: str) -> str:
+    host = (urlsplit(url).hostname or "").casefold()
+    return host.removeprefix("www.")
+
+
+def _owner(url: str, orgs) -> Org | None:
+    """The configured organisation whose website serves this URL, if any."""
+    host = _host(url)
+    for org in orgs:
+        if any(host == d.casefold() or host.endswith("." + d.casefold()) for d in org.web_domains):
+            return org
+    return None
+
+
+def _heading(source: str) -> str:
+    slug = urlsplit(source).path.rstrip("/").rsplit("/", 1)[-1]
+    return slug.replace("-", " ").capitalize() if re.fullmatch(r"[a-zA-Z]+(?:-[a-zA-Z]+)*", slug) else ""
+
+
+def policy_sections(org: Org, orgs=()) -> tuple[list[PolicySection], list[tuple[str, str]]]:
+    """An organisation's own public quotations by source page, and links to other organisations.
+
+    Quotations a dossier gathered from another configured organisation's website (a regulator's
+    press release, another company's complaints page) are not presented as this organisation's
+    text; they become related links to their original public pages. Quotation text is verbatim."""
     dossier = (saved_dossier(org) or {}).get("dossier")
     if not dossier:
-        return org.policy.strip()
+        return [PolicySection("", "", (org.policy.strip(),))], []
     sources: dict[str, list[str]] = {}
     for fact in dossier.get("facts", []):
         if quote := fact.get("quote", "").strip():
             sources.setdefault(fact.get("url") or fact.get("source", ""), []).append(quote)
-    sections = []
+    sections, related = [], {}
     for source, raw_quotes in sources.items():
+        owner = _owner(source, orgs) if source else None
+        if owner is not None and owner.key != org.key:
+            heading = _heading(source)
+            related.setdefault(source, f"{owner.name}: {heading}" if heading else owner.name)
+            continue
         quotes = list(dict.fromkeys(raw_quotes))
         quotes = [quote for quote in quotes if not any(quote != other and quote in other for other in quotes)]
-        if source:
-            slug = urlsplit(source).path.rstrip("/").rsplit("/", 1)[-1]
-            heading = slug.replace("-", " ").capitalize() if re.fullmatch(r"[a-zA-Z]+(?:-[a-zA-Z]+)*", slug) else ""
-            quotes.insert(0, "\n".join(filter(None, [heading, source])))
-        sections.append("\n\n".join(quotes))
-    return "\n\n".join(sections)
+        sections.append(PolicySection(_heading(source) if source else "", source, tuple(quotes)))
+    return sections, [(label, url) for url, label in related.items()]
+
+
+def policy_page_text(org: Org, orgs=()) -> str:
+    """Public quotations from the dossier, else the scenario's authored policy.
+
+    Section headings name the source page; source URLs are links, not body text."""
+    sections, _ = policy_sections(org, orgs)
+    return "\n\n".join("\n\n".join(filter(None, [section.heading, *section.quotes])) for section in sections)
+
+
+def policy_html(org: Org, orgs=()) -> str:
+    """Policy body markup: linked section headings, verbatim quotations and related links."""
+    esc = html.escape
+    sections, related = policy_sections(org, orgs)
+    parts = []
+    for section in sections:
+        if section.heading and section.source:
+            parts.append(f'<h2><a href="{esc(section.source, quote=True)}">{esc(section.heading)}</a></h2>')
+        elif section.heading:
+            parts.append(f"<h2>{esc(section.heading)}</h2>")
+        parts.extend(f"<p>{esc(quote).replace(chr(10), '<br>')}</p>" for quote in section.quotes)
+    if related:
+        parts.append("<h2>Related information</h2><ul>" + "".join(
+            f'<li><a href="{esc(url, quote=True)}">{esc(label)}</a></li>' for label, url in related) + "</ul>")
+    return "".join(parts)
 
 
 def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
@@ -87,8 +144,8 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             contact.append(org.contact_note)
         pages.extend([
             FixturePage(
-                policy_url, f"{org.name}: refunds and complaints", policy_page_text(org),
-                org.key, contact_url=contact_url,
+                policy_url, f"{org.name}: refunds and complaints", policy_page_text(org, ctx.scenario.orgs),
+                org.key, contact_url=contact_url, body_html=policy_html(org, ctx.scenario.orgs),
             ),
             FixturePage(
                 contact_url, f"Contact {org.name}", "\n\n".join(contact), org.key,
@@ -101,7 +158,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
 
 def _page_html(page: FixturePage) -> str:
     esc = html.escape
-    paragraphs = "\n".join(
+    paragraphs = page.body_html if page.body_html is not None else "\n".join(
         f"<p>{esc(part).replace(chr(10), '<br>')}</p>"
         for part in page.text.split("\n\n") if part
     )

@@ -126,9 +126,9 @@ class BookingChannels:
         self._policy_url = ORIGIN + "/help/refunds-and-complaints"
         # Reuse the public quotations already exposed by the fixture pages.
         # The help link must not depend on a live article remaining at its old URL.
-        from refund_eval.published.fixture_web import policy_page_text
+        from refund_eval.published.fixture_web import policy_html
 
-        self._policy_text = policy_page_text(retailer)
+        self._policy_html = policy_html(retailer, scenario.orgs)
         self._travel_date = journey.date
         # This policy is only for the late task's explicitly same-day Advance
         # ticket. Do not infer expiry from travel date for arbitrary tickets.
@@ -221,9 +221,7 @@ class BookingChannels:
             elif route == "find":
                 content, title = self._find_form(), "Find a booking"
             elif route == "policy":
-                content = "".join(f"<p>{html.escape(paragraph)}</p>"
-                                  for paragraph in self._policy_text.split("\n\n"))
-                content += "<nav>" + _link("/about-us/contact-us", "Contact customer services") + "</nav>"
+                content = self._policy_html + "<nav>" + _link("/about-us/contact-us", "Contact customer services") + "</nav>"
                 title = "Refunds and complaints"
             else:
                 content, title = self._contact_form(), "Contact customer services"

@@ -122,6 +122,10 @@ async def test_a_saved_file_is_cleaned_like_live_research(sim, monkeypatch):
 
 async def test_auto_uses_a_fresh_file_and_researches_a_stale_one(sim, monkeypatch):
     store().set(research.MODE_KEY, "auto")
+    # The committed dossier ages with the calendar; pin a retrieval time inside the window.
+    saved = research.saved_dossier(TRAINLINE)
+    fresh = {**saved, "retrieved_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()}
+    monkeypatch.setattr(research, "saved_dossier", lambda org: fresh)
     record = await research.research(TRAINLINE)
     assert record["mode"] == "saved" and not sim.dossier_prompts
     stale = {**record, "retrieved_at": (datetime.now(UTC) - timedelta(days=research.FRESH_DAYS + 1)).isoformat()}

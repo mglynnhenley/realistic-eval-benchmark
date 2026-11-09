@@ -48,7 +48,7 @@ def parcel_messages(source):
 def test_parcel_correspondent_role_and_private_family_details_survive_personalization(kind):
     source, _, surname = persona(kind)
     incoming, outgoing = parcel_messages(source)
-    assert len(source.emails) == 39  # Three unrelated existing messages are delivered later.
+    assert len(source.emails) == 77  # Unrelated bulk mail arrives during the session.
     assert incoming.sender == f"Auntie Jackie {surname} <{JACKIE_ADDRESS}>"
     assert outgoing.to == [incoming.sender]
     assert outgoing.body.startswith("Hi Auntie Jackie,\n")

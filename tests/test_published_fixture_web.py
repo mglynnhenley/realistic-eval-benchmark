@@ -68,20 +68,54 @@ def test_policy_excerpts_keep_separate_source_context(monkeypatch):
         ],
     }})
     assert policy_page_text(org) == (
-        "Rail complaints\n" + general + "\n\nUse the portal to complain about a rail provider.\n\n"
-        "Complaints about service\n" + own_service + "\n\n"
+        "Rail complaints\n\nUse the portal to complain about a rail provider.\n\n"
+        "Complaints about service\n\n"
         "You can raise a formal complaint by email or in writing.\n\nEmail complaints@disputes.example.test."
     )
+    from refund_eval.published.fixture_web import policy_html
+
+    markup = policy_html(org)
+    assert f'<h2><a href="{general}">Rail complaints</a></h2>' in markup
+    assert f'<h2><a href="{own_service}">Complaints about service</a></h2>' in markup
+    assert f"<p>{general}</p>" not in markup and f"<p>{own_service}</p>" not in markup
 
 
 def test_saved_ombudsman_policy_preserves_service_complaint_scope():
-    from refund_eval.published.fixture_web import policy_page_text
+    from refund_eval.published.fixture_web import policy_html, policy_page_text
 
-    text = policy_page_text(load_scenario("train_refund").org("rail_ombudsman"))
-    assert "https://www.railombudsman.org/en/faq" in text
-    service = text.split("Complaints about service\nhttps://www.railombudsman.org/en/complaints-about-service\n\n")[1]
+    scenario = load_scenario("train_refund")
+    org = scenario.org("rail_ombudsman")
+    text = policy_page_text(org, scenario.orgs)
+    assert "https://www.railombudsman.org/en/faq" in policy_html(org, scenario.orgs)
+    assert not any(line.startswith("https://") for line in text.splitlines())
+    service = text.split("Complaints about service\n\n")[1]
     assert "you can raise a formal complaint by email or in writing." in service
     assert "complaints@railombudsman.org" in service
+
+
+def test_other_organisations_quotations_become_related_links_not_page_text():
+    from refund_eval.published.fixture_web import (
+        policy_html,
+        policy_page_text,
+        policy_sections,
+    )
+
+    scenario = load_scenario("train_refund_late")
+    org = scenario.org("trainline")
+    sections, related = policy_sections(org, scenario.orgs)
+    assert sections and all("thetrainline.com" in section.source for section in sections)
+    text = policy_page_text(org, scenario.orgs)
+    markup = policy_html(org, scenario.orgs)
+    for body in (text, markup):
+        assert "By joining the Rail Ombudsman scheme" not in body
+        assert "You can appeal to the Rail Ombudsman if" not in body
+    assert not any(line.startswith("https://") for line in text.splitlines())
+    urls = {url for _, url in related}
+    assert "https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu" in urls
+    assert "https://www.nationalrail.co.uk/help-and-assistance/complaints/" in urls
+    assert all(f'href="{url}"' in markup for url in urls) and "Related information" in markup
+    # Trainline's own quotations remain verbatim.
+    assert "no later than 28 days after the ticket expiry date" in text
 
 
 @pytest.fixture

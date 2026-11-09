@@ -43,7 +43,7 @@ def _world(**kw) -> World:
 def test_fixture_inbox_is_a_realistic_personal_mailbox():
     src = FixtureMailSource(DEFAULT_FIXTURE_PATH)
     emails = src.emails
-    assert 28 <= len(emails) <= 45
+    assert 60 <= len(emails) <= 90
     assert len({e.id for e in emails}) == len(emails)
     senders = {e.sender.split("<")[-1].split("@")[-1].rstrip(">") for e in emails}
     assert len(senders) >= 20
@@ -123,9 +123,9 @@ def test_rescheduled_existing_mail_is_hidden_initially_and_arrives_over_the_simu
     starting = {e.id for e in src.search("", now=START, limit=100)}
     end = START + timedelta(days=21)
     later = {e.id for e in src.search("", now=end, limit=100)}
-    assert len(starting) == 36
+    assert len(starting) == 66
     future = [e for e in src.emails if e.id in later - starting]
-    assert len(future) == 3
+    assert len(future) == 11
     for email in future:
         before = as_aware(email.sent_at) - timedelta(microseconds=1)
         assert email.id not in {e.id for e in src.search("", now=before, limit=100)}
@@ -210,7 +210,7 @@ def test_mailbox_merges_overlay_real_and_sent_mail_newest_first():
             },
         )
     )
-    results = box.search(w, "", limit=50)
+    results = box.search(w, "", limit=100)
     assert results[0].id == "abc123abc123abc1"
     dates = [as_aware(e.sent_at) for e in results]
     assert dates == sorted(dates, reverse=True)
@@ -525,7 +525,7 @@ def test_future_fixture_visibility_across_clock_change(start):
     source = FixtureMailSource().for_scenario(scenario)
     world = World(start_time=scenario.start_time, now=scenario.start_time)
     source.schedule_future(world)
-    assert len(world.pending) == 3
+    assert len(world.pending) == 11
     for pending in world.pending:
         email = pending.email
         # Use UTC on either side of the boundary, including dates after BST ends.

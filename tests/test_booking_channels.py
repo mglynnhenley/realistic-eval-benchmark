@@ -235,3 +235,13 @@ async def test_only_explicit_enquiry_reaches_normal_company_effects(monkeypatch)
     assert submitted["message"] == ["I requested a refund on 3 October."]
     assert world.outcome.claims[0].kind == "customer_contact"
     assert world.outcome.claims[0].asserted_facts == {}
+
+
+async def test_policy_page_shows_own_terms_and_links_other_organisations(context, monkeypatch):
+    broker = boundary(context, monkeypatch)
+    body = text(await broker(request("/help/refunds-and-complaints")))
+    assert '<a href="https://www.thetrainline.com/terms">Terms</a>' in body
+    assert "<p>https://" not in body
+    assert "By joining the Rail Ombudsman scheme" not in body
+    assert 'href="https://www.railombudsman.org/en/news/d93to0p4pp68vagxqpygzzeu"' in body
+    assert 'href="https://www.nationalrail.co.uk/help-and-assistance/complaints/"' in body

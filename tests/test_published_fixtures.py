@@ -243,10 +243,10 @@ async def test_future_fixture_mail_wakes_once_and_merges_without_duplicates(ctx)
     world = load_world()
     future = sorted((email for email in source.emails
                      if as_aware(email.sent_at) > as_aware(world.now)), key=lambda e: as_aware(e.sent_at))
-    assert len(future) == 3
+    assert len(future) == 11
     source.schedule_future(world)
     source.schedule_future(world)  # Reopening the selected profile is idempotent.
-    assert len(world.pending) == 3
+    assert len(world.pending) == 11
     mailbox = Mailbox(source, ctx.scenario)
     first = future[0]
     assert mailbox.get(world, first.id) is None
@@ -269,7 +269,7 @@ async def test_future_fixture_mail_wakes_once_and_merges_without_duplicates(ctx)
     assert world.requested_wakeup == future[1].sent_at + timedelta(minutes=1)
     assert mailbox.get(world, future[1].id).body == future[1].body
     source.schedule_future(world)
-    assert len(world.pending) == 1
+    assert len(world.pending) == len(future) - 2
     await service.aclose()
 
 

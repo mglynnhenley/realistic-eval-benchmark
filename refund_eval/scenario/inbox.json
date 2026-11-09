@@ -479,6 +479,462 @@
       "subject": "Your car insurance renewal",
       "body": "Dear {{user_name}},\n\nYour car insurance is due for renewal on {{date+42}}.\n\nPolicy number: P76312894\nVehicle: 2019 Volkswagen Polo 1.0 TSI\nRenewal premium: £486.20 (last year: £412.80)\n\nYour policy is set to renew automatically, so you don't need to do anything if you want to stay covered with us. If you'd like to make changes, you can do so in your online account or by calling 0333 220 2000.\n\nWhy has my price changed? Premiums across the market have gone up because repair and parts costs have risen. We've included a breakdown in your renewal documents.\n\nKind regards,\nAdmiral Car Insurance",
       "sent_at": "2026-08-03T10:15:00+01:00"
+    },
+    {
+      "id": "1905d5d7d3f8fbe2",
+      "thread_id": "1905d5d7d3f8fbe2",
+      "sender": "Sainsbury's <sainsburys@mail.sainsburys.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Nectar Prices this week, {{user_first_name}}",
+      "body": "Hi {{user_first_name}},\n\nHere are this week's Nectar Prices picked for you:\n\nTaylors Hot Lava Java coffee beans 1kg - £10.50 with Nectar (was £14.00)\nYeo Valley Organic Greek style yoghurt 950g - £2.25 with Nectar\nSainsbury's Taste the Difference sourdough - £1.60 with Nectar\n\nOffers end {{date+6}}. Scan your Nectar card or app at the till, or shop online.\n\nShop now: https://www.sainsburys.co.uk/gol-ui/nectar-prices\n\nYou're receiving this because you signed up at sainsburys.co.uk.\nUnsubscribe: https://sainsburys.co.uk/email/unsubscribe?u=a91c22&e={{user_email}}",
+      "sent_at": "2026-08-04T07:41:00+01:00"
+    },
+    {
+      "id": "1906c3a49eb1aef3",
+      "thread_id": "1906c3a49eb1aef3",
+      "sender": "Creative Boom <hello@creativeboom.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "The week in creativity: packaging that breaks the grid",
+      "body": "This week on Creative Boom\n\nPackaging that breaks the grid: six studios on ditching the shelf template\nhttps://www.creativeboom.com/inspiration/packaging-that-breaks-the-grid/\n\nIs the logo dead? We asked 20 brand designers\nhttps://www.creativeboom.com/insight/is-the-logo-dead/\n\nFreelance rates survey 2026: the results are in\nhttps://www.creativeboom.com/resources/freelance-rates-2026/\n\nHave a lovely weekend,\nKatyMarie and the Creative Boom team\n\nYou're receiving this because you signed up at creativeboom.com.\nUnsubscribe: https://creativeboom.com/email/unsubscribe?u=cb7741&e={{user_email}}",
+      "sent_at": "2026-08-07T08:00:00+01:00"
+    },
+    {
+      "id": "195ae29204ea88dc",
+      "thread_id": "195ae29204ea88dc",
+      "sender": "Royal Mail <no-reply@royalmail.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your item has been delivered",
+      "body": "Hello,\n\nYour item with reference QF418823046GB was delivered on {{date+0}} at 11:52.\n\nIt was signed for by: WHITE\n\nTrack another item: https://www.royalmail.com/track-your-item\n\nPlease do not reply to this email. Royal Mail Group Ltd, 185 Farringdon Road, London EC1A 1AA.",
+      "sent_at": "2026-08-08T12:04:00+01:00"
+    },
+    {
+      "id": "19bc3330a59bf7a4",
+      "thread_id": "19bc3330a59bf7a4",
+      "sender": "Netflix <info@mailer.netflix.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "New on Netflix: your weekend watchlist",
+      "body": "{{user_first_name}}, here's what's new this week.\n\nSlow Horses-style spy drama 'The Quiet Desk' - all episodes now streaming\n\nBecause you watched Bake Off: 'The Great Pottery Throw Down' series 8\n\nContinue watching: 'Chef's Table: Pizza'\n\nWatch now: https://www.netflix.com/browse\n\nYou're receiving this because you signed up at netflix.com.\nUnsubscribe: https://netflix.com/email/unsubscribe?u=nf20817&e={{user_email}}",
+      "sent_at": "2026-08-09T18:22:00+01:00"
+    },
+    {
+      "id": "19076cd86c7633a2",
+      "thread_id": "19076cd86c7633a2",
+      "sender": "Behance <noreply@behance.net>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your project \"Harrow & Finch identity\" got 12 new appreciations",
+      "body": "Hi {{user_first_name}},\n\nYour project \"Harrow & Finch identity\" is getting noticed.\n\n12 new appreciations\n3 new followers\n1 new comment: \"Love the custom serif on the jars - who did the lettering?\"\n\nSee your stats: https://www.behance.net/{{user_handle}}/insights\n\nAdobe, 345 Park Avenue, San Jose, CA 95110 USA. Manage notifications: https://www.behance.net/account/notifications",
+      "sent_at": "2026-08-11T15:37:00+01:00"
+    },
+    {
+      "id": "19d9d8da65421696",
+      "thread_id": "19d9d8da65421696",
+      "sender": "Jess Okafor <jess.okafor@gmail.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Pub quiz Thursday?",
+      "body": "Heya,\n\nQuiz is back at the Bell on Thursday - we came fourth last time and I am NOT over it. Are you in? Dan says he'll actually revise the music round this time (he won't).\n\n8pm, I'll grab a table from 7:30.\n\nJ x",
+      "sent_at": "2026-08-12T13:15:00+01:00"
+    },
+    {
+      "id": "19d92b11734e91ee",
+      "thread_id": "19d9d8da65421696",
+      "sender": "{{user_name}} <{{user_email}}>",
+      "to": [
+        "jess.okafor@gmail.com"
+      ],
+      "cc": [],
+      "subject": "Re: Pub quiz Thursday?",
+      "body": "In! Might be a bit late, I've got a call till 7:30. Get me a large white if you're at the bar first, I'll owe you.\n\nOn {{date-0}}, Jess Okafor <jess.okafor@gmail.com> wrote:\n> Quiz is back at the Bell on Thursday - are you in?",
+      "sent_at": "2026-08-12T13:48:00+01:00"
+    },
+    {
+      "id": "195f84de7b14e0e0",
+      "thread_id": "195f84de7b14e0e0",
+      "sender": "Etsy <transaction@etsy.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Items in your basket are selling fast",
+      "body": "Hi {{user_first_name}},\n\nJust so you know, these items in your basket are in demand:\n\nRisograph print 'Leeds Market' A3 - £28.00 (only 2 left)\nHandmade stoneware espresso cups, set of 2 - £34.00\n\nGo to basket: https://www.etsy.com/cart\n\nYou're receiving this because you signed up at etsy.com.\nUnsubscribe: https://etsy.com/email/unsubscribe?u=et55302&e={{user_email}}",
+      "sent_at": "2026-08-14T20:05:00+01:00"
+    },
+    {
+      "id": "19790c6aef5b8d38",
+      "thread_id": "19790c6aef5b8d38",
+      "sender": "Squarespace <no-reply@squarespace.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your website billing receipt",
+      "body": "Hi {{user_first_name}},\n\nThanks for your payment.\n\nWebsite: {{user_slug}}-design.com\nPlan: Personal (annual)\nAmount: £144.00\nNext billing date: {{date+365:short}}\n\nView invoice: https://account.squarespace.com/billing\n\nSquarespace Ireland Limited, Le Pole House, Ship Street Great, Dublin 8, Ireland.",
+      "sent_at": "2026-08-15T06:12:00+01:00"
+    },
+    {
+      "id": "194707cf908af5c7",
+      "thread_id": "194707cf908af5c7",
+      "sender": "Strava <no-reply@strava.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your weekly summary: 3 activities, 21.4 km",
+      "body": "Nice work this week, {{user_first_name}}!\n\nActivities: 3\nDistance: 21.4 km\nTime: 2h 04m\nLongest run: 9.1 km (Sunday)\n\nYou're 12% ahead of last week. Keep it up.\n\nSee your progress: https://www.strava.com/athlete/progress\n\nManage email settings: https://www.strava.com/settings/email",
+      "sent_at": "2026-08-17T09:00:00+01:00"
+    },
+    {
+      "id": "19dc55138a5a61da",
+      "thread_id": "19dc55138a5a61da",
+      "sender": "Duolingo <hello@duolingo.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You're on a 46 day streak!",
+      "body": "Keep it going, {{user_first_name}}!\n\nYou're on a 46 day Italian streak. Just 5 minutes today will keep your streak alive.\n\nStart a lesson: https://www.duolingo.com/learn\n\nDon't want these reminders? https://www.duolingo.com/settings/notifications",
+      "sent_at": "2026-08-19T19:30:00+01:00"
+    },
+    {
+      "id": "19b3994eb6445cfa",
+      "thread_id": "19b3994eb6445cfa",
+      "sender": "{{home_area}} Library <libraries@notifications.gov.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your items are due back soon",
+      "body": "Dear {{user_name}},\n\nThe following items are due back on {{date+3}}:\n\n- Grapefruit by Yoko Ono\n- Thinking with Type (2nd edition) by Ellen Lupton\n\nYou can renew online or in the library app: https://library.example.gov.uk/account\n\nThis is an automated message. Please do not reply.",
+      "sent_at": "2026-08-21T07:00:00+01:00"
+    },
+    {
+      "id": "19b8414c518098d1",
+      "thread_id": "19b8414c518098d1",
+      "sender": "Nextdoor {{home_area}} <reply@ss.email.nextdoor.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Lost grey cat near the high street + 4 more posts",
+      "body": "Trending near you\n\nLost: grey cat, answers to Mochi, last seen near the high street on Tuesday evening. Microchipped. Please check sheds!\n\nRecommendations: anyone know a good plumber who'll do a small job?\n\nFree: IKEA Kallax 2x4, collection only\n\nSee all posts: https://nextdoor.co.uk/news_feed/\n\nUnsubscribe from digests: https://nextdoor.co.uk/settings/email",
+      "sent_at": "2026-08-23T08:30:00+01:00"
+    },
+    {
+      "id": "19066094f9e67717",
+      "thread_id": "19066094f9e67717",
+      "sender": "Adobe <message@adobe.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Creative Cloud invoice",
+      "body": "Hi {{user_first_name}},\n\nThank you for your payment. Here are the details:\n\nPlan: Creative Cloud All Apps (monthly)\nAmount: £56.98 incl. VAT\nInvoice number: GB5026718832\n\nView and download your invoice: https://account.adobe.com/billing-history\n\nAdobe Systems Software Ireland Ltd, 4-6 Riverwalk, Citywest Business Campus, Dublin 24.",
+      "sent_at": "2026-08-26T05:48:00+01:00"
+    },
+    {
+      "id": "19383b8c1bfe894d",
+      "thread_id": "19383b8c1bfe894d",
+      "sender": "Uniqlo <news@mail.uniqlo.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Autumn layers are here",
+      "body": "New season, new layers.\n\nUltra Light Down jackets from £59.90\nMerino crew neck jumpers in 14 colours\nWide-fit pleated trousers - new in\n\nFree delivery on orders over £60.\n\nShop now: https://www.uniqlo.com/uk/en/women/new-arrivals\n\nYou're receiving this because you signed up at uniqlo.com.\nUnsubscribe: https://uniqlo.com/email/unsubscribe?u=uq88120&e={{user_email}}",
+      "sent_at": "2026-08-28T10:10:00+01:00"
+    },
+    {
+      "id": "19867bbe82fee542",
+      "thread_id": "19867bbe82fee542",
+      "sender": "Google Photos <noreply-photos@google.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Rediscover this day",
+      "body": "Hi {{user_first_name}},\n\nYou have new memories from this week in 2023 and 2024.\n\nOpen in Google Photos: https://photos.google.com/memories\n\nYou received this email to update you about your Google Photos account. Manage notifications in Settings.\nGoogle LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA",
+      "sent_at": "2026-08-30T09:12:00+01:00"
+    },
+    {
+      "id": "19b48b59412b994c",
+      "thread_id": "19b48b59412b994c",
+      "sender": "Meetup <info@meetup.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "New event: Life drawing at the Mill",
+      "body": "{{home_area}} Life Drawing Group posted a new event\n\nLife drawing - long poses\n{{day+5}}, 7:00 PM - 9:00 PM\nThe Mill, Coppermill Lane\n£12 on the door, all materials provided\n\nRSVP: https://www.meetup.com/life-drawing-group/events/\n\nManage notifications: https://www.meetup.com/account/comm/",
+      "sent_at": "2026-09-02T17:44:00+01:00"
+    },
+    {
+      "id": "19f7cfa904e8d6b0",
+      "thread_id": "19f7cfa904e8d6b0",
+      "sender": "eBay <ebay@ebay.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "You've been outbid on: Vintage Letraset sheets x20",
+      "body": "Hi {{user_first_name}},\n\nSomeone has outbid you on this item. There's still time to place another bid.\n\nVintage Letraset dry transfer sheets x20 (Helvetica, Futura, Cooper Black)\nCurrent bid: £23.50\nTime left: 4h 12m\n\nBid again: https://www.ebay.co.uk/myb/WatchList\n\neBay (UK) Limited, 1 More London Place, London SE1 2AF.",
+      "sent_at": "2026-09-04T16:20:00+01:00"
+    },
+    {
+      "id": "19fd4e76183a97fc",
+      "thread_id": "19fd4e76183a97fc",
+      "sender": "FreeAgent <notifications@freeagent.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your monthly summary for August",
+      "body": "Hi {{user_first_name}},\n\nHere's how your business did in August.\n\nInvoiced: £3,450.00\nPaid: £2,100.00\nExpenses: £312.40\nOutstanding invoices: 2\n\nSee the full overview: https://login.freeagent.com/overview\n\nFreeAgent Central Ltd, One Edinburgh Quay, 133 Fountainbridge, Edinburgh EH3 9QG.",
+      "sent_at": "2026-09-06T08:05:00+01:00"
+    },
+    {
+      "id": "19d328acc9604231",
+      "thread_id": "19d328acc9604231",
+      "sender": "Instagram <no-reply@mail.instagram.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "{{user_handle}}, you have 3 new notifications",
+      "body": "See what you've missed on Instagram.\n\nharrowandfinch mentioned you in a comment\nchloe.ade and 14 others liked your post\nletterform.archive started following you\n\nOpen Instagram: https://www.instagram.com/\n\nThis message was sent to {{user_email}}. Unsubscribe: https://www.instagram.com/emails/unsubscribe/",
+      "sent_at": "2026-09-08T21:02:00+01:00"
+    },
+    {
+      "id": "19743a83335d8ddb",
+      "thread_id": "19743a83335d8ddb",
+      "sender": "OpenTable <member_services@opentable.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your reservation is confirmed",
+      "body": "Hi {{user_first_name}},\n\nYour table is confirmed.\n\nDishoom Shoreditch\n{{date+3:full}}, 19:30\nParty of 4\n\nNeed to make a change? https://www.opentable.co.uk/my/profile\n\nWe look forward to seeing you.",
+      "sent_at": "2026-09-09T12:40:00+01:00"
+    },
+    {
+      "id": "19d35d2898021729",
+      "thread_id": "19d35d2898021729",
+      "sender": "Too Good To Go <hello@toogoodtogo.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Surprise Bag is ready to collect",
+      "body": "Hi {{user_first_name}},\n\nYour Surprise Bag from Gail's Bakery is ready.\n\nCollect today between 17:30 and 18:00. Show your order in the app at the counter.\n\nOrder: TGTG-77K2Q\n\nThanks for saving food!\nToo Good To Go",
+      "sent_at": "2026-09-11T15:05:00+01:00"
+    },
+    {
+      "id": "19e6955c1984c11b",
+      "thread_id": "19e6955c1984c11b",
+      "sender": "Ticketmaster <noreply@email.ticketmaster.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Presale tomorrow: Wet Leg at Alexandra Palace",
+      "body": "Hi {{user_first_name}},\n\nBecause you follow Wet Leg: presale starts tomorrow at 10:00.\n\nWet Leg - Alexandra Palace, London\nSaturday 13 March 2027\n\nSet a reminder: https://www.ticketmaster.co.uk/wet-leg-tickets/artist/\n\nYou're receiving this because you signed up at ticketmaster.co.uk.\nUnsubscribe: https://ticketmaster.co.uk/email/unsubscribe?u=tm40211&e={{user_email}}",
+      "sent_at": "2026-09-13T11:00:00+01:00"
+    },
+    {
+      "id": "19fffd56d43fbc5e",
+      "thread_id": "19fffd56d43fbc5e",
+      "sender": "Dribbble <jobs@dribbble.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "12 new design jobs that match your profile",
+      "body": "Hi {{user_first_name}},\n\nNew roles this week:\n\n- Packaging Designer (Freelance) - Pip & Nut - Remote UK\n- Brand Designer - Monzo - London / Hybrid\n- Senior Designer - Pentagram - London\n\nSee all 12 jobs: https://dribbble.com/jobs\n\nManage job alerts: https://dribbble.com/account/notifications",
+      "sent_at": "2026-09-16T09:30:00+01:00"
+    },
+    {
+      "id": "196b20b5767aab62",
+      "thread_id": "196b20b5767aab62",
+      "sender": "Ali (window cleaner) <ali.cleans.windows@gmail.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Window cleaning",
+      "body": "Hi {{user_first_name}},\n\nDone the front and back windows today. £18 as usual - bank transfer is fine, details below, or cash next time.\n\nAli\nSort 20-45-77 Acc 41893320\n\nNext one in 6 weeks, I'll text the day before.",
+      "sent_at": "2026-09-17T14:22:00+01:00"
+    },
+    {
+      "id": "19837d1ed07afe47",
+      "thread_id": "19837d1ed07afe47",
+      "sender": "Notion Team <notify@mail.notion.so>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Weekly digest: 4 updates in Freelance HQ",
+      "body": "Here's what changed in your workspace this week.\n\nFreelance HQ\n- Client tracker: 2 pages edited\n- Invoices 2026: 1 page edited\n- Moodboard - H&F round 2: 1 new comment from Priya Nair\n\nOpen Notion: https://www.notion.so/\n\nUpdate your email settings: https://www.notion.so/my-account",
+      "sent_at": "2026-09-19T07:15:00+01:00"
+    },
+    {
+      "id": "19675893db6d890c",
+      "thread_id": "19675893db6d890c",
+      "sender": "Royal Academy of Arts <members@royalacademy.org.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Friends' preview: Kerry James Marshall",
+      "body": "Dear {{user_first_name}},\n\nAs a Friend of the RA, you're invited to preview our new exhibition before it opens to the public.\n\nFriends' preview days: {{date+10}} and {{date+11}}, 10am-6pm\nNo need to book - just bring your membership card.\n\nFind out more: https://www.royalacademy.org.uk/exhibitions\n\nRoyal Academy of Arts, Burlington House, Piccadilly, London W1J 0BD.",
+      "sent_at": "2026-09-21T10:00:00+01:00"
+    },
+    {
+      "id": "191b1a03ebd43990",
+      "thread_id": "191b1a03ebd43990",
+      "sender": "Evri <noreply@evri.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your parcel is on its way",
+      "body": "Good news! Your parcel from Cass Art is on its way.\n\nTracking number: H01HYA0042873561\nExpected delivery: {{date+1}}, between 10:15 and 14:15\n\nTrack your parcel: https://www.evri.com/track\n\nPlease don't reply to this email.",
+      "sent_at": "2026-09-22T18:30:00+01:00"
+    },
+    {
+      "id": "19dfa56db2fccae6",
+      "thread_id": "19dfa56db2fccae6",
+      "sender": "Jess Okafor <jess.okafor@gmail.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "photos from Chloe's thing",
+      "body": "Finally sorted the photos from Saturday - the one of you and Dan doing the wedding dance is a CRIME.\n\nhttps://photos.app.goo.gl/r8Kq2Fz7mWbLx3tA9\n\nx",
+      "sent_at": "2026-09-24T22:11:00+01:00"
+    },
+    {
+      "id": "191ab5eb3813d89d",
+      "thread_id": "191ab5eb3813d89d",
+      "sender": "Finisterre <hello@finisterre.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Built for the cold months",
+      "body": "Our new knitwear is here.\n\nThe Nordic crew - responsibly sourced wool, made to last\nThe Fisherman beanie - back in stock\n\nFree returns within 30 days.\n\nShop knitwear: https://finisterre.com/collections/womens-knitwear\n\nYou're receiving this because you signed up at finisterre.com.\nUnsubscribe: https://finisterre.com/email/unsubscribe?u=fn71004&e={{user_email}}",
+      "sent_at": "2026-09-26T09:45:00+01:00"
+    },
+    {
+      "id": "196f1c57b9bc754c",
+      "thread_id": "196f1c57b9bc754c",
+      "sender": "Sainsbury's <sainsburys@mail.sainsburys.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your Nectar Prices this week, {{user_first_name}}",
+      "body": "Hi {{user_first_name}},\n\nThis week's Nectar Prices picked for you:\n\nPukka Herbs Three Ginger tea x20 - £2.50 with Nectar\nSainsbury's British chicken thighs 1kg - £3.75 with Nectar\nCathedral City mature cheddar 550g - £4.25 with Nectar\n\nOffers end {{date+6}}.\n\nShop now: https://www.sainsburys.co.uk/gol-ui/nectar-prices\n\nYou're receiving this because you signed up at sainsburys.co.uk.\nUnsubscribe: https://sainsburys.co.uk/email/unsubscribe?u=a91c22&e={{user_email}}",
+      "sent_at": "2026-09-28T14:10:00+01:00"
+    },
+    {
+      "id": "195a545831a064b4",
+      "thread_id": "195a545831a064b4",
+      "sender": "Creative Boom <hello@creativeboom.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "The week in creativity: the return of the hand-drawn logo",
+      "body": "This week on Creative Boom\n\nThe return of the hand-drawn logo\nhttps://www.creativeboom.com/inspiration/hand-drawn-logos/\n\nHow to price a brand refresh (without underselling yourself)\nhttps://www.creativeboom.com/tips/pricing-a-brand-refresh/\n\nHave a lovely week,\nThe Creative Boom team\n\nYou're receiving this because you signed up at creativeboom.com.\nUnsubscribe: https://creativeboom.com/email/unsubscribe?u=cb7741&e={{user_email}}",
+      "sent_at": "2026-09-29T07:30:00+01:00"
+    },
+    {
+      "id": "199e227e27a1c79d",
+      "thread_id": "199e227e27a1c79d",
+      "sender": "Netflix <info@mailer.netflix.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Just added: a new season you'll love",
+      "body": "{{user_first_name}}, a new season has just landed.\n\n'Abstract: The Art of Design' season 3 - now streaming\n\nWatch now: https://www.netflix.com/browse\n\nYou're receiving this because you signed up at netflix.com.\nUnsubscribe: https://netflix.com/email/unsubscribe?u=nf20817&e={{user_email}}",
+      "sent_at": "2026-09-29T19:05:00+01:00"
+    },
+    {
+      "id": "1957389bc878b1cd",
+      "thread_id": "1957389bc878b1cd",
+      "sender": "Strava <no-reply@strava.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your weekly summary: 2 activities, 14.8 km",
+      "body": "Good week, {{user_first_name}}.\n\nActivities: 2\nDistance: 14.8 km\nTime: 1h 27m\n\nSee your progress: https://www.strava.com/athlete/progress\n\nManage email settings: https://www.strava.com/settings/email",
+      "sent_at": "2026-10-01T08:15:00+01:00"
+    },
+    {
+      "id": "19cb662ad6927078",
+      "thread_id": "19cb662ad6927078",
+      "sender": "Etsy <transaction@etsy.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Picked for you: autumn prints and ceramics",
+      "body": "Hi {{user_first_name}},\n\nBased on your favourites:\n\nScreen print 'Allotment' A2 - £45.00\nSpeckled stoneware mug - £22.00\n\nSee more: https://www.etsy.com/your/favorites\n\nYou're receiving this because you signed up at etsy.com.\nUnsubscribe: https://etsy.com/email/unsubscribe?u=et55302&e={{user_email}}",
+      "sent_at": "2026-10-02T16:20:00+01:00"
+    },
+    {
+      "id": "199b68f2f315dffc",
+      "thread_id": "199b68f2f315dffc",
+      "sender": "Duolingo <hello@duolingo.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your streak is waiting",
+      "body": "{{user_first_name}}, your Italian streak needs you today.\n\nStart a 5-minute lesson: https://www.duolingo.com/learn\n\nDon't want these reminders? https://www.duolingo.com/settings/notifications",
+      "sent_at": "2026-10-04T20:00:00+01:00"
+    },
+    {
+      "id": "19067cf28323541a",
+      "thread_id": "19067cf28323541a",
+      "sender": "Nextdoor {{home_area}} <reply@ss.email.nextdoor.co.uk>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Found: grey cat (Mochi is home!) + 6 more posts",
+      "body": "Trending near you\n\nUPDATE: Mochi is home! Thank you everyone who checked their sheds.\n\nEvents: Apple Day at the community orchard this Sunday, 11am-3pm\n\nRecommendations: best Sunday roast nearby?\n\nSee all posts: https://nextdoor.co.uk/news_feed/\n\nUnsubscribe from digests: https://nextdoor.co.uk/settings/email",
+      "sent_at": "2026-10-06T08:30:00+01:00"
+    },
+    {
+      "id": "19c0d96b645c831c",
+      "thread_id": "19c0d96b645c831c",
+      "sender": "Squarespace <no-reply@squarespace.com>",
+      "to": [
+        "{{user_email}}"
+      ],
+      "cc": [],
+      "subject": "Your domain renews in 30 days",
+      "body": "Hi {{user_first_name}},\n\nYour domain {{user_slug}}-design.com will renew automatically in 30 days.\n\nRenewal price: £16.00 per year\n\nManage domain: https://account.squarespace.com/domains\n\nSquarespace Ireland Limited, Le Pole House, Ship Street Great, Dublin 8, Ireland.",
+      "sent_at": "2026-10-08T06:00:00+01:00"
     }
   ]
 }
