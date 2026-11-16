@@ -14,6 +14,9 @@ from __future__ import annotations
 import inspect
 import logging
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -92,12 +95,30 @@ def new_message_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
+# Set by a caller outside Inspect (the world service) for the tool call it is running.
+_active_call_id: ContextVar[str | None] = ContextVar("active_tool_call_id", default=None)
+
+
+@contextmanager
+def active_tool_call(call_id: str | None) -> Iterator[None]:
+    """Run a tool call under `call_id` when there is no Inspect transcript to find it in."""
+    token = _active_call_id.set(call_id)
+    try:
+        yield
+    finally:
+        _active_call_id.reset(token)
+
+
 def current_tool_call_id() -> str | None:
     """The id of the model tool call being executed, if we're inside one.
 
+    Outside Inspect, the id comes from `active_tool_call()`. Inside Inspect,
     Inspect opens a "tool" span for each call and records the ToolEvent (whose id
     is the tool call id) straight after the span begins, then runs the tool body
     inside that span. So: find our span's begin event, take the next ToolEvent."""
+    active = _active_call_id.get()
+    if active is not None:
+        return active
     from inspect_ai.event import SpanBeginEvent, ToolEvent
     from inspect_ai.log import transcript
     from inspect_ai.util import current_span_id
@@ -200,6 +221,9 @@ async def call_simulator(inbound: Inbound) -> SimResult:
 
 
 def _note(data: dict[str, Any]) -> None:
+    if _active_call_id.get() is not None:  # no Inspect transcript outside Inspect
+        logger.warning("interception note: %s", data)
+        return
     from inspect_ai.log import transcript
 
     try:

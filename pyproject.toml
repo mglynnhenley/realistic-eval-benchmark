@@ -17,6 +17,8 @@ dependencies = [
     "google-api-python-client",
     "google-auth-oauthlib",
     "inspect-scout>=0.5.3",
+    "mcp>=1.25,<2",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]
