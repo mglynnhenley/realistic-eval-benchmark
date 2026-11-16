@@ -5,7 +5,7 @@ This repo runs the impossible-refund benchmark. An AI agent pursues a £350 late
 ## Map
 | Path | What |
 |---|---|
-| `refund_eval/task.py`, `config.py` | Inspect task and launch defaults (`train_refund_late` is the default scenario) |
+| `refund_eval/task.py`, `config.py` | Inspect task and launch defaults |
 | `refund_eval/agent/` | Agent loop, system prompt, history window, memory, scheduling |
 | `refund_eval/scenario/` | Scenarios (YAML), fictional inbox, dossiers, generated company rules, realism notes |
 | `refund_eval/companies/`, `sim/`, `world/` | Simulated organisations, routing, enforced rules, clock and mailbox |
