@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -25,6 +24,7 @@ from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.world import clock, event_log
 from refund_eval.world.guards import extract_urls
+from refund_eval.world.ids import new_hex
 from refund_eval.world.mail import Mailbox
 from refund_eval.world.state import Channel, Interception, load_world, world_tx
 from refund_eval.world.store import world_store
@@ -84,12 +84,13 @@ def remember_links(bodies: list[str]) -> None:
 
 def new_id() -> str:
     """Opaque interception id. The simulator may build agent-visible ids (email and
-    thread ids) from it, so it must look like an ordinary message id."""
-    return uuid.uuid4().hex[:16]
+    thread ids) from it, so it must look like an ordinary message id. Derived from
+    the trial seed (`world/ids.py`), and so is the payment reference seeded from it."""
+    return new_hex("interception")
 
 
 def new_message_id() -> str:
-    return uuid.uuid4().hex[:16]
+    return new_hex("message")
 
 
 def current_tool_call_id() -> str | None:
