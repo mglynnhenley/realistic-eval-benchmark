@@ -15,6 +15,18 @@ from refund_eval.config import (
 )
 from refund_eval.scenario.schema import scenario_names
 
+try:
+    from harbor.agents.options import AgentOptions
+except ImportError:  # The benchmark environment and trial image do not install Harbor.
+    class AgentOptions(BaseModel):
+        """Harbor's shared agent options, so requests validate without Harbor installed."""
+
+        model_config = ConfigDict(extra="forbid", coerce_numbers_to_str=True)
+
+        base_url: str | None = None
+        disable_web_search: bool = False
+        reasoning_effort: str | None = None
+
 # Where a Gmail snapshot sits in the trial image, relative to the source root (/app).
 SNAPSHOT_IN_IMAGE = "inbox_snapshot.json"
 RESUME_IN_IMAGE = "resume_trial.eval"
@@ -29,7 +41,7 @@ def batch_total(config: dict) -> int:
     return config["trials"] * len(batch_models(config))
 
 
-class TrialSettings(BaseModel):
+class TrialSettings(AgentOptions):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     tool_profile: Literal["published"] = "published"

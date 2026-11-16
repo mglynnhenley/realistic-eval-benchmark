@@ -34,6 +34,8 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(socket, "getaddrinfo", forbidden)
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
+    # Harbor 0.26 agents import LiteLLM to parse the model name; keep its price map offline.
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
 class InstalledEnvironment:
@@ -62,7 +64,7 @@ class InstalledEnvironment:
             command = args[-1]
 
             async def read():
-                return ""
+                return b""  # Harbor 0.26 asks Modal for bytes and decodes them
 
             async def wait():
                 if "--signal-owned" in command or "touch /app/.context/KILL" in command:
