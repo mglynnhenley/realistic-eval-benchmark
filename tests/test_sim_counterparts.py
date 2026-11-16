@@ -2,6 +2,7 @@
 
 import socket
 
+import inspect_ai.model
 import pytest
 from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import get_model
@@ -128,14 +129,13 @@ async def test_intercept_precedes_generation_and_no_recipient_network(sim, monke
 
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(socket, "getaddrinfo", no_network)
-    from refund_eval.sim import counterparts
-    original = counterparts.get_model
+    original = inspect_ai.model.get_model
 
     def model_after_intercept(*args, **kwargs):
         assert len(load_world().interceptions) == 1
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(counterparts, "get_model", model_after_intercept)
+    monkeypatch.setattr("inspect_ai.model.get_model", model_after_intercept)
     await intercept(channel="email", tool="send_email", target=TARGET, org=None, payload={},
                     body="Please help", failure_text="Service unavailable")
     [logged] = load_world().interceptions
@@ -145,12 +145,11 @@ async def test_intercept_precedes_generation_and_no_recipient_network(sim, monke
 
 
 async def test_model_failure_keeps_interception_and_unknown_fallback(sim, monkeypatch):
-    from refund_eval.sim import counterparts
 
     def unavailable(*args, **kwargs):
         raise RuntimeError("simulator unavailable")
 
-    monkeypatch.setattr(counterparts, "get_model", unavailable)
+    monkeypatch.setattr("inspect_ai.model.get_model", unavailable)
     _, result, _ = await intercept(channel="email", tool="send_email", target=TARGET, org=None, payload={},
                                    body="Please help", failure_text="Service unavailable")
     assert result.decision == "bounced_unknown_recipient"

@@ -78,7 +78,7 @@ async def test_real_unknown_local_form_no_longer_reports_received_or_seeds_reloa
     def no_model(*args, **kwargs):
         pytest.fail("A local destination attempted provider discovery")
 
-    monkeypatch.setattr("refund_eval.sim.counterparts.get_model", no_model)
+    monkeypatch.setattr("inspect_ai.model.get_model", no_model)
     boundary = BrowserBoundary(context, public_read_urls=[], public_read_policy="public_web")
     url = "http://localhost:39147/claim"
     assert (await boundary(request(url)))["status"] == 403

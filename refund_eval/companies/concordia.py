@@ -6,27 +6,28 @@ import asyncio
 import concurrent.futures
 import contextvars
 import threading
+from typing import Any
 
 import numpy as np
 from concordia.associative_memory.basic_associative_memory import AssociativeMemoryBank
 from concordia.language_model import language_model
 from concordia.prefabs.entity import basic
 from concordia.typing.entity import free_action_spec
-from inspect_ai.model import GenerateConfig, Model, get_model
 
 from refund_eval.companies.llm import ACTION_SHAPE, build_messages
 from refund_eval.companies.models import CompanyAction, CompanyContext, CompanyEvent
 from refund_eval.model_io import completion_json
+from refund_eval.models.client import Message, ModelClient, as_client
 
 CALL_TO_ACTION = ("How does {name} respond? Return only one JSON object with exactly these keys (use empty "
                   "lists when you make no offers, payments or notes; accept_offer is null unless the customer "
                   "accepts one of your open offers):\n" + ACTION_SHAPE)
 
 
-class InspectLanguageModel(language_model.LanguageModel):
-    """Synchronous Concordia model that runs an Inspect model on the sample's event loop."""
+class ClientLanguageModel(language_model.LanguageModel):
+    """Synchronous Concordia model that runs the simulator role's client on the sample's event loop."""
 
-    def __init__(self, model: Model, loop: asyncio.AbstractEventLoop, context: contextvars.Context):
+    def __init__(self, model: ModelClient, loop: asyncio.AbstractEventLoop, context: contextvars.Context):
         self.model, self.loop, self.context = model, loop, context
         self.closed = threading.Event()
         self.pending: dict[asyncio.Task, concurrent.futures.Future] = {}  # loop thread only
@@ -47,8 +48,8 @@ class InspectLanguageModel(language_model.LanguageModel):
             raise RuntimeError("Concordia act abandoned")
         # Some providers reject whitespace-only stop sequences; terminators are applied below anyway.
         # Concordia caps the act at 2,200 tokens; a reply with a full call transcript needs more.
-        config = GenerateConfig(max_tokens=max(max_tokens, 8000), temperature=temperature,
-                                stop_seqs=[t for t in terminators if t.strip()] or None)
+        settings = {"max_tokens": max(max_tokens, 8000), "temperature": temperature,
+                    "stop": [t for t in terminators if t.strip()] or None}
         future: concurrent.futures.Future = concurrent.futures.Future()
 
         def finish(task: asyncio.Task) -> None:
@@ -66,13 +67,14 @@ class InspectLanguageModel(language_model.LanguageModel):
             if self.closed.is_set():
                 future.cancel()
                 return
-            task = self.loop.create_task(self.model.generate(prompt, config=config), context=self.context.copy())
+            task = self.loop.create_task(self.model.complete("simulator", [Message("user", prompt)], **settings),
+                                         context=self.context.copy())
             self.pending[task] = future
             task.add_done_callback(finish)
 
         try:
             self.loop.call_soon_threadsafe(start)
-            text = future.result().completion.lstrip()
+            text = future.result().text.lstrip()
         except BaseException:
             self.closed.set()  # The act is failing: stop sibling components re-running this step.
             raise
@@ -93,12 +95,12 @@ class ConcordiaCompanySimulator:
     kind = "concordia"
     version = "concordia-basic-v1"
 
-    def __init__(self, model: Model | None = None):
+    def __init__(self, model: Any = None):
+        """`model` is a ModelClient or an Inspect model; by default the installed client's simulator role."""
         self.model = model
 
     async def respond(self, event: CompanyEvent, context: CompanyContext) -> CompanyAction:
-        model = self.model if self.model is not None else get_model(role="simulator", required=True)
-        bridge = InspectLanguageModel(model, asyncio.get_running_loop(), contextvars.copy_context())
+        bridge = ClientLanguageModel(as_client(self.model), asyncio.get_running_loop(), contextvars.copy_context())
         # One observation carries the role, persona, terms and the contact, so every reasoning step sees them.
         observation = "\n\n".join(m.text for m in build_messages(event, context))
         agent = basic.Entity(params={"name": context.org.name, "prefix_entity_name": False}).build(

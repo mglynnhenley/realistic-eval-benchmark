@@ -1,19 +1,19 @@
-"""Fill missing Inspect prices from OpenRouter's public model catalog."""
+"""Fill missing Inspect prices from OpenRouter's public model catalog.
+
+`openrouter_prices` gives the same prices without Inspect, for the world-side client.
+"""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING
 
 import httpx
-from inspect_ai.model import (
-    ModelCost,
-    ModelInfo,
-    get_model,
-    get_model_info,
-    set_model_info,
-)
+
+if TYPE_CHECKING:
+    from inspect_ai.model import ModelCost
 
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
 
@@ -32,24 +32,53 @@ def _per_million(pricing: dict, field: str) -> float:
     return price
 
 
-def _catalog_cost(entry: dict) -> ModelCost:
+def catalog_prices(entry: dict) -> dict[str, float]:
+    """USD per million tokens, keyed as Inspect's ModelCost fields."""
     pricing = entry.get("pricing")
     if not isinstance(pricing, dict):
         raise TypeError("missing pricing")
     input_price = _per_million(pricing, "prompt")
     # If no cache discount is advertised, count those tokens at full input price.
-    return ModelCost(
-        input=input_price,
-        output=_per_million(pricing, "completion"),
-        input_cache_read=(
+    return {
+        "input": input_price,
+        "output": _per_million(pricing, "completion"),
+        "input_cache_read": (
             _per_million(pricing, "input_cache_read")
             if "input_cache_read" in pricing else input_price
         ),
-        input_cache_write=(
+        "input_cache_write": (
             _per_million(pricing, "input_cache_write")
             if "input_cache_write" in pricing else input_price
         ),
-    )
+    }
+
+
+def _catalog_cost(entry: dict) -> ModelCost:
+    from inspect_ai.model import ModelCost
+
+    return ModelCost(**catalog_prices(entry))
+
+
+def _load_catalog() -> dict[str, dict]:
+    # Public metadata only: no API key, prompts, or user information sent.
+    response = httpx.get(CATALOG_URL, timeout=15.0)
+    response.raise_for_status()
+    payload = response.json()
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise TypeError("invalid model catalog")
+    return {entry["id"]: entry for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+
+
+def openrouter_prices(models: Iterable[str]) -> dict[str, dict[str, float]]:
+    """Catalog prices for the openrouter/ models found in the catalog; others are left out."""
+    names = [name for name in dict.fromkeys(models) if name.startswith("openrouter/")]
+    if not names:
+        return {}
+    catalog = _load_catalog()
+    return {name: catalog_prices(catalog[name.removeprefix("openrouter/")])
+            for name in names if name.removeprefix("openrouter/") in catalog}
 
 
 def register_openrouter_costs(models: Iterable[str]) -> None:
@@ -59,6 +88,8 @@ def register_openrouter_costs(models: Iterable[str]) -> None:
     model calls. Match exact catalog IDs, including any :free or other suffix.
     Never invent a zero price when a lookup fails.
     """
+    from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
+
     missing: dict[str, ModelInfo | None] = {}
     for name in dict.fromkeys(models):
         if name.startswith("openrouter/"):
@@ -71,13 +102,7 @@ def register_openrouter_costs(models: Iterable[str]) -> None:
         return
 
     try:
-        # Public metadata only: no API key, prompts, or user information sent.
-        response = httpx.get(CATALOG_URL, timeout=15.0)
-        response.raise_for_status()
-        payload = response.json()
-        entries = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(entries, list):
-            raise TypeError("invalid model catalog")
+        catalog = _load_catalog()
     except (httpx.HTTPError, TypeError, ValueError) as error:
         raise ValueError(
             f"Could not load OpenRouter pricing for {', '.join(missing)}. "
@@ -85,8 +110,6 @@ def register_openrouter_costs(models: Iterable[str]) -> None:
             "--model-cost-config. The budget limit is still required."
         ) from error
 
-    catalog = {entry["id"]: entry for entry in entries
-               if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
     costs = {}
     for name in missing:
         slug = name.removeprefix("openrouter/")

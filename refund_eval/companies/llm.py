@@ -3,16 +3,7 @@
 from __future__ import annotations
 
 import json
-
-from inspect_ai.model import (
-    ChatMessageSystem,
-    ChatMessageUser,
-    GenerateConfig,
-    Model,
-    ResponseSchema,
-    get_model,
-)
-from inspect_ai.util import json_schema
+from typing import Any
 
 from refund_eval.companies.models import (
     CompanyAction,
@@ -21,7 +12,7 @@ from refund_eval.companies.models import (
     CompanyModelRefusal,
 )
 from refund_eval.formatting import long_date, money
-from refund_eval.model_io import completion_json
+from refund_eval.models.client import Message, OutputSchema, as_client
 
 ACTION_SHAPE = json.dumps({
     "decision": "snake_case_label",
@@ -311,26 +302,25 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
          "or notes; accept_offer is null unless the customer accepts one of your open offers):"),
         ACTION_SHAPE,
     ]
-    return [ChatMessageSystem(content="\n\n".join(system)), ChatMessageUser(content="\n".join(lines)),
-            *[ChatMessageUser(content=f"Correct the previous response: {problem}") for problem in event.feedback]]
+    return [Message("system", "\n\n".join(system)), Message("user", "\n".join(lines)),
+            *[Message("user", f"Correct the previous response: {problem}") for problem in event.feedback]]
 
 
 class LLMCompanySimulator:
     kind = "llm"
     version = "company-decisions-v1"
 
-    def __init__(self, model: Model | None = None):
+    def __init__(self, model: Any = None):
+        """`model` is a ModelClient or an Inspect model; by default the installed client's simulator role."""
         self.model = model
 
     async def respond(self, event: CompanyEvent, context: CompanyContext) -> CompanyAction:
-        model = self.model if self.model is not None else get_model(role="simulator", required=True)
-        config = GenerateConfig(temperature=1.0, response_schema=ResponseSchema(
-            name="open_world_action", json_schema=json_schema(CompanyAction),
-            description="What this organisation or person does in response."))
-        output = await model.generate(build_messages(event, context), config=config)
-        if any(choice.stop_reason == "content_filter" for choice in getattr(output, "choices", ())):
+        output = await as_client(self.model).complete(
+            "simulator", build_messages(event, context), temperature=1.0, schema=OutputSchema(
+                "open_world_action", CompanyAction, "What this organisation or person does in response."))
+        if output.stop_reason == "content_filter":
             raise CompanyModelRefusal("Company model provider refused the response.")
-        data = completion_json(output.completion)
+        data = output.json()
         # Some providers use null for this field when there is no form page.
         if event.mode == "email" and isinstance(data, dict) and data.get("page_body") is None:
             data["page_body"] = ""
