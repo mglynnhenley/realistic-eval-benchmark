@@ -28,8 +28,8 @@
       "location": "refund_eval/scenario/train_refund_late.yaml:151",
       "change": "Use a realistic NHS practice address shape (e.g. an nhs.net shared mailbox) that cannot resolve to a real practice.",
       "seen": 0,
-      "status": "open",
-      "updated": "2026-10-26"
+      "status": "resolved",
+      "updated": "2026-11-16"
     },
     {
       "id": "continue_working_wakeup",
