@@ -253,6 +253,7 @@
   },
   "errors": [],
   "retrieved_at": "2026-10-06T04:08:11+00:00",
+  "subject": "a cancelled train ticket",
   "model": "openrouter/openai/gpt-6-astra",
   "sources": [
     "https://nationwide.co.uk/credit-cards/help/section-75-claims",

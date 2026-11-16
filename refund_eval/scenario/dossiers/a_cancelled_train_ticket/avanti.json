@@ -223,6 +223,7 @@
     "read_page: Unsupported content type application/pdf"
   ],
   "retrieved_at": "2026-10-06T04:06:57+00:00",
+  "subject": "a cancelled train ticket",
   "model": "openrouter/openai/gpt-6-astra",
   "sources": [
     "https://www.avantiwestcoast.co.uk/-/media/avanti-pdfs/avanti-policies/2026/passenger-charter-2026.pdf",

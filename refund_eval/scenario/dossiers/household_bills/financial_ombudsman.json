@@ -1,0 +1,249 @@
+{
+  "org": "financial_ombudsman",
+  "name": "Financial Ombudsman Service (financial-ombudsman.org.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:financial-ombudsman.org.uk household bills energy water council tax financial difficulty complaints what we can help",
+        "objective": "Find Financial Ombudsman Service official pages on household bills scope, utilities bills, financial difficulty and complaint procedure eligibility times contact email."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      "chars": 6672
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:financial-ombudsman.org.uk consumers how to complain contact complaint.info@financial-ombudsman.org.uk financial difficulties household bills",
+        "objective": "Rank official consumer complaint procedure contact and financial difficulties pages; get evidence requirements time limits stages email phone hours and urgent support."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      "chars": 6859
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      "chars": 7664
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site:financial-ombudsman.org.uk \"household\" \"bills\" \"debt\" \"complaints\"",
+        "objective": "Find current official consumer debt collecting or financial difficulties policy explicitly excluding household utility and council tax debt, and relevant support."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/files/2839/issue147.pdf"
+      },
+      "error": "Unsupported content type application/pdf"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.financial-ombudsman.org.uk/consumers/expect"
+      },
+      "chars": 6311
+    }
+  ],
+  "dossier": {
+    "summary": "The Financial Ombudsman Service is a free service set up by Parliament to resolve complaints about financial businesses, such as banks and insurers. For household bills, it distinguishes disputes about utilities and council tax debt from complaints about financial services such as loans, credit cards and payments; it checks its jurisdiction before investigating and directs consumers to other schemes where appropriate.",
+    "facts": [
+      {
+        "statement": "The service is free, was set up by Parliament and can require financial businesses to put unfair treatment right.",
+        "quote": "We’re a free service set up by Parliament to resolve complaints about financial businesses, for example banks or insurance companies. If we decide you’ve been treated unfairly, we have the power to put things right.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      {
+        "statement": "Its published debt guidance excludes complaints about debts relating to household utilities, council tax and fines.",
+        "quote": "Although debt collectors deal with unregulated debts as well, we can’t look at complaints about debts relating to household utilities, council tax, or fines.",
+        "url": "https://www.financial-ombudsman.org.uk/files/2839/issue147.pdf"
+      },
+      {
+        "statement": "It can consider debt-collection complaints involving credit agreements such as mortgages, credit cards, overdrafts and loans.",
+        "quote": "We can look into complaints about collection activity for credit and consumer agreements – such as mortgages, credit cards overdrafts and personal or business loans.",
+        "url": "https://www.financial-ombudsman.org.uk/files/2839/issue147.pdf"
+      },
+      {
+        "statement": "It directs consumers with utility, phone or internet disputes to other ombudsman schemes through the Ombudsman Association.",
+        "quote": "There are ombudsman schemes that offer help with disputes about utilities, phone and internet connections, legal services, housing and other services.\nFind other ombudsman schemes on the Ombudsman Association's website",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      {
+        "statement": "It signposts water-company complaints in England and Wales to the Consumer Council for Water.",
+        "quote": "Consumer Council for Water\n(for England and Wales) for problems with water companies and their services.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      {
+        "statement": "It checks whether it has jurisdiction before investigating a complaint.",
+        "quote": "Before investigating a complaint, we first need to decide whether or not we have the power to do so.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      {
+        "statement": "A complaint may concern a financial business failing to take the customer's circumstances into account.",
+        "quote": "You may be unhappy with the way a financial business:\ntreated you – either as a customer or a named attorney\nresponded when something went wrong, or\nfailed to take your circumstances into account.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help"
+      },
+      {
+        "statement": "Consumers must first tell the financial business what went wrong and how they want it put right.",
+        "quote": "contact the financial business\nmake them aware of what’s happened or what the problem is\nlet them know how you would like them to put things right",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "The FCA register is a suggested source of contact details for regulated financial businesses.",
+        "quote": "The Financial Conduct Authority (FCA) publishes contact details for regulated financial businesses.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "Consumers should retain supporting evidence, including conversations and correspondence with the financial business.",
+        "quote": "Keep a note of any information or evidence that you think will support your complaint, such as conversations and correspondence you have had with the financial business.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "The financial business normally has up to eight weeks to investigate, while the complaints page specifies 15 days for fraud, scams, payment services and electronic money complaints.",
+        "quote": "For most complaints, a business has up to 8 weeks to consider a complaint. But a business has only 15 days to consider complaints about:\nfraud and scams\npayment services such as bank transfers or direct debits\nelectronic money",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "Consumers can approach the service when dissatisfied with a final response or when the business has not replied within its applicable time limit.",
+        "quote": "you’ve had a final response and you’re not happy with the outcome, or\nthe business has had the\ntime it needs\nand you have not had a reply",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "Consumers should retain the final response because the service will ask to see it, and referral must be within six months of its date.",
+        "quote": "You should read this carefully and keep it. We will ask to see it if you contact us about your complaint.\nYou will need to make a complaint to us within 6 months from the date on your final response.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "Paid representation is unnecessary, and a family member, friend or another person may help with the complaint.",
+        "quote": "You don’t need to pay anyone to represent you, for example, a lawyer or claims management company (CMC). If you want to, you can ask a family member, friend or someone else to help you with your complaint.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      },
+      {
+        "statement": "The service may request account or policy numbers and gives the consumer a case reference to use in subsequent contact.",
+        "quote": "If we think we need more – for example, your account or policy numbers – we will contact you.\nWe’ll give you a case reference number. Use this when you contact us so we can find your case quickly.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "It aims to set up the case and contact the consumer within seven days of receiving the complaint.",
+        "quote": "We aim to set up your case within seven days of receiving your complaint and will contact you when we do.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Consumers needing urgent handling because of financial hardship or severe ill health should flag this when submitting the complaint or call the helpline with their reference.",
+        "quote": "If you feel your case needs to be dealt with urgently because you’re struggling financially or have severe ill health, let us know when you send your complaint. Or you can contact us on our helpline number quoting your reference number.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "An investigator considers both sides, checks for any new settlement offer and assesses the information impartially.",
+        "quote": "consider what you've said and ask the business for their side of the story\nlook at whether the business has made a new or updated offer to resolve the complaint before we carry out a full investigation\nconsider all the information about what’s happened, fairly and impartially",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "It aims to answer complaints within 90 days and will explain if a complex case is expected to take longer.",
+        "quote": "We aim to give answers to complaints within 90 days, but complex cases can take longer. We’ll let you know if we think it will take more than 90 days.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Either party may request an ombudsman's final decision if they reject the investigator's answer.",
+        "quote": "If either of you don’t accept the investigator’s answer, you – or the business – can ask for one of our ombudsmen to review it and make a final decision.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The service aims to resolve 90% of cases within six months of accepting them as complaints.",
+        "quote": "we aim to resolve 90% of cases within six months of the point we accept them as complaints.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "Possible remedies include correcting mistakes and compensation for financial loss, distress or inconvenience.",
+        "quote": "correcting their mistake – for example, reinstating an insurance policy if they cancelled\nit unfairly\ngiving you\ncompensation\nif we think you lost out financially, or experienced distress or and inconvenience because of their actions.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The business must follow the service's instructions if the consumer accepts its findings.",
+        "quote": "If you accept our findings, the business must follow our instructions.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The online form is the preferred route for new complaints and checks whether the service is the right organisation and the complaint is ready.",
+        "quote": "This is the easiest way to bring a new complaint to us.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "The consumer helpline is 0800 023 4567, open 8am–5pm Monday to Friday.",
+        "quote": "0800 023 4567\n. Our phone lines are open between 8am and 5pm, Monday to Friday.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Post can be sent to Exchange Tower, London E14 9SR, but its offices do not offer face-to-face customer assistance.",
+        "quote": "You can send post to:\nExchange Tower\nLondon\nE14 9SR\nOur offices are not set up to help customers face to face",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Existing customers can use Ombudsman Connect to view their case, message the case handler and submit new information.",
+        "quote": "Once you have registered, you can log in to view your case, message your case handler or send us new information.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Email is an accepted communication method alongside the portal, telephone and post.",
+        "quote": "We’ll communicate through our portal, by email, phone or post – whichever works best for you.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect"
+      },
+      {
+        "statement": "The service offers accessible formats, languages and adapted communication.",
+        "quote": "We can provide our complaint form and other information in different formats or languages, and adapt the way we communicate with you, to suit your needs.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Complaints about its own customer service should go to the case handler, who refers unresolved concerns to a manager.",
+        "quote": "If your case handler can’t resolve the problem, they will refer your complaint to a manager.",
+        "url": "https://www.financial-ombudsman.org.uk/contact-us"
+      },
+      {
+        "statement": "Its public communication encourages plain, personal explanations rather than formal legal arguments.",
+        "quote": "No one can explain your experience – or how it’s affected you – better than you can. And what you write doesn’t need to be formal or contain legal arguments.",
+        "url": "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-17 Mon-Fri",
+      "Cold-email": null,
+      "voice": "Write in clear, approachable British English, using direct explanations and practical next steps rather than legal jargon. Be supportive about financial hardship while remaining fair and impartial between the consumer and the business. Explain jurisdiction and time limits plainly, distinguish service aims from guarantees, and signpost another organisation when the complaint belongs elsewhere."
+    }
+  },
+  "errors": [
+    "read_page: Unsupported content type application/pdf"
+  ],
+  "retrieved_at": "2026-10-28T00:58:15+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help",
+    "https://www.financial-ombudsman.org.uk/consumers/complaints-can-help/expect",
+    "https://www.financial-ombudsman.org.uk/consumers/expect",
+    "https://www.financial-ombudsman.org.uk/consumers/log-ombudsman-connect/how-to-complain",
+    "https://www.financial-ombudsman.org.uk/contact-us",
+    "https://www.financial-ombudsman.org.uk/files/2839/issue147.pdf"
+  ]
+}

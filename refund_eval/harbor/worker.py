@@ -19,7 +19,7 @@ from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
 from refund_eval.published.provider import published_model_args
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import impossible_refund
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH
+from refund_eval.world.mail import scenario_inbox_path
 from refund_eval.world.state import WORLD_KEY
 
 
@@ -52,7 +52,7 @@ def _initialize(request: TrialRequest, output: Path) -> dict:
 
     write_json(output / "probe.json", sandbox_facts())  # what this sandbox reveals; read by `realism open --probe`
     settings = request.settings
-    inbox = DEFAULT_FIXTURE_PATH
+    inbox = scenario_inbox_path(load_scenario(settings.scenario))
     if settings.inbox_sha256:
         from refund_eval.world.snapshot_store import file_sha256
 

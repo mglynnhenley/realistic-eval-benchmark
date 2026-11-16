@@ -133,7 +133,7 @@ async def published_tools(
     from refund_eval.runtime.snapshots import emit_snapshot
 
     emit_snapshot(phase="checking_tools")
-    source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture")
+    source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture", scenario)
     source = source.for_scenario(scenario)
     with world_tx() as world:
         source.schedule_future(world)

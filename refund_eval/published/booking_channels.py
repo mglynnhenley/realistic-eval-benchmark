@@ -139,7 +139,7 @@ class BookingChannels:
         # The help link must not depend on a live article remaining at its old URL.
         from refund_eval.published.fixture_web import policy_html
 
-        self._policy_html = policy_html(retailer, scenario.orgs)
+        self._policy_html = policy_html(retailer, scenario.subject, scenario.orgs)
         self._travel_date = journey.date
         # This policy is only for the late task's explicitly same-day Advance
         # ticket. Do not infer expiry from travel date for arbitrary tickets.

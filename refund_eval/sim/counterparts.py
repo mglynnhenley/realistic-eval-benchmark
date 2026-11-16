@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from refund_eval.model_io import completion_json
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.interface import Inbound
+from refund_eval.sim.rules import SELLER_POLICY
 from refund_eval.world.orgs import host_of, parse_address
 
 REGISTRY_KEY = "simulated_counterparts"
@@ -145,6 +146,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
     duplicate = profile.name.strip().casefold() in {o.name.casefold() for o in scenario.orgs}
     key = "dynamic_" + hashlib.sha256(identity.encode()).hexdigest()[:16]
     role = profile.role
+    sells = False
     if role != "personal" and not duplicate and host:
         # Research the organisation on the web: a dossier shows it is real and gives it a persona.
         from refund_eval.sim import research
@@ -155,14 +157,16 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
             if record.get("dossier"):
                 store().set(research.DOSSIERS_KEY, {**store().get(research.DOSSIERS_KEY, {}), key: record})
                 role = "advice" if role == "unknown" else role
+                sells = True
     if role not in {"unknown", "personal"} and not duplicate:
         org = Org(
             key=key, name=profile.name.strip(), kind="dynamic_" + role,
             email_domains=[host] if host else [], contact_emails=[address] if address else [],
             web_domains=[host] if host else [],
             persona="Use a brief, professional customer-service voice. No invented policies or contact details.",
-            policy="Simulation assumption, not a verified published policy: advice or redirection only. "
-                   "No authority over the booking, bank account, settlements or other organisations.",
+            policy=SELLER_POLICY if sells else (
+                "Simulation assumption, not a verified published policy: advice or redirection only. "
+                "No authority over the booking, bank account, settlements or other organisations."),
         )
     # A personal/invalid mailbox does not establish that every contact on its
     # domain is unknown. Cache only that recipient when identification fails.

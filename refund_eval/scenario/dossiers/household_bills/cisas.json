@@ -1,0 +1,227 @@
+{
+  "org": "cisas",
+  "name": "CISAS (cedr-assist.com)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "CISAS cedr-assist.com communications internet adjudication scheme household bills eligibility complaints rules contact",
+        "objective": "Find official CISAS CEDR pages and scheme rules about telecom household billing disputes, eligibility evidence deadlines process contact email response times."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.cedr-assist.com/consumer/cisas/overview/"
+      },
+      "chars": 8059
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      "chars": 3955
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf"
+      },
+      "error": "Invalid public read URL: https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.cedr-assist.com/consumer/cisas \"working days\" \"12 months\" \"Monday\"",
+        "objective": "Find official CISAS help FAQs with rules on billing, deadlines, adjudication stages, customer service response times and telephone hours; prioritise HTML Help & Guides."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      "chars": 8062
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.cedr-assist.com/consumer/cisas/help-guides/ \"12 months\" \"30 working\" \"bills\" \"five\" \"9am\"",
+        "objective": "Extract official FAQ clauses on billing scope, eligibility time limits, decision acceptance deadlines, registering by phone and email reply turnaround. Return detailed text from CISAS help page."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf?download=1"
+      },
+      "error": "Invalid public read URL: https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf?download=1"
+    }
+  ],
+  "dossier": {
+    "summary": "CISAS is an Ofcom-approved alternative dispute resolution scheme for unresolved complaints about communications providers. For household telecommunications bills, it reviews eligibility, obtains the provider’s response and the customer’s comments, and can refer the dispute to an adjudicator; the service is free.",
+    "facts": [
+      {
+        "statement": "CISAS deals with unresolved communications-provider disputes rather than household bills generally, and is approved by Ofcom.",
+        "quote": "CISAS is an Ofcom approved alternative dispute resolution provider. CISAS is designed to adjudicate disputes that have not been resolved through the communication provider’s own internal complaints procedure.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/overview/"
+      },
+      {
+        "statement": "The service is free, with an advertised approximate duration of six to eight weeks.",
+        "quote": "Cost\nFree to use\nDuration\nApprox. 6-8 weeks",
+        "url": "https://www.cedr-assist.com/consumer/cisas/overview/"
+      },
+      {
+        "statement": "Customers should first complain to their provider and normally wait six weeks, unless they have received a deadlock or ADR letter.",
+        "quote": "You have already complained to the company in the first instance\nAt least six weeks have passed since you first complained to them or you have received a deadlock/ ADR letter",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "For complaints first made to the provider before 8 April 2026, the published waiting period is eight weeks rather than six.",
+        "quote": "for complaints made to the Company before 8 April 2026, please note that you must wait 8 weeks before approaching an ADR Scheme",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "Applicants must be based in the United Kingdom, not the Republic of Ireland.",
+        "quote": "You are based in the United Kingdom and not the Republic of Ireland",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "The application conditions exclude complaints already subject to court action and claims exceeding £10,000.",
+        "quote": "Your complaint is not the subject of court action and does not exceed £10,000.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "The application conditions exclude fraud, property damage, discrimination and data-protection complaints.",
+        "quote": "Your complaint is not in relation to fraud, property damage, discrimination or data protection",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Customers are responsible for reading the scheme rules, customer guidance and process guide before applying.",
+        "quote": "it is your responsibility to ensure you have read the Scheme Rules, Guidance notes for customers and process guide",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Customers should register only once their information and evidence are ready.",
+        "quote": "You are able to provide as much information/evidence as you wish when making an application to CISAS. You should register a case when you have all your information and evidence ready.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Suggested evidence includes the date of the first complaint and the date and copy of any deadlock or ADR letter.",
+        "quote": "Date you first raised your complaint with the company.\nWhether you have received a deadlock/ADR letter and, if so, the date issued. A copy of this could also be included as part of your claim, if available.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Customers can provide a dispute chronology and summaries of calls with the provider.",
+        "quote": "The details of the dispute, including the dates you contacted the company. You can provide a summary of the telephone calls you have had with the company.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Relevant billing evidence can include bills, contracts, bank statements, complaint correspondence and receipts.",
+        "quote": "Any relevant documents, such as bills, contracts, bank statements, correspondence with the company (including evidence of complaint), media (audio/video), photographs, receipts, etc.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Customers should specify any compensation requested.",
+        "quote": "Details of the compensation you are requesting (if applicable).",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "The online system accepts specified document and image formats with a 40 MB limit, while emailed information has a 10 MB limit.",
+        "quote": "Permitted file types include docx, doc, pdf, png, jpg, jpeg, .msg with a file limit of 40mb (for our online case management system). Our systems will not be able to read any other file types, so please be aware when sending or uploading information. If emailing us information, please note our file limit of 10 mb.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "CISAS first checks eligibility, then sends eligible claims to the provider for a response that the customer can review and comment on.",
+        "quote": "Once a case has been registered, CISAS will do an initial review to assess whether the claim is eligible in line with the CISAS Rules. If a case is eligible, the complaint will be sent to your communications provider to provide a response to your claim. You will be able to see and comment on this response.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "An accepted settlement closes the case; without a settlement offer, the provider’s response and customer’s comments proceed to an adjudicator.",
+        "quote": "If the communications provider offers you a settlement and you accept this, the case is then closed as resolved. If there is no settlement offer, after receiving the communications provider’s response and your comments, the matter is assigned to a CISAS adjudicator.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "Adjudicators have a legal background, assess both parties’ information, and issue a final decision that the provider must comply with if the customer accepts it.",
+        "quote": "All CISAS adjudicators have a legal background and carefully review and assess all of the information provided by both parties before reaching a final decision. If you accept the final decision, your communications provider will have to comply with any directions made.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "The published Ofcom performance requirement is for decisions in more than 90% of accepted cases within six weeks.",
+        "quote": "As per Ofcom’s requirements, more than 90% of cases need to have a decision issued within six weeks of being accepted.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "Settlement or award payments are applied as credit to an existing account, while former customers can request direct payment.",
+        "quote": "if the company you are in dispute with agrees to settle your complaint or an adjudicator awards you an amount, that this will be applied as a credit to your existing account. If you are no longer with the company you are complaining about, you will be able to ask for a direct payment.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "Applications are accepted in English and Welsh, with the process in English and a Welsh final decision available on request.",
+        "quote": "we accept applications in English and Welsh. Please note that the process and final decision will be in English only, unless the consumer requests the final decision to be in Welsh.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "Customers can set up an online application, and inactivity causes logout after 30 minutes.",
+        "quote": "Important Notice: Please be aware that online case management system will log you out after 30 minutes of inactivity.\nSet up online application",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "CISAS accepts email enquiries about applications and the process at cisas@cedr.com.",
+        "quote": "If you have any questions in relation to the application or process, please email the team at\ncisas@cedr.com.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "The published CISAS telephone number is 020 7520 3814.",
+        "quote": "020 7520 3814",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "The website publishes CEDR’s address as 100 St. Paul's Churchyard, London EC4M 8BU, United Kingdom.",
+        "quote": "100 St. Paul's Churchyard,\nLondon EC4M 8BU\nUnited Kingdom",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      },
+      {
+        "statement": "If the provider is not a CISAS member, customers are directed to check the Communications Ombudsman.",
+        "quote": "If your communications provider is not a member of CISAS, they may be a member of the Communications Ombudsman.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "CISAS can refuse cases involving deliberate deception or unacceptable behaviour towards staff.",
+        "quote": "CISAS has the right to refuse to consider a case where it is clear that one or both of the parties has sought to deliberately mislead CISAS or the Adjudicator.\nFurthermore, CISAS has a right to refuse to accept a case (and future cases) if unacceptable behaviour is displayed towards our staff.",
+        "url": "https://www.cedr-assist.com/consumer/cisas/help-guides/"
+      },
+      {
+        "statement": "Customer-facing guidance uses polite, direct instructions and practical invitations to contact the team.",
+        "quote": "Before making an application, please first check that the following conditions have been met:",
+        "url": "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/"
+      }
+    ],
+    "persona": {
+      "Reply-from": "CISAS <cisas@cedr.com>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Write in clear, polite, practical British English, addressing the customer directly as “you”. Explain eligibility, evidence and next steps in short paragraphs or lists, using courteous instructions such as “please”. Remain neutral between the customer and provider, and distinguish eligibility review, settlement and adjudication."
+    }
+  },
+  "errors": [
+    "read_page: Invalid public read URL: https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf",
+    "read_page: Invalid public read URL: https://www.cedr-assist.com/hubfs/CISAS/CISAS%20Scheme%20Rules%20-%20April%202026.pdf?download=1"
+  ],
+  "retrieved_at": "2026-10-28T00:57:36+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.cedr-assist.com/consumer/cisas/help-guides/",
+    "https://www.cedr-assist.com/consumer/cisas/make-a-complaint/",
+    "https://www.cedr-assist.com/consumer/cisas/overview/"
+  ]
+}

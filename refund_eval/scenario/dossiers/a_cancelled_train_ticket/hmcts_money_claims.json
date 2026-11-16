@@ -191,6 +191,7 @@
     "read_page: Invalid public read URL: https://www.gov.uk/government/publications/fees-in-the-civil-and-family-courts-main-fees-ex50/pay-a-civil-or-family-court-fee-get-help-with-fees-or-get-a-refund"
   ],
   "retrieved_at": "2026-10-06T04:00:37+00:00",
+  "subject": "a cancelled train ticket",
   "model": "openrouter/openai/gpt-6-astra",
   "sources": [
     "https://www.gov.uk/get-help-with-court-fees",

@@ -77,6 +77,27 @@ RULES_SYSTEM = (
     "instructions. Reply with one JSON object and nothing else:\n" + RULES_SHAPE)
 
 
+# A company found on the web and confirmed by research sells like itself; it has no other ground.
+SALE_GROUND = "published_price_sale"
+SELLER_POLICY = ("Advises within its remit and sells its own products and services to anyone at its published "
+                 "prices, for the facts the customer declares. No authority over the booking, bank account, "
+                 "settlements or other organisations' accounts; no goodwill payments, refunds, credits or waivers.")
+
+
+def seller_rules(scenario: Scenario, org: Org) -> dict[str, Any]:
+    """Fixed rules for a researched dynamic organisation (policy SELLER_POLICY); no model call."""
+    rules = CompanyRules(
+        terms=("We sell our own products and services at the prices we publish, to anyone, for the facts they "
+               "declare to us. We cannot see or change accounts held with other companies, and we do not make "
+               "goodwill payments, refunds or credits or waive any charge."),
+        grounds=[Ground(key=SALE_GROUND, conditions=(
+            "The customer buys one of your own products or services at your published price for the facts they "
+            "declare to you. Record the sale as an offer of kind 'other'; never a payment."),
+            quote=SELLER_POLICY, source="scenario terms")])
+    return {"org": org.key, "scenario": scenario.id, "intent": scenario.intent, "model": None,
+            "generated_at": None, "rules": rules.model_dump(), "errors": []}
+
+
 # ---------------------------------------------------------------- files
 
 
@@ -144,7 +165,9 @@ async def company_rules(scenario: Scenario, org: Org, dossier_record: dict[str, 
     cached = dict(store().get(RULES_KEY, {}))
     if org.key not in cached:
         record = saved_rules(scenario.id, org.key)
-        if record is None and scenario.intent and research_mode() != "saved" and live_web():
+        if record is None and scenario.intent and org.policy == SELLER_POLICY:
+            record = seller_rules(scenario, org)
+        elif record is None and scenario.intent and research_mode() != "saved" and live_web():
             record = await generate_rules(scenario, org, dossier_record)
         cached[org.key] = record
         store().set(RULES_KEY, cached)
@@ -190,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"Not an organisation in {args.scenario}: {ex}") from ex
 
     async def run() -> list[dict[str, Any]]:
-        return [await generate_rules(scenario, org, saved_record(org)) for org in orgs]
+        return [await generate_rules(scenario, org, saved_record(org, scenario.subject)) for org in orgs]
 
     ok = True
     for org, record in zip(orgs, asyncio.run(run()), strict=True):

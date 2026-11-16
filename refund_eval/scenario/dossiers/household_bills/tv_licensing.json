@@ -1,0 +1,257 @@
+{
+  "org": "tv_licensing",
+  "name": "TV Licensing (tvlicensing.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.tvlicensing.co.uk TV Licence household bills payment eligibility refund complaints contact email",
+        "objective": "Prioritise official TV Licensing pages on who needs licence household, cost payment difficulties concessions refunds and complaints contact email. Find policy clauses time limits and evidence."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ11"
+      },
+      "error": "Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      "error": "Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/refunds-and-cancellations/apply-for-a-refund"
+      },
+      "error": "Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]"
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.tvlicensing.co.uk licence cost £ 2026 payment difficulties Simple Payment Plan over 75 Pension Credit blind live iPlayer household",
+        "objective": "Find official core household licensing rules current dated licence cost, payment options and arrears support, concessions evidence. Return relevant official URLs and policy text."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.tvlicensing.co.uk \"You need\" \"iPlayer\" \"household\" \"licence\"",
+        "objective": "Official TV Licensing household coverage policy: live TV streaming BBC iPlayer, when not needed, joint or separate tenancies. Extract exact clauses."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.tvlicensing.co.uk \"refund\" \"evidence\" \"21\" \"75\"",
+        "objective": "Prioritise official refund eligibility evidence time limits and processing time, and over-75 Pension Credit evidence. Include exact quotes from policy pages."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.tvlicensing.co.uk contact email complaints \"working days\" \"0300\" \"Monday\"",
+        "objective": "Prioritise official contact and complaints pages full text on published email address or contact form, telephone hours and response targets, complaint stages and ombudsman."
+      },
+      "chars": 6000
+    }
+  ],
+  "dossier": {
+    "summary": "TV Licensing handles TV Licence requirements, payments, concessions and refunds for households. Its guidance explains when a licence is needed, offers instalment options and help for customers struggling to pay, and provides a staged complaints process with potential independent Ombudsman review.",
+    "facts": [
+      {
+        "statement": "A TV Licence is required to watch live television on any channel, TV service or streaming service, or to use BBC iPlayer.",
+        "quote": "If you watch live on any channel, TV service or streaming service, or use BBC iPlayer, you need to be covered by a TV Licence.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ1"
+      },
+      {
+        "statement": "The requirement applies across devices, including computers, phones and games consoles.",
+        "quote": "This applies to any device you use, including a TV, computer, laptop, phone, tablet, games console or digital box.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ1"
+      },
+      {
+        "statement": "Its general household guidance says one licence covers multiple devices.",
+        "quote": "You only need one TV Licence per household, even if you use more than one of the devices listed above.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ1"
+      },
+      {
+        "statement": "Customers who only watch on-demand programmes outside BBC iPlayer do not need a TV Licence.",
+        "quote": "You don’t need a TV Licence if you only ever watch on demand programmes on any TV service apart from BBC iPlayer*.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one"
+      },
+      {
+        "statement": "TV Licensing asks households that do not use iPlayer or live TV to confirm their No Licence Needed status.",
+        "quote": "If no one in the household uses iPlayer or live TV, please confirm your No Licence Needed status.",
+        "url": "https://www.tvlicensing.co.uk/using-iplayer"
+      },
+      {
+        "statement": "The published fee from 1 April 2026 is £180 for a colour licence and £60.50 for a black-and-white licence.",
+        "quote": "The TV Licence fee changed on 1 April 2026. A colour licence costs £180. A black and white licence costs £60.50.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ23"
+      },
+      {
+        "statement": "The Government sets the licence fee.",
+        "quote": "The Government is responsible for setting the level of the licence fee.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ23"
+      },
+      {
+        "statement": "Monthly Direct Debit spreads the first licence over six months at around £30 per month, followed by payments of around £15 per month.",
+        "quote": "We'll spread the cost of your first Direct Debit licence over six months, at around £30 a month. From then on you'll pay around £15 a month.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/topics/tv-licence-types-and-costs-top2"
+      },
+      {
+        "statement": "Quarterly Direct Debit involves four payments, each including a £1.25 charge.",
+        "quote": "We'll take four payments throughout the year. Each payment will include a £1.25 charge.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/topics/tv-licence-types-and-costs-top2"
+      },
+      {
+        "statement": "Customers can pay the full annual fee by yearly Direct Debit or debit or credit card.",
+        "quote": "Pay the full licence fee automatically every year by Direct Debit, or pay for your licence by debit or credit card.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/topics/tv-licence-types-and-costs-top2"
+      },
+      {
+        "statement": "Customers with payment questions are encouraged to contact TV Licensing promptly to discuss next steps.",
+        "quote": "If you have a question about your payments, please contact us as soon as possible to talk about what to do next.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ171"
+      },
+      {
+        "statement": "Some not-for-profit organisations can help customers access the Simple Payment Plan, with free and private advice.",
+        "quote": "Did you know you may be able to spread the cost of your TV Licence through the Simple Payment Plan? Some not-for-profit organisations can help you access it. Their advice is free and private.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ171"
+      },
+      {
+        "statement": "A free licence is available where the licence holder is at least 75 and either they or their partner at the same address receives Pension Credit; applications can start at 74.",
+        "quote": "You can get a free TV Licence if you, as the licence holder, are 75 years or older and you, or your partner living at the same address, receive Pension Credit. You can apply when you turn 74 and we'll adjust your payments automatically.",
+        "url": "https://www.tvlicensing.co.uk/reducedfee"
+      },
+      {
+        "statement": "Apart from its specified concessions, TV Licensing says receiving benefits or Universal Credit does not provide a discount or financial help.",
+        "quote": "There is no discount or financial help with your TV Licence if you are on benefits or Universal Credit.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ171"
+      },
+      {
+        "statement": "Blind or severely sight-impaired customers can apply for a 50% concession with appropriate evidence.",
+        "quote": "If you are blind (severely sight impaired) and can provide the appropriate evidence, you are eligible to apply for a 50% concession.",
+        "url": "https://www.tvlicensing.co.uk/reducedfee"
+      },
+      {
+        "statement": "Residents of care homes, supported housing or sheltered accommodation may qualify for a reduced-fee licence.",
+        "quote": "If you live in a residential care home, supported housing or sheltered accommodation you may be entitled to a reduced fee TV Licence.",
+        "url": "https://www.tvlicensing.co.uk/reducedfee"
+      },
+      {
+        "statement": "A customer can apply for a refund when the licence will not be needed again before expiry and at least one complete month remains.",
+        "quote": "You can apply for a refund if you won’t need your licence again before it expires, and you have at least one complete month left on it.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/refunds-and-cancellations/apply-for-a-refund"
+      },
+      {
+        "statement": "Customers eligible for an over-75 or blind concession can apply for a refund at any time and for any remaining licence period.",
+        "quote": "If you’re eligible for an over 75 or blind concession, you can apply for a refund at any time and for any length of time left on your licence.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/refunds-and-cancellations/apply-for-a-refund"
+      },
+      {
+        "statement": "TV Licensing assesses the information supplied to determine refund eligibility and amount.",
+        "quote": "We’ll look carefully at the information you give us and let you know if we can offer you a refund, and how much it will be.",
+        "url": "https://www.tvlicensing.co.uk/check-if-you-need-one/refunds-and-cancellations/apply-for-a-refund"
+      },
+      {
+        "statement": "Its published email contact route is the Contact us form, while customers can also sign in to view, renew or change their licence details.",
+        "quote": "By email\n: You can get in touch using our Contact us form. You can also view, renew or change the details on your TV Licence by signing in to your TV Licence.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ11"
+      },
+      {
+        "statement": "Stage 1a complaints can be submitted in writing or through the Contact us form with the word Complaint in the question.",
+        "quote": "Stage 1a: If you wish to make a complaint, please apply in writing to the relevant address below, or alternatively use our Contact us form and enter \"Complaint\" within your question.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "General written complaints go to Customer Relations, TV Licensing, Darlington DL98 1TL.",
+        "quote": "General complaint Customer Relations TV Licensing Darlington DL98 1TL",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "At Stage 1b, customers can write to the Operations Director at TV Licensing, Darlington DL98 1TL for review of the original complaint and response.",
+        "quote": "Stage 1b: Write to the Operations Director at: TV Licensing Darlington DL98 1TL The Operations Director will review your original complaint and the response to it",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "Stage 2 escalations should reach the BBC Director of Revenue and Customer Management within 20 working days of receiving the Stage 1b response.",
+        "quote": "You should contact the BBC Director of Revenue and Customer Management within 20 working days of the date on which you received the response at Stage 1b.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "Correspondence for the BBC Director should be sent through TV Licensing in Darlington, with an email address encouraged to avoid delays.",
+        "quote": "all complaints correspondence addressed to the BBC Director of Revenue and Customer Management should be sent to TV Licensing in Darlington. Where possible we encourage you to include an email address to avoid additional delays.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "The BBC aims to answer complex complaints within 35 working days.",
+        "quote": "The BBC aims to answer complex complaints within 35 working days.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "At Stage 3 customers write back to the BBC Director, and the nature of the complaint determines whether the next route is the Editorial Complaints Unit or the Ombudsman.",
+        "quote": "Depending on the nature of your complaint, you may be referred by the BBC Director of Revenue and Customer Management to the Editorial Complaints Unit (ECU) or you may be asked to make a referral to the Ombudsman.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "After exhausting the BBC complaints procedure, customers may refer unresolved complaints to the independent Dispute Resolution Ombudsman.",
+        "quote": "Dispute Resolution Ombudsman, which is independent of the BBC, has been chosen by the BBC to review TV Licensing complaints where we have been unable to resolve it directly with the complainant. Having exhausted the BBC’s complaints procedure, you are now able to refer your case to the Ombudsman for their consideration.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "The Ombudsman service is free and accepts referrals through its website.",
+        "quote": "This is a free service, with complainants able to refer their case via the Ombudsman’s website.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      },
+      {
+        "statement": "Payment-support communications acknowledge financial difficulty and express a wish to help.",
+        "quote": "We know that some customers find paying for a licence difficult, and we want to do everything we can to help.",
+        "url": "https://www.tvlicensing.co.uk/faqs/FAQ171"
+      },
+      {
+        "statement": "Complaint communications emphasise putting problems right quickly and improving service.",
+        "quote": "When there is a problem, we rely on feedback from our customers to try to put things right as quickly as possible and improve our services.",
+        "url": "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7"
+      }
+    ],
+    "persona": {
+      "Reply-from": null,
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": null,
+      "Cold-email": null,
+      "voice": "Use plain, direct English, addressing the customer as “you” and speaking as “we”, with short explanations and clear next steps. Acknowledge payment difficulties sympathetically and explain available payment options and concessions without promising eligibility. Be reassuring about assessing refunds and resolving complaints, while stating licence requirements and procedural deadlines clearly."
+    }
+  },
+  "errors": [
+    "read_page: Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]",
+    "read_page: Cannot connect to host www.tvlicensing.co.uk:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)')]"
+  ],
+  "retrieved_at": "2026-10-28T00:56:39+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.tvlicensing.co.uk/about/making-a-complaint-AB7",
+    "https://www.tvlicensing.co.uk/check-if-you-need-one",
+    "https://www.tvlicensing.co.uk/check-if-you-need-one/refunds-and-cancellations/apply-for-a-refund",
+    "https://www.tvlicensing.co.uk/check-if-you-need-one/topics/tv-licence-types-and-costs-top2",
+    "https://www.tvlicensing.co.uk/faqs/FAQ1",
+    "https://www.tvlicensing.co.uk/faqs/FAQ11",
+    "https://www.tvlicensing.co.uk/faqs/FAQ171",
+    "https://www.tvlicensing.co.uk/faqs/FAQ23",
+    "https://www.tvlicensing.co.uk/reducedfee",
+    "https://www.tvlicensing.co.uk/using-iplayer"
+  ]
+}

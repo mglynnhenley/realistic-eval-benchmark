@@ -1,0 +1,256 @@
+{
+  "org": "thames_water",
+  "name": "Thames Water (thameswater.co.uk)",
+  "mode": "live",
+  "tool_calls": [
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.thameswater.co.uk household bills payment help complaints household account contact email",
+        "objective": "Prioritize Thames Water official household billing policies including liability payment metered unmetered disputes help schemes contact complaint response deadlines."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      "chars": 5645
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill"
+      },
+      "chars": 2936
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/how-to-complain"
+      },
+      "chars": 3355
+    },
+    {
+      "tool": "web_search_exa",
+      "arguments": {
+        "query": "site.thameswater.co.uk \"WaterHelp\" \"WaterSure\" \"bill responsibility\"",
+        "objective": "Find official household financial assistance eligibility income threshold evidence and bill responsibility policies. Return specific policy URLs and clauses."
+      },
+      "chars": 6000
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      "chars": 3024
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      "chars": 4332
+    },
+    {
+      "tool": "read_page",
+      "arguments": {
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      "chars": 2119
+    }
+  ],
+  "dossier": {
+    "summary": "Thames Water Utilities Limited handles household water and wastewater bills, offering payment plans and financial support through WaterHelp and WaterSure. It investigates billing queries through its case management team and provides a complaint review process, with escalation to CCW after a final response or more than eight weeks.",
+    "facts": [
+      {
+        "statement": "The organisation's legal name is Thames Water Utilities Limited, registered in England and Wales.",
+        "quote": "Thames Water Utilities Limited\nRegistered in England and Wales",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      {
+        "statement": "Customers can arrange instalments with a choice of payment date, frequency and method; otherwise the bill must be paid in full within 14 days of receipt.",
+        "quote": "This gives you the flexibility to choose how and when you pay, including the date, frequency and method of payment.\nIf you don't set up a payment plan, you'll need to pay your bill in full within 14 days of receiving it.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      {
+        "statement": "Customers who do not want Direct Debit can arrange instalments by other methods and set up or amend their payment plan through their online account.",
+        "quote": "If you prefer not to use Direct Debit you can still set up a plan and pay in instalments by card, cash or a way that suits you. To set up or amend your payment plan log in to your online account.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      {
+        "statement": "Cancelling a Direct Debit requires contacting the bank and arranging another payment method for the outstanding balance.",
+        "quote": "To cancel a Direct Debit, contact your bank. You'll need to set up a new payment method to pay your outstanding balance.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      {
+        "statement": "Thames Water accepts major payment cards except American Express and says payments can take up to five working days to clear.",
+        "quote": "We accept all major cards, except American Express.\nPlease allow time for payments to clear, as they can take up to five working days.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      },
+      {
+        "statement": "Billing agents may request the customer's full name, account number, address, date of birth and a meter reading.",
+        "quote": "our agents may require your:\nFull name\nAccount number\nAddress\nDate of birth\nWe may also ask for a meter reading.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill"
+      },
+      {
+        "statement": "For complex billing issues, the case management team provides next steps and a resolution timescale, then resolves the issue or advises that more time is needed.",
+        "quote": "The case management team will be able to give you next steps and a timescale for when we can resolve your issue.\nWe will either resolve it by the timescale given or advise if the timescale needs to increase.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill"
+      },
+      {
+        "statement": "Complex billing updates can be sent by email, SMS, letter or phone according to the customer's preference.",
+        "quote": "This contact will be done through email, SMS, letter, or phone depending on which you prefer.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill"
+      },
+      {
+        "statement": "Where usage is higher or inconsistent with the previous bill, Thames Water says it will discuss possible reasons and next steps.",
+        "quote": "If your water usage is higher or inconsistent than your previous bill, this could be for many reasons. We'll contact you to go through why this could be and next steps.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill"
+      },
+      {
+        "statement": "WaterHelp eligibility may apply when the annual water bill exceeds 5% of net income and also depends on the number of occupants.",
+        "quote": "If your annual bill is more than 5% of your net income, you may be eligible for WaterHelp. This is also dependent on the number of occupants at the property.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "WaterHelp currently offers qualifying customers a 25%–99% discount, subject to checking details and verifying income, without affecting their credit score.",
+        "quote": "We currently offer a discount of between 25% and 99% on your bill if you qualify. This amount may change in the future. If you qualify, WaterHelp will not impact your credit score. In order to qualify, we'll need to check your details and verify your income.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "Customers can complete an online income and expenditure assessment for WaterHelp or apply and discuss support by calling 0800 980 8800.",
+        "quote": "We can help you choose the right support for you when you complete an income and expenditure form. You can complete the form online at your own pace.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "WaterHelp telephone applications and financial-support discussions are available on 0800 980 8800.",
+        "quote": "Alternatively, you can apply for WaterHelp or discuss your financial support options on 0800 980 8800.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "WaterHelp applicants should have details of income, debts, regular bills, other outgoings and their Thames Water account number ready.",
+        "quote": "Please have the following information to hand:\nIncome you receive and any debts you have\nRegular bills and any other outgoings\nYour Thames Water account number",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "After a WaterHelp assessment, Thames Water promises contact within 20 working days and applies any discount from the application date.",
+        "quote": "Once your assessment is completed, we’ll be in touch within 20 working days. Any discounts will be applied from the date of application.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "WaterSure requires a water meter, someone in the household receiving a means-tested benefit, and either a medical condition requiring extra water or at least three resident children under 19 making the household eligible for child benefits.",
+        "quote": "To qualify for the scheme, someone in your household must receive a means-tested benefit. You will also need to have a water meter and either:\nA medical condition that requires extra water\nor\nThree or more children under the age of 19 living at the property making you eligible for child benefits",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "The WaterSure page lists Child Tax Credit above the family element, Housing Benefit, income-based Jobseeker's Allowance, Pension Credit, Income Support, Working Tax Credit and Universal Credit as eligible benefits.",
+        "quote": "Means-tested eligible benefits\nChild Tax Credit (receiving more than the family element)\nHousing Benefit\nIncome-based Jobseeker's Allowance\nPension Credit\nIncome Support\nWorking Tax Credit\nUniversal Credit",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "WaterSure medical eligibility includes the listed bowel, skin and continence conditions, home dialysis except where the NHS contributes to water costs, and other medical conditions requiring extra water.",
+        "quote": "Abdominal stoma\nCrohn's disease / ulcerative colitis\nDesquamation (flaky skin disease)\nEczema, psoriasis, or varicose ulceration (weeping skin disease)\nIncontinence\nRenal conditions requiring home dialysis (except where the NHS contributes to water costs)\nAny other medical conditions that require extra water",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "For 2026–27, WaterSure caps are £658 for water and wastewater, £372 for water only and £286 for wastewater only, while customers whose usage costs less continue paying less.",
+        "quote": "In 2026-27, for example, we’d cap your bills at:\nWater and wastewater services: £658\nWater-only services: £372\nWastewater services: £286\nIf you already use less, you’ll keep paying less.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "WaterSure applicants must complete an application form and have their details checked, with prescriptions, labels and doctor or hospital letters accepted as evidence.",
+        "quote": "To apply for WaterSure, please fill in an application form. Before approving your application, we’ll need to check your details. We accept a range of evidence such as prescriptions, labels, and a doctor/hospital letter.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "Completed WaterSure forms are accepted by email at ecs@thameswater.co.uk or by post to Extra Care Services, Thames Water, PO Box 508, Swindon, SN38 2TX.",
+        "quote": "After filling out your form, it can be emailed to ecs@thameswater.co.uk. Alternatively, you can post the form to the following address:\nExtra Care Services\nThames Water\nPO Box 508\nSwindon\nSN38 2TX",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "Support with the income and expenditure assessment is available on 0800 009 3652 Monday to Friday, 8am–5pm.",
+        "quote": "You can complete the form online at your own pace or over the phone on 0800 009 3652. We're available Monday to Friday 8am to 5pm.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure"
+      },
+      {
+        "statement": "Bill and account complaints can be raised through webchat, telephone or writing.",
+        "quote": "If your complaint is relating to your bill and account, you can either contact us through webchat, call us or write to us.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      {
+        "statement": "WhatsApp support is available Monday–Friday 8am–8pm, Saturday 8am–6pm and Sunday 8am–5pm.",
+        "quote": "Available Monday-Friday 8am-8pm, Saturday 8am-6pm, and Sunday 8am-5pm.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      {
+        "statement": "The bill and account complaints telephone number is 0800 980 8800, open Monday–Friday 8am–8pm and Saturday 8am–6pm.",
+        "quote": "You can call us on 0800 980 8800 Monday to Friday 8am to 8pm or Saturday 8am to 6pm.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      {
+        "statement": "Written billing complaints should go to Thames Water, PO Box 436, Swindon, SN38 1TU and include the customer's name, address, account number, telephone number and best contact time.",
+        "quote": "Send us a letter to: Thames Water, PO Box 436, Swindon, SN38 1TU. Please include your name, address, account number, phone number and the best time to contact you.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      {
+        "statement": "For written billing complaints, Thames Water promises contact by telephone or letter within 10 working days of receipt.",
+        "quote": "We'll be in touch via phone or letter within 10 working days of receiving your complaint.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+      },
+      {
+        "statement": "Customers may nominate a representative if they authorise information sharing, but Thames Water does not accept responsibility for solicitor or land-agent costs.",
+        "quote": "You can nominate someone to speak to us on your behalf if you prefer. We’ll just need you to give us permission to share your information with them.\nIf you appoint a solicitor or land agent, we'll be happy to liaise with them, but we can’t be responsible for any costs incurred.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain"
+      },
+      {
+        "statement": "Thames Water aims to resolve complaints within eight weeks and promises to explain delays, the revised resolution timing and the next contact.",
+        "quote": "We’ll work with you to resolve your complaint within eight weeks. If there’s ever a delay, we’ll let you know why, when it’ll be resolved and when we’ll contact you again.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain"
+      },
+      {
+        "statement": "Customers can request a complaint review if dissatisfied with the response or if a promised response deadline is missed, after which Thames Water provides its final response.",
+        "quote": "You can ask for your complaint to be reviewed if you’re not happy with the response we’ve given you, or we haven’t responded to you within the timescale we promised. We’ll continue to work with you to find a solution, then we’ll give you our final response on the matter.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain"
+      },
+      {
+        "statement": "Customers can approach CCW if unhappy with the final response or more than eight weeks after first complaining, although CCW normally requires Thames Water to have investigated first.",
+        "quote": "If you’re not happy with our final response or it’s been more than eight weeks since you first complained, you can contact CCW for help. Please note CCW won’t normally be able to assist you until we’ve investigated the complaint.",
+        "url": "https://www.thameswater.co.uk/help/how-to-complain"
+      },
+      {
+        "statement": "Thames Water offers accessible contact through British Sign Language, Relay UK and Language Line, and additional support through its Priority Services Register.",
+        "quote": "You can contact us using British Sign Language, Relay UK, and Language Line.\nGet extra help\nOur Priority Services Register can help provide extra support to you or someone you know.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp"
+      },
+      {
+        "statement": "Its public billing communications use reassuring, customer-centred language that emphasises practical help and customer choice.",
+        "quote": "We've got different payment options to suit everyone's needs. Whether paying in full or by instalments, it's important you can pay your bill in the way that suits you.",
+        "url": "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Extra Care Services <ecs@thameswater.co.uk>",
+      "Sign-off": null,
+      "Greeting": null,
+      "Case-ref-format": null,
+      "Phone-hours": "8-20 Mon-Fri, 8-18 Sat (0800 980 8800); 8-17 Mon-Fri (0800 009 3652 financial-support assessment)",
+      "Cold-email": null,
+      "voice": "Write in plain, approachable British English, using 'we' and 'you' and natural contractions. Be reassuring and non-judgmental about payment difficulties, offering practical choices and support. Explain what information is needed, the next steps and the applicable timescale; when an investigation takes longer, explain the delay and when the customer will hear again."
+    }
+  },
+  "errors": [],
+  "retrieved_at": "2026-10-28T00:57:29+00:00",
+  "subject": "household bills",
+  "model": "openrouter/openai/gpt-6-astra",
+  "sources": [
+    "https://www.thameswater.co.uk/help/account-and-billing/contact-us-about-your-account-and-bill",
+    "https://www.thameswater.co.uk/help/account-and-billing/financial-support/waterhelp",
+    "https://www.thameswater.co.uk/help/account-and-billing/financial-support/watersure",
+    "https://www.thameswater.co.uk/help/account-and-billing/paying-your-bill",
+    "https://www.thameswater.co.uk/help/how-to-complain",
+    "https://www.thameswater.co.uk/help/how-to-complain/bill-account-complaints"
+  ]
+}

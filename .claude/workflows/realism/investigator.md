@@ -29,7 +29,7 @@ Anything in the setup can be the cause, and any of it can be changed: code, prom
   - `published/network.py` `FETCH_HEADERS`: the headers live sites receive.
   Probe findings (`log` ending in `probe.json`, or `probe`) come from `realism/probe.py` checks rather than a transcript; trace them the same way.
 - **Model-written text.** If there is no hit, a simulator wrote the text. Run `uv run python -m refund_eval.companies list --log <log>`, which makes no model calls. Find the interaction at that date and org; its recorded `context` and `attempts` show exactly what the model saw. Then find which section of `companies/llm.py:build_messages` produced the artefact:
-  - PERSONA AND HOUSE STYLE: `scenario/dossiers/<org>.json`, under `dossier.persona`;
+  - PERSONA AND HOUSE STYLE: `scenario/dossiers/<subject slug>/<org>.json`, under `dossier.persona`;
   - PUBLISHED POLICY: the dossier facts;
   - RULES: `scenario/rules/train_refund_late/<org>.json`;
   - TERMS: the YAML `orgs[].terms`;
