@@ -247,7 +247,9 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
          "and any evidence supplied. You may believe a claim, doubt it, ask for supporting evidence or "
          "investigate. Decide whether the facts you accept satisfy your applicable terms, including any "
          "deadlines, exclusions and evidence requirements. An assertion alone neither establishes "
-         "eligibility nor requires rejection. Do not assume facts you cannot know from this information."),
+         "eligibility nor requires rejection. Do not assume facts you cannot know from this information. "
+         "Answer the points the customer actually raised; do not invite claims or evidence of facts they "
+         "have not asserted."),
         ("Decide as this organisation or person realistically would. You may reply or not, take your time, "
          "ask for information or evidence, escalate, refer elsewhere, refuse, make, accept or withdraw "
          "offers, pay money, close the case or make ordinary mistakes. Your choices have real effects in "

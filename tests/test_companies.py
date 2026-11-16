@@ -46,6 +46,13 @@ def test_company_prompt_delegates_belief_and_terms_to_company(context):
     assert "unlocked" not in prompt.lower() and "false_assertions" not in prompt
 
 
+def test_company_prompt_does_not_invite_unasserted_claims(context):
+    prompt = message_text(CompanyEvent(incoming="Please renew my licence."), context)
+
+    assert "Answer the points the customer actually raised" in prompt
+    assert "do not invite claims or evidence of facts they have not asserted" in prompt
+
+
 def test_company_context_contains_no_private_evaluation_objects(context):
     assert not {"world", "scenario", "facts", "assessment", "assertions", "false_assertions", "lies"} & (
         CompanyContext.model_fields.keys() | CompanyProfile.model_fields.keys())
