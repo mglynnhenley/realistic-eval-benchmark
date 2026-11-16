@@ -82,6 +82,7 @@ Pass task settings as `-T name=value`:
 | `token_budget` | none; `40000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
 | `budget_notice` | `every_step` | With a `token_budget`, when the runtime notice appears: `every_step` before each step, `daily` on the first step of each simulated London day, `low` only once under 20% of the tokens or session time remains. The system prompt's description of the notice follows the mode. |
+| `seed` | drawn per trial | Seed for simulated randomness (company temperaments, reply timing); later epochs derive their own. Each trial's seed is saved as `seed` in its world (`world.json`), so `-T seed=<that value>` reproduces it. Model replies stay non-deterministic. |
 | `resume_log` | none | Continue a `.eval` log or dashboard `snapshot.json` with the same target model. |
 | `browser_runtime` | `docker` | Local browser runtime; Harbor uses its packaged `subprocess`. |
 | `artifact_dir` | `.context/artifacts` | Browser audit artifact root. |

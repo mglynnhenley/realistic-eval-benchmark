@@ -223,6 +223,8 @@ class TargetTokenLedger(BaseModel):
 class World(BaseModel):
     start_time: datetime
     now: datetime
+    # The trial's seed for simulated randomness (temperaments, reply timing); None in older logs.
+    seed: int | None = None
     requested_wakeup: datetime | None = None
     token_ledger: TargetTokenLedger | None = None
     turn: int = 0

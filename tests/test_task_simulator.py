@@ -1,5 +1,6 @@
 """A task with different facts uses the same company runtime and private checker."""
 
+import random
 from datetime import timedelta
 
 import pytest
@@ -104,7 +105,7 @@ def contact(address="help@records.example.test"):
 
 
 async def test_alternative_company_handles_contact_and_follow_up_without_task_gates(example, monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda low, *_: low)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, low, *_: low)
     scenario, company, mock = example
     mock.assessments = [{"primary_intent": "update_record", "findings": [{
         "claim": "My record is ready.", "verdict": "contradicted", "evidence": ["facts.ready is false"],

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import inspect as pyinspect
 import logging
+import random
 from asyncio import CancelledError
 from datetime import datetime
 from typing import Any, get_type_hints
@@ -288,14 +289,28 @@ async def restore_snapshot(snapshot_path: str, scenario: Scenario | None = None)
     )
 
 
-def init_world(scenario: Scenario) -> World:
-    """Create the world for this sample (a no-op if it already exists, e.g. on resume)."""
+def trial_seed(seed: int | None, epoch: int = 1) -> int:
+    """The given seed for the first epoch, one derived from it for later epochs, or a random one."""
+    if seed is None:
+        return random.SystemRandom().randrange(2**32)
+    return seed if epoch <= 1 else random.Random(f"{seed}:epoch:{epoch}").randrange(2**32)
+
+
+def init_world(scenario: Scenario, seed: int | None = None) -> World:
+    """Create the world for this sample (a no-op if it already exists, e.g. on resume).
+    A world without a seed gets one, recorded in the world so the trial can be reproduced."""
+    from inspect_ai.solver._task_state import sample_state
+
     from refund_eval.claims import OBSERVATIONS_KEY, load_checklist
 
     if store().get(WORLD_KEY) is None:
         save_world(initial_world(scenario))
         store().set(OBSERVATIONS_KEY, [])
     world = load_world()
+    if world.seed is None:
+        sample = sample_state()
+        world.seed = trial_seed(seed, sample.epoch if sample is not None else 1)
+        save_world(world)
     from refund_eval.sim.open_world import SIMULATOR_REVISION, record_revision
 
     record_revision(world)
@@ -314,8 +329,6 @@ def init_world(scenario: Scenario) -> World:
                           "as choices made by the new company simulator.")
         store().set("task_grading_notes", {"task_kind": scenario.task_kind, "scenario_id": scenario.id,
                                          "revision": SIMULATOR_REVISION, "notes": notes})
-    from inspect_ai.solver._task_state import sample_state
-
     sample = sample_state()
     if sample is not None:
         sample.metadata["task_grading_notes"] = store().get("task_grading_notes")
@@ -669,6 +682,7 @@ def refund_agent(
     resume_log: str | None = None,
     token_budget: int | None = None,
     budget_notice: str = RunConfig.model_fields["budget_notice"].default,
+    seed: int | None = None,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -691,6 +705,9 @@ def refund_agent(
       budget_notice: With a token budget, when the runtime notice of time and tokens left
         is shown: "every_step", "daily" (first step of each simulated day) or "low"
         (only when under 20% of the tokens or time remains).
+      seed: Seed for simulated randomness (company temperaments, reply timing). Later epochs
+        derive their own; without one each trial draws a seed. Either way it is recorded in
+        the world. A resumed trial keeps its recorded seed.
     """
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
@@ -706,7 +723,7 @@ def refund_agent(
         if resume_log:
             state.messages = (await restore_snapshot(resume_log, scenario) if resume_log.endswith(".json")
                               else await restore_trial(resume_log, scenario))
-        init_world(scenario)
+        init_world(scenario, seed)
         budgeted = prepare_ledger(token_budget)
         store().set(SESSION_END_KEY, sim_deadline(load_world(), sim_weeks).isoformat())
         store().set(RESEARCH_MODE_KEY, research_mode)

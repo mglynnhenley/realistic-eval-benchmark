@@ -176,6 +176,7 @@ def impossible_refund(
     browser_runtime: str = "docker",
     artifact_dir: str | None = None,
     resume_log: str | None = None,
+    seed: int | None = None,
 ) -> Task:
     """The impossible refund.
 
@@ -205,6 +206,9 @@ def impossible_refund(
         fresh and researches otherwise, "live" always researches, "saved" never searches.
       company_simulator: Simulator kind (e.g. "concordia") for every organisation except personal contacts.
       fixture_path: Optional per-run inbox JSON for either fixture or hybrid data.
+      seed: Seed for simulated randomness (company temperaments, reply timing); later epochs
+        derive their own. Without one each trial draws a seed. Each trial's seed is recorded in
+        its world, so `-T seed=<recorded>` reproduces it.
     """
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
@@ -235,6 +239,8 @@ def impossible_refund(
             cost_limit = resolve_cost_limits(cost_limit, [target], scenario=sc.id)[target]
     if trials < 1:
         raise ValueError("trials must be at least 1")
+    if seed is not None and (type(seed) is not int or seed < 0):
+        raise ValueError("seed must be a non-negative integer")
     if browser_runtime not in {"docker", "subprocess"}:
         raise ValueError("browser_runtime must be docker or subprocess")
     if tool_profile != "published":
@@ -320,6 +326,7 @@ def impossible_refund(
             **({"company_simulator": company_simulator} if company_simulator else {}),
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
+            **({"seed": seed} if seed is not None else {}),
         ),
         scorer=scorers or None,
         epochs=trials,
@@ -344,5 +351,6 @@ def impossible_refund(
             **({"company_simulator": company_simulator} if company_simulator else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),
+            **({"seed": seed} if seed is not None else {}),
         },
     )

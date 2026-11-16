@@ -79,6 +79,7 @@ def offer_is_open(offer: Offer, now: datetime) -> bool:
 
 
 TEMPERAMENTS_KEY = "open_world_temperaments"
+REPLY_JITTER_DRAWS_KEY = "open_world_reply_jitter_draws"
 # Personal contacts retain their existing bounds; organisations use their own
 # configured reply_delay_hours rather than a universal four-to-72-hour clamp.
 MIN_REPLY_HOURS = 4
@@ -113,10 +114,18 @@ def money_problem(action: OpenAction, world: World, org: Org, limit: float) -> s
     return None
 
 
-def temperament(org: Org) -> str:
+def trial_rng(world: World, purpose: str, org: Org) -> random.Random:
+    """An independent stream per purpose and organisation, from the trial seed.
+    Worlds saved before trials had a seed keep drawing unseeded."""
+    if world.seed is None:
+        return random.Random()
+    return random.Random(f"{world.seed}:{purpose}:{org.key}")
+
+
+def temperament(org: Org, world: World) -> str:
     chosen = dict(world_store().get(TEMPERAMENTS_KEY, {}))
     if org.key not in chosen:
-        chosen[org.key] = random.SystemRandom().choice(TEMPERAMENTS)
+        chosen[org.key] = trial_rng(world, "temperament", org).choice(TEMPERAMENTS)
         world_store().set(TEMPERAMENTS_KEY, chosen)
     return chosen[org.key]
 
@@ -186,7 +195,7 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     simulator = get_company_simulator(org.simulator_kind)
     saved[org.key] = {"org": org.model_dump(mode="json"), "research": record, "rules": rules,
                       "simulator_kind": org.simulator_kind, "version": simulator.version,
-                      "temperament": temperament(org)}
+                      "temperament": temperament(org, world)}
     world_store().set(COMPANIES_KEY, saved)
     return org, record
 
@@ -327,7 +336,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         records=scenario.task.company_records(scenario, org), dossier=dossier_text(record) or "",
         rules=rules_text(rules, scenario.task.grant_description) if scenario.intent else "",
         persona=persona_text((record or {}).get("dossier")) or org.persona,
-        temperament=pinned.get("temperament") or temperament(org), realism=realism,
+        temperament=pinned.get("temperament") or temperament(org, world), realism=realism,
         examples="" if org.kind == "dynamic_personal" else exemplars_text(org.key), case_ref=case_ref,
         history=history, offers=offers, payments=payments, promises=promises,
         other_orgs=[o.name for o in others] if org.kind == "dynamic_personal" else [],
@@ -378,13 +387,17 @@ def _prepare_action(action: OpenAction, event: CompanyEvent, world: World, org: 
         minimum, maximum = ((0, MAX_REPLY_HOURS) if action.reply_kind == "automatic" else
                             (MIN_REPLY_HOURS, MAX_REPLY_HOURS) if org.kind == "dynamic_personal"
                             else org.reply_delay_hours)
-        proposed_hours = action.reply_after_hours * random.uniform(0.8, 1.2)
+        draws = dict(world_store().get(REPLY_JITTER_DRAWS_KEY, {}))
+        draws[org.key] = draws.get(org.key, 0) + 1
+        world_store().set(REPLY_JITTER_DRAWS_KEY, draws)
+        rng = trial_rng(world, f"reply-jitter:{draws[org.key]}", org)
+        proposed_hours = action.reply_after_hours * rng.uniform(0.8, 1.2)
         if (org.kind != "dynamic_personal" and action.reply_kind != "automatic"
                 and proposed_hours < minimum):
             # A model's short estimate should not put every staff reply exactly
             # at the configured floor. Prefer the earlier part of the existing
             # range while allowing ordinary variation across that range.
-            action.reply_after_hours = random.triangular(minimum, maximum, minimum)
+            action.reply_after_hours = rng.triangular(minimum, maximum, minimum)
         else:
             action.reply_after_hours = min(max(proposed_hours, minimum), maximum)
     sender = _sender(org, action, record, inbound_target)

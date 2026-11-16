@@ -158,6 +158,7 @@ def run_worker(run_dir: str | Path) -> int:
                     "sim_weeks": config["sim_weeks"],
                     "scenario": config["scenario"],
                     **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),
+                    **({"seed": config["seed"]} if config.get("seed") is not None else {}),
                     **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),
                     **profile_args,
                 },
