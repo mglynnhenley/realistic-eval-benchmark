@@ -91,9 +91,11 @@ from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
 from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
+from refund_eval.world import event_log
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
     SESSION_END_KEY,
+    current_tool_call_id,
     enforce_session_end,
 )
 from refund_eval.world.mail import seed_emails
@@ -373,11 +375,13 @@ def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
 
     async def guarded(*args: Any, **kwargs: Any) -> Any:
         try:
-            reason = kill_reason()
-            if reason is not None:
-                raise _kill_error(reason)
-            enforce_session_end()
-            return await inner(*args, **kwargs)
+            # World changes made by this call are logged with its tool call id.
+            with event_log.tool_call(tdef.name, current_tool_call_id()):
+                reason = kill_reason()
+                if reason is not None:
+                    raise _kill_error(reason)
+                enforce_session_end()
+                return await inner(*args, **kwargs)
         except LimitExceededError as ex:
             # Inspect represents tool limits as ordinary tool errors. Retain
             # their native type so both startup and the agent loop can stop.

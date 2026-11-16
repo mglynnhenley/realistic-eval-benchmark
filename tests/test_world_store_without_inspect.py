@@ -11,6 +11,7 @@ from refund_eval.world import store as trial_store
 PURE_MODULES = [
     "refund_eval.world.store",
     "refund_eval.world.state",
+    "refund_eval.world.event_log",
     "refund_eval.world.clock",
     "refund_eval.world.mail",
     "refund_eval.world.mailquery",

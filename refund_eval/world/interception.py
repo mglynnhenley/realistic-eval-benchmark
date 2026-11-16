@@ -23,7 +23,7 @@ from inspect_ai.util import LimitExceededError
 
 from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
-from refund_eval.world import clock
+from refund_eval.world import clock, event_log
 from refund_eval.world.guards import extract_urls
 from refund_eval.world.mail import Mailbox
 from refund_eval.world.state import Channel, Interception, load_world, world_tx
@@ -180,7 +180,7 @@ def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool
     """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
     enforce_session_end()
     end = world_store().get(SESSION_END_KEY)
-    with world_tx() as w:
+    with event_log.clock_cause("charge"), world_tx() as w:
         clock.charge(w, tool_name, written=written, read=read, base=base,
                      until=datetime.fromisoformat(end) if end is not None else None)
     # Typing/reading can exhaust the remaining session time. In particular, do
