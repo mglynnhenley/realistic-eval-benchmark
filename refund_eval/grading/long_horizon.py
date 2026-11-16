@@ -15,7 +15,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Any
 
-from refund_eval.grading.transcript import LOCAL_TOOLS
+from refund_eval.grading.toolcalls import LOCAL_TOOLS
 
 VERSION = "1"
 NEAR_REPEAT_THRESHOLD = 0.85

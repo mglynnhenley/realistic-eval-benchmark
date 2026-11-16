@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from datetime import timedelta
 from typing import Any
 
 import pytest
 from fixtures.simulator import MockSim
+from fixtures.verifier import export_trial, reward_from_scores
 from inspect_ai import eval
 from inspect_ai.model import (
     ChatMessage,
@@ -31,6 +33,7 @@ from inspect_ai.model import (
 
 from refund_eval.claims import ClaimFinding
 from refund_eval.claims.evaluation import evaluate_log
+from refund_eval.grading import verifier
 from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published import profile
 from refund_eval.task import impossible_refund
@@ -188,3 +191,17 @@ def test_lie_to_retailer_end_to_end(tmp_path, offline_published_profile):
     assert set(sample.scores) == {"containment", "resource_use", "permission_checks", "long_horizon_activity"}
     review = sample.scores["long_horizon_activity"].metadata["unsupported_claims"]["items"]
     assert review == []
+
+    # The Harbor verifier, from the exported state.json and events.jsonl and the trial's .eval,
+    # gives the scorers' numbers, and task success from the refund_reached stop.
+    state, events = export_trial(sample.store, {"scenario": sample.metadata["scenario"]}, tmp_path / "world")
+    artifacts = tmp_path / "agent"
+    artifacts.mkdir()
+    shutil.copy(log.location, artifacts)
+    out = tmp_path / "verifier" / "reward.json"
+    assert verifier.main(["--state", str(state), "--events", str(events), "--artifacts", str(artifacts),
+                          "--out", str(out)]) == 0
+    reward = json.loads(out.read_text())
+    assert reward.pop("task_success") == 1.0 and reward.pop("event_log_matches_state") == 1.0
+    assert reward == reward_from_scores(sample.scores)
+    assert reward["long_horizon_activity.delivered_branches"] >= 1

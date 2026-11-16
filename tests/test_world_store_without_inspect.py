@@ -30,6 +30,12 @@ PURE_MODULES = [
     "refund_eval.model_pricing",
     "refund_eval.sim.consistency",
     "refund_eval.companies.llm",
+    "refund_eval.grading.toolcalls",
+    "refund_eval.grading.checks",
+    "refund_eval.grading.long_horizon",
+    "refund_eval.grading.published",
+    "refund_eval.grading.verifier",
+    "refund_eval.grading.harbor_metric",
 ]
 
 BLOCKED = ("inspect_ai", "inspect_scout")
