@@ -18,9 +18,8 @@ from urllib.parse import urlsplit
 
 import httpx
 import jsonschema
-from inspect_ai.model import ChatMessage
 
-from refund_eval.grading.transcript import (
+from refund_eval.grading.toolcalls import (
     BROWSER_TOOLS,
     LOCAL_TOOLS,
     NATIVE_MAIL_READ_TOOLS,
@@ -28,13 +27,6 @@ from refund_eval.grading.transcript import (
     NOT_EXECUTED_ERRORS,
     ToolCallRecord,
     tool_calls,
-)
-from refund_eval.published.network import (
-    MAX_BYTES,
-    PUBLIC_READ_POLICY_VERSION,
-    PUBLIC_WEB_CHECKS,
-    navigation_write_reason,
-    public_web_read_reason,
 )
 from refund_eval.world.state import World
 
@@ -162,7 +154,7 @@ def _probe_errors(manifest: dict, audit: list[dict], ready_index: int | None) ->
 
 
 def published_containment_check(
-    messages: Sequence[ChatMessage], world: World | None, profile: Any, audit: Any,
+    messages: Sequence[Any], world: World | None, profile: Any, audit: Any,
 ) -> dict[str, Any]:
     errors: list[str] = []
 
@@ -505,6 +497,9 @@ def _denied_booking_lookup(
     events: list[dict], world: World | None, profile: dict,
 ) -> bool:
     """Recognise a completely joined denied lookup, without claiming booking success."""
+    # Imported here: the network module needs Inspect, and this module imports without it.
+    from refund_eval.published.network import MAX_BYTES, PUBLIC_READ_POLICY_VERSION
+
     if (world is None or len(matches) != 1
             or profile.get("public_read_policy") != "public_web" or profile.get("public_read_urls") != []
             or type(profile.get("evidence_version")) is not int or profile["evidence_version"] != 2
@@ -647,6 +642,13 @@ def _browser_evidence(
     call: ToolCallRecord, events: list[dict], world: World | None, profile: dict,
     outcome: dict, fail: Any, requests_seen: set[str],
 ) -> None:
+    from refund_eval.published.network import (
+        PUBLIC_READ_POLICY_VERSION,
+        PUBLIC_WEB_CHECKS,
+        navigation_write_reason,
+        public_web_read_reason,
+    )
+
     events = [e for e in events if e.get("call_id") == call.id]
     starts = [e for e in events if e.get("event") == "browser_tool_start"]
     ends = [e for e in events if e.get("event") == "browser_tool_end"]

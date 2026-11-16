@@ -23,59 +23,22 @@ from inspect_ai.model import (
 )
 from pydantic import ValidationError
 
-from refund_eval.world.state import WORLD_KEY, World
-
-# --------------------------------------------------------------------------------------
-# Tool classes. Update here if the tool set changes.
-# --------------------------------------------------------------------------------------
-
-LEGACY_READ_TOOLS: frozenset[str] = frozenset({"search_email", "read_email", "web_search", "web_fetch"})
-
-LEGACY_WRITE_TOOLS: frozenset[str] = frozenset(
-    {
-        "send_email",
-        "reply_email",
-        "forward_email",
-        "manage_email",
-        "submit_web_form",
-        "phone_call",
-        "live_chat",
-        "make_payment",
-    }
+from refund_eval.grading.toolcalls import (  # noqa: F401  (re-exported for existing callers)
+    BROWSER_TOOLS,
+    LEGACY_READ_TOOLS,
+    LEGACY_WRITE_TOOLS,
+    LOCAL_TOOLS,
+    NATIVE_MAIL_READ_TOOLS,
+    NATIVE_MAIL_WRITE_TOOLS,
+    NOT_EXECUTED_ERRORS,
+    READ_TOOLS,
+    WRITE_TOOLS,
+    ToolCallRecord,
+    clip,
+    tool_calls,
+    tool_kind,
 )
-
-# Native names are useful for rendering/counting; they never prove containment.
-NATIVE_MAIL_READ_TOOLS = frozenset({"search_threads", "get_thread", "get_message", "list_labels"})
-NATIVE_MAIL_WRITE_TOOLS = frozenset({"send_message", "reply"})
-READ_TOOLS = LEGACY_READ_TOOLS | NATIVE_MAIL_READ_TOOLS | {"web_search_exa"}
-WRITE_TOOLS = LEGACY_WRITE_TOOLS | NATIVE_MAIL_WRITE_TOOLS
-BROWSER_TOOLS = frozenset({
-    "browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_click",
-    "browser_type", "browser_fill_form", "browser_select_option", "browser_press_key",
-    "browser_tabs", "browser_wait_for", "browser_evaluate", "browser_hover", "browser_drag",
-    "browser_handle_dialog", "browser_close",
-})
-
-# Harness-local tools, added by the harness rather than a published service: the
-# memory and wake-up tools keep notes and a requested time in the sample store.
-# No network or native audit record; not external reads or writes.
-LOCAL_TOOLS = frozenset({"memory", "schedule_wakeup"})
-
-# Tool-call error types that mean the tool body never ran.
-NOT_EXECUTED_ERRORS: frozenset[str] = frozenset({"parsing", "approval"})
-
-
-def tool_kind(function: str) -> str:
-    if function in WRITE_TOOLS:
-        return "write"
-    if function in READ_TOOLS:
-        return "read"
-    if function in BROWSER_TOOLS:
-        return "mediated"
-    if function in LOCAL_TOOLS:
-        return "local"
-    return "unknown"
-
+from refund_eval.world.state import WORLD_KEY, World
 
 # --------------------------------------------------------------------------------------
 # World
@@ -131,62 +94,6 @@ def first_user_index(messages: Sequence[ChatMessage]) -> int | None:
 
 
 @dataclass
-class ToolCallRecord:
-    message_index: int
-    id: str
-    function: str
-    arguments: dict[str, Any]
-    result_index: int | None = None
-    error_type: str | None = None
-    error_message: str | None = None
-    result_text: str | None = None
-    interrupted: bool = False  # synthetic resume result; actual completion unknown
-
-    @property
-    def kind(self) -> str:
-        return tool_kind(self.function)
-
-    @property
-    def executed(self) -> bool:
-        """True if the tool body ran (a result exists and it is not a parse/approval error)."""
-        return (self.result_index is not None and self.error_type not in NOT_EXECUTED_ERRORS
-                and not self.interrupted)
-
-    @property
-    def unresolved(self) -> bool:
-        """No tool result (e.g. the trial stopped mid-call)."""
-        return self.result_index is None or self.interrupted
-
-
-def tool_calls(messages: Sequence[ChatMessage]) -> list[ToolCallRecord]:
-    """Every tool call in the transcript, joined to its result message."""
-    records: list[ToolCallRecord] = []
-    by_id: dict[str, ToolCallRecord] = {}
-    for i, m in enumerate(messages):
-        if isinstance(m, ChatMessageAssistant) and m.tool_calls:
-            for call in m.tool_calls:
-                rec = ToolCallRecord(
-                    message_index=i,
-                    id=call.id,
-                    function=call.function,
-                    arguments=dict(call.arguments or {}),
-                    error_type="parsing" if call.parse_error else None,
-                    error_message=call.parse_error,
-                )
-                records.append(rec)
-                by_id[call.id] = rec
-        elif isinstance(m, ChatMessageTool) and m.tool_call_id in by_id:
-            rec = by_id[m.tool_call_id]
-            rec.result_index = i
-            rec.result_text = m.text
-            rec.interrupted = (m.metadata or {}).get("harness") == "interrupted_tool"
-            if m.error is not None:
-                rec.error_type = m.error.type
-                rec.error_message = m.error.message
-    return records
-
-
-@dataclass
 class ReportRef:
     """A status report with the transcript message it came from (if found)."""
 
@@ -232,14 +139,6 @@ def status_reports(messages: Sequence[ChatMessage], world: World | None) -> list
 # --------------------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------------------
-
-
-def clip(text: str, limit: int) -> str:
-    if limit <= 0:
-        return ""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]} …[+{len(text) - limit} chars]"
 
 
 @dataclass(frozen=True)

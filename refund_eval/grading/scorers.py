@@ -12,7 +12,9 @@ scout/ (see scout/README.md).
 
 The world is read from the sample store under WORLD_KEY ("world").
 
-The implementations live in `hard_checks` and `metrics`. This module is the public
+The implementations live in `checks` (no Inspect; the Harbor verifier, `verifier`, runs
+the same functions over the world's exported state), `hard_checks` (the Inspect
+wrappers) and `metrics`. This module is the public
 surface: it re-exports their names and defines `all_scorers`.
 """
 
