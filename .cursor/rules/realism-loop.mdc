@@ -1,0 +1,12 @@
+---
+description: Running and changing the realism improvement loop
+globs: refund_eval/realism/**,refund_eval/awareness/**,docs/environment-improvement-loop.md,docs/realism-cloud-agent.md
+alwaysApply: false
+---
+- The maintained loop is `python -m refund_eval.realism continuous` (Python 3.14). Each round runs three trials of one frozen committed environment and gets reports from four investigators of different model families. The primary agent then selects and implements repairs in an isolated worktree, and checks must pass before the next round. Full protocol: `.agents/skills/realism-loop/SKILL.md` and `docs/environment-improvement-loop.md`.
+- `continuous init` always starts paused. Paid execution (`advance --resume --execute`) needs the owner's explicit resume and budget.
+- Repairs must preserve task facts, company terms, privacy, finances and grading. Never fabricate successful actions or suppress evidence to lower tell counts.
+- Lessons from past runs:
+  - Tell counts are noisy at 3–5 trials, and bundled fixes hid which change helped. Prefer one change per round, or more trials.
+  - The loop is most valuable as a defect finder.
+- The eval-awareness probe feeds `realism open/score/compare --awareness`, but not `continuous` yet. The probe was trained on short prompts, so validate it on our transcripts before trusting it as a metric.

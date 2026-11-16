@@ -1,0 +1,5 @@
+logs/
+scans/
+.context/
+.secrets/
+measurements/**/*.png
