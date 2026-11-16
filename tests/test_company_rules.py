@@ -143,7 +143,7 @@ async def test_a_failed_generation_is_cached_and_returns_none(sim, no_saved):
 
 def test_cli_generates_from_saved_dossiers_and_saves(sim, no_saved, monkeypatch, capsys):
     model = get_model("mockllm/model", custom_outputs=sim, memoize=False)
-    monkeypatch.setattr(rules, "get_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda *args, **kwargs: model)
     sim.reply = {**RULES, "grounds": [{**RULES["grounds"][0], "quote": "within 28 days"}]}
     assert rules.main(["--scenario", "train_refund_late", "--org", "trainline", "--model", "mockllm/model", "--save"]) == 0
     saved = json.loads((no_saved / "train_refund_late" / "trainline.json").read_text())

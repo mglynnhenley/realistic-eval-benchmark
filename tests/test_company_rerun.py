@@ -169,7 +169,7 @@ def test_log_selection_requires_unambiguous_sample_and_epoch(snapshot, interacti
 async def test_explicit_model_injection_works_outside_inspect_run(interaction, monkeypatch):
     model = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(
         completion=interaction.attempts[-1].action.model_dump_json())))
-    monkeypatch.setattr("refund_eval.companies.llm.get_model", lambda **kw: pytest.fail("No live model role"))
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda **kw: pytest.fail("No live model role"))
     action = await LLMCompanySimulator(model=model).respond(interaction.event, interaction.context)
     assert action == interaction.attempts[-1].action
     assert model.generate.await_count == 1

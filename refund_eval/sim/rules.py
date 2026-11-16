@@ -20,18 +20,10 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from inspect_ai.model import (
-    ChatMessageSystem,
-    ChatMessageUser,
-    GenerateConfig,
-    ResponseSchema,
-    get_model,
-)
-from inspect_ai.util import json_schema
 from pydantic import BaseModel, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL
-from refund_eval.model_io import completion_json
+from refund_eval.models.client import Message, OutputSchema, client
 from refund_eval.scenario.schema import SCENARIO_DIR, Org, Scenario, load_scenario
 from refund_eval.sim.research import live_web, research_mode, saved_record
 from refund_eval.world.store import world_store
@@ -133,17 +125,16 @@ def _brief(scenario: Scenario, org: Org, dossier_record: dict[str, Any] | None) 
 
 async def generate_rules(scenario: Scenario, org: Org, dossier_record: dict[str, Any] | None) -> dict[str, Any]:
     """One simulator-role call for the organisation's rules; `rules` is None on failure."""
-    model = get_model(role="simulator", required=True)
+    model = client()
     record: dict[str, Any] = {
-        "org": org.key, "scenario": scenario.id, "intent": scenario.intent, "model": str(model),
+        "org": org.key, "scenario": scenario.id, "intent": scenario.intent, "model": model.model_name("simulator"),
         "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat(), "rules": None, "errors": []}
-    messages = [ChatMessageSystem(content=RULES_SYSTEM), ChatMessageUser(content=_brief(scenario, org, dossier_record))]
-    config = GenerateConfig(max_tokens=MAX_OUTPUT_TOKENS, response_schema=ResponseSchema(
-        name="company_rules", json_schema=json_schema(CompanyRules),
-        description="The terms the organisation applies and the only grounds on which it may grant."))
+    messages = [Message("system", RULES_SYSTEM), Message("user", _brief(scenario, org, dossier_record))]
+    schema = OutputSchema("company_rules", CompanyRules,
+                          "The terms the organisation applies and the only grounds on which it may grant.")
     try:
-        output = await model.generate(messages, config=config)
-        rules = CompanyRules.model_validate(completion_json(output.completion))
+        output = await model.complete("simulator", messages, max_tokens=MAX_OUTPUT_TOKENS, schema=schema)
+        rules = CompanyRules.model_validate(output.json())
     except Exception as ex:  # noqa: BLE001 - no rules; the caller decides what that means
         logger.warning("rules generation failed for %s: %s", org.key, ex)
         record["errors"].append(f"rules: {ex}"[:300])
@@ -196,6 +187,7 @@ def rules_text(record: dict[str, Any] | None, grant_description: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
+    from inspect_ai.model import get_model
     from inspect_ai.model._model import init_model_roles
 
     parser = argparse.ArgumentParser(prog="python -m refund_eval.sim.rules",

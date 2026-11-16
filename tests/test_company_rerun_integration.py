@@ -79,7 +79,7 @@ def test_real_log_and_model_round_trip_without_a_live_trial(tmp_path, monkeypatc
 
     model = get_model("mockllm/company-comparison", custom_outputs=respond, memoize=False)
     monkeypatch.setattr(cli, "get_model", lambda name: model)
-    monkeypatch.setattr("refund_eval.companies.llm.get_model", lambda **kwargs: pytest.fail("No trial role lookup"))
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda **kwargs: pytest.fail("No trial role lookup"))
     init_subtask_store(Store({"world": {"sentinel": "unchanged"}}))
     destination = tmp_path / "comparison.json"
     monkeypatch.setattr("sys.argv", ["company", "rerun", "--log", str(source),

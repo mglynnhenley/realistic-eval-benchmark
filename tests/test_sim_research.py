@@ -184,7 +184,7 @@ def test_dossier_text_quotes_facts_with_sources():
 
 def test_cli_saves_a_dated_dossier_with_sources(sim, monkeypatch, tmp_path, capsys):
     model = get_model("mockllm/model", custom_outputs=sim, memoize=False)
-    monkeypatch.setattr(research, "get_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda *args, **kwargs: model)
     monkeypatch.setattr(research, "DOSSIER_DIR", tmp_path)
     sim.research_script = [SEARCH, READ, DOSSIER]
     assert research.main(["trainline", "--save", "--model", "mockllm/model"]) == 0
@@ -225,7 +225,7 @@ async def test_saved_dossiers_are_not_reused_for_another_subject(sim):
 
 def test_cli_research_uses_the_selected_scenarios_subject(sim, monkeypatch, capsys):
     model = get_model("mockllm/model", custom_outputs=sim, memoize=False)
-    monkeypatch.setattr(research, "get_model", lambda *args, **kwargs: model)
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda *args, **kwargs: model)
     scenario = SC.model_copy(update={"subject": "a licence renewal"})
     monkeypatch.setattr(research, "load_scenario", lambda _: scenario)
     assert research.main(["trainline", "--scenario", "custom", "--model", "mockllm/model"]) == 0

@@ -1,4 +1,4 @@
-"""World state and the pure world modules import without Inspect installed."""
+"""World state, the world-side model interface and the pure world modules import without Inspect installed."""
 
 import subprocess
 import sys
@@ -20,6 +20,12 @@ PURE_MODULES = [
     "refund_eval.agent.prompt",
     "refund_eval.sim.interface",
     "refund_eval.sim.common",
+    "refund_eval.models.client",
+    "refund_eval.models.openrouter",
+    "refund_eval.model_io",
+    "refund_eval.model_pricing",
+    "refund_eval.sim.consistency",
+    "refund_eval.companies.llm",
 ]
 
 BLOCKED = ("inspect_ai", "inspect_scout")

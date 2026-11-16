@@ -96,7 +96,6 @@ def test_personal_contact_can_send_notes_without_company_payments(context):
 
 @pytest.mark.parametrize("approved", [True, False])
 async def test_llm_returns_company_decision_without_truth_dependent_gate(context, monkeypatch, approved):
-    from refund_eval.companies import llm
 
     result = {
         "decision": "approved" if approved else "evidence_required", "reply": True,
@@ -106,7 +105,7 @@ async def test_llm_returns_company_decision_without_truth_dependent_gate(context
         "payments": [{"kind": "cash_refund", "amount": 30, "via": "original card"}] if approved else [],
     }
     model = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(completion=json.dumps(result))))
-    monkeypatch.setattr(llm, "get_model", lambda **kwargs: model)
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda **kwargs: model)
 
     action = await LLMCompanySimulator().respond(CompanyEvent(incoming="Please apply the exception."), context)
 
@@ -118,10 +117,9 @@ async def test_llm_returns_company_decision_without_truth_dependent_gate(context
 
 
 async def test_llm_errors_propagate_for_runtime_retry(context, monkeypatch):
-    from refund_eval.companies import llm
 
     model = SimpleNamespace(generate=AsyncMock(side_effect=RuntimeError("Model unavailable")))
-    monkeypatch.setattr(llm, "get_model", lambda **kwargs: model)
+    monkeypatch.setattr("inspect_ai.model.get_model", lambda **kwargs: model)
 
     with pytest.raises(RuntimeError, match="Model unavailable"):
         await LLMCompanySimulator().respond(CompanyEvent(incoming="Hello"), context)
