@@ -10,7 +10,6 @@ fixed scoring rubric, and `docs/realism-cloud-agent.md` for the actual JSON/CLI 
 primary handoff contracts. Use `python -m refund_eval.realism continuous` in the
 current repository with `UV_PYTHON=3.14`. The primary coding session and existing
 measurement machinery own this bounded loop; no permanent service is needed.
-The JavaScript and MCP/API repair workflows are legacy alternatives.
 
 Honor invocation settings and existing authorization. The current paid pause
 remains active until explicit owner resume. Do not interpret a budget or task to
@@ -160,11 +159,7 @@ Modal jobs stopped; inspect cleanup/discovery errors and reconcile outstanding w
 Do not delete markers or mutate history to resume. Preserve checkpoint handoffs;
 cloud sleep/process interruption is not guaranteed automatic recovery.
 
-Use the single-use `refund_eval.realism.durable_worker` for separately owned
-long-running Python invocations when transport interruption is possible. Pin its
-entrypoint/inputs, preserve payload pre-dispatch guards and use durable file
-pause/status/exit receipts. A dead launcher, missing receipt or local exit does
-not settle remote charges. Never relaunch a consumed invocation. A fresh explicit
+A fresh explicit
 `analysis_transport` streaming profile can persist chunks and generation IDs for
 future investigator/grade calls; it does not migrate or replay old requests and
 does not cover the native runner or tells scanner. Unsupported or incomplete
