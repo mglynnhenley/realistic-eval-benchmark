@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from refund_eval.runtime.events import due_mail
 from refund_eval.world.state import Email, World
 from refund_eval.world.timeutil import as_aware, as_utc
 
@@ -32,20 +33,20 @@ def advance(world: World, to: datetime) -> list[Email]:
     """Move the clock forward to `to` (never backwards) and deliver due mail.
 
     Pending emails with `due_at <= world.now` are moved into `world.overlay_inbox`
-    in due order. Returns the emails that arrived. Mutates `world`; the caller is
+    in the order of `refund_eval.runtime.events`. Returns the emails that arrived. Mutates `world`; the caller is
     responsible for saving it (use inside `world_tx()`).
     """
     if as_utc(to) > as_utc(world.now):
         world.now = to
     now = as_utc(world.now)
 
-    due = [p for p in world.pending if as_utc(p.due_at) <= now]
+    due = due_mail(world)
     if not due:
         return []
     world.pending = [p for p in world.pending if as_utc(p.due_at) > now]
 
     arrived: list[Email] = []
-    for p in sorted(due, key=lambda p: as_utc(p.due_at)):
+    for p in due:
         email = p.email
         # An email is visible once its sent_at has passed; keep it consistent with due_at.
         if as_utc(email.sent_at) > now:

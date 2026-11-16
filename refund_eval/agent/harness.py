@@ -73,10 +73,10 @@ from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import (
     CHECKIN_HOURS,
     LONDON,
+    WAKE_KIND,
     aware,
     new_mail_ids,
     next_checkin,
-    next_event,
     sim_deadline,
     unannounced_mail_ids,
     wakeup_text,
@@ -85,6 +85,7 @@ from refund_eval.config import BUDGET_NOTICES, RunConfig
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.mail import SUPPORTED_TOOLS as MAIL_TOOLS
 from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
+from refund_eval.runtime.events import follow_up_before_wake, next_wake
 from refund_eval.runtime.snapshots import emit_snapshot
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
@@ -447,9 +448,10 @@ def wake(
     simulated-time cap."""
     deadline = sim_deadline(world, sim_weeks)
     since = world.wakeups[-1].time if world.wakeups else world.start_time
-    when, kind = next_event(world, checkin_hours)
-    if when > deadline:
+    event = next_wake(world, checkin_hours, session_end=deadline)
+    if event is None:
         return None
+    when, kind = event.due_at, WAKE_KIND[event.kind]
     arrived = _advance(world, when)
     ids = new_mail_ids(world, since, when, arrived) | unannounced_mail_ids(world)
     if kind == "new_mail" and not ids:
@@ -471,17 +473,14 @@ def wake(
 async def _follow_ups_before_wake(sim_weeks: float, checkin_hours: tuple[int, ...], limit: int = 10) -> None:
     """Open world: fire each counterparty follow-up that falls due before the agent's
     next wake-up, moving the clock to it first. Each may schedule mail that brings
-    the wake-up forward, so the next event is recomputed every time."""
-    from refund_eval.sim.open_world import next_follow_up
+    the wake-up forward, so the next event is recomputed every time (see
+    `refund_eval.runtime.events` for the order)."""
     from refund_eval.sim.router import follow_up
 
     for _ in range(limit):
         world = load_world()
-        item = next_follow_up(world)
+        item = follow_up_before_wake(world, checkin_hours, session_end=sim_deadline(world, sim_weeks))
         if item is None:
-            return
-        when = next_event(world, checkin_hours)[0]
-        if aware(item.due_at) >= sim_deadline(world, sim_weeks) or aware(item.due_at) > when:
             return
         with world_tx() as w:
             _advance(w, max(aware(item.due_at), aware(w.now)))

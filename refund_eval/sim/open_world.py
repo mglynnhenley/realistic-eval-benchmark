@@ -29,6 +29,8 @@ from refund_eval.companies.exemplars import exemplars_text
 from refund_eval.companies.models import CompanyModelRefusal
 from refund_eval.formatting import long_date, money
 from refund_eval.realism.notes import notes_text
+from refund_eval.runtime.events import follow_up_pending as _follow_up_pending
+from refund_eval.runtime.events import next_follow_up  # noqa: F401 - re-exported
 from refund_eval.runtime.records import (
     InteractionAttempt,
     InteractionEffect,
@@ -618,14 +620,6 @@ def apply_open(
                         thread=(emails[0][0].thread_id, emails[0][0].subject) if emails else thread)
 
 
-def _follow_up_pending(item: FollowUp, now: datetime) -> bool:
-    """A scheduled supersession cannot erase a promise before its reply arrives."""
-    return item.status == "pending" or (
-        item.status == "superseded" and item.superseded_at is not None
-        and as_aware(now) < as_aware(item.superseded_at)
-    )
-
-
 def _follow_up_problem(action: OpenAction, world: World, org: Org) -> str | None:
     operation, ids = action.follow_up_action, action.follow_up_ids
     if operation == "new":
@@ -866,12 +860,6 @@ async def _react_to_note(scenario: Scenario, inbound: Inbound, source: Org, targ
         thread_id=f"t-{inbound.interception_id}-{target.key}", thread_subject=None,
         email_id=f"{inbound.interception_id}-note-{target.key}", prompted_by=source.name,
     )
-
-
-def next_follow_up(world: World) -> FollowUp | None:
-    """The earliest promise still outstanding, if any."""
-    pending = [f for f in world.follow_ups if _follow_up_pending(f, world.now)]
-    return min(pending, key=lambda f: as_aware(f.due_at)) if pending else None
 
 
 async def fire_follow_up(scenario: Scenario, follow_up: FollowUp) -> None:

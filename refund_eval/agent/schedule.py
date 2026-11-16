@@ -21,17 +21,28 @@ like the mail tools. Naive datetimes are read as London time.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
+from refund_eval.runtime.events import (  # noqa: F401 - re-exported for callers
+    CHECKIN_HOURS,
+    EventKind,
+    next_checkin,
+    next_wake,
+    unannounced_mail_ids,
+)
 from refund_eval.world.state import Email, World
-from refund_eval.world.timeutil import LONDON, as_utc
-from refund_eval.world.timeutil import as_aware as aware
+from refund_eval.world.timeutil import LONDON, as_utc  # noqa: F401 - LONDON re-exported
+from refund_eval.world.timeutil import as_aware as aware  # noqa: F401 - re-exported
 from refund_eval.world.timeutil import to_london as london
 
-CHECKIN_HOURS = (9,)
-
 WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "continue"]
+
+WAKE_KIND: dict[EventKind, WakeupKind] = {
+    EventKind.MAIL: "new_mail",
+    EventKind.WAKEUP: "requested",
+    EventKind.CHECKIN: "scheduled_checkin",
+}
 
 _LABELS: dict[str, str] = {
     "scheduled_checkin": "Scheduled check-in",
@@ -53,32 +64,13 @@ def format_long(when: datetime) -> str:
     return f"{d:%A} {d.day} {d:%B %Y}, {d:%H:%M}"
 
 
-def next_checkin(now: datetime, hours: tuple[int, ...] = CHECKIN_HOURS) -> datetime:
-    """The first check-in (one of `hours`, on the hour, London time) strictly after `now`."""
-    local = london(now)
-    for day in (local.date(), local.date() + timedelta(days=1)):
-        for hour in sorted(hours):
-            candidate = datetime.combine(day, time(hour), tzinfo=LONDON)
-            if candidate > local:
-                return candidate
-    raise ValueError("hours must not be empty")
-
-
 def next_event(world: World, hours: tuple[int, ...] = CHECKIN_HOURS) -> tuple[datetime, WakeupKind]:
     """When the agent should next be woken, and why: the earliest pending reply or
-    requested wake-up, with a notice now for mail delivered during active work."""
-    now = aware(world.now)
-    if unannounced_mail_ids(world):
-        return now, "new_mail"
-    events: list[tuple[datetime, WakeupKind]] = []
-    if world.pending:
-        earliest = min((aware(p.due_at) for p in world.pending), key=as_utc)
-        events.append((max(earliest, now, key=as_utc), "new_mail"))
-    if world.requested_wakeup is not None:
-        events.append((max(aware(world.requested_wakeup), now, key=as_utc), "requested"))
-    if not events:
-        return next_checkin(now, hours), "scheduled_checkin"
-    return min(events, key=lambda event: as_utc(event[0]))
+    requested wake-up, with a notice now for mail delivered during active work.
+    The order is defined in `refund_eval.runtime.events`."""
+    event = next_wake(world, hours)
+    assert event is not None
+    return event.due_at, WAKE_KIND[event.kind]
 
 
 def sim_deadline(world: World, sim_weeks: float) -> datetime:
@@ -105,25 +97,6 @@ def new_mail_ids(world: World, since: datetime, until: datetime, arrived: Iterab
         if e.source in {"counterparty", "real"} and lo < as_utc(e.sent_at) <= hi
     )
     return ids
-
-
-def unannounced_mail_ids(world: World) -> set[str]:
-    """Arrivals during active work that have not yet had a wake notice.
-
-    Old unread inbox mail is not an event. For new checkpoints, recording IDs
-    also distinguishes a new arrival at the exact time of the previous notice.
-    """
-    previous = world.wakeups[-1] if world.wakeups else None
-    since = as_utc(previous.time if previous else world.start_time)
-    until = as_utc(world.now)
-    announced = set(previous.announced_mail_ids or []) if previous else set()
-    inclusive = previous is not None and previous.announced_mail_ids is not None
-    return {
-        email.id for email in world.overlay_inbox
-        if email.source in {"counterparty", "real"}
-        and (since <= as_utc(email.sent_at) if inclusive else since < as_utc(email.sent_at))
-        and as_utc(email.sent_at) <= until and email.id not in announced
-    }
 
 
 def wakeup_text(kind: WakeupKind, when: datetime, new_emails: int) -> str:

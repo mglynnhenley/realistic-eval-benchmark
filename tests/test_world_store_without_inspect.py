@@ -15,6 +15,7 @@ PURE_MODULES = [
     "refund_eval.world.mail",
     "refund_eval.world.mailquery",
     "refund_eval.world.snapshot",
+    "refund_eval.runtime.events",
     "refund_eval.agent.schedule",
     "refund_eval.agent.prompt",
     "refund_eval.sim.interface",
