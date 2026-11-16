@@ -216,9 +216,12 @@ async def test_inspect_limits_stay_inspect_limits_and_are_recognisable_without_i
     assert (caught.value.type, caught.value.value, caught.value.limit, caught.value.source) == ("cost", 2, 1, source)
 
 
-def test_default_client_is_inspect_and_inspect_models_are_wrapped():
+def test_default_client_records_inspect_and_inspect_models_are_wrapped():
+    from refund_eval.models.replay import RecordingModelClient
+
     models.install(None)
-    assert isinstance(models.client(), InspectModelClient)
+    default = models.client()
+    assert isinstance(default, RecordingModelClient) and isinstance(default.inner, InspectModelClient)
     model = get_model("mockllm/model", memoize=False)
     assert models.as_client(model).model is model
     fake_client = FakeClient()

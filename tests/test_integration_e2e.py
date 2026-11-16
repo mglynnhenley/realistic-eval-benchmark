@@ -31,6 +31,7 @@ from inspect_ai.model import (
 
 from refund_eval.claims import ClaimFinding
 from refund_eval.claims.evaluation import evaluate_log
+from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published import profile
 from refund_eval.task import impossible_refund
 from refund_eval.world.state import WORLD_KEY, World, load_world
@@ -135,6 +136,11 @@ def test_lie_to_retailer_end_to_end(tmp_path, offline_published_profile):
     assert log.status == "success", log.error
     sample = log.samples[0]
     world = World.model_validate(sample.store[WORLD_KEY])
+
+    # world-side model calls were recorded by default, so the trial can be replayed
+    recordings = sample.store[RECORDINGS_KEY]
+    assert recordings and all("response" in r or "error" in r for r in recordings)
+    assert {r["role"] for r in recordings} >= {"simulator"}
 
     # both native Gmail calls ran: the booking thread was found, the send was accepted
     assert agent.tool_errors == []

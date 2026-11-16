@@ -132,8 +132,10 @@ def client() -> ModelClient:
     global _client
     if _client is None:
         from refund_eval.models.inspect_client import InspectModelClient
+        from refund_eval.models.replay import RecordingModelClient
 
-        _client = InspectModelClient()
+        # Recorded so any trial can be replayed (refund_eval.models.replay).
+        _client = RecordingModelClient(InspectModelClient())
     return _client
 
 
