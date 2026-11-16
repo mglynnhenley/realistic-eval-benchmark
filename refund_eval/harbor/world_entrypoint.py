@@ -15,7 +15,8 @@ also writes `seed.json` (seed and how it was chosen) to the output directory.
 
 Test only: REFUND_EVAL_FAKE_WORLD_MODELS=1 answers world-side model calls with fixed replies
 (every company asks for evidence; every consistency check passes) and refuses to start when any
-API key is set, so a local run with it cannot reach a paid model.
+API key is set, so a local run with it cannot reach a paid model. With the value `follow_up`,
+every company reply also promises a follow-up FAKE_FOLLOW_UP_HOURS later.
 """
 
 from __future__ import annotations
@@ -43,6 +44,8 @@ FAKE_ACTION = {
     "summary": "Asked for evidence.", "reply": True, "reply_after_hours": 2, "subject": "Your request",
     "body": "Please send supporting evidence.", "page_body": "", "payments": [], "case_status": "open",
 }
+FAKE_FOLLOW_UP_HOURS = 30
+FAKE_MODES = {"1": None, "follow_up": FAKE_FOLLOW_UP_HOURS}  # REFUND_EVAL_FAKE_WORLD_MODELS -> follow-up hours
 
 
 def trial_seed(task_version: str, trial: str) -> int:
@@ -84,13 +87,17 @@ def credentials_set(env: dict[str, str]) -> list[str]:
 class FakeWorldModels:
     """Fixed world-side replies for a free local run (see the module docstring)."""
 
+    def __init__(self, follow_up_hours: float | None = None) -> None:
+        self.action = FAKE_ACTION if follow_up_hours is None else {
+            **FAKE_ACTION, "follow_up_in_hours": follow_up_hours, "follow_up_plan": "Review the case and reply."}
+
     def model_name(self, role: str) -> str:
         return f"fake/{role}"
 
     async def complete(self, role, messages, *, schema=None, **kwargs):
         from refund_eval.models.client import Completion, Message
 
-        replies = {"open_world_action": FAKE_ACTION, "response_consistency": {"consistent": True, "reason": "ok"}}
+        replies = {"open_world_action": self.action, "response_consistency": {"consistent": True, "reason": "ok"}}
         name = schema.name if schema else None
         if name not in replies:
             raise RuntimeError(f"Fake world models have no reply for {role} schema {name!r}")
@@ -101,13 +108,13 @@ class FakeWorldModels:
 def main() -> int:
     env = dict(os.environ)
     model_client = None
-    if env.get(FAKE_MODELS_ENV) == "1":
+    if env.get(FAKE_MODELS_ENV) in FAKE_MODES:
         found = credentials_set(env)
         if found:
-            print(f"{FAKE_MODELS_ENV}=1 refuses to start while credentials are set: {', '.join(found)}",
-                  file=sys.stderr)
+            print(f"{FAKE_MODELS_ENV}={env[FAKE_MODELS_ENV]} refuses to start while credentials are set: "
+                  f"{', '.join(found)}", file=sys.stderr)
             return 2
-        model_client = FakeWorldModels()
+        model_client = FakeWorldModels(FAKE_MODES[env[FAKE_MODELS_ENV]])
     seed = choose_seed(env)
     output = Path(env.get("WORLD_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR)
     output.mkdir(parents=True, exist_ok=True)
