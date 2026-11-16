@@ -363,7 +363,7 @@ as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late
 | `report [--scans DIR]` | Findings per factor, notes by status, and accepted code notes |
 | `track run --models M... --trials K --cost-limit USD` / `track add LOGS...` / `track report` | Record per-model behaviour against the realism version (the commit plus the memory hash) |
 
-The legacy JavaScript `realism-loop` workflow runs one iteration from mining to a report in `.context/realism/iterations/`. Mining is paid; pass existing scans to skip it. The `realism-track` workflow runs or adds trials to the behaviour ledger, then writes an analysis to `.context/realism/tracking/`. Only `notes merge` and `check --note` write the memory.
+Only `notes merge` and `check --note` write the memory.
 
 ### Operate in one cloud workspace
 
@@ -372,15 +372,6 @@ This bounded command extends the existing measurement machinery; no permanent
 orchestration service is needed. Saved configuration, checkpoints and file-based
 handoffs preserve progress across sessions. It does not schedule itself after a
 cloud workspace sleeps or a process stops.
-
-For an explicitly owned invocation, `refund_eval.realism.durable_worker` provides
-a single-use detached Python worker with private file-backed logs, process
-identities, pause controls and exit receipts. Pin its entry script and inputs in
-the launch configuration, and retain the payload's source, budget and
-pre-dispatch pause guards. It survives local launcher process-group termination;
-it cannot guarantee survival of workspace or VM teardown. A missing terminal
-receipt remains unknown and never permits replay. Status distinguishes a Python
-finalizer, an observed direct-child exit and unsettled remote work.
 
 Future continuous configurations can separately select
 `analysis_transport: {"profile": "openrouter-chat-sse-receipts-v1",
@@ -455,118 +446,13 @@ worker uses the trusted caller's absolute Harbor launcher and standalone worker
 paths, including for older candidate working directories. Its lean environment
 needs the standard library and Modal rather than the measurement stack.
 
-### Legacy experimental background worker (MCP)
-
-This optional implementation is retained for investigation and compatibility.
-It is not the maintained continuous workflow. Its custom API repair actor and
-review/comparison stages remain legacy behaviour; use the continuous CLI and
-primary handoff for new rounds. The commands below describe that legacy worker.
-
-The `refund-realism` MCP server exposes `realism_start`, `realism_status`,
-`realism_results` and `realism_cancel`. The server starts a detached Python worker;
-it continues after the MCP client or coding-agent session disconnects. It calls
-model APIs directly for repairs and independent review, and Harbor for Modal
-trials. It does not require a running Claude Code or Codex session. The Mac must
-remain awake and connected; this is a local worker, not a hosted scheduler.
-
-Start the server with the repository's installed Python environment:
-
-```sh
-.venv/bin/python -m refund_eval.realism.loop_mcp --repo "$PWD" --backend refund_eval.realism.autonomous:run_job
-```
-
-Register that command, with absolute paths and the repository as its working
-directory, in your MCP client. Runtime credentials are loaded from the repository
-`.env`; they are never copied to candidate worktrees. For Codex, registration is:
-
-```sh
-codex mcp add refund-realism -- uv --directory "$PWD" run --frozen python -m refund_eval.realism.loop_mcp --repo "$PWD" --backend refund_eval.realism.autonomous:run_job
-```
-
-Call the `realism_start` tool, for example:
-
-```json
-{
-  "request_key": "short-ab-three-001",
-  "budget_usd": 10.8,
-  "source": "HEAD",
-  "trials": 3,
-  "token_budget": 200000,
-  "max_rounds": 1,
-  "per_trial_cost": 0.5,
-  "scan_reserve": 2,
-  "repair_budget": 2,
-  "skip_diagnostic": true,
-  "findings": [".context/realism/saved-findings.json"]
-}
-```
-
-The example budget is an additional invocation limit, not a reset of any existing
-session cap. Choose a limit within the remaining authorised allowance. A token
-budget counts the target's tokens including cached input, not just new output.
-These short trials give exploratory evidence; they do not replace a full-length
-behaviour assessment.
-
-With `skip_diagnostic: true`, saved findings inform the repair and are excluded
-from comparison scores. The worker proposes one focused repair, requests an
-independent synthetic regression test, checks failure before and success after,
-runs the local suite and Ruff, then requests independent review of the exact
-diff. A supported candidate gets **three fresh control trials and three fresh
-candidate trials** on Modal. The fixed judge scans both arms under the same
-protocol; bootstrap comparison reports `better`, `worse` or `unclear`. With no
-supplied findings, the default first runs a diagnostic batch, adding three more
-trials. Higher `max_rounds` repeats this process only when the declared budget
-covers all requested rounds.
-
-Each paid stage receives a durable reservation before launch. Current public
-pricing, rendered transcript size, a bounded judge output and disabled scanner
-retries are checked before judging. If a candidate is unsupported, a check fails,
-a scan cannot be bounded, or budget is insufficient, the job stops and preserves
-its evidence. No automatic paid retry or unclear-result rerun occurs. Unknown
-charges keep their reservation; reservations are conservative estimates, not
-provider-enforced billing ceilings. Modal compute is billed separately.
-
-Published tariffs must contain explicit finite prices for prompt, completion and
-cache writes. Null, empty or boolean prices are unknown and stop scan planning;
-they are never interpreted as free. Explicit numeric zero remains valid.
-The bounded tells protocol uses exact base-model names, disables OpenRouter
-plugins and declares only the structured answer tool. Its published optional
-`web_search` tariff is preserved with an explicit inapplicability reason rather
-than treated as a per-request fee. Other unsupported charges and unknown tariff
-fields still stop planning; published cache rates are covered conservatively.
-The bounded judge model receives its generation settings directly; both Inspect
-and the underlying SDK have retries disabled. Scout's global scan config alone
-does not configure a named model role or disable the SDK's separate retry loop.
-Each arm checks the judge's public metadata before reserving or launching trials,
-then renders the actual saved transcripts and rechecks their complete cost bound
-before scanning. This free check cannot guarantee that future logs fit the scan
-reserve or context window. Results are saved as `judge-preflight.json`.
-
-`realism_start` returns a `job_id`. Pass it to `realism_status` for progress and
-spend, `realism_results` for saved results, or `realism_cancel` to stop that job.
-Reuse the same `request_key` and identical arguments after a lost response: it
-returns the original job without starting another. Changed settings require a
-new key. Only one job may be active in this repository. Cancellation preserves
-artifacts and attempts cleanup of that job's own Modal sandboxes.
-
-Artifacts live under `.context/realism/background/<job_id>/`: `settings.json`,
-`state.json`, `plan.json`, the stage ledger, model responses, command logs,
-regression evidence, frozen batch configurations, scan outputs and decisions.
-Verified correctness fixes can be retained despite inconclusive realism scores;
-style-only changes need positive realism evidence. Candidate commits remain in
-private Git worktrees with named refs for review. The worker never merges into
-or switches the user's current checkout. Interrupted paid stages are not resumed
-automatically; inspect original outputs before doing further paid work.
-
 The repository's `$realism-loop` skill and `/realism-loop` slash command enter
-the maintained continuous workflow. The legacy `.claude/workflows/realism-cycle.js`
-requires a compatible workflow runtime and remains available for interactive
-operation separately from the detached worker.
+the maintained continuous workflow.
 
 ### Measurement and diagnostic commands
 
-Continuous rounds use the first command. Reviewed A/B measurement, comparison and
-the JavaScript/MCP workflows remain legacy tools; none is required to continue.
+Continuous rounds use the first command. Reviewed A/B measurement and comparison
+remain legacy tools; neither is required to continue.
 
 | Command | Purpose |
 |---|---|
@@ -578,7 +464,7 @@ the JavaScript/MCP workflows remain legacy tools; none is required to continue.
 
 ### Eval-awareness probe
 
-An optional published probe reads an open-weights model's activations at each agent turn and scores how test-like the situation looks to it, including when the agent says nothing. Its `awareness.json` output can feed the loop: `open --awareness` adds turns where the score rose as findings, `score --awareness` adds a per-trial probe score, and `compare --metric awareness` decides on it. The legacy JavaScript `realism-loop` workflow takes `awareness` paths; `realism-cycle` takes `awarenessProbe`, `awarenessGpu`, `reasoning`, `historyTokens` and `metric`. Scoring runs on a paid Modal GPU that the cycle's budget does not count. See [the awareness guide](awareness.md) for setup and limitations.
+An optional published probe reads an open-weights model's activations at each agent turn and scores how test-like the situation looks to it, including when the agent says nothing. Its `awareness.json` output can feed the loop: `open --awareness` adds turns where the score rose as findings, `score --awareness` adds a per-trial probe score, and `compare --metric awareness` decides on it. `realism continuous` does not use the probe yet. Scoring runs on a paid Modal GPU that loop budgets do not count. See [the awareness guide](awareness.md) for setup and limitations.
 
 ## Preserve reproducibility
 

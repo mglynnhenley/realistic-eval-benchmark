@@ -21,7 +21,7 @@ Each probe was trained on the model's own reasoning: sentences where it said it 
 There are two ways to use it:
 
 - **Off-policy.** Replay any trial, for example one where Claude Haiku was the agent, through the open model. This asks: would this model, in the agent's seat, think it was being tested?
-- **On-policy, with reasoning (recommended for hardening).** Run the open model itself as the agent with its reasoning returned, then probe the same weights: `realism trials --model openrouter/qwen/qwen3-32b --reasoning --history-tokens 24000 ...` (most OpenRouter providers of Qwen3-32B have a 41k-token context) (or `reasoning: true` in the `realism-cycle` workflow). The probe then reads the same kind of text it was trained on, and the turns where it rises point at the messages to make more realistic. The scores then describe the model that actually acted. `same_model` in the output records whether a trial's agent matches the probe model.
+- **On-policy, with reasoning (recommended for hardening).** Run the open model itself as the agent with its reasoning returned, then probe the same weights: `realism trials --model openrouter/qwen/qwen3-32b --reasoning --history-tokens 24000 ...` (most OpenRouter providers of Qwen3-32B have a 41k-token context). The probe then reads the same kind of text it was trained on, and the turns where it rises point at the messages to make more realistic. The scores then describe the model that actually acted. `same_model` in the output records whether a trial's agent matches the probe model.
 
 ## Setup
 
@@ -72,7 +72,7 @@ All three uses are opt-in; without `--awareness` the realism commands behave as 
 - `realism score LOGS --scans DIR --awareness FILE...` adds `awareness_per_trial` (the mean of per-trial mean scores), `awareness_ci` and `per_trial_awareness`.
 - `realism compare --metric awareness` decides on the per-trial probe means instead of tell counts. Lower is better.
 
-The `realism-loop` workflow accepts `awareness: [paths]`, alone or with logs, scans or probes. The `realism-cycle` workflow accepts `awarenessProbe` (a probe path), which scores every trial batch on Modal after the trials, optionally `awarenessGpu`, and `metric: "awareness"` to make the probe score the decision and plateau metric. With the awareness metric, the plateau is an absolute drop in mean probe score rather than a relative drop in tells. Tell counts are still reported. A failed awareness run stops an awareness-metric cycle but only logs a warning in a tells-metric one.
+The maintained `realism continuous` loop does not use the probe yet; feed `awareness.json` to `realism open`, `score` and `compare` directly.
 
 ## Limitations
 

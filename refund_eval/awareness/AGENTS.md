@@ -55,7 +55,7 @@ the message that set it off. The probe is a lead for the loop, not a headline re
     Inspect's OpenRouter provider. Harbor is OpenRouter-only, so the flag is always valid there.
   - `transcript.chat` keeps reasoning in a separate `reasoning` field. Redacted reasoning is skipped.
 - **History length.** Two of Qwen3-32B's three OpenRouter providers have 20k or 41k context, but `realism trials`
-  defaulted to 60k history. `--history-tokens` was added (workflow arg `historyTokens`); use about 24,000.
+  defaulted to 60k history. `--history-tokens` was added; use about 24,000.
 - **Reading each turn.** The probes were trained on activations averaged over reasoning
   spans, so `Reader` replays each assistant turn as it was generated (`model.turn_ids`) and averages over the turn's
   own tokens:
@@ -88,13 +88,9 @@ the message that set it off. The probe is a lead for the loop, not a headline re
   - The quote is the message just before the turn (the likely trigger), and the factor comes from that message's
     tool: mail, phone or chat → `company`; web or browser → `internet`; anything else → `sandbox`.
   - `noticed` is `"possible"`, because a probe rise is not a visible reaction. `impact` is `high` at a score ≥ 1,
-    otherwise `medium`. Findings carry `source: "awareness"`, and `investigator.md` says how to treat them.
-- **Workflows.**
-  - `realism-loop` takes `awareness: [paths]`.
-  - `realism-cycle` takes `awarenessProbe`, `awarenessGpu`, `reasoning`, `historyTokens` and `metric`.
-  - A failed awareness run is fatal only when `metric` is `awareness`.
-  - With `metric: "awareness"` the plateau is an absolute drop in mean score, because scores can be negative.
-  - GPU spend is not counted in the cycle budget.
+    otherwise `medium`. Findings carry `source: "awareness"`.
+- **Loop wiring (2026-11-16).** The JavaScript workflows that passed probe paths through were removed. The
+  maintained `realism continuous` loop does not use the probe yet; use the CLI hooks above directly.
 
 ## Runs and status
 

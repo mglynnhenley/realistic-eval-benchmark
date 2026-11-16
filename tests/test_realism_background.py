@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from refund_eval.realism.background import JobManager, _alive, atomic_json
-from refund_eval.realism.loop_mcp import Server
 
 
 @pytest.fixture
@@ -117,40 +116,8 @@ def test_no_backend_rejects_start_and_findings_cannot_read_secrets(manager):
         manager.status("../escape")
 
 
-def test_mcp_lifecycle_and_argument_errors_are_bounded(manager):
-    server = Server(manager)
-    assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
-    reply = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                           "params": {"protocolVersion": "2025-06-18"}})
-    assert reply["result"]["serverInfo"]["name"] == "refund-realism-loop"
-    catalog = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    assert [t["name"] for t in catalog["result"]["tools"]] == [
-        "realism_start", "realism_status", "realism_results", "realism_cancel"]
-    reply = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-        "name": "realism_start", "arguments": {"budget_usd": 1, "request_key": "test", "unexpected": "private"}}})
-    assert reply["result"]["isError"]
-    assert "private" not in json.dumps(reply)
 
 
-@pytest.mark.asyncio
-async def test_real_mcp_disconnect_leaves_worker_running(manager):
-    import sys
-
-    from refund_eval.published.mcp import MCPStdioClient
-
-    command = [sys.executable, "-m", "refund_eval.realism.loop_mcp", "--repo", str(manager.repo),
-               "--backend", "mock_loop_backend:waiting"]
-    env = {"PATH": os.defpath, "PYTHONPATH": os.environ["PYTHONPATH"]}
-    async with MCPStdioClient(command, env=env) as client:
-        started = await client.call_tool("realism_start", {"request_key": "disconnect", "budget_usd": 1})
-        job_id = json.loads(started["content"][0]["text"])["job_id"]
-    wait_state(manager, job_id, {"running"})
-    async with MCPStdioClient(command, env=env) as client:
-        status = await client.call_tool("realism_status", {"job_id": job_id})
-        assert json.loads(status["content"][0]["text"])["status"] == "running"
-        cancelled = await client.call_tool("realism_cancel", {"job_id": job_id})
-        assert json.loads(cancelled["content"][0]["text"])["cancel_requested"]
-    wait_state(manager, job_id, {"cancelled"})
 
 
 def test_skip_diagnostic_requires_saved_findings_and_is_fingerprinted(manager):
