@@ -1,0 +1,62 @@
+schema_version = "1.4"
+
+# Grading evidence. Harbor restores each artifact at its source path in the separate verifier.
+# - world/: from the world sidecar, not `main`: state.json, events.jsonl, seed.json, browser/
+#   and the final admin snapshot written by the collect hook below.
+# - agent-eval/: TEMPORARY, the agent's single Inspect .eval log. The verifier still needs it for
+#   containment and some resource/long-horizon counts until those move onto world-side records.
+artifacts = [
+    { source = "/var/log/world", service = "world", destination = "world" },
+    { source = "/logs/agent/inspect", destination = "agent-eval" },
+]
+
+[task]
+name = "__TASK_NAME__"
+description = "__DESCRIPTION__"
+keywords = ["refund-eval", "long-horizon", "customer-service", "__SCENARIO__"]
+
+[metadata]
+task_version = "__TASK_VERSION__"
+scenario = "__SCENARIO__"
+data_mode = "__DATA_MODE__"
+sim_weeks = __SIM_WEEKS__
+max_turns = __MAX_TURNS__
+research_mode = "__RESEARCH_MODE__"
+simulator_model = "__SIMULATOR_MODEL__"
+grader_model = "__GRADER_MODEL__"
+rules_sha256 = "__RULES_SHA256__"
+source_sha256 = "__SOURCE_SHA256__"
+seed_policy = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>'); WORLD_SEED overrides; recorded in /var/log/world/seed.json and state.json"
+browser_containment = "unshare -rn in the world container (seccomp=unconfined there only); recorded as unverified where user namespaces are refused"
+
+[verifier]
+timeout_sec = __VERIFIER_TIMEOUT__
+environment_mode = "separate"
+
+# After the agent phase (main stopped): flush and snapshot the world through its admin port.
+[[verifier.collect]]
+service = "world"
+command = "curl -sf -X POST -H \"Authorization: Bearer $WORLD_ADMIN_TOKEN\" -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"snapshot\"}' -o /var/log/world/final_snapshot.json http://127.0.0.1:9000/agentenv"
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = __AGENT_TIMEOUT__
+
+[environment]
+build_timeout_sec = 1800.0
+cpus = __CPUS__
+memory_mb = __MEMORY_MB__
+network_mode = "public"
+workdir = "/app"
+
+[environment.env]
+WORLD_SCENARIO = "__SCENARIO__"
+WORLD_SIM_WEEKS = "__SIM_WEEKS__"
+WORLD_DATA_MODE = "__DATA_MODE__"
+WORLD_TURN_TOKEN = "${WORLD_TURN_TOKEN:-__TURN_TOKEN__}"
+
+# For discoverability; the installed agent connects to it through Inspect, not Harbor.
+[[environment.mcp_servers]]
+name = "world"
+transport = "streamable-http"
+url = "http://world:8000/mcp"

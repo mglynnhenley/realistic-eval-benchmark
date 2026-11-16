@@ -124,3 +124,50 @@ Run the isolated runner checks without launching model trials:
 scripts/harbor python -m pytest -q tests/test_harbor_runner.py tests/test_harbor_dashboard.py
 uv run pytest -q tests/test_harbor_worker.py
 ```
+
+## Native Harbor task (new)
+
+A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. This path is not the default yet.
+
+Generate a task. This launches nothing. The output directory holds the source and per-task tokens, so keep it private:
+
+```bash
+scripts/harbor python -m refund_eval.harbor.adapter \
+  --scenario train_refund_late --out .context/harbor_tasks
+```
+
+This writes `.context/harbor_tasks/train_refund_late/` with the following parts:
+
+- `task.toml`, using schema 1.4. Its `[metadata]` records the task version, seed policy, rules hash and source hash.
+- `instruction.md`.
+- `environment/`, with the `main` and `world/` Dockerfiles and `docker-compose.yaml`.
+- `tests/`, holding the verifier image and `test.sh`, which runs `refund_eval.grading.verifier`.
+
+The adapter also writes these files next to the task:
+
+- `dataset.toml`.
+- `metric.py`, which averages each reward key and skips keys a trial did not report.
+- `job.yaml`, a sample job.
+
+World settings are fixed in the task: scenario, simulated weeks, turn cap, data mode, research mode, and the simulator and grader models. The target's budgets are agent options in the job: `cost_limit`, `token_budget`, `history_tokens`, `budget_notice`, `time_limit` and `reasoning`. The agent is `refund_eval.harbor.installed_agent:RefundInstalledAgent`.
+
+Running `job.yaml` is paid: it calls OpenRouter for the target, the simulator and the grader. It needs `OPENROUTER_API_KEY` exported on the host, and both containers receive it. Use `-y` to accept Harbor's prompt about task environment variables.
+
+Each trial collects the following:
+
+- `agent/`: the Inspect `.eval` log, `trajectory.json` (ATIF-v1.8, with simulated time in each step's `extra`) and `inspect.log`.
+- `artifacts/world/`: `state.json`, `events.jsonl`, `seed.json`, `browser/` and `final_snapshot.json`.
+- `artifacts/agent-eval/`: a temporary copy of the `.eval` for the verifier.
+- `verifier/`: `reward.json` and `details.json`.
+
+The admin port is reachable only inside the world container. The browser's network namespace needs user namespaces, which Docker's default seccomp profile blocks, so the `world` service runs with `seccomp=unconfined`. `main` keeps Docker's defaults.
+
+Each trial's seed is derived from the task version and the trial name. Set `WORLD_SEED` to replay a recorded seed.
+
+To test without paid calls, run a fixture task with a `mockllm/model` target and the world's fake models. `REFUND_EVAL_FAKE_WORLD_MODELS=1` enables the fake models; they refuse to start if any API key is set:
+
+```bash
+env -u OPENROUTER_API_KEY REFUND_EVAL_FAKE_WORLD_MODELS=1 scripts/harbor harbor run -y -c <job with model_name: mockllm/model>
+scripts/harbor python -m pytest -q tests/test_harbor_native_task.py
+uv run pytest -q tests/test_harbor_native_world.py
+```

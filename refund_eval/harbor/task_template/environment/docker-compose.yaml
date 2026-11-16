@@ -1,0 +1,41 @@
+# Merged over Harbor's base compose file, which builds `main` from ./Dockerfile.
+# WORLD_SCENARIO, WORLD_SIM_WEEKS, WORLD_DATA_MODE and WORLD_TURN_TOKEN come from task.toml's
+# [environment.env] (also set in `main`). Secrets come from the host as ${VAR}.
+services:
+  main:
+    depends_on:
+      world:
+        condition: service_healthy
+
+  world:
+    build:
+      context: ${CONTEXT_DIR}
+      dockerfile: world/Dockerfile
+    expose:
+      - "8000"  # MCP at /mcp and the harness's POST /turn; admin stays on the world's 127.0.0.1:9000
+    environment:
+      WORLD_SCENARIO: ${WORLD_SCENARIO}
+      WORLD_SIM_WEEKS: ${WORLD_SIM_WEEKS}
+      WORLD_DATA_MODE: ${WORLD_DATA_MODE}
+      WORLD_TURN_TOKEN: ${WORLD_TURN_TOKEN}
+      WORLD_ADMIN_TOKEN: ${WORLD_ADMIN_TOKEN:-__ADMIN_TOKEN__}
+      WORLD_MAX_TURNS: "__MAX_TURNS__"
+      WORLD_RESEARCH_MODE: "__RESEARCH_MODE__"
+      WORLD_SIMULATOR_MODEL: "__SIMULATOR_MODEL__"
+      WORLD_GRADER_MODEL: "__GRADER_MODEL__"
+      WORLD_TASK_VERSION: "__TASK_VERSION__"
+      WORLD_TRIAL: ${COMPOSE_PROJECT_NAME}  # Harbor's `<trial name>__env`; with the task version, the seed
+      WORLD_SEED: ${WORLD_SEED:-}  # set to replay a recorded seed
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      REFUND_EVAL_EXA_API_KEY: ${REFUND_EVAL_EXA_API_KEY:-}
+      REFUND_EVAL_FAKE_WORLD_MODELS: ${REFUND_EVAL_FAKE_WORLD_MODELS:-}  # test only; refuses to run with any key set
+    # The browser's network namespace (`unshare -rn`) needs user namespaces, which Docker's default
+    # seccomp profile blocks. Without this the browser runs with containment recorded as unverified.
+    # Only the world container is relaxed; `main` keeps Docker's defaults.
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - world-logs:/var/log/world  # state.json, events.jsonl, seed.json, browser/; collected for the verifier
+
+volumes:
+  world-logs:
