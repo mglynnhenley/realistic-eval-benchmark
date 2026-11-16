@@ -21,3 +21,10 @@ def _no_reply_jitter(monkeypatch, request):
     if request.node.get_closest_marker("harbor"):
         return
     monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: 1.0)
+
+
+@pytest.fixture(autouse=True)
+def _no_transcript_upload(monkeypatch):
+    """Trials in tests never upload to a Supabase project configured in the shell or .env."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)

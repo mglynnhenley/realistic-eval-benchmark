@@ -199,6 +199,32 @@ Inspect logs and dashboard snapshots use the same runtime checkpoint and resume 
 
 Inspect writes `.eval` files under `logs/` by default. Open them with `uv run inspect view`, or use the dashboard's transcript and progress views. Logs include world state, tool evidence, wake-ups, stop reasons, costs and scores. Browser `.network.jsonl` audits persist under the selected artifact directory. Dashboard `--data-dir`, Harbor `--output`, browser `artifact_dir` and Scout wrapper `--scans` destinations are checked before use: inside a Git checkout they must be ignored and contain no tracked output files. Paths are resolved through symlinks; destinations outside Git checkouts are also supported. Use a new ignored directory rather than forcing private output into version control.
 
+## Storing transcripts in Supabase
+
+Every finished trial can be stored in a Supabase project: CLI, dashboard and Harbor runs upload when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set (in `.env` or the shell). Unset, nothing is uploaded. The upload runs after Inspect has written the `.eval` log; a failed upload is logged as a warning and never changes the trial or its local log.
+
+To create a project, apply the schema and write both variables to `.env`, use a [personal access token](https://supabase.com/dashboard/account/tokens):
+
+```bash
+SUPABASE_ACCESS_TOKEN=... uv run python -m refund_eval.storage setup --region eu-west-2
+```
+
+Add `--organization NAME` if the token can see several organizations, or `--project-ref REF` to use an existing project. A new project's database password is saved as `SUPABASE_DB_PASSWORD`; the access token is not saved. Rerunning applies only new files in [`supabase/migrations/`](../supabase/migrations/), recorded where the Supabase CLI records them, so `supabase db push` also works. The schema creates:
+
+| Object | Contents |
+| --- | --- |
+| `runs` | One row per trial (Inspect sample): model and roles, scenario, task arguments, status, stop reason, turns, simulated start and end, cost, usage, scores, world state, counterparts, remaining sample store and long-horizon measurements. Unique by `eval_id`, `sample_id`, `epoch`. |
+| `run_messages` | The full transcript, one row per message: `message_index` (the 0-based index Scout cites as `[M12]`), role, text, tool calls, tool result name and the complete message as JSON. |
+| `eval-logs` bucket | The raw `.eval` log at `runs.eval_log_path`, for `inspect view` or resume. If the bucket rejects it (for example, above the plan's file size limit), the rows are still stored without a path. |
+
+Uploading a log again replaces its rows and messages. To upload earlier runs, or retry a failed upload:
+
+```bash
+uv run python -m refund_eval.storage upload logs/ .context/dashboard/runs/
+```
+
+Directories are searched for `.eval` files. Transcripts contain whatever inbox the run used, including an exported Gmail snapshot. Row level security is on with no policies and the bucket is private, so only the service-role key can read them; keep that key out of client code. Harbor forwards both variables to trials by reference when they are set locally; with `--secret`, add them to the Modal secret instead.
+
 ## Boundaries and evidence
 
 Browser evidence distinguishes verified Docker/network-namespace isolation from a subprocess sharing its worker's network. A startup canary tests interception independently. Shared-network containment is recorded as unverified; review the recorded manifest when interpreting results. Browser and worker share the trial filesystem in subprocess mode.

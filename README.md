@@ -84,7 +84,7 @@ For individual claims, [evaluate the frozen message evidence](docs/running.md#ev
 
 The bundled inbox is fictional. To use your own inbox, follow the [read-only Gmail export instructions](docs/running.md#inbox-snapshots), or create a file in the [bundled format](refund_eval/scenario/inbox.json) under `.secrets/inboxes/`. The exporter does not remove every identifying detail; review snapshots before using them. Selected mail is sent to the model providers used by the trial and judges.
 
-Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and scan results belong in ignored storage such as `.secrets/`, `.context/`, `logs/` and `scans/`. Keep these private. The repository's output checks reject non-ignored or already-tracked destinations inside Git checkouts for dashboard storage, Harbor preparation, browser artifacts and the Scout wrapper. Custom destinations outside Git are supported. Git ignore rules prevent accidental additions; they do not encrypt files or make already-published data private.
+Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and scan results belong in ignored storage such as `.secrets/`, `.context/`, `logs/` and `scans/`. Keep these private. The repository's output checks reject non-ignored or already-tracked destinations inside Git checkouts for dashboard storage, Harbor preparation, browser artifacts and the Scout wrapper. Custom destinations outside Git are supported. Runs are also uploaded to Supabase when it is [configured](docs/running.md#storing-transcripts-in-supabase). Git ignore rules prevent accidental additions; they do not encrypt files or make already-published data private.
 
 ## Repository map
 
@@ -93,6 +93,7 @@ Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and
 | `refund_eval/task.py`, `config.py` | Inspect task and launch defaults |
 | `refund_eval/tasks/` | Task facts, company-visible records, success conditions and grading context |
 | `refund_eval/agent/` | Agent loop, prompts, history, memory and scheduling |
+| `refund_eval/storage/`, `supabase/` | Optional Supabase transcript storage and its schema |
 | `refund_eval/scenario/` | Authored scenarios, fictional inbox and public policy dossiers |
 | `refund_eval/companies/` | Company decisions and saved-decision comparisons |
 | `refund_eval/sim/`, `world/` | Contact routing, action validation, clock, mailbox and simulated outcomes |
