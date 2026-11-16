@@ -11,7 +11,10 @@ recordings. A native Harbor trial (`jobs/<job>/<trial>/`, `harbor/adapter.py`) s
 
 `read_trial_log` returns the agent's log with each sample's store merged with the world's and
 its scores taken from the verifier, so `final_snapshot`, `checkpoint_from_sample` and storage
-rows read it as they read a native log. Tools that open `.eval` files themselves (Scout, the
+rows read it as they read a native log. The agent's log counts only the target model, so the
+world's simulator and grader usage (its recorded completions, `world_usage`) is added to each
+sample's `model_usage` and `role_usage`, as a native log has them, and the split is kept in
+`metadata["cost_usd"]` as `{"agent": ..., "world": ...}`. Tools that open `.eval` files themselves (Scout, the
 realism loop, claims, company reruns, measurements) get a synthesized copy instead:
 `eval_path` / `eval_paths` write the merged log to `<trial>/merged/` and return its path.
 
@@ -27,8 +30,10 @@ from pathlib import Path
 from typing import Any
 
 from inspect_ai.log import EvalLog, read_eval_log, write_eval_log
+from inspect_ai.model import ModelUsage
 from inspect_ai.scorer import CORRECT, INCORRECT, Score
 
+from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.state import WORLD_KEY
 
@@ -80,6 +85,36 @@ def world_store(trial: str | Path) -> dict[str, Any]:
     return store
 
 
+def world_usage(store: dict[str, Any]) -> tuple[dict[str, ModelUsage], dict[str, ModelUsage]]:
+    """World-side model usage by model and by role, summed from the store's recorded completions
+    (`models.replay`: each finished call's usage and cost as the world's model client counted them)."""
+    by_model: dict[str, ModelUsage] = {}
+    by_role: dict[str, ModelUsage] = {}
+    for call in store.get(RECORDINGS_KEY) or []:
+        response = call.get("response") if isinstance(call, dict) else None
+        usage = response.get("usage") if isinstance(response, dict) else None
+        if not isinstance(usage, dict):
+            continue  # failed or unfinished: no usage recorded
+        counted = ModelUsage(**{k: v for k, v in usage.items() if k in ModelUsage.model_fields and v is not None},
+                             total_cost=usage.get("cost"))
+        model, role = call.get("model_name") or response.get("model") or "unknown", call.get("role") or "unknown"
+        by_model[model] = by_model.get(model, ModelUsage()) + counted
+        by_role[role] = by_role.get(role, ModelUsage()) + counted
+    return by_model, by_role
+
+
+def _cost(usage: dict[str, ModelUsage]) -> float | None:
+    costs = [u.total_cost for u in usage.values() if u.total_cost is not None]
+    return sum(costs) if costs else None
+
+
+def _plus(usage: dict[str, ModelUsage] | None, extra: dict[str, ModelUsage]) -> dict[str, ModelUsage]:
+    merged = dict(usage or {})
+    for name, value in extra.items():
+        merged[name] = merged[name] + value if name in merged else value
+    return merged
+
+
 def reward_scores(trial: str | Path) -> dict[str, Score]:
     """The verifier's reward.json as Inspect scores, shaped as the Inspect scorers' (`a.b` keys grouped
     under `a`), with explanations and metadata from details.json."""
@@ -126,9 +161,15 @@ def read_trial_log(path: str | Path, **kwargs: Any) -> EvalLog:
     if kwargs.get("header_only"):
         return log
     store, scores = world_store(path), reward_scores(path)
+    models, roles = world_usage(store)
     for sample in log.samples or []:
         sample.store = {**(sample.store or {}), **store}
         sample.scores = {**(sample.scores or {}), **scores} or None
+        if models:
+            sample.metadata = {**(sample.metadata or {}),
+                               "cost_usd": {"agent": _cost(sample.model_usage), "world": _cost(roles)}}
+            sample.model_usage = _plus(sample.model_usage, models)
+            sample.role_usage = _plus(sample.role_usage, roles)
     return log
 
 

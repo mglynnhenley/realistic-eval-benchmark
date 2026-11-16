@@ -242,3 +242,83 @@ def test_storage_upload_reads_a_harbor_trial(runs, monkeypatch):
     assert sent["object"] == agent.read_bytes()
     assert sent["run"]["world"]["stop_reason"] == "max_turns"
     assert len(sent["messages"]) == len(runs["native"].messages)
+
+
+TARGET, SIMULATOR, GRADER = "openrouter/target/model", "openrouter/sim/model", "openrouter/grader/model"
+
+
+def _recorded(n, role, model, cost, tokens=(100, 20)):
+    usage = {"input_tokens": tokens[0], "output_tokens": tokens[1], "total_tokens": sum(tokens),
+             "input_tokens_cache_read": None, "input_tokens_cache_write": None, "reasoning_tokens": None,
+             "cost": cost}
+    return {"n": n, "role": role, "model_name": model, "request": "x",
+            "response": {"text": "", "message": {"role": "assistant", "content": "", "tool_calls": []},
+                         "stop_reason": "stop", "usage": usage, "model": model}}
+
+
+# Two simulator calls, a grader call and a failed call (no usage), as the world's client records them.
+WORLD_CALLS = [_recorded(0, "simulator", SIMULATOR, 0.5), _recorded(1, "simulator", SIMULATOR, 0.25),
+               _recorded(2, "grader", GRADER, 0.125),
+               {"n": 3, "role": "simulator", "model_name": SIMULATOR, "request": "x",
+                "error": {"type": "TimeoutError", "message": "timed out", "limit": False}}]
+
+
+def _synthetic_log(path, *, model_usage, role_usage=None, store=None):
+    from inspect_ai.log import (
+        EvalConfig,
+        EvalDataset,
+        EvalLog,
+        EvalSample,
+        EvalSpec,
+        write_eval_log,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_eval_log(EvalLog(
+        status="success",
+        eval=EvalSpec(created="2026-11-16T00:00:00Z", task="synthetic", dataset=EvalDataset(), model=TARGET,
+                      config=EvalConfig()),
+        samples=[EvalSample(id="synthetic", epoch=1, input="synthetic input", target="", store=store or {},
+                            metadata={"scenario": "synthetic"},
+                            model_usage=model_usage, role_usage=role_usage or {})]), str(path))
+    return path
+
+
+def test_harbor_trial_cost_adds_the_worlds_simulator_and_grader_spend(tmp_path):
+    from inspect_ai.model import ModelUsage
+
+    trial = tmp_path / "jobs/job/trial__1"
+    _synthetic_log(trial / "agent/inspect/agent.eval",
+                   model_usage={TARGET: ModelUsage(input_tokens=1000, output_tokens=50, total_tokens=1050,
+                                                   total_cost=2.0)})
+    (trial / "artifacts/world").mkdir(parents=True)
+    (trial / "artifacts/world/state.json").write_text(json.dumps(
+        {"settings": {}, "store": {WORLD_KEY: {"turn": 1}, "model_completions": WORLD_CALLS}}))
+
+    log = read_trial_log(trial)
+    [sample] = log.samples
+    assert sample.metadata["cost_usd"] == {"agent": 2.0, "world": 0.875}
+    assert sample.role_usage["simulator"].total_cost == 0.75 and sample.role_usage["grader"].total_cost == 0.125
+    assert sample.role_usage["simulator"].input_tokens == 200 and sample.role_usage["simulator"].total_tokens == 240
+    assert {name: usage.total_cost for name, usage in sample.model_usage.items()} == {
+        TARGET: 2.0, SIMULATOR: 0.75, GRADER: 0.125}
+    assert run_row(log, sample)["total_cost"] == 2.875
+    # The synthesized .eval for .eval-only tools carries the same totals.
+    [merged] = read_eval_log(str(eval_path(trial))).samples
+    assert merged.metadata["cost_usd"] == {"agent": 2.0, "world": 0.875}
+    assert sum(usage.total_cost for usage in merged.model_usage.values()) == 2.875
+
+
+def test_native_log_cost_is_unchanged_by_its_recorded_completions(tmp_path):
+    from inspect_ai.model import ModelUsage
+
+    # A native .eval also records the world's completions, but its usage already counts them.
+    usage = {TARGET: ModelUsage(total_cost=2.0), SIMULATOR: ModelUsage(total_cost=0.75),
+             GRADER: ModelUsage(total_cost=0.125)}
+    roles = {"simulator": ModelUsage(total_cost=0.75), "grader": ModelUsage(total_cost=0.125)}
+    path = _synthetic_log(tmp_path / "native.eval", model_usage=usage, role_usage=roles,
+                          store={WORLD_KEY: {"turn": 1}, "model_completions": WORLD_CALLS})
+    log = read_trial_log(path)
+    [sample] = log.samples
+    assert sample.model_usage == usage and sample.role_usage == roles and "cost_usd" not in sample.metadata
+    assert run_row(log, sample)["total_cost"] == 2.875
