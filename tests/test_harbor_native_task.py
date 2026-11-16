@@ -218,6 +218,18 @@ def test_world_url_comes_from_the_tasks_mcp_server(tmp_path):
     assert RefundInstalledAgent(logs_dir=tmp_path, model_name="mockllm/model").world_url() == "http://world:8000"
 
 
+def test_scripted_parity_agent_runs_inspect_through_its_script(tmp_path):
+    from refund_eval.parity.harbor_agent import ScriptedRefundAgent
+
+    command = ScriptedRefundAgent(logs_dir=tmp_path / "t__abc" / "agent", model_name="mockllm/model",
+                                  mcp_servers=WORLD, script="turn_cap", cost_limit=1).inspect_command()
+    assert "/app/.venv/bin/python -m refund_eval.parity.inspect_cli turn_cap eval refund_eval/task.py " in command
+    assert "/app/.venv/bin/inspect eval" not in command and "-T cost_limit=1.0" in command
+    with pytest.raises(ValueError, match="mockllm"):
+        ScriptedRefundAgent(logs_dir=tmp_path, model_name="openrouter/a/b", mcp_servers=WORLD,
+                            script="turn_cap").inspect_command()
+
+
 # --------------------------------------------------------------------------- ATIF
 
 
