@@ -13,6 +13,7 @@ import shutil
 from pathlib import Path
 
 from refund_eval.config import HYBRID_EXA_KEY_ENV
+from refund_eval.harbor.adapter import AGENT_IMPORT_PATH
 from refund_eval.realism.coverage import source_identity
 from refund_eval.realism.cycle import score
 from refund_eval.realism.scan_budget import validate_saved_tells_scan
@@ -93,26 +94,32 @@ def _provenance(root, commit, protocol, hashes):
             or job.get("environment", {}).get("type") != "modal" or len(agents) != 1):
         raise ValueError("Evidence Harbor job differs from the trial protocol")
     kwargs = agents[0].get("kwargs", {})
-    search_auth = "api_key" if agents[0].get("env", {}).get(HYBRID_EXA_KEY_ENV) else "keyless"
-    if protocol.get("search_auth") != search_auth:
-        raise ValueError("Evidence search authentication differs from the trial protocol")
-    fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
-              "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
-              "research_mode": "research_mode", "data_mode": "data_mode",
-              "simulator_model": "simulator_model", "consistency_model": "grader_model"}
+    if agents[0].get("import_path") == AGENT_IMPORT_PATH:
+        # Native Harbor job: only the target's budgets are agent kwargs. The world's settings and
+        # search authentication are in the task; `_native_protocol` checks them in the merged logs.
+        fields = {"token_budget": "token_budget", "time_limit": "time_limit", "cost_limit": "cost_limit"}
+    else:
+        search_auth = "api_key" if agents[0].get("env", {}).get(HYBRID_EXA_KEY_ENV) else "keyless"
+        if protocol.get("search_auth") != search_auth:
+            raise ValueError("Evidence search authentication differs from the trial protocol")
+        fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
+                  "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
+                  "research_mode": "research_mode", "data_mode": "data_mode",
+                  "simulator_model": "simulator_model", "consistency_model": "grader_model"}
     if agents[0].get("model_name") != protocol.get("model") or any(
             key not in protocol or kwargs.get(field) != protocol[key] for key, field in fields.items()):
         raise ValueError("Evidence target/simulator settings differ from the trial protocol")
 
 
 def _native_protocol(logs, protocol, *, commit, prepared):
-    from inspect_ai.log import read_eval_log
+    """`logs` are .eval files or native Harbor trials, read as their merged view (the world's settings)."""
+    from refund_eval.runtime.trial_artifacts import read_trial_log
 
     fields = {"scenario": "scenario", "token_budget": "token_budget", "max_turns": "max_turns",
               "time_limit": "time_limit", "sim_weeks": "sim_weeks", "cost_limit": "cost_limit",
               "research_mode": "research_mode", "data_mode": "published_data"}
     for log in logs:
-        evaluation = read_eval_log(log)
+        evaluation = read_trial_log(log)
         args = evaluation.eval.task_args or {}
         roles = evaluation.eval.model_roles or {}
         if evaluation.eval.model != protocol.get("model") or any(
@@ -172,7 +179,9 @@ def write_evidence(batch: dict, measurement_hashes: dict) -> Path:
     _protocol(protocol)
     _hashes(measurement_hashes)
     directory = Path(batch.get("directory", batch.get("path"))).resolve()
-    logs = [str(Path(log).resolve()) for log in batch["logs"]]
+    from refund_eval.runtime.trial_artifacts import eval_path
+
+    logs = [str(eval_path(Path(log).resolve())) for log in batch["logs"]]  # native Harbor trials: merged logs
     scans = Path(batch["scans"]).resolve()
     if not scans.is_dir() or not _files(scans):
         raise ValueError("Evidence has no saved scans")

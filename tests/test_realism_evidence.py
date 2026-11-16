@@ -325,3 +325,74 @@ def test_native_search_auth_cannot_disagree_with_prepared_job(batch):
     native_log(Path(batch["logs"][0]), "evaluation-0", {**batch["protocol"], "search_auth": "api_key"})
     with pytest.raises(ValueError, match="Native search authentication"):
         evidence.write_evidence(batch, HASHES)
+
+
+WORLD_MODELS = {"simulator_model": "openrouter/example/simulator", "consistency_model": "openrouter/example/grader"}
+
+
+def harbor_trial(trial, eval_id, protocol):
+    """A native Harbor trial: the agent's world-service-mode .eval with the default world-side settings,
+    beside the world's state.json with the settings it used (`protocol`'s)."""
+    from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL, RunConfig
+
+    defaults = {**protocol, "max_turns": RunConfig.model_fields["max_turns"].default,
+                "simulator_model": DEFAULT_ROLE_MODEL, "consistency_model": DEFAULT_GRADER_MODEL}
+    assert defaults != protocol
+    native_log(trial / "agent/inspect/agent.eval", eval_id, defaults)
+    settings = {"scenario": protocol["scenario"], "seed": None, "sim_weeks": protocol["sim_weeks"],
+                "max_turns": protocol["max_turns"], "research_mode": protocol["research_mode"],
+                "data_mode": protocol["data_mode"], "simulator_model": protocol["simulator_model"],
+                "grader_model": protocol["consistency_model"], "company_simulator": None,
+                "browser_runtime": "subprocess"}
+    (trial / "artifacts/world").mkdir(parents=True)
+    (trial / "artifacts/world/state.json").write_text(json.dumps({"settings": settings, "store": {
+        "world": {"seed": 5}, "published_tool_profile": {"search_auth": protocol["search_auth"]}}}))
+    return trial
+
+
+@pytest.fixture
+def harbor_batch(batch):
+    """`batch` as native Harbor trials whose world used non-default models and turn cap."""
+    from refund_eval.harbor.adapter import AGENT_IMPORT_PATH
+    from refund_eval.runtime.trial_artifacts import eval_path
+
+    root = Path(batch["path"])
+    protocol = {**batch["protocol"], **WORLD_MODELS}
+    trials = [harbor_trial(root / "trials/jobs/job" / f"trial__{index}", f"evaluation-{index}", protocol)
+              for index in range(2)]
+    rows = next((root / "scans").rglob("tells.parquet"))
+    table = pd.read_parquet(rows)
+    table["transcript_source_uri"] = ["file://" + str(eval_path(trial)) for trial in trials]
+    table.to_parquet(rows)
+    job = {"n_attempts": 2, "retry": {"max_retries": 0}, "environment": {"type": "modal"},
+           "agents": [{"import_path": AGENT_IMPORT_PATH, "model_name": protocol["model"],
+                       "env": {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"},
+                       "kwargs": {"history_tokens": 60000, **{key: protocol[key] for key in (
+                           "token_budget", "time_limit", "cost_limit")}}}]}
+    job_path = root / "trials/job.json"
+    job_path.write_text(json.dumps(job))
+    prepared = json.loads((root / "prepared-source.json").read_text())
+    prepared["job_sha256"] = hashlib.sha256(job_path.read_bytes()).hexdigest()
+    (root / "prepared-source.json").write_text(json.dumps(prepared))
+    (root / "manifest.json").write_text(json.dumps({"source_commit": COMMIT, "protocol": protocol, "hashes": HASHES}))
+    return {**batch, "protocol": protocol, "logs": [str(trial) for trial in trials]}
+
+
+def test_native_harbor_trials_are_checked_against_the_worlds_settings(harbor_batch, batch, tmp_path):
+    protocol, trials = harbor_batch["protocol"], harbor_batch["logs"]
+    prepared = {"source_sha256": "d" * 64}
+    evidence._native_protocol(trials, protocol, commit=COMMIT, prepared=prepared)
+    with pytest.raises(ValueError, match="Native simulator settings"):  # the default models
+        evidence._native_protocol(trials, {**protocol, **{key: batch["protocol"][key] for key in WORLD_MODELS}},
+                                  commit=COMMIT, prepared=prepared)
+    with pytest.raises(ValueError, match="Native trial settings"):  # the agent's own log has default settings
+        evidence._native_protocol([str(next(Path(trials[0]).glob("agent/inspect/*.eval")))], protocol,
+                                  commit=COMMIT, prepared=prepared)
+
+    manifest = evidence.write_evidence(harbor_batch, HASHES)
+    copied = tmp_path / "portable"
+    shutil.copytree(manifest.parent, copied)
+    loaded = evidence.load_evidence(copied / "manifest.json", commit=COMMIT, protocol=protocol, hashes=HASHES)
+    assert loaded["score"]["per_trial"] == [0, 0]
+    with pytest.raises(ValueError, match="protocol differs"):
+        evidence.load_evidence(copied / "manifest.json", commit=COMMIT, protocol=batch["protocol"], hashes=HASHES)

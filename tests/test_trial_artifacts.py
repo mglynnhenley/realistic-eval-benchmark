@@ -99,6 +99,11 @@ def test_harbor_trial_loads_into_the_same_view_as_the_native_run(runs):
     assert scores["containment"].explanation == "Every write was intercepted."
     assert scores["resource_use"].value == {"total_actions": 3.0, "messages_sent": 1.0}
     assert scores["task_success"].value == 0.0 and scores["task_success"].metadata["stop_reason"] == "max_turns"
+    # The world's settings as it used them: its seed and the (fake) models that served its roles.
+    spec = read_trial_log(trial).eval
+    assert spec.model_roles["simulator"].model == "fake/simulator" and spec.model_roles["grader"].model == "fake/grader"
+    assert spec.task_args["seed"] == 7 and spec.task_args["max_turns"] == MAX_TURNS
+    assert spec.task_args["research_mode"] == "saved" and spec.task_args["published_data"] == "fixture"
     snapshot = final_snapshot(read_trial_log(trial))
     assert snapshot["phase"] == "completed" and snapshot["world"]["turn"] == MAX_TURNS
     assert snapshot["inspect_log"] == str((trial / "agent/inspect").resolve() / next(
@@ -178,6 +183,7 @@ def test_native_logs_and_the_old_harbor_layout_still_load(tmp_path, monkeypatch)
     sample = run_inspect(tmp_path / "native")
     [log_path] = (tmp_path / "native" / "logs").glob("*.eval")
     assert read_trial_log(log_path).samples[0].store == read_eval_log(str(log_path)).samples[0].store
+    assert read_trial_log(log_path).eval == read_eval_log(str(log_path)).eval
     assert eval_path(log_path) == log_path and eval_paths([str(log_path)]) == [str(log_path)]
 
     # The old wrapper's trial: worker log and collected refund artifacts, with the whole store in its .eval.
@@ -193,6 +199,7 @@ def test_native_logs_and_the_old_harbor_layout_still_load(tmp_path, monkeypatch)
     assert eval_paths([jobs]) == [str(jobs)]  # tools search it as before
     loaded = read_trial_log(old).samples[0]
     assert loaded.store[WORLD_KEY] == sample.store[WORLD_KEY]
+    assert read_trial_log(old).eval == read_eval_log(str(log_path)).eval
     assert not (old / "merged").exists()
 
     # The dashboard ignores it (old Harbor trials reach it through its batch runs).
@@ -263,7 +270,7 @@ WORLD_CALLS = [_recorded(0, "simulator", SIMULATOR, 0.5), _recorded(1, "simulato
                 "error": {"type": "TimeoutError", "message": "timed out", "limit": False}}]
 
 
-def _synthetic_log(path, *, model_usage, role_usage=None, store=None):
+def _synthetic_log(path, *, model_usage, role_usage=None, store=None, task_args=None, model_roles=None):
     from inspect_ai.log import (
         EvalConfig,
         EvalDataset,
@@ -277,7 +284,7 @@ def _synthetic_log(path, *, model_usage, role_usage=None, store=None):
     write_eval_log(EvalLog(
         status="success",
         eval=EvalSpec(created="2026-11-16T00:00:00Z", task="synthetic", dataset=EvalDataset(), model=TARGET,
-                      config=EvalConfig()),
+                      config=EvalConfig(), task_args=task_args or {}, model_roles=model_roles),
         samples=[EvalSample(id="synthetic", epoch=1, input="synthetic input", target="", store=store or {},
                             metadata={"scenario": "synthetic"},
                             model_usage=model_usage, role_usage=role_usage or {})]), str(path))
@@ -322,3 +329,41 @@ def test_native_log_cost_is_unchanged_by_its_recorded_completions(tmp_path):
     [sample] = log.samples
     assert sample.model_usage == usage and sample.role_usage == roles and "cost_usd" not in sample.metadata
     assert run_row(log, sample)["total_cost"] == 2.875
+
+
+def test_harbor_trial_reports_the_worlds_settings_not_the_agents_defaults(tmp_path):
+    from inspect_ai.model import ModelUsage
+
+    from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
+
+    # The agent ran in world-service mode: its spec has the default world-side settings.
+    agent_args = {"scenario": "train_refund_late", "sim_weeks": 3, "published_data": "hybrid", "max_turns": 1000,
+                  "research_mode": "saved", "seed": None, "company_simulator": None, "browser_runtime": "docker",
+                  "world_url": "http://world:8000", "history_tokens": 60000, "token_budget": 1000000,
+                  "cost_limit": 0.5, "time_limit": 36000}
+    trial = tmp_path / "jobs/job/trial__1"
+    _synthetic_log(trial / "agent/inspect/agent.eval", model_usage={TARGET: ModelUsage(total_cost=1.0)},
+                   task_args=agent_args, model_roles={"simulator": {"model": DEFAULT_ROLE_MODEL},
+                                                      "grader": {"model": DEFAULT_GRADER_MODEL}})
+    world = {"scenario": "train_refund_late", "seed": None, "sim_weeks": 3.0, "max_turns": 77, "research_mode": "auto",
+             "data_mode": "hybrid", "simulator_model": SIMULATOR, "grader_model": GRADER,
+             "company_simulator": "concordia", "browser_runtime": "subprocess", "output_dir": "/var/log/world"}
+    (trial / "artifacts/world").mkdir(parents=True)
+    (trial / "artifacts/world/state.json").write_text(json.dumps(
+        {"settings": world, "store": {WORLD_KEY: {"turn": 1, "seed": 1234}}}))
+
+    expected = {**agent_args, "sim_weeks": 3.0, "max_turns": 77, "research_mode": "auto", "seed": 1234,
+                "company_simulator": "concordia", "browser_runtime": "subprocess"}
+    for spec in (read_trial_log(trial).eval, read_trial_log(trial, header_only=True).eval,
+                 read_eval_log(str(eval_path(trial))).eval):
+        assert spec.task_args == expected  # target budgets, history window and cost limit stay the agent's
+        assert {role: config.model for role, config in spec.model_roles.items()} == {
+            "simulator": SIMULATOR, "grader": GRADER}
+        assert spec.model == TARGET
+        assert set(spec.metadata["settings_source"]["world"]) == {
+            "model_roles.simulator", "model_roles.grader", *(f"task_args.{arg}" for arg in (
+                "scenario", "seed", "sim_weeks", "max_turns", "research_mode", "published_data",
+                "company_simulator", "browser_runtime"))}
+    log = read_trial_log(trial)
+    row = run_row(log, log.samples[0])
+    assert row["task_args"]["max_turns"] == 77 and row["model_roles"]["simulator"]["model"] == SIMULATOR

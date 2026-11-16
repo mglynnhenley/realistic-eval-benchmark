@@ -14,7 +14,11 @@ its scores taken from the verifier, so `final_snapshot`, `checkpoint_from_sample
 rows read it as they read a native log. The agent's log counts only the target model, so the
 world's simulator and grader usage (its recorded completions, `world_usage`) is added to each
 sample's `model_usage` and `role_usage`, as a native log has them, and the split is kept in
-`metadata["cost_usd"]` as `{"agent": ..., "world": ...}`. Tools that open `.eval` files themselves (Scout, the
+`metadata["cost_usd"]` as `{"agent": ..., "world": ...}`. The agent ran Inspect in world-service mode, so
+its eval spec has default world-side settings: the merged log's `model_roles` (simulator, grader) and
+world-side `task_args` (`WORLD_TASK_ARGS`) are the world's, from state.json's `settings`, with the
+fields taken from it listed in `eval.metadata["settings_source"]`; the agent-side ones (target model,
+budgets, history window, cost limit) stay the agent's. Tools that open `.eval` files themselves (Scout, the
 realism loop, claims, company reruns, measurements) get a synthesized copy instead:
 `eval_path` / `eval_paths` write the merged log to `<trial>/merged/` and return its path.
 
@@ -30,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from inspect_ai.log import EvalLog, read_eval_log, write_eval_log
-from inspect_ai.model import ModelUsage
+from inspect_ai.model import ModelConfig, ModelUsage
 from inspect_ai.scorer import CORRECT, INCORRECT, Score
 
 from refund_eval.models.replay import RECORDINGS_KEY
@@ -41,6 +45,11 @@ AGENT_EVAL_DIRS = ("agent/inspect", "artifacts/agent-eval")
 WORLD_DIR = "artifacts/world"
 VERIFIER_DIR = "verifier"
 MERGED_DIR = "merged"
+# World-service setting -> the Inspect task argument it decides in a native trial.
+WORLD_TASK_ARGS = {"scenario": "scenario", "seed": "seed", "sim_weeks": "sim_weeks", "max_turns": "max_turns",
+                   "research_mode": "research_mode", "data_mode": "published_data",
+                   "company_simulator": "company_simulator", "browser_runtime": "browser_runtime"}
+WORLD_ROLES = {"simulator_model": "simulator", "grader_model": "grader"}
 
 
 def is_harbor_trial(path: str | Path) -> bool:
@@ -83,6 +92,36 @@ def world_store(trial: str | Path) -> dict[str, Any]:
     if lines is not None:
         store[EVENTS_KEY] = [json.loads(line) for line in lines if line.strip()]
     return store
+
+
+def world_settings(trial: str | Path) -> dict[str, Any]:
+    """The world's run settings as state.json records them, with the seed its world recorded; {} if absent."""
+    state = _json(Path(trial) / WORLD_DIR / "state.json")
+    if not isinstance(state, dict) or not isinstance(state.get("settings"), dict):
+        return {}
+    settings = dict(state["settings"])
+    world = (state.get("store") or {}).get(WORLD_KEY) if isinstance(state.get("store"), dict) else None
+    if isinstance(world, dict) and world.get("seed") is not None:
+        settings["seed"] = world["seed"]
+    return settings
+
+
+def _apply_world_settings(log: EvalLog, settings: dict[str, Any]) -> None:
+    """Replace the agent's default world-side task args and model roles with the world's settings."""
+    spec, taken = log.eval, []
+    args = dict(spec.task_args or {})
+    for setting, arg in WORLD_TASK_ARGS.items():
+        if setting in settings:
+            args[arg] = settings[setting]
+            taken.append(f"task_args.{arg}")
+    roles = dict(spec.model_roles or {})
+    for setting, role in WORLD_ROLES.items():
+        if settings.get(setting):
+            roles[role] = ModelConfig(model=settings[setting])
+            taken.append(f"model_roles.{role}")
+    if taken:
+        spec.task_args, spec.model_roles = args, roles
+        spec.metadata = {**(spec.metadata or {}), "settings_source": {"world": taken}}
 
 
 def world_usage(store: dict[str, Any]) -> tuple[dict[str, ModelUsage], dict[str, ModelUsage]]:
@@ -158,6 +197,7 @@ def read_trial_log(path: str | Path, **kwargs: Any) -> EvalLog:
     if agent is None:
         raise FileNotFoundError(f"No agent .eval collected in Harbor trial {path}")
     log = read_eval_log(str(agent), **kwargs)
+    _apply_world_settings(log, world_settings(path))
     if kwargs.get("header_only"):
         return log
     store, scores = world_store(path), reward_scores(path)

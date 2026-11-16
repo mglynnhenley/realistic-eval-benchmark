@@ -471,6 +471,18 @@ class WorldTrial:
         world = self.trial.store().get(WORLD_KEY) or {}
         return {"ok": True, "sim_time": world.get("now"), "stopped": world.get("stop_reason") is not None}
 
+    def effective_settings(self) -> dict[str, Any]:
+        """The settings as used: the world's recorded seed (drawn when none was given) and the
+        models that served the simulator and grader roles."""
+        settings = self.settings.model_dump(mode="json")
+        seed = (self.trial.store().get(WORLD_KEY) or {}).get("seed") if self.trial is not None else None
+        if seed is not None:
+            settings["seed"] = seed
+        if self._model_client is not None:
+            for role in ("simulator", "grader"):
+                settings[f"{role}_model"] = self._model_client.model_name(role)
+        return settings
+
     def persist(self) -> None:
         if self._writer is not None and self.trial is not None:
-            self._writer.write(self.trial.store(), self.settings.model_dump(mode="json"))
+            self._writer.write(self.trial.store(), self.effective_settings())
