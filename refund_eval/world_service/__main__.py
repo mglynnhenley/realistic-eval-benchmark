@@ -35,7 +35,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--simulator-model", default=defaults.simulator_model)
     p.add_argument("--grader-model", default=defaults.grader_model)
     p.add_argument("--company-simulator", default=None, help="Simulator kind for every organisation (e.g. concordia)")
-    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Where state.json and events.jsonl go (default: %(default)s)")
+    p.add_argument("--browser-runtime", choices=["docker", "subprocess"], default=defaults.browser_runtime,
+                   help="Browser: a network-disabled Docker container, or a Node subprocess (default: %(default)s)")
+    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Where state.json, events.jsonl and browser/ go (default: %(default)s)")
     p.add_argument("--host", default="0.0.0.0", help="Agent-facing host (default: %(default)s)")
     p.add_argument("--port", type=int, default=8000, help="Agent-facing port (default: %(default)s)")
     p.add_argument("--admin-port", type=int, default=9000, help="Admin port, always on 127.0.0.1 (default: %(default)s)")
@@ -52,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         scenario=args.scenario, seed=args.seed, sim_weeks=args.sim_weeks, max_turns=args.max_turns,
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
-        company_simulator=args.company_simulator, output_dir=args.output_dir,
+        company_simulator=args.company_simulator, browser_runtime=args.browser_runtime, output_dir=args.output_dir,
     )
 
     async def run() -> None:
