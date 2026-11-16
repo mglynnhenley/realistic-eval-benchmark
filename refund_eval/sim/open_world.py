@@ -28,6 +28,7 @@ from refund_eval.companies import (
 from refund_eval.companies.exemplars import exemplars_text
 from refund_eval.companies.models import CompanyModelRefusal
 from refund_eval.formatting import long_date, money
+from refund_eval.models.client import ModelLimitExceeded
 from refund_eval.realism.notes import notes_text
 from refund_eval.runtime.events import follow_up_pending as _follow_up_pending
 from refund_eval.runtime.events import next_follow_up  # noqa: F401 - re-exported
@@ -430,7 +431,7 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         try:
             proposed = await simulator.respond(event, context)
             action = OpenAction.model_validate(proposed)
-        except LimitExceededError as ex:
+        except (LimitExceededError, ModelLimitExceeded) as ex:
             attempt.error = f"{type(ex).__name__}: {ex}"
             raise
         except CompanyModelRefusal as ex:
@@ -479,7 +480,7 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
             try:
                 problem = await response_problem(action, world, org, mode=event.mode,
                                                  effective_at=prepared.effective_at)
-            except LimitExceededError as ex:
+            except (LimitExceededError, ModelLimitExceeded) as ex:
                 attempt.error = f"{type(ex).__name__}: {ex}"
                 raise
         attempt.validation_error = problem
@@ -745,7 +746,7 @@ async def process_company_event(
         if prepared is None:
             last = interaction.attempts[-1] if interaction.attempts else None
             interaction.error = ((last.validation_error or last.error) if last else None) or "No valid company action."
-    except LimitExceededError as ex:
+    except (LimitExceededError, ModelLimitExceeded) as ex:
         interaction.status = "failed"
         interaction.error = f"{type(ex).__name__}: {ex}"
         with world_tx() as w:
