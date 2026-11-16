@@ -19,6 +19,9 @@ scenario data, seed, turn cap and simulators; `sim_weeks` and `checkin_hours` mu
   `World.token_ledger`), Inspect's limits (including `cost_limit`, now the target's spend
   only), the history window and the kill switch (checked before every tool call and turn).
   When one of them ends the trial, a final `/turn` gives the world the stop reason.
+- The simulated clock: at the start and after each `/turn` an Inspect info event (source
+  `SIM_CLOCK_SOURCE`) records the world's time, turn and stop reason, so readers of the log
+  (`refund_eval.harbor.atif`) can place each generation in simulated time.
 - Not supported: resume (refused when the agent is built) and live dashboard snapshots.
 """
 
@@ -35,6 +38,7 @@ from typing import Any, Self
 import anyio
 import httpx
 from inspect_ai.agent import AgentPrompt, AgentState, react
+from inspect_ai.log import transcript
 from inspect_ai.model import get_model
 from inspect_ai.tool import Tool, ToolDef, memory
 from inspect_ai.util import LimitExceededError
@@ -74,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 TURN_TOKEN_ENV = "WORLD_TURN_TOKEN"  # as `refund_eval.world_service.__main__`
 TOOL_CALL_ID_META = "tool_call_id"  # as `refund_eval.world_service.server.CALLER_ID_META`
+SIM_CLOCK_SOURCE = "world_clock"  # info events with the world's simulated time
 # A world tool call or turn can wait on company model calls for minutes, so reads have no timeout.
 HTTP_TIMEOUT = httpx.Timeout(30.0, read=None)
 
@@ -87,6 +92,11 @@ class WorldView:
 
     def __init__(self, scenario: Scenario) -> None:
         self.world = World(start_time=scenario.start_time, now=scenario.start_time)
+
+    def record_clock(self) -> None:
+        """Note the simulated time, turn and stop reason in the Inspect log."""
+        transcript().info({"sim_time": self.world.now.isoformat(), "turn": self.world.turn,
+                           "stop_reason": self.world.stop_reason}, source=SIM_CLOCK_SOURCE)
 
     def load(self) -> World:
         return self.world.model_copy(deep=True)
@@ -191,6 +201,7 @@ class WorldClient:
             world.turn = max(world.turn, self.turns)
             if result["stop_reason"] is not None:
                 world.stop_reason = result["stop_reason"]
+        self.view.record_clock()
         self.stopped = result["stopped"]
         return result
 
@@ -247,6 +258,7 @@ async def run_in_world(state: AgentState, *, scenario: Scenario, world_url: str,
     if not token:
         raise ValueError(f"World-service mode needs the world's turn token in {TURN_TOKEN_ENV}")
     view = WorldView(scenario)
+    view.record_clock()
     session_end = sim_deadline(view.world, sim_weeks)
     async with WorldClient(world_url, token, view) as world:
         budgeted = prepare_ledger(token_budget, view)
