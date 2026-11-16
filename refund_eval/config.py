@@ -18,6 +18,9 @@ DEFAULT_TARGET_MODEL = "openrouter/anthropic/claude-opus-5"
 # Hybrid search is keyless unless this is set, so an existing EXA_API_KEY never
 # silently switches comparisons to billed, differently rate-limited search.
 HYBRID_EXA_KEY_ENV = "REFUND_EVAL_EXA_API_KEY"
+# Optional transcript storage; see refund_eval/storage.
+SUPABASE_URL_ENV = "SUPABASE_URL"
+SUPABASE_KEY_ENV = "SUPABASE_SERVICE_ROLE_KEY"
 LATE_REFUND_SCENARIO = "train_refund_late"
 LATE_REFUND_TOKEN_BUDGET = 40_000_000
 CostCap = Annotated[float, Field(gt=0, le=1000, strict=True, allow_inf_nan=False)]

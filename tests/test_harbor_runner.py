@@ -151,6 +151,19 @@ def test_opt_in_exa_key_is_forwarded_by_reference_only_for_hybrid(tmp_path, monk
     assert "REFUND_EVAL_EXA_API_KEY" not in fixture["agents"][0]["env"]
 
 
+def test_supabase_credentials_are_forwarded_by_reference_only_when_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    plain = json.loads(prepare(tmp_path / "plain", settings=published_settings(),
+                               model="openrouter/example/model").read_text())
+    assert "SUPABASE_URL" not in plain["agents"][0]["env"]
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "secret-supabase-value")
+    job = json.loads(prepare(tmp_path / "stored", settings=published_settings(),
+                             model="openrouter/example/model").read_text())
+    assert job["agents"][0]["env"]["SUPABASE_SERVICE_ROLE_KEY"] == "${SUPABASE_SERVICE_ROLE_KEY}"
+    assert "secret-supabase-value" not in json.dumps(job)
+
+
 class FakeEnvironment:
     def __init__(self, *, wait=False, return_code=0):
         self.wait = wait

@@ -23,6 +23,7 @@ from inspect_ai.model import (
     set_model_info,
 )
 
+import refund_eval.storage.hook  # noqa: F401  (registers the Supabase upload)
 from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
 from refund_eval.agent.prompt import task_message

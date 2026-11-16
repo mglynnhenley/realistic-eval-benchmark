@@ -14,6 +14,8 @@ from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     HYBRID_EXA_KEY_ENV,
+    SUPABASE_KEY_ENV,
+    SUPABASE_URL_ENV,
     resolve_cost_limits,
 )
 from refund_eval.harbor.config import (
@@ -154,6 +156,9 @@ def prepare(
         # Opt-in Exa account for hybrid search; otherwise trials stay keyless.
         if settings.data_mode == "hybrid" and os.environ.get(HYBRID_EXA_KEY_ENV):
             agent_env[HYBRID_EXA_KEY_ENV] = "${" + HYBRID_EXA_KEY_ENV + "}"
+        # Trials upload their own transcripts when Supabase is configured here.
+        if os.environ.get(SUPABASE_URL_ENV) and os.environ.get(SUPABASE_KEY_ENV):
+            agent_env.update({name: "${" + name + "}" for name in (SUPABASE_URL_ENV, SUPABASE_KEY_ENV)})
     job = JobConfig.model_validate({
         "job_name": "refund-inspect",
         "jobs_dir": str(destination / "jobs"), "n_attempts": trials,
