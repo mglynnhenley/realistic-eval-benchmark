@@ -19,12 +19,19 @@ from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
 from refund_eval.published.provider import published_model_args
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import impossible_refund
+from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.mail import scenario_inbox_path
 from refund_eval.world.state import WORLD_KEY
 
 
 def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(finite_json(value), indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def write_jsonl(path: Path, entries) -> None:
+    """One JSON object per line; runs from before the event log write an empty file."""
+    path.write_text("".join(json.dumps(finite_json(entry), ensure_ascii=False, allow_nan=False) + "\n"
+                            for entry in entries or []), encoding="utf-8")
 
 
 def _resume_args(settings) -> dict:
@@ -96,6 +103,7 @@ def _export(request: TrialRequest, output: Path, log) -> dict:
     write_json(output / "snapshot.json", snapshot)
     world = sample.store[WORLD_KEY]
     write_json(output / "world.json", world)
+    write_jsonl(output / "events.jsonl", sample.store.get(EVENTS_KEY))
     scores = {
         name: score.model_dump(mode="json") for name, score in (sample.scores or {}).items()
     }
@@ -180,10 +188,11 @@ def _diagnostics(request: TrialRequest, output: Path, log, error: BaseException 
                 "roles": {k: v.model_dump(mode="json") for k, v in (sample.role_usage or {}).items()}},
             "transcript.partial.json": [m.model_dump(mode="json") for m in sample.messages],
             "world.partial.json": sample.store.get(WORLD_KEY),
+            "events.partial.jsonl": sample.store.get(EVENTS_KEY),
         }
         for name, value in values.items():
             try:
-                write_json(output / name, value)
+                (write_jsonl if name.endswith(".jsonl") else write_json)(output / name, value)
             except (OSError, ValueError, TypeError) as exc:
                 failures.append({"artifact": name, "error_type": type(exc).__name__})
     artifacts = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()

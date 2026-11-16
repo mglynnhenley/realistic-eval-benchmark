@@ -3,7 +3,7 @@
 The world lives in the trial store (`refund_eval.world.store`; by default the
 Inspect sample store) as plain JSON under WORLD_KEY, so it is serialised into the
 eval log and graders can read it back after the trial.
-Always mutate through `world_tx()` so changes are saved.
+Always mutate through `world_tx()` so changes are saved and logged.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field
 
 from refund_eval.runtime.records import InteractionRecord
+from refund_eval.world import event_log
 from refund_eval.world.store import world_store
 
 WORLD_KEY = "world"
@@ -252,7 +253,10 @@ def load_world() -> World:
 
 
 def save_world(world: World) -> None:
-    world_store().set(WORLD_KEY, world.model_dump(mode="json"))
+    """Save the world and append what changed to the trial's event log (`world/event_log.py`)."""
+    store, data = world_store(), world.model_dump(mode="json")
+    event_log.record(store, store.get(WORLD_KEY), data)
+    store.set(WORLD_KEY, data)
 
 
 @contextmanager

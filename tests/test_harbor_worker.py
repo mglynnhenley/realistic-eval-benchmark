@@ -32,10 +32,12 @@ def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch):
     from inspect_ai.scorer import Score
 
     from refund_eval.harbor import worker
+    from refund_eval.world.event_log import EVENTS_KEY
     from refund_eval.world.state import WORLD_KEY
 
+    events = [{"seq": 0, "kind": "stop", "payload": {"reason": "max_turns"}}]
     sample = SimpleNamespace(
-        store={WORLD_KEY: {"stop_reason": "max_turns", "turn": 1}}, messages=[], error=None,
+        store={WORLD_KEY: {"stop_reason": "max_turns", "turn": 1}, EVENTS_KEY: events}, messages=[], error=None,
         scores={"containment": Score(value=float("nan"))},
         model_usage={}, role_usage={},
     )
@@ -57,3 +59,5 @@ def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch):
     assert calls[0]["task_args"]["budget_notice"] == "daily"
     assert "grader" in calls[0]["model_roles"]
     assert json.loads((tmp_path / "artifacts/scores.json").read_text())["containment"]["value"] is None
+    lines = (tmp_path / "artifacts/events.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == events

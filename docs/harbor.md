@@ -103,7 +103,7 @@ Jobs are saved under the prepared directory's `jobs/`. Each trial includes
 `agent/worker.log` and collected `artifacts/logs/artifacts/refund/` files:
 
 - The Inspect `.eval` log, including model/tool events and private reasoning.
-- `world.json`, `transcript.json` and `scores.json`.
+- `world.json`, `events.jsonl` (the world's change log), `transcript.json` and `scores.json`.
 - `usage.json` with model totals and separate simulator/grader usage.
 - `request.json`, `result.json` and browser network/interception evidence.
 
