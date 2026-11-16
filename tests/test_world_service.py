@@ -16,7 +16,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from refund_eval.models import client as models
-from refund_eval.models.client import Completion, Message
+from refund_eval.models.client import Completion, Message, ModelLimitExceeded
 from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published.adapter import _normalized
 from refund_eval.published.mail import _visible_id
@@ -338,3 +338,18 @@ def test_cli_help_and_tokens(capsys, monkeypatch):
     assert "--data-mode" in capsys.readouterr().out
     monkeypatch.delenv("WORLD_ADMIN_TOKEN", raising=False)
     assert cli_main([]) == 2
+
+
+class OutOfCredit(FakeModels):
+    async def complete(self, role, messages, *, schema=None, **kwargs):
+        raise ModelLimitExceeded("402: out of credit")
+
+
+async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path):
+    async with (WorldTrial(settings(tmp_path), model_client=OutOfCredit()) as trial,
+                session(trial) as (client, _, _)):
+        sent = await client.call_tool("send_message", {
+            "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."})
+        world = trial.data()["world"]
+    assert world["stop_reason"] == "model_limit"
+    assert "SENT" not in sent.content[0].text

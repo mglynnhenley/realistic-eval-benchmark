@@ -567,7 +567,9 @@ class GmailService:
             # Interception and simulator errors must never become successful
             # Sent entries. Inspect limits are deliberately propagated.
             from inspect_ai.util import LimitExceededError
-            if isinstance(exc, LimitExceededError):
+
+            from refund_eval.models.client import ModelLimitExceeded
+            if isinstance(exc, (LimitExceededError, ModelLimitExceeded)):
                 raise
             return _error(str(exc))
         with world_tx() as world:
