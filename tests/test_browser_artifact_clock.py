@@ -63,7 +63,7 @@ def inspect_result(result):
 
 async def test_console_alias_is_a_real_live_file_and_raw_audit_survives(tmp_path, monkeypatch):
     async with artifact_service(tmp_path, monkeypatch) as (service, workspace, output, clock):
-        before = time.time() * 1000
+        before = int(time.time() * 1000)  # host times are whole milliseconds
         first = await service.call_tool("browser_snapshot", {}, tool_call_id="first")
         text, facts, file, fragment = inspect_result(first)
         alias = (workspace / file).resolve()
