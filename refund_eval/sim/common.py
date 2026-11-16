@@ -10,6 +10,7 @@ from functools import lru_cache
 
 from refund_eval.config import RunConfig
 from refund_eval.scenario.schema import Org, Scenario, load_scenario
+from refund_eval.world.store import scenario_id as trial_scenario_id
 
 DEFAULT_SCENARIO = RunConfig.model_fields["scenario"].default
 
@@ -23,15 +24,9 @@ def _cached_scenario(scenario_id: str) -> Scenario:
 
 
 def current_scenario_id() -> str:
-    """Scenario id from the Inspect sample metadata key "scenario",
-    falling back to the default when there is no active sample."""
-    from inspect_ai.solver._task_state import (
-        sample_state,  # no public accessor for sample metadata
-    )
-
-    state = sample_state()
-    sid = (state.metadata or {}).get("scenario") if state is not None else None
-    return str(sid) if sid else DEFAULT_SCENARIO
+    """Scenario id of the current trial (the Inspect sample metadata key "scenario"
+    by default), falling back to the default when there is no active trial."""
+    return trial_scenario_id() or DEFAULT_SCENARIO
 
 
 def current_scenario() -> Scenario:

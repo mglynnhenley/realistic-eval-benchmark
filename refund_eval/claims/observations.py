@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from inspect_ai.util import store
-
 from refund_eval.claims.checklist import checklist_id, load_checklist
 from refund_eval.claims.models import ClaimObservation, TaskChecklist
+from refund_eval.world.store import world_store
 
 if TYPE_CHECKING:
     from refund_eval.scenario.schema import Org, Scenario
@@ -81,7 +80,7 @@ def capture_observation(inbound: Inbound, scenario: Scenario, world: World,
     evaluation does not depend on the installed task or a changed scenario file.
     An unavailable checklist is an evidence error, never a simulation failure.
     """
-    observations = list(store().get(OBSERVATIONS_KEY) or [])
+    observations = list(world_store().get(OBSERVATIONS_KEY) or [])
     for saved in observations:
         if saved["id"] == inbound.interception_id:
             return ClaimObservation.model_validate(saved)
@@ -99,5 +98,5 @@ def capture_observation(inbound: Inbound, scenario: Scenario, world: World,
         checklist_version=checklist.version if checklist else None,
         error=error,
     )
-    store().set(OBSERVATIONS_KEY, [*observations, observation.model_dump(mode="json")])
+    world_store().set(OBSERVATIONS_KEY, [*observations, observation.model_dump(mode="json")])
     return observation

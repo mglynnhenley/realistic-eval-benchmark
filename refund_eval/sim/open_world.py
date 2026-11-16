@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 
-from inspect_ai.util import LimitExceededError, store
+from inspect_ai.util import LimitExceededError
 
 from refund_eval.companies import (
     CompanyAction as OpenAction,
@@ -59,6 +59,7 @@ from refund_eval.world.state import (
     World,
     world_tx,
 )
+from refund_eval.world.store import world_store
 from refund_eval.world.timeutil import LONDON, as_aware, to_london
 
 logger = logging.getLogger(__name__)
@@ -113,10 +114,10 @@ def money_problem(action: OpenAction, world: World, org: Org, limit: float) -> s
 
 
 def temperament(org: Org) -> str:
-    chosen = dict(store().get(TEMPERAMENTS_KEY, {}))
+    chosen = dict(world_store().get(TEMPERAMENTS_KEY, {}))
     if org.key not in chosen:
         chosen[org.key] = random.SystemRandom().choice(TEMPERAMENTS)
-        store().set(TEMPERAMENTS_KEY, chosen)
+        world_store().set(TEMPERAMENTS_KEY, chosen)
     return chosen[org.key]
 
 
@@ -157,36 +158,36 @@ TRANSITIONS_KEY = "simulator_transitions"
 
 def record_revision(world: World, *, resumed: bool = False) -> None:
     """Record a behaviour transition without rewriting any completed events."""
-    previous = store().get(REVISION_KEY)
+    previous = world_store().get(REVISION_KEY)
     if previous != SIMULATOR_REVISION:
         if previous is not None or resumed:
-            transitions = list(store().get(TRANSITIONS_KEY) or [])
+            transitions = list(world_store().get(TRANSITIONS_KEY) or [])
             transitions.append({"from": previous or "legacy_refund_gates", "to": SIMULATOR_REVISION,
                                 "time": world.now.isoformat(), "turn": world.turn})
-            store().set(TRANSITIONS_KEY, transitions)
-        store().set(REVISION_KEY, SIMULATOR_REVISION)
+            world_store().set(TRANSITIONS_KEY, transitions)
+        world_store().set(REVISION_KEY, SIMULATOR_REVISION)
 
 
 async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     """Pin company configuration and research once, also across resumed runs."""
-    saved = dict(store().get(COMPANIES_KEY) or {})
+    saved = dict(world_store().get(COMPANIES_KEY) or {})
     if org.key in saved:
         record = saved[org.key]
         return Org.model_validate(record["org"]), record.get("research")
-    record = (store().get("late_refund_frozen_dossiers") or {}).get(org.key)
+    record = (world_store().get("late_refund_frozen_dossiers") or {}).get(org.key)
     if record is None:
         record = await researched(org, world)
     from refund_eval.sim.common import current_scenario
 
     rules = None if org.kind == "dynamic_personal" else await company_rules(current_scenario(), org, record)
-    kind = store().get(COMPANY_SIMULATOR_KEY)
+    kind = world_store().get(COMPANY_SIMULATOR_KEY)
     if kind and org.kind != "dynamic_personal":
         org = org.model_copy(update={"simulator_kind": kind})
     simulator = get_company_simulator(org.simulator_kind)
     saved[org.key] = {"org": org.model_dump(mode="json"), "research": record, "rules": rules,
                       "simulator_kind": org.simulator_kind, "version": simulator.version,
                       "temperament": temperament(org)}
-    store().set(COMPANIES_KEY, saved)
+    world_store().set(COMPANIES_KEY, saved)
     return org, record
 
 
@@ -198,7 +199,7 @@ def _provider_terms(scenario: Scenario, org: Org) -> dict[str, str]:
     """
     if org.kind != "ombudsman":
         return {}
-    pinned = store().get(COMPANIES_KEY) or {}
+    pinned = world_store().get(COMPANIES_KEY) or {}
     terms = {}
     for provider in scenario.orgs:
         if provider.kind not in {"retailer", "operator"}:
@@ -302,7 +303,7 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         + ")"
         for f in world.follow_ups if f.org == org.key and _follow_up_pending(f, world.now)
     ]
-    pinned = (store().get(COMPANIES_KEY) or {}).get(org.key, {})
+    pinned = (world_store().get(COMPANIES_KEY) or {}).get(org.key, {})
     rules = pinned.get("rules") if scenario.intent else None
     terms = rules["rules"]["terms"] if rules else org.terms
     realism = notes_text(scenario.id, org.key, "personal" if org.kind == "dynamic_personal" else "company")
@@ -441,7 +442,7 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
             problem = ("automatic receipts cannot decide claims, move money, change offers, close the case "
                        "or change existing promises")
         if problem is None and scenario.intent and scenario.task.grants(action):
-            rules = (store().get(COMPANIES_KEY) or {}).get(org.key, {}).get("rules") or {}
+            rules = (world_store().get(COMPANIES_KEY) or {}).get(org.key, {}).get("rules") or {}
             keys = [ground["key"] for ground in rules.get("rules", {}).get("grounds", [])]
             if action.grant_ground not in keys:
                 problem = (f"you may only grant {scenario.task.grant_description} under one of your grounds "

@@ -1,7 +1,8 @@
 """Per-trial world state.
 
-The world lives in the Inspect sample store as plain JSON under WORLD_KEY, so it is
-serialised into the eval log and graders can read it back after the trial.
+The world lives in the trial store (`refund_eval.world.store`; by default the
+Inspect sample store) as plain JSON under WORLD_KEY, so it is serialised into the
+eval log and graders can read it back after the trial.
 Always mutate through `world_tx()` so changes are saved.
 """
 
@@ -12,10 +13,10 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Literal
 
-from inspect_ai.util import store
 from pydantic import BaseModel, Field, computed_field
 
 from refund_eval.runtime.records import InteractionRecord
+from refund_eval.world.store import world_store
 
 WORLD_KEY = "world"
 
@@ -242,14 +243,14 @@ class World(BaseModel):
 
 
 def load_world() -> World:
-    data = store().get(WORLD_KEY)
+    data = world_store().get(WORLD_KEY)
     if data is None:
         raise RuntimeError("World not initialised for this sample; the harness must call save_world() first")
     return World.model_validate(data)
 
 
 def save_world(world: World) -> None:
-    store().set(WORLD_KEY, world.model_dump(mode="json"))
+    world_store().set(WORLD_KEY, world.model_dump(mode="json"))
 
 
 @contextmanager

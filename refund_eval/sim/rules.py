@@ -27,13 +27,14 @@ from inspect_ai.model import (
     ResponseSchema,
     get_model,
 )
-from inspect_ai.util import json_schema, store
+from inspect_ai.util import json_schema
 from pydantic import BaseModel, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL
 from refund_eval.model_io import completion_json
 from refund_eval.scenario.schema import SCENARIO_DIR, Org, Scenario, load_scenario
 from refund_eval.sim.research import live_web, research_mode, saved_record
+from refund_eval.world.store import world_store
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ async def generate_rules(scenario: Scenario, org: Org, dossier_record: dict[str,
 
 async def company_rules(scenario: Scenario, org: Org, dossier_record: dict[str, Any] | None) -> dict[str, Any] | None:
     """The organisation's rules record for this trial: store cache, then saved file, then generated."""
-    cached = dict(store().get(RULES_KEY, {}))
+    cached = dict(world_store().get(RULES_KEY, {}))
     if org.key not in cached:
         record = saved_rules(scenario.id, org.key)
         if record is None and scenario.intent and org.policy == SELLER_POLICY:
@@ -170,7 +171,7 @@ async def company_rules(scenario: Scenario, org: Org, dossier_record: dict[str, 
         elif record is None and scenario.intent and research_mode() != "saved" and live_web():
             record = await generate_rules(scenario, org, dossier_record)
         cached[org.key] = record
-        store().set(RULES_KEY, cached)
+        world_store().set(RULES_KEY, cached)
     record = cached[org.key]
     return record if record and record.get("rules") else None
 

@@ -23,7 +23,7 @@ async def pinned_kinds(monkeypatch, company_simulator):
         pinned, _ = await company_record(org, None)
         kinds[org.key] = pinned.simulator_kind
     assert kinds == {key: record["simulator_kind"]
-                     for key, record in open_world.store().get(open_world.COMPANIES_KEY).items()}
+                     for key, record in open_world.world_store().get(open_world.COMPANIES_KEY).items()}
     return kinds
 
 

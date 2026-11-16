@@ -14,8 +14,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
-from inspect_ai.util import store
-
 from refund_eval.config import HYBRID_EXA_KEY_ENV, RunConfig
 from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
@@ -26,6 +24,7 @@ from refund_eval.scenario.schema import Scenario
 from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
 from refund_eval.world.state import world_tx
+from refund_eval.world.store import world_store
 
 PROFILE_KEY = "published_tool_profile"
 
@@ -179,7 +178,7 @@ async def published_tools(
     channel_fields = ({"scenario_channel": boundary.scenario_channels.descriptor}
                       if scenario_channel_policy is not None else {})
     profile_config.update(channel_fields)
-    store().set(
+    world_store().set(
         PROFILE_KEY,
         {
             "name": "published",
@@ -235,14 +234,14 @@ async def published_tools(
         # page text again would move calendar labels away from the dates they select.
         tools.extend(await inspect_tools(browser, source="playwright"))
         manifest = getattr(browser, "security_manifest", {}) or {}
-        profile = store().get(PROFILE_KEY)
+        profile = world_store().get(PROFILE_KEY)
         profile["browser_network"] = manifest.get("network_mode", "unverified")
         profile["browser_audit"] = str(network_audit.relative_to(artifacts.parent))
         profile["browser_runtime"] = browser_runtime
         profile["browser_boundary"] = manifest
         if manifest.get("evidence_version") == 2:
             profile["evidence_version"] = 2
-        store().set(PROFILE_KEY, profile)
+        world_store().set(PROFILE_KEY, profile)
         names = [t.name for t in tools]
         if len(set(names)) != len(names):
             raise ValueError("Published MCP catalogs contain duplicate tool names")

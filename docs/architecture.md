@@ -161,7 +161,7 @@ Checking has its own execution and cost. Its findings and failures cannot change
 
 ## World and evidence
 
-`world/state.py` is one JSON record in the Inspect sample store. Changes go through `world_tx()` so the saved log captures the clock, inbox overlay, pending replies, the requested wake-up (including on resume), counterpart cases, interceptions, claims, offers, transfers, updates and stop reason. Browser audits are also persisted as JSONL artifacts.
+`world/state.py` is one JSON record in the Inspect sample store. The world, simulator, claims and published-tool modules reach that store, the scenario id and the per-trial lock through `world/store.py`; its default backend, `world/inspect_store.py`, is where Inspect is imported for them. Changes go through `world_tx()` so the saved log captures the clock, inbox overlay, pending replies, the requested wake-up (including on resume), counterpart cases, interceptions, claims, offers, transfers, updates and stop reason. Browser audits are also persisted as JSONL artifacts.
 
 `runtime/records.py` defines the company interaction record stored in `World.interactions`. Each record links its event to the exact company context, implementation version, proposed actions, validation failures, final action, decision basis and scheduled effect IDs. The dashboard's World tab reads these records directly. Legacy case histories and decision records remain available for old runs.
 

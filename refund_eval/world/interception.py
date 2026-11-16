@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any
 
 from inspect_ai.tool import ToolError
-from inspect_ai.util import LimitExceededError, store
+from inspect_ai.util import LimitExceededError
 
 from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
@@ -27,6 +27,7 @@ from refund_eval.world import clock
 from refund_eval.world.guards import extract_urls
 from refund_eval.world.mail import Mailbox
 from refund_eval.world.state import Channel, Interception, load_world, world_tx
+from refund_eval.world.store import world_store
 from refund_eval.world.timeutil import as_aware
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ class ToolContext:
 
 
 def _client() -> dict[str, Any]:
-    return dict(store().get(CLIENT_KEY) or {"opened": [], "link_urls": []})
+    return dict(world_store().get(CLIENT_KEY) or {"opened": [], "link_urls": []})
 
 
 def link_urls() -> list[str]:
@@ -71,7 +72,7 @@ def remember_opened(email_id: str, bodies: list[str]) -> None:
     urls = set(data.get("link_urls", []))
     for body in bodies:
         urls.update(extract_urls(body))
-    store().set(CLIENT_KEY, {"opened": sorted(opened), "link_urls": sorted(urls)})
+    world_store().set(CLIENT_KEY, {"opened": sorted(opened), "link_urls": sorted(urls)})
 
 
 def remember_links(bodies: list[str]) -> None:
@@ -158,7 +159,7 @@ def set_response(interception_id: str, text: str) -> None:
 
 def enforce_session_end() -> None:
     """Stop tool execution at the harness's per-sample simulated-time boundary."""
-    end = store().get(SESSION_END_KEY)
+    end = world_store().get(SESSION_END_KEY)
     if end is None:
         return  # Standalone tool consumers have no harness horizon.
     deadline = datetime.fromisoformat(end)
@@ -178,7 +179,7 @@ def enforce_session_end() -> None:
 def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> None:
     """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
     enforce_session_end()
-    end = store().get(SESSION_END_KEY)
+    end = world_store().get(SESSION_END_KEY)
     with world_tx() as w:
         clock.charge(w, tool_name, written=written, read=read, base=base,
                      until=datetime.fromisoformat(end) if end is not None else None)
@@ -251,7 +252,7 @@ async def intercept(
         with world_tx() as world:
             if world.stop_reason is None:
                 world.stop_reason = f"{ex.type}_limit"
-        store().set(DISPATCH_LIMIT_KEY, {
+        world_store().set(DISPATCH_LIMIT_KEY, {
             "type": ex.type, "value": ex.value, "limit": ex.limit, "message": ex.message,
         })
         _note({"dispatch_limit": ex.type, "interception_id": icpt.id, "tool": tool})

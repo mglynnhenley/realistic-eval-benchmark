@@ -59,11 +59,10 @@ RequestHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 def _sim_time_meta() -> dict[str, str]:
     """The trial's simulated time, so pages show the simulated date instead of today's."""
     try:
-        from inspect_ai.util import store
-
         from refund_eval.world.state import WORLD_KEY
+        from refund_eval.world.store import world_store
 
-        world = store().get(WORLD_KEY)
+        world = world_store().get(WORLD_KEY)
     except (RuntimeError, LookupError, ImportError):  # outside a trial
         return {}
     return {"refund-eval/sim-time": world["now"]} if world and world.get("now") else {}

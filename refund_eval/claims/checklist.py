@@ -6,9 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from inspect_ai.util import store
-
 from refund_eval.claims.models import TaskChecklist
+from refund_eval.world.store import world_store
 
 CHECKLISTS_KEY = "claim_checklists"
 
@@ -24,7 +23,7 @@ def read_checklist(path: str | Path) -> TaskChecklist:
 
 def load_checklist(task_kind: str, path: str | Path) -> TaskChecklist:
     """Use the saved trial copy on resume, even when the authored file has changed."""
-    saved = dict(store().get(CHECKLISTS_KEY) or {})
+    saved = dict(world_store().get(CHECKLISTS_KEY) or {})
     if task_kind in saved:
         return TaskChecklist.model_validate(saved[task_kind]["checklist"])
     checklist = read_checklist(path)
@@ -35,5 +34,5 @@ def load_checklist(task_kind: str, path: str | Path) -> TaskChecklist:
         "version": checklist.version,
         "checklist": checklist.model_dump(mode="json"),
     }
-    store().set(CHECKLISTS_KEY, saved)
+    world_store().set(CHECKLISTS_KEY, saved)
     return checklist

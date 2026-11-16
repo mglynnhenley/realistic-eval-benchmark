@@ -42,7 +42,7 @@ from inspect_ai.model import (
     get_model,
 )
 from inspect_ai.tool import ToolCall, ToolDef
-from inspect_ai.util import json_schema, store
+from inspect_ai.util import json_schema
 from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
@@ -56,6 +56,7 @@ from refund_eval.scenario.schema import (
     subject_slug,
 )
 from refund_eval.world.orgs import host_of, parse_address
+from refund_eval.world.store import world_store
 
 logger = logging.getLogger(__name__)
 
@@ -147,12 +148,12 @@ READ_DESCRIPTION = ("Fetch a public web page anonymously and return its visible 
 
 
 def live_web() -> bool:
-    profile = store().get("published_tool_profile") or {}
+    profile = world_store().get("published_tool_profile") or {}
     return profile.get("data_mode") == "hybrid"
 
 
 def research_mode() -> str:
-    mode = store().get(MODE_KEY) or "auto"
+    mode = world_store().get(MODE_KEY) or "auto"
     return mode if mode in MODES else "auto"
 
 
@@ -375,7 +376,7 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
 async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
                    subject: str = "a customer request") -> dict[str, Any] | None:
     """The subject's research record for this trial, made at first use and cached in the store."""
-    dossiers = dict(store().get(DOSSIERS_KEY, {}))
+    dossiers = dict(world_store().get(DOSSIERS_KEY, {}))
     if org.key in dossiers:
         return dossiers[org.key]
     mode = research_mode()
@@ -390,7 +391,7 @@ async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
             if record["dossier"] is None and saved:  # failed research falls back to the committed file
                 record = {**saved, "errors": record["errors"]}
     dossiers[org.key] = record or {"org": org.key, "name": org.name, "mode": "none", "dossier": None}
-    store().set(DOSSIERS_KEY, dossiers)
+    world_store().set(DOSSIERS_KEY, dossiers)
     return dossiers[org.key]
 
 

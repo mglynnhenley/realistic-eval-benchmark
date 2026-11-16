@@ -18,13 +18,13 @@ import httpx
 import jsonschema
 from inspect_ai.model import ContentImage, ContentText
 from inspect_ai.tool import ToolDef, ToolError, ToolParams
-from inspect_ai.util import store
 from pydantic import ConfigDict
 
 from refund_eval.published.mcp import MCPRPCError
 from refund_eval.published.search import ExaPolicyDenied
 from refund_eval.world.interception import charge_time, current_tool_call_id
 from refund_eval.world.state import WORLD_KEY
+from refund_eval.world.store import world_store
 
 AUDIT_KEY = "published_tool_audit"
 PUBLIC_SEARCH_PROVENANCE = (
@@ -60,8 +60,8 @@ def fingerprint(value: Any) -> str:
 
 def audit(event: dict[str, Any]) -> None:
     """Append a JSON-safe event in the sample's private audit record."""
-    events = list(store().get(AUDIT_KEY) or [])
-    world = store().get("world") or {}
+    events = list(world_store().get(AUDIT_KEY) or [])
+    world = world_store().get("world") or {}
     events.append(
         copy.deepcopy(
             {
@@ -71,7 +71,7 @@ def audit(event: dict[str, Any]) -> None:
             }
         )
     )
-    store().set(AUDIT_KEY, events)
+    world_store().set(AUDIT_KEY, events)
 
 
 def _normalized(schema: Any, *, root: bool = False) -> Any:
@@ -226,7 +226,7 @@ def _tool(
             # Clock charging also delivers mail due during uninterrupted tool
             # use. Advance before dispatch so this call can observe that mail.
             # Catalog/adapter consumers outside a trial have no World to move.
-            if store().get(WORLD_KEY) is not None:
+            if world_store().get(WORLD_KEY) is not None:
                 charge_time(name, written=_strings(arguments))
             result = await service.call_tool(
                 name, arguments, **({"tool_call_id": call_id} if accepts_id else {})
@@ -298,7 +298,7 @@ def _tool(
             content.append(ContentText(text=PUBLIC_SEARCH_PROVENANCE))
             audit({"event": "search_provenance", "source": source, "tool": name,
                    "call_id": call_id, "notice": PUBLIC_SEARCH_PROVENANCE})
-        if store().get(WORLD_KEY) is not None:  # reading what came back takes time too
+        if world_store().get(WORLD_KEY) is not None:  # reading what came back takes time too
             charge_time(name, read=_strings(content), base=False)
         return content
 

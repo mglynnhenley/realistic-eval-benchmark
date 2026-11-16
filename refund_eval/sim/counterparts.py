@@ -20,7 +20,7 @@ from inspect_ai.model import (
     ResponseSchema,
     get_model,
 )
-from inspect_ai.util import json_schema, store
+from inspect_ai.util import json_schema
 from pydantic import BaseModel, Field
 
 from refund_eval.model_io import completion_json
@@ -28,6 +28,7 @@ from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.rules import SELLER_POLICY
 from refund_eval.world.orgs import host_of, parse_address
+from refund_eval.world.store import world_store
 
 REGISTRY_KEY = "simulated_counterparts"
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def scenario_context(scenario: Scenario) -> str:
 
 
 def registered_orgs() -> list[Org]:
-    return [Org.model_validate(record["org"]) for record in store().get(REGISTRY_KEY, {}).values()
+    return [Org.model_validate(record["org"]) for record in world_store().get(REGISTRY_KEY, {}).values()
             if record.get("org")]
 
 
@@ -81,7 +82,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         return None
     identity = "host:" + host if host else "name:" + inbound.target.strip().casefold()
     rejected_identity = "recipient:" + inbound.channel + ":" + (address or inbound.target.strip().casefold())
-    registry = dict(store().get(REGISTRY_KEY, {}))
+    registry = dict(world_store().get(REGISTRY_KEY, {}))
     person_identity = "address:" + address if address else None
     if person_identity in registry:
         return Org.model_validate(registry[person_identity]["org"])
@@ -140,7 +141,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
             "org": org.model_dump(mode="json"), "profile": profile.model_dump(), "identity_verified": False,
             "source": "simulator_inference", "target": inbound.target, "interception_id": inbound.interception_id,
         }
-        store().set(REGISTRY_KEY, registry)
+        world_store().set(REGISTRY_KEY, registry)
         return org
     # Never create a second copy of a scenario company via an unrecognised address.
     duplicate = profile.name.strip().casefold() in {o.name.casefold() for o in scenario.orgs}
@@ -155,7 +156,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
                         email_domains=[host], web_domains=[host])
             record = await research.research_live(found)
             if record.get("dossier"):
-                store().set(research.DOSSIERS_KEY, {**store().get(research.DOSSIERS_KEY, {}), key: record})
+                world_store().set(research.DOSSIERS_KEY, {**world_store().get(research.DOSSIERS_KEY, {}), key: record})
                 role = "advice" if role == "unknown" else role
                 sells = True
     if role not in {"unknown", "personal"} and not duplicate:
@@ -176,5 +177,5 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         "source": "simulator_inference", "target": inbound.target,
         "interception_id": inbound.interception_id,
     }
-    store().set(REGISTRY_KEY, registry)
+    world_store().set(REGISTRY_KEY, registry)
     return org

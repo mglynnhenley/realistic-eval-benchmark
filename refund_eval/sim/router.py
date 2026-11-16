@@ -16,9 +16,6 @@ import random
 import re
 from datetime import datetime, timedelta
 
-import anyio
-from inspect_ai.util import store
-
 from refund_eval.claims import capture_observation
 from refund_eval.formatting import long_date, money
 from refund_eval.scenario.schema import Org, Scenario
@@ -49,19 +46,9 @@ from refund_eval.world.state import (
     load_world,
     world_tx,
 )
+from refund_eval.world.store import trial_lock
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-
-# one lock per sample store, so parallel tool calls in a sample are applied in order
-_locks: dict[int, anyio.Lock] = {}
-
-
-def _sample_lock() -> anyio.Lock:
-    key = id(store())
-    lock = _locks.get(key)
-    if lock is None:
-        lock = _locks[key] = anyio.Lock()
-    return lock
 
 
 # ---------------------------------------------------------------- resolution
@@ -185,7 +172,7 @@ def _closed_transcript(org: Org, number: str, now: datetime) -> str:
 
 async def dispatch(inbound: Inbound) -> SimResult:
     scenario = current_scenario()
-    async with _sample_lock():
+    async with trial_lock():
         return await _dispatch(scenario, inbound)
 
 
@@ -194,7 +181,7 @@ async def follow_up(item: FollowUp) -> None:
     from refund_eval.sim.open_world import fire_follow_up
 
     scenario = current_scenario()
-    async with _sample_lock():
+    async with trial_lock():
         await fire_follow_up(scenario, item)
 
 
