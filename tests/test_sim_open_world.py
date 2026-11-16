@@ -1,5 +1,6 @@
 """Companies decide outcomes; the runtime applies them within accounting limits."""
 
+import random
 import re
 from datetime import timedelta
 
@@ -29,7 +30,7 @@ FARE = SC.journey.fare
 def sim(monkeypatch):
     # Broad execution/effects tests use the earliest allowed sample. Dedicated
     # delivery tests exercise the spread and staffing adjustments explicitly.
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda low, *_: low)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, low, *_: low)
     mock = MockSim()
     install_mock_models(mock)
     start_sample()
@@ -635,7 +636,7 @@ async def test_a_company_cannot_trigger_another_company(sim):
 
 
 async def test_reply_delays_are_jittered_and_capped(sim, monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: b)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, a, b: b)
     sim.open_actions += [{"reply_after_hours": 10}, {"reply_after_hours": 500}]
     await dispatch(email("sales.support@info.thetrainline.com"))
     await dispatch(email("sales.support@info.thetrainline.com", iid="open-2"))
@@ -814,8 +815,8 @@ async def test_all_company_events_validate_and_apply_the_same_final_delivery_tim
 ):
     import json
 
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: b)
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: 18)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, a, b: b)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, *_: 18)
     sim.open_actions.append({
         "decision": "goodwill", "reply_after_hours": proposed_hours, "body": "We have sent £10 to your card.",
         "payments": [{"kind": "partial_compensation", "amount": 10, "via": "card"}],

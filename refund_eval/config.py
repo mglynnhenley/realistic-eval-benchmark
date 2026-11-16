@@ -116,6 +116,9 @@ class RunConfig(BaseModel):
     time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
     # Scenario YAML bundled with the source, discovered when the run is configured.
     scenario: str = "train_refund_pressure"
+    # Seed for simulated randomness (temperaments, reply timing); None draws one per trial.
+    # Local runs only. Every trial records its seed in its world.
+    seed: int | None = Field(default=None, ge=0, strict=True)
 
     @field_validator("scenario")
     @classmethod

@@ -1,5 +1,6 @@
 """Synthetic delivery schedules keep organisation delays separate from personal mail."""
 
+import random
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -27,8 +28,8 @@ def prepare(org, now, hours, pending=(), *, reply_kind="substantive"):
 
 @pytest.mark.parametrize("proposed,expected", [(1, 96), (500, 200)])
 def test_company_uses_its_configured_reply_delay(monkeypatch, proposed, expected):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: 96)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, *_: 96)
     now = datetime(2026, 10, 12, 9, tzinfo=LONDON)
     result = prepare(company(), now, proposed)
     assert result.effective_at == now + timedelta(hours=expected)
@@ -36,8 +37,8 @@ def test_company_uses_its_configured_reply_delay(monkeypatch, proposed, expected
 
 @pytest.mark.parametrize("sampled", [3, 6, 9])
 def test_too_short_company_estimates_can_arrive_across_the_existing_range(monkeypatch, sampled):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: sampled)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, *_: sampled)
     now = datetime(2026, 10, 12, 8, tzinfo=LONDON)
     result = prepare(company(reply_delay_hours=(2, 10)), now, 0)
     assert result.effective_at == now + timedelta(hours=sampled)
@@ -45,14 +46,14 @@ def test_too_short_company_estimates_can_arrive_across_the_existing_range(monkey
 
 
 def test_in_range_company_estimate_keeps_its_timing_without_fallback_sampling(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
-    monkeypatch.setattr("refund_eval.sim.open_world.random.triangular", lambda *_: pytest.fail("Unexpected sampling"))
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
+    monkeypatch.setattr(random.Random, "triangular", lambda _self, *_: pytest.fail("Unexpected sampling"))
     now = datetime(2026, 10, 12, 8, tzinfo=LONDON)
     assert prepare(company(reply_delay_hours=(2, 10)), now, 4).effective_at == now + timedelta(hours=4)
 
 
 def test_staffed_reply_waits_until_monday_and_preserves_queue_order(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 16, 17, tzinfo=LONDON)  # Friday
     org = company(reply_delay_hours=(0, 200))
     first = prepare(org, now, 2)
@@ -66,7 +67,7 @@ def test_staffed_reply_waits_until_monday_and_preserves_queue_order(monkeypatch)
 
 
 def test_delivery_crosses_clock_change_in_local_office_hours(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 23, 17, tzinfo=LONDON)
     due = prepare(company(), now, 48).effective_at
     assert due == datetime(2026, 10, 26, 8, tzinfo=LONDON)
@@ -75,7 +76,7 @@ def test_delivery_crosses_clock_change_in_local_office_hours(monkeypatch):
 
 
 def test_queue_gap_crossing_closing_time_moves_to_next_staffed_day(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 16, 17, tzinfo=LONDON)
     earlier = now.replace(minute=55)
     pending = ScheduledEmail(due_at=earlier, email=Email(
@@ -87,7 +88,7 @@ def test_queue_gap_crossing_closing_time_moves_to_next_staffed_day(monkeypatch):
 
 
 def test_personal_contacts_keep_their_existing_independent_timing(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 16, 23, tzinfo=LONDON)
     due = prepare(company(kind="dynamic_personal"), now, 5).effective_at
     assert due == now + timedelta(hours=5)
@@ -105,7 +106,7 @@ def test_follow_up_hours_are_elapsed_time_across_clock_change():
 
 
 def test_automatic_receipt_arrives_outside_staff_hours_without_waiting_for_staff(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 16, 23, tzinfo=LONDON)
     due = now + timedelta(days=3)
     pending = ScheduledEmail(due_at=due, email=Email(
@@ -117,7 +118,7 @@ def test_automatic_receipt_arrives_outside_staff_hours_without_waiting_for_staff
 
 
 def test_a_scheduled_automatic_receipt_does_not_delay_substantive_staff_mail(monkeypatch):
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda *_: 1)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, *_: 1)
     now = datetime(2026, 10, 12, 9, tzinfo=LONDON)
     due = now + timedelta(days=7)
     pending = ScheduledEmail(due_at=due, email=Email(

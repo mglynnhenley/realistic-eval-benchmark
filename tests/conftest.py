@@ -1,5 +1,7 @@
 """Test-wide fixtures."""
 
+import random
+
 import pytest
 
 
@@ -20,7 +22,7 @@ def _no_reply_jitter(monkeypatch, request):
     # Harbor controller tests run without Inspect in their separate environment.
     if request.node.get_closest_marker("harbor"):
         return
-    monkeypatch.setattr("refund_eval.sim.open_world.random.uniform", lambda a, b: 1.0)
+    monkeypatch.setattr(random.Random, "uniform", lambda _self, a, b: 1.0)
 
 
 @pytest.fixture(autouse=True)

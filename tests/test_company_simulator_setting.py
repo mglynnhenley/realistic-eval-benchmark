@@ -7,6 +7,7 @@ from inspect_ai.util._store import Store, init_subtask_store
 from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim import open_world
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY, company_record
+from refund_eval.world.state import World
 
 SC = load_scenario("train_refund")
 PERSON = Org(key="dynamic_friend", name="A Friend", kind="dynamic_personal", email_domains=[],
@@ -20,7 +21,7 @@ async def pinned_kinds(monkeypatch, company_simulator):
     monkeypatch.setattr(open_world, "get_company_simulator", lambda kind: SimpleNamespace(version=kind))
     kinds = {}
     for org in ORGS:
-        pinned, _ = await company_record(org, None)
+        pinned, _ = await company_record(org, World(start_time=SC.start_time, now=SC.start_time))
         kinds[org.key] = pinned.simulator_kind
     assert kinds == {key: record["simulator_kind"]
                      for key, record in open_world.world_store().get(open_world.COMPANIES_KEY).items()}
