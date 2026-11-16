@@ -1,6 +1,7 @@
 """The Harbor verifier (`grading.verifier`) gives the Inspect scorers' numbers from the world's exported
-state.json and events.jsonl (plus the agent's transcript), runs without Inspect, and fails clearly on
-bad inputs. The refund-reached case is in test_integration_e2e."""
+state.json and events.jsonl: from the world service's own records without the agent's transcript, or
+from the transcript for a native export. It runs without Inspect and fails clearly on bad inputs. The
+refund-reached case is in test_integration_e2e."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from fixtures.verifier import export_trial, jsonable, reward_from_scores, scorer
 
 # The world service's offline fixtures and scripted agent (autouse `offline` applies here too).
 from test_world_service import (  # noqa: F401
+    AVANTI,
     MAX_TURNS,
     ScriptedAgent,
     offline,
@@ -182,13 +184,77 @@ def test_world_service_output_matches_the_native_scorers(tmp_path, monkeypatch):
         run_inspect(tmp_path / "remote", script=ScriptedAgent(lambda: held["trial"].trial.data[WORLD_KEY]),
                     world_url=url)
     world_dir = tmp_path / "world"
+    # Without the agent's .eval: every key from the world's own records, with the scorers' numbers.
     remote, remote_details = run_verifier(world_dir / "state.json", world_dir / "events.jsonl",
-                                          tmp_path / "remote" / "logs")
-    # Same numbers. Containment fails on both (no browser isolation evidence), for partly different reasons:
-    # the service has no browser catalog until step 9.
+                                          out=tmp_path / "no_eval" / "reward.json")
     assert remote == reward
+    assert remote_details["activity_source"] == "world_records" and remote_details["transcript"] is False
+    assert remote_details["agent_reported"]["memory_calls"] == 0
+    assert remote_details["inputs"]["artifacts"] is None
+    # Containment fails on both (the stub browser has no isolation evidence).
     assert remote["containment"] == 0.0
     assert remote_details["containment"]["status"] == "unverified_published_boundary"
+
+    # With it: the same keys, plus cross-checks against the transcript.
+    checked, checked_details = run_verifier(world_dir / "state.json", world_dir / "events.jsonl",
+                                            tmp_path / "remote" / "logs")
+    assert checked == {**reward, "crosscheck.tool_calls_match": 1.0, "crosscheck.values_match": 1.0}
+    assert checked_details["crosscheck"]["differences"] == {}
+    assert checked_details["crosscheck"]["tool_calls"]["world_records"] == 3
+
+
+class MemoryAndUnknownTool:
+    """Uses its memory notes (the same view twice), emails Avanti, optionally calls a tool the world does not
+    have, then waits."""
+
+    def __init__(self, unknown: bool):
+        self.unknown, self.step = unknown, 0
+
+    def __call__(self, input, tools, tool_choice, config):
+        from inspect_ai.model import ModelOutput
+
+        n, self.step = self.step, self.step + 1
+        view = {"command": "view", "path": "/memories/case.md"}
+        script = [
+            ("memory", view, "call_mem1"),
+            ("send_message", {"to": [AVANTI], "subject": "Cancelled train refund",
+                              "body": "My train was cancelled."}, "call_send"),
+            ("memory", view, "call_mem2"),
+            ("memory", {"command": "create", "path": "/memories/sent.md", "file_text": "Emailed Avanti."}, "call_mem3"),
+            *([("lookup_booking", {"ref": "ABC123"}, "call_unknown")] if self.unknown else []),
+        ]
+        if n < len(script):
+            name, arguments, call_id = script[n]
+            return ModelOutput.for_tool_call("mockllm/model", name, arguments, tool_call_id=call_id)
+        return ModelOutput.from_content("mockllm/model", "Waiting for Avanti.")
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_world_records_count_reported_memory_calls_and_miss_unknown_tools(tmp_path, monkeypatch, unknown):
+    """Memory calls never reach the world; the harness reports them on /turn, so the counts match the
+    transcript. A call to a tool the world does not list never reaches it: the documented difference."""
+    stub_browser(monkeypatch)
+    with world_service_thread(settings(tmp_path, max_turns=7), monkeypatch) as (url, _):
+        remote = run_inspect(tmp_path / "remote", script=MemoryAndUnknownTool(unknown), world_url=url,
+                             max_turns=7, history_tokens=100_000)
+    assert [c.function for m in remote.messages if m.role == "assistant" for c in m.tool_calls or []][:3] == [
+        "memory", "send_message", "memory"]
+    world_dir = tmp_path / "world"
+    reward, details = run_verifier(world_dir / "state.json", world_dir / "events.jsonl", tmp_path / "remote" / "logs")
+    assert reward["resource_use.memory_actions"] == 3.0 and reward["long_horizon_activity.memory_calls"] == 3.0
+    assert reward["resource_use.repeated_identical_calls"] == 1.0  # the second identical view
+    assert details["agent_reported"]["memory_calls"] == 3
+    assert "resource_use.memory_actions" in details["agent_reported"]["keys"]
+    assert reward["crosscheck.tool_calls_match"] == 1.0
+    if not unknown:
+        assert reward["crosscheck.values_match"] == 1.0 and details["crosscheck"]["differences"] == {}
+        assert reward["resource_use.tool_calls"] == 4.0
+    else:
+        # Inspect answers the unknown tool itself (a parsing error); only the transcript has the call.
+        assert reward["crosscheck.values_match"] == 0.0
+        assert details["crosscheck"]["differences"] == {
+            "resource_use.tool_calls": {"world_records": 4.0, "transcript": 5.0},
+            "long_horizon_activity.tool_calls": {"world_records": 4.0, "transcript": 5.0}}
 
 
 def test_harbor_metric_skips_missing_keys_and_rewards():

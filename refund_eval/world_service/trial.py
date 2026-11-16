@@ -8,6 +8,21 @@ same `runtime.turns` code: count the turn, save the agent's text as a status rep
 stop on success, the session cap or the turn cap, otherwise run due company follow-ups
 and wake the agent on mail, its requested time or the next check-in. The agent harness
 in world-service mode (`agent.world_mode`) calls it.
+
+Every tool call and turn is also recorded, in order, under `store.ACTIVITY_KEY` (`_record`), so
+the verifier grades the agent's activity from the world's records (`grading.world_records`):
+- `{"kind": "tool_call", "tool", "call_id", "arguments", "status", "error"?, "audit",
+  "result_text"?, "sim_time"}`. `status` is "ok", "error" (the model is shown `error`),
+  "exception" (an unexpected error; the MCP server shows the model its text, `error`) or
+  "cancelled" (no result was returned). `audit` is the [start, end) range of the tool audit
+  records made during the call; the raw result the model's text is rebuilt from is there, so
+  it is not stored twice. `result_text` is kept only when no audit record holds the result
+  (`schedule_wakeup`).
+- `{"kind": "turn", "ended", "text", "counted", "stop_reason", "memory_calls", "turn",
+  "stopped", "world_stop_reason", "wakeup", "sim_time"}`: the `/turn` request's fields as
+  sent, then the world's turn count, its stop state and the wake-up it returned.
+  `memory_calls` is agent-reported: `[{"id", "arguments_sha256"}]` for the harness's local
+  memory tool calls since the last turn (they never reach the world), or None if not sent.
 """
 
 from __future__ import annotations
@@ -32,7 +47,7 @@ from refund_eval.models import client as models
 from refund_eval.models.client import ModelClient, ModelLimitExceeded
 from refund_eval.models.replay import RecordingModelClient
 from refund_eval.output_paths import validate_private_output
-from refund_eval.published.adapter import MCPService, audit, fingerprint
+from refund_eval.published.adapter import AUDIT_KEY, MCPService, audit, fingerprint
 from refund_eval.published.profile import (
     PROFILE_KEY,
     allow_search_request,
@@ -70,7 +85,7 @@ from refund_eval.world.state import (
 )
 from refund_eval.world.store import world_store
 from refund_eval.world_service.settings import WorldSettings
-from refund_eval.world_service.store import MemoryTrial, OutputWriter
+from refund_eval.world_service.store import ACTIVITY_KEY, MemoryTrial, OutputWriter
 from refund_eval.world_service.tools import (
     SCHEDULE_WAKEUP,
     SCHEDULE_WAKEUP_TOOL,
@@ -107,6 +122,19 @@ def _error(message: str) -> dict[str, Any]:
     return {"content": [text_block(message)], "isError": True}
 
 
+def _record(entry: dict[str, Any]) -> None:
+    """Append one tool call or turn to the trial's activity record."""
+    world = world_store().get(WORLD_KEY) or {}
+    world_store().set(ACTIVITY_KEY, [*(world_store().get(ACTIVITY_KEY) or []),
+                                     copy.deepcopy({**entry, "sim_time": world.get("now")})])
+
+
+def _audited_result(call_id: str | None, start: int) -> bool:
+    """Whether the call's raw result is in the tool audit (from record `start` on)."""
+    return any(e.get("event") == "result" and e.get("call_id") == call_id
+               for e in (world_store().get(AUDIT_KEY) or [])[start:])
+
+
 class WorldTrial:
     """One trial's world. Use as an async context manager; one per process (the store is global)."""
 
@@ -139,6 +167,7 @@ class WorldTrial:
         try:
             init_world(scenario, settings.seed)
             store = world_store()
+            store.set(ACTIVITY_KEY, [])
             store.set(SESSION_END_KEY, sim_deadline(load_world(), settings.sim_weeks).isoformat())
             store.set(RESEARCH_MODE_KEY, settings.research_mode)
             store.set(COMPANY_SIMULATOR_KEY, settings.company_simulator)
@@ -297,20 +326,35 @@ class WorldTrial:
 
         Returns an MCP CallToolResult: content blocks, and isError for errors the model sees."""
         async with self._lock:
+            start = len(world_store().get(AUDIT_KEY) or [])
+            entry: dict[str, Any] = {"kind": "tool_call", "tool": name, "call_id": call_id,
+                                     "arguments": arguments, "status": "cancelled"}
             try:
                 with active_tool_call(call_id), event_log.tool_call(name, call_id):
-                    return {"content": await self._call(name, arguments, call_id), "isError": False}
+                    content = await self._call(name, arguments, call_id)
+                entry["status"] = "ok"
+                if not _audited_result(call_id, start):
+                    entry["result_text"] = "\n".join(p["text"] for p in content if p["type"] == "text")
+                return {"content": content, "isError": False}
             except ToolFailure as ex:
+                entry.update(status="error", error=str(ex))
                 return _error(str(ex))
             except LimitExceededError as ex:
                 # The harness's guard_tool keeps the limit for its next on_continue; so does turn().
                 world_store().set(DISPATCH_LIMIT_KEY, {"type": ex.type, "value": ex.value, "limit": ex.limit,
                                                        "message": str(ex)})
+                entry.update(status="error", error=str(ex))
                 return _error(str(ex))
             except ModelLimitExceeded as ex:
                 _record_stop(STOP_MODEL_LIMIT)
+                entry.update(status="error", error=str(ex))
                 return _error(str(ex))
+            except Exception as ex:
+                entry.update(status="exception", error=str(ex))  # the MCP server's error result shows this text
+                raise
             finally:
+                entry["audit"] = [start, len(world_store().get(AUDIT_KEY) or [])]
+                _record(entry)
                 self.persist()
 
     async def _call(self, name: str, arguments: dict[str, Any], call_id: str | None) -> list[dict[str, Any]]:
@@ -326,32 +370,38 @@ class WorldTrial:
         return await tool.call(arguments, call_id)
 
     async def turn(self, *, ended: bool = True, text: str = "", stop_reason: str | None = None,
-                   counted: bool = True, token_ledger: dict[str, Any] | None = None) -> dict[str, Any]:
+                   counted: bool = True, token_ledger: dict[str, Any] | None = None,
+                   memory_calls: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """After each agent generation: `ended` when it made no tool calls, `text` its message.
 
         `token_ledger` is the agent's target-token ledger (budgets are agent-side); it replaces
         the world's. `stop_reason` says the agent has ended the trial itself (its token budget,
         an Inspect limit, its kill switch, the loop ending): the turn is counted only if
         `counted`, the reason is recorded unless the world has stopped already, and nothing
-        else runs. Returns the wake-up to give the agent (None mid-work or once stopped), the
-        stop reason and the simulated time."""
+        else runs. `memory_calls` (agent-reported) is only recorded. Returns the wake-up to give
+        the agent (None mid-work or once stopped), the stop reason and the simulated time."""
         ledger = TargetTokenLedger.model_validate(token_ledger) if token_ledger is not None else None
         async with self._lock:
+            wakeup = None
             try:
                 if ledger is not None:
                     with world_tx() as world:
                         world.token_ledger = ledger
                 if stop_reason is not None:
                     self._agent_stop(stop_reason, counted=counted, ended=ended, text=text)
-                    wakeup = None
                 else:
                     wakeup = await self._turn(ended, text)
             finally:
+                world = load_world()
+                result = {"stopped": world.stop_reason is not None, "stop_reason": world.stop_reason,
+                          "wakeup": (wakeup.model_dump(mode="json")
+                                     if wakeup is not None and world.stop_reason is None else None),
+                          "sim_time": world.now.isoformat()}
+                _record({"kind": "turn", "ended": ended, "text": text, "counted": counted, "stop_reason": stop_reason,
+                         "memory_calls": memory_calls, "turn": world.turn, "stopped": result["stopped"],
+                         "world_stop_reason": world.stop_reason, "wakeup": result["wakeup"]})
                 self.persist()
-        world = load_world()
-        return {"stopped": world.stop_reason is not None, "stop_reason": world.stop_reason,
-                "wakeup": wakeup.model_dump(mode="json") if wakeup is not None and world.stop_reason is None else None,
-                "sim_time": world.now.isoformat()}
+        return result
 
     def _pending_limit(self) -> bool:
         """A limit hit in a tool call stops the trial at the next turn, as the harness's on_continue does."""

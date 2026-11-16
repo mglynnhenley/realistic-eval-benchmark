@@ -45,7 +45,12 @@ from refund_eval.world.trial_snapshot import TrialSnapshot
 from refund_eval.world_service import server
 from refund_eval.world_service.__main__ import main as cli_main
 from refund_eval.world_service.settings import WorldSettings
-from refund_eval.world_service.store import EVENTS_FILE, STATE_FILE, MemoryTrial
+from refund_eval.world_service.store import (
+    ACTIVITY_KEY,
+    EVENTS_FILE,
+    STATE_FILE,
+    MemoryTrial,
+)
 from refund_eval.world_service.trial import WorldTrial, init_world
 
 ADMIN, TURN = "admin-secret", "turn-secret"
@@ -384,6 +389,20 @@ def test_scripted_mcp_trial_matches_the_inspect_path(tmp_path, monkeypatch):
     audit = data["store"]["published_tool_audit"]
     assert {e["call_id"] for e in audit if e.get("tool") == "send_message"} == {send_events[0]["tool_call_id"]}
 
+    # Every tool call and accepted /turn is recorded in order; results stay in the audit, by range.
+    records = data["store"][ACTIVITY_KEY]
+    assert [r["kind"] for r in records] == ["tool_call", *["turn"] * (1 + len(WAITING)), "tool_call", "turn",
+                                            "tool_call", "turn", "turn", "tool_call"]
+    send = records[0]
+    assert (send["tool"], send["call_id"], send["status"]) == ("send_message", send_events[0]["tool_call_id"], "ok")
+    assert "result_text" not in send
+    start, end = send["audit"]
+    assert [e["event"] for e in audit[start:end] if e.get("call_id") == send["call_id"]][-1] == "result"
+    assert records[1]["wakeup"] is None and records[2]["wakeup"]["kind"] == "new_mail"
+    assert records[-2]["world_stop_reason"] == "max_turns" and records[-2]["turn"] == MAX_TURNS
+    bad_wakeup = records[-1]
+    assert bad_wakeup["status"] == "error" and "YYYY-MM-DD HH:MM" in bad_wakeup["error"]
+
     # The output directory holds the same state and log.
     out = tmp_path / "world"
     assert [json.loads(line) for line in (out / EVENTS_FILE).read_text().splitlines()] == events
@@ -640,12 +659,17 @@ async def test_turn_records_the_agents_stop(tmp_path, monkeypatch):
         assert (await http.post(f"{base}/turn", json={"stop_reason": 7}, headers=headers)).status_code == 400
         bad_ledger = await http.post(f"{base}/turn", json={"token_ledger": {"budget": 0}}, headers=headers)
         assert bad_ledger.status_code == 400
+        bad_memory = await http.post(f"{base}/turn", json={"memory_calls": [{"id": "m1"}]}, headers=headers)
+        assert bad_memory.status_code == 400
         stopped = (await http.post(f"{base}/turn", json={"stop_reason": "cost_limit", "counted": False},
                                    headers=headers)).json()
         assert stopped["stopped"] and stopped["stop_reason"] == "cost_limit"
         later = (await http.post(f"{base}/turn", json={"stop_reason": "loop_ended"}, headers=headers)).json()
-        world = trial.data()["world"]
+        world, records = trial.data()["world"], trial.data()["store"][ACTIVITY_KEY]
     assert later["stop_reason"] == "cost_limit" and world["stop_reason"] == "cost_limit" and world["turn"] == 0
+    # Only the accepted requests are recorded, each with what the agent sent and what the world did.
+    assert [(r["stop_reason"], r["counted"], r["world_stop_reason"]) for r in records] == [
+        ("cost_limit", False, "cost_limit"), ("loop_ended", True, "cost_limit")]
 
 
 def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatch):

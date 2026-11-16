@@ -1,8 +1,8 @@
 """The world service's trial state: an in-memory `TrialContext`, written to an output directory.
 
 `state.json` holds every trial store key except the event log (the world under "world",
-the tool audit, claim observations, company records) with the run settings and the
-stop reason. `events.jsonl` holds the event log, one entry per line, appended as it
+the tool audit, claim observations, company records, the agent's activity under
+ACTIVITY_KEY) with the run settings and the stop reason. `events.jsonl` holds the event log, one entry per line, appended as it
 grows. Both are rewritten after every tool call and turn, and at shutdown.
 """
 
@@ -20,6 +20,9 @@ from refund_eval.world.state import WORLD_KEY
 
 STATE_FILE = "state.json"
 EVENTS_FILE = "events.jsonl"
+# Every MCP tool call and `/turn` the service received, in order (`WorldTrial._record`); the
+# verifier grades the agent's activity from these (`grading.world_records`), not the agent's log.
+ACTIVITY_KEY = "agent_activity"
 
 
 class MemoryStore(dict):
