@@ -8,9 +8,9 @@ two give the same numbers. Nothing here calls a model.
 
 Inputs: the final `World`, the trial store's published tool profile and audit, the
 scenario, and the model's messages (Inspect `ChatMessage`s or their JSON form). The
-messages are the agent's transcript, not world state: the verifier has them only when
-the agent's `.eval` is collected, so `WORLD_RESOURCE_KEYS` and `WORLD_LONG_HORIZON_KEYS`
-name the values that need the world alone.
+scorers pass the agent's transcript; the verifier passes the messages rebuilt from the
+world service's own records (`world_records`). `WORLD_RESOURCE_KEYS` and
+`WORLD_LONG_HORIZON_KEYS` name the values that need the world alone.
 """
 
 from __future__ import annotations

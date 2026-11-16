@@ -3,8 +3,8 @@ schema_version = "1.4"
 # Grading evidence. Harbor restores each artifact at its source path in the separate verifier.
 # - world/: from the world sidecar, not `main`: state.json, events.jsonl, seed.json, browser/
 #   and the final admin snapshot written by the collect hook below.
-# - agent-eval/: TEMPORARY, the agent's single Inspect .eval log. The verifier still needs it for
-#   containment and some resource/long-horizon counts until those move onto world-side records.
+# - agent-eval/: the agent's single Inspect .eval log, for Scout. The verifier grades every key
+#   from the world's records without it; when present it only adds the crosscheck.* keys.
 artifacts = [
     { source = "/var/log/world", service = "world", destination = "world" },
     { source = "/logs/agent/inspect", destination = "agent-eval" },

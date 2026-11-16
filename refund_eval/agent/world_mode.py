@@ -13,7 +13,9 @@ scenario data, seed, turn cap and simulators; `sim_weeks` and `checkin_hours` mu
   Inspect's `memory` tool stays local.
 - `on_continue` posts `POST /turn`: the world counts the turn, saves the status report,
   checks its stop conditions, runs due follow-ups and wakes the agent. The reply's wake-up
-  becomes the wake-up message; a stopped world ends the loop.
+  becomes the wake-up message; a stopped world ends the loop. Each `/turn` also reports the
+  memory tool calls made since the last one (call id and a sha256 of the canonical arguments),
+  which the world records as agent-reported for grading.
 - Limits that stay here: the target token budget (`BudgetedModel`, with the ledger in
   `WorldView` and sent to the world on every `/turn`, where it is saved as
   `World.token_ledger`), Inspect's limits (including `cost_limit`, now the target's spend
@@ -27,6 +29,8 @@ scenario data, seed, turn cap and simulators; `sim_weeks` and `checkin_hours` mu
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from asyncio import CancelledError
@@ -118,6 +122,7 @@ class WorldClient:
         self.turns = 0  # turns the world has been asked to count
         self.stopped = False  # the world has a stop reason
         self.pending_kill: str | None = None  # the kill switch refused a tool call
+        self.memory_calls: list[dict[str, Any]] = []  # local tool calls not yet reported on /turn
         self._stack = AsyncExitStack()
         self._http: httpx.AsyncClient | None = None
         self._session: ClientSession | None = None
@@ -165,11 +170,15 @@ class WorldClient:
                        parameters=inspect_parameters(listed.inputSchema), parallel=False, max_output=0)
 
     def local_tool(self, tool: Tool) -> ToolDef:
-        """A local tool (memory) that refuses to run once the kill switch is on."""
+        """A local tool (memory) that refuses to run once the kill switch is on. Its calls are
+        reported on the next `/turn` (they never reach the world)."""
         tdef = ToolDef(tool)
         inner = tdef.tool
 
         async def execute(**kwargs: Any):
+            canonical = json.dumps(kwargs, sort_keys=True, ensure_ascii=False, default=str)  # as checks._canonical
+            self.memory_calls.append({"id": current_tool_call_id(),
+                                      "arguments_sha256": hashlib.sha256(canonical.encode()).hexdigest()})
             self._check_kill()
             return await inner(**kwargs)
 
@@ -189,10 +198,13 @@ class WorldClient:
         ledger = self.view.world.token_ledger
         if ledger is not None:
             body["token_ledger"] = ledger.model_dump(mode="json")
+        reported = list(self.memory_calls)
+        body["memory_calls"] = reported
         response = await self._http.post(f"{self.url}/turn", json=body,
                                          headers={"Authorization": f"Bearer {self._token}"})
         if response.status_code != 200:
             raise RuntimeError(f"World service /turn failed: HTTP {response.status_code}: {response.text[:500]}")
+        del self.memory_calls[:len(reported)]
         result = response.json()
         if counted:
             self.turns += 1

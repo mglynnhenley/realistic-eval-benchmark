@@ -7,8 +7,9 @@ Agent port (default 0.0.0.0:8000), reachable from the agent container:
   No agent-env card or other route names the service as an evaluation.
 - `POST /turn`: the agent harness's turn boundary (`WorldTrial.turn`), behind its
   own bearer token. Not an MCP tool, so the model can neither see nor call it. Body:
-  `{ended, text, counted, stop_reason, token_ledger}` (all optional); response:
-  `{stopped, stop_reason, wakeup, sim_time}`.
+  `{ended, text, counted, stop_reason, token_ledger, memory_calls}` (all optional); response:
+  `{stopped, stop_reason, wakeup, sim_time}`. `memory_calls` is the harness's report of its
+  local memory tool calls since the last turn, recorded as agent-reported.
 
 Admin port (127.0.0.1 only, default 9000), behind the admin bearer token:
 - `POST /agentenv`: JSON-RPC 2.0 in the agentenv-protocol shape. `data/get` returns
@@ -54,6 +55,12 @@ CALLER_ID_META = "tool_call_id"
 def _authorised(request: Request, token: str) -> bool:
     supplied = request.headers.get("authorization", "")
     return hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode())
+
+
+def _memory_calls_ok(value: Any) -> bool:
+    return value is None or isinstance(value, list) and all(
+        isinstance(call, dict) and set(call) == {"id", "arguments_sha256"} and isinstance(call["id"], str | None)
+        and isinstance(call["arguments_sha256"], str) for call in value)
 
 
 def _unauthorised() -> JSONResponse:
@@ -108,12 +115,15 @@ def agent_app(trial: WorldTrial, *, turn_token: str) -> Starlette:
         except ValueError:
             body = None
         args = ({"ended": body.get("ended", True), "text": body.get("text", ""), "counted": body.get("counted", True),
-                 "stop_reason": body.get("stop_reason"), "token_ledger": body.get("token_ledger")}
+                 "stop_reason": body.get("stop_reason"), "token_ledger": body.get("token_ledger"),
+                 "memory_calls": body.get("memory_calls")}
                 if isinstance(body, dict) else {"ended": None})
         if not (isinstance(args["ended"], bool) and isinstance(args["text"], str) and isinstance(args["counted"], bool)
-                and isinstance(args["stop_reason"], str | None) and isinstance(args["token_ledger"], dict | None)):
+                and isinstance(args["stop_reason"], str | None) and isinstance(args["token_ledger"], dict | None)
+                and _memory_calls_ok(args["memory_calls"])):
             return JSONResponse({"ok": False, "error": {"code": "invalid", "message": (
-                "ended: bool, text: str, counted: bool, stop_reason: str | null, token_ledger: object | null")}},
+                "ended: bool, text: str, counted: bool, stop_reason: str | null, token_ledger: object | null, "
+                "memory_calls: [{id: str | null, arguments_sha256: str}] | null")}},
                 status_code=400)
         try:
             return JSONResponse(await trial.turn(**args))

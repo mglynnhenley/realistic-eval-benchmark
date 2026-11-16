@@ -157,7 +157,7 @@ Each trial collects the following:
 
 - `agent/`: the Inspect `.eval` log, `trajectory.json` (ATIF-v1.8, with simulated time in each step's `extra`) and `inspect.log`.
 - `artifacts/world/`: `state.json`, `events.jsonl`, `seed.json`, `browser/` and `final_snapshot.json`.
-- `artifacts/agent-eval/`: a temporary copy of the `.eval` for the verifier.
+- `artifacts/agent-eval/`: a copy of the `.eval` for Scout. The verifier grades every key from the world's own records (its tool calls and `/turn`s, with the memory calls the agent reports labelled as agent-reported); with the `.eval` it only adds `crosscheck.*` keys. `refund_eval/grading/world_records.py` lists where the two can differ.
 - `verifier/`: `reward.json` and `details.json`.
 
 The admin port is reachable only inside the world container. The browser's network namespace needs user namespaces, which Docker's default seccomp profile blocks, so the `world` service runs with `seccomp=unconfined`. `main` keeps Docker's defaults.
