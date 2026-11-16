@@ -1,0 +1,82 @@
+"""The free parity gate (migration step 19): scripted fixture trials on the old Inspect path and the native
+Harbor task's path give the same world, event log and grades, apart from known differences
+(`refund_eval.parity.run.KNOWN`).
+
+Needs Docker (the real browser runs in its container on the in-process paths) and skips without it.
+The `harbor run --environment docker` path builds the task images and takes about a minute per script
+once they are cached; it also needs REFUND_EVAL_PARITY_HARBOR=1. Free: mockllm target, fake world
+models, no API keys. The full gate with its report: `uv run python -m refund_eval.parity`.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+
+import pytest
+
+from refund_eval.parity import run
+from refund_eval.parity.scripts import SCRIPTS
+from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
+
+
+def _docker_ready() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    probe = subprocess.run(["docker", "image", "inspect", DEFAULT_IMAGE], capture_output=True, check=False)
+    return probe.returncode == 0
+
+
+DOCKER = pytest.mark.skipif(not _docker_ready(), reason=f"Needs Docker and the browser image {DEFAULT_IMAGE}")
+HARBOR = pytest.mark.skipif(os.environ.get("REFUND_EVAL_PARITY_HARBOR") != "1",
+                            reason="Set REFUND_EVAL_PARITY_HARBOR=1 to run the local Harbor Docker trials")
+
+
+def unexplained(name: str, comparison: dict) -> list:
+    return [(key, path, a, b) for key, c in comparison.items() for path, a, b in [*c["world"], *c["events"],
+                                                                                    *c["grades"]]
+            if run.classify(name, key, path) is None]
+
+
+def check(name: str, out, paths) -> None:
+    for path in paths:
+        result = run.spawn(path, SCRIPTS[name], out / path, 7)
+        assert result["ok"], result
+        assert result["stop_reason"] == SCRIPTS[name].expected_stop, result
+    comparison = run.compare(out)
+    assert {f"{a}_vs_{b}" for a, b in [("old", "inprocess"), ("old", "harbor"), ("inprocess", "harbor")]
+            if a in paths and b in paths} == set(comparison)
+    assert unexplained(name, comparison) == []
+    for c in comparison.values():
+        assert c["event_order_same"]
+
+
+@DOCKER
+@pytest.mark.parametrize("name", list(SCRIPTS))
+def test_in_process_paths_match(name, tmp_path):
+    check(name, tmp_path, ["old", "inprocess"])
+
+
+@DOCKER
+@HARBOR
+@pytest.mark.parametrize("name", list(SCRIPTS))
+def test_harbor_docker_path_matches(name, tmp_path):
+    check(name, tmp_path, ["old", "inprocess", "harbor"])
+
+
+def test_token_ledger_events_are_compared_by_the_calls_they_record():
+    def ledger(seq, calls, set_=False):
+        payload = ({"path": ["token_ledger"], "value": {"calls": calls}} if set_ else {"append": {"calls": calls}})
+        return {"seq": seq, "kind": "field_set" if set_ else "token_ledger_updated", "sim_time": "t", "payload": payload}
+
+    mail = {"kind": "mail_queued", "sim_time": "t", "payload": {"id": "m"}}
+    native = [ledger(0, [], set_=True), ledger(1, ["c1"]), {**mail, "seq": 2}]
+    remote = [{**mail, "seq": 0}, ledger(1, ["c1"], set_=True)]
+    found = run.compare_events(native, remote)
+    assert not found["whole_same"] and found["order_same"]
+    assert [p for p, _, _ in found["diffs"]] == ["events[token ledger].positions"]
+    assert [p for p, _, _ in run.compare_events(native, [*remote, ledger(2, ["c2"])])["diffs"]] == [
+        "events[token ledger].calls", "events[token ledger].positions"]
+    moved = run.compare_events(native, [{**mail, "payload": {"id": "other"}, "seq": 0}])
+    assert ("events[mail_queued #0].payload.id", "m", "other") in moved["diffs"]
