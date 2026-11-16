@@ -12,15 +12,14 @@ import getpass
 import os
 from pathlib import Path
 
+from refund_eval.runtime.trial_artifacts import trial_sources
 from refund_eval.storage import setup
 from refund_eval.storage.supabase import UploadError, upload_log
 
 
 def eval_logs(paths: list[Path]) -> list[Path]:
-    found: list[Path] = []
-    for path in paths:
-        found.extend(sorted(path.rglob("*.eval")) if path.is_dir() else [path])
-    return found
+    """.eval files, with each native Harbor trial found as its directory."""
+    return trial_sources(paths)
 
 
 async def upload_all(paths: list[Path]) -> int:
@@ -38,7 +37,7 @@ async def upload_all(paths: list[Path]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    upload = commands.add_parser("upload", help="Upload .eval files, or every .eval file under a directory.")
+    upload = commands.add_parser("upload", help="Upload .eval files, native Harbor trial directories, or every one under a directory.")
     upload.add_argument("paths", nargs="+", type=Path)
     create = commands.add_parser("setup", help="Create or reuse a project, apply the schema and write .env.")
     create.add_argument("--project-ref", help="Use this existing project instead of creating one.")

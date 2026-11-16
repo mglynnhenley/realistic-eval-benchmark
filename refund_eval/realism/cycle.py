@@ -36,12 +36,15 @@ def collect(out: str, trials: int) -> dict:
     """Collect only complete native logs; every requested sample must succeed exactly once."""
     from inspect_ai.log import read_eval_log
 
+    from refund_eval.runtime.trial_artifacts import eval_path, trial_sources
+
     if trials <= 0:
         raise ValueError("Requested trial count must be positive")
     jobs = Path(out) / "jobs"
     logs, errors, seen = [], [], set()
     valid_trials = 0
-    for path in sorted(jobs.rglob("*.eval")):
+    # Native Harbor trials count once, as their synthesized merged logs.
+    for path in map(eval_path, trial_sources([jobs])):
         try:
             evaluation = read_eval_log(str(path))
             samples = evaluation.samples or []

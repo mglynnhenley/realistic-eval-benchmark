@@ -32,6 +32,7 @@ from refund_eval.realism.scan_budget import (
     FLASH_REASONING_PROFILE,
     bounded_tells_config,
 )
+from refund_eval.runtime.trial_artifacts import eval_paths
 from scout import scanners as scout_scanners
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -218,6 +219,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--parts-sha256", help="Exact frozen plan file digest")
     parser.add_argument("--yes", action="store_true", help="Do not ask before scanning")
     args = parser.parse_args(argv)
+    args.logs = eval_paths(args.logs)  # native Harbor trials: their synthesized merged logs
     if args.bounded_tells:
         if args.scanners != ["tells"] or args.max_tokens is None:
             parser.error("--bounded-tells requires --scanners tells and explicit --max-tokens")

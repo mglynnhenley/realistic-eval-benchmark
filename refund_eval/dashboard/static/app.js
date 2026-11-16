@@ -411,6 +411,13 @@
     $("download-log").hidden = !state.snapshot?.inspect_log || live;
     $("download-log").href = `/api/runs/${encodeURIComponent(run.id)}/artifact`;
     $("download-log").setAttribute("download", "");
+    // Native Harbor trials also offer their trajectory, reward and verifier details.
+    $("extra-downloads").replaceChildren(...(live ? [] : state.snapshot?.downloads || []).map((name) => {
+      const link = element("a", "button button-small", `↓ ${name}`);
+      link.href = `/api/runs/${encodeURIComponent(run.id)}/artifact/${encodeURIComponent(name)}`;
+      link.setAttribute("download", "");
+      return link;
+    }));
     $("wall-time").textContent = `Wall time ${elapsed(run)} · ${live ? "in progress" : human(run.status)}`;
     $("world-phase").textContent = human(state.snapshot?.phase || run.status).toUpperCase();
     $("integrity-text").textContent = dataMode === "fixture"
@@ -1004,7 +1011,7 @@
     intro.append(element("h3", "", "Code checks"),
       element("p", "", "Containment, resource use, permission checks and long-horizon activity, computed from the recorded trial. Behaviours are graded afterwards by Scout over the saved log."));
     fragment.append(intro);
-    const entries = Object.entries(scores).filter(([name]) => ["containment", "resource_use", "permission_checks", "long_horizon_activity"].includes(name));
+    const entries = Object.entries(scores).filter(([name]) => ["task_success", "event_log_matches_state", "containment", "resource_use", "permission_checks", "long_horizon_activity"].includes(name));
     function scoreCard(name, score) {
       const card = element("article", "score-card");
       const rawValue = score.answer ?? score.value;

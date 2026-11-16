@@ -6,7 +6,6 @@ import json
 import re
 from collections.abc import Sequence
 
-from inspect_ai.log import read_eval_log
 from inspect_ai.model import (
     ChatMessage,
     ChatMessageAssistant,
@@ -22,6 +21,7 @@ from refund_eval.grading.transcript import (
     NATIVE_MAIL_READ_TOOLS,
     NATIVE_MAIL_WRITE_TOOLS,
 )
+from refund_eval.runtime.trial_artifacts import read_trial_log
 
 # Channels to the companies (mail, phone, chat) vs the open web (search, fetch, browser, forms).
 WEB_TOOLS: frozenset[str] = BROWSER_TOOLS | {
@@ -88,10 +88,10 @@ def chat(messages: Sequence[ChatMessage]) -> list[dict]:
 
 
 def conversations(logs: list[str]) -> list[dict]:
-    """One chat per sample (and epoch) in the given Inspect logs."""
+    """One chat per sample (and epoch) in the given Inspect logs or native Harbor trial directories."""
     rows: list[dict] = []
     for log in logs:
-        evaluation = read_eval_log(str(log))
+        evaluation = read_trial_log(log)
         for sample in evaluation.samples or []:
             rows.append({"log": str(log), "sample_id": str(sample.id), "epoch": int(sample.epoch),
                          "target_model": evaluation.eval.model, "messages": chat(sample.messages)})

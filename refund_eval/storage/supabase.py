@@ -16,10 +16,11 @@ from typing import Any
 
 import anyio
 import httpx
-from inspect_ai.log import EvalLog, read_eval_log
+from inspect_ai.log import EvalLog
 
 from refund_eval.config import SUPABASE_KEY_ENV as KEY_ENV
 from refund_eval.config import SUPABASE_URL_ENV as URL_ENV
+from refund_eval.runtime.trial_artifacts import is_harbor_trial, read_trial_log
 from refund_eval.storage.rows import message_row, run_row
 
 BUCKET = "eval-logs"
@@ -76,17 +77,18 @@ async def _upload_file(client: httpx.AsyncClient, content: bytes, object_path: s
 
 
 async def upload_log(path: str | Path, log: EvalLog | None = None) -> list[str]:
-    """Upload every sample in a saved .eval log; return the run row IDs.
+    """Upload every sample in a saved .eval log or native Harbor trial directory; return the run row IDs.
 
-    The raw log is stored first. If the bucket rejects it (for example, over the
-    plan's file size limit) the rows are still written, without a log path.
+    The raw log is stored first (for a Harbor trial, the agent's .eval; the rows hold the
+    world from its artifacts). If the bucket rejects it (for example, over the plan's file
+    size limit) the rows are still written, without a log path.
     """
     source = Path(path).expanduser().resolve()
     if log is None or not log.samples:
-        log = await anyio.to_thread.run_sync(read_eval_log, str(source))
+        log = await anyio.to_thread.run_sync(read_trial_log, source)
     if not log.samples:
         raise UploadError(f"{source} contains no samples to upload.")
-    content = source.read_bytes()
+    content = Path(log.location).read_bytes() if is_harbor_trial(source) else source.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
     # Inspect's file names carry timestamps with characters storage keys reject.
     object_path: str | None = f"{log.eval.eval_id}.eval"

@@ -24,6 +24,7 @@ from refund_eval.companies.models import (
     CompanySimulator,
 )
 from refund_eval.runtime.records import InteractionAttempt, InteractionRecord
+from refund_eval.runtime.trial_artifacts import eval_path
 
 
 class SavedInteraction(BaseModel):
@@ -76,6 +77,8 @@ class DecisionComparison(BaseModel):
 def load_interactions(path: str | Path, *, source_format: Literal["log", "snapshot"]) -> SavedInteractions:
     """Read recorded company inputs, never reconstruct missing inputs from the world."""
     path = Path(path).expanduser().resolve()
+    if source_format == "log":
+        path = eval_path(path)  # a native Harbor trial: its synthesized merged log
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     if source_format == "log":
         log = read_eval_log(str(path))

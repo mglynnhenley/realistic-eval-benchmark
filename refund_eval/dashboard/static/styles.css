@@ -677,3 +677,4 @@
 .budget-fields .field-help { font-size: 12px; color: #52664d; }
 .budget-fields .text-input { font-size: 12px; min-height: 40px; }
 .budget-fields .text-input::placeholder { color: #52664d; }
+#extra-downloads{display:contents}

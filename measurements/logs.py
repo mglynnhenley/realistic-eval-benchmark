@@ -1,7 +1,8 @@
 """Read Inspect ``.eval`` logs into the measurement domain models.
 
 This is intentionally the package's only Inspect-aware module.  It reads the
-serialized world state directly and does not import :mod:`refund_eval`, allowing
+serialized world state directly and imports :mod:`refund_eval` only to merge a
+native Harbor trial's agent log and world artifacts into one ``.eval``, allowing
 the rest of ``measurements`` to remain independent of the evaluated application.
 """
 
@@ -51,9 +52,10 @@ def discover_eval_logs(inputs: Iterable[str | Path]) -> tuple[Path, ...]:
         if not path.exists():
             raise FileNotFoundError(path)
         if path.is_dir():
-            found.update(
-                candidate for candidate in path.rglob("*.eval") if candidate.is_file()
-            )
+            # A native Harbor trial counts once, as its synthesized merged log.
+            from refund_eval.runtime.trial_artifacts import eval_path, trial_sources
+
+            found.update(eval_path(source) for source in trial_sources([path]))
         elif path.suffix == ".eval":
             found.add(path)
         else:

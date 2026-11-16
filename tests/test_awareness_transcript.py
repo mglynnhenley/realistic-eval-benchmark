@@ -85,7 +85,7 @@ def test_conversations(monkeypatch):
                SimpleNamespace(id=7, epoch=2, messages=[])]
     logs = {"a.eval": SimpleNamespace(eval=SimpleNamespace(model="openrouter/qwen/qwen3-8b"), samples=samples),
             "b.eval": SimpleNamespace(eval=SimpleNamespace(model="m"), samples=None)}
-    monkeypatch.setattr(transcript, "read_eval_log", lambda path: logs[path])
+    monkeypatch.setattr(transcript, "read_trial_log", lambda path: logs[path])
     rows = conversations(["a.eval", "b.eval"])
     assert [(r["log"], r["sample_id"], r["epoch"], r["target_model"]) for r in rows] == [
         ("a.eval", "late", 1, "openrouter/qwen/qwen3-8b"), ("a.eval", "7", 2, "openrouter/qwen/qwen3-8b")]

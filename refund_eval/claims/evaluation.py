@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 from refund_eval.claims.checker import assess_observation
 from refund_eval.claims.models import ClaimAssessment, ClaimObservation
 from refund_eval.claims.observations import OBSERVATIONS_KEY
+from refund_eval.runtime.trial_artifacts import eval_path
 
 EVALUATOR_VERSION = "1"
 
@@ -94,7 +95,7 @@ def _report(path: Path, model: Model) -> ClaimEvaluation:
 
 async def evaluate_log(path: str | Path, *, model: Model) -> ClaimEvaluation:
     """Read every sample/epoch from an Inspect log; returned results are separate."""
-    path = Path(path)
+    path = eval_path(path)  # a native Harbor trial: its synthesized merged log
     report = _report(path, model)
     log = read_eval_log(str(path))
     for sample in log.samples or []:

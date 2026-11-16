@@ -1,9 +1,14 @@
-"""Loopback-only dashboard server and isolated eval subprocess management."""
+"""Loopback-only dashboard server and isolated eval subprocess management.
+
+Beside its own runs it lists finished native Harbor trials found under `--jobs-dir`
+(`<jobs>/<job>/<trial>/`), read-only, through `runtime.trial_artifacts`.
+"""
 
 from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -32,7 +37,19 @@ from refund_eval.config import (
 )
 from refund_eval.harbor.config import batch_models, batch_total
 from refund_eval.output_paths import validate_private_output
-from refund_eval.runtime.snapshots import activity_measurements
+from refund_eval.runtime.snapshots import (
+    activity_measurements,
+    final_snapshot,
+    json_safe,
+)
+from refund_eval.runtime.trial_artifacts import (
+    WORLD_DIR,
+    agent_eval_path,
+    is_harbor_trial,
+    read_trial_log,
+    reward_scores,
+    world_store,
+)
 from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import list_snapshots
 
@@ -47,6 +64,9 @@ PROVIDER_KEYS = {
     "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     "grok": ("XAI_API_KEY", "GROK_API_KEY"),
 }
+# Files offered for download from a native Harbor trial, beside its agent .eval.
+HARBOR_DOWNLOADS = {"trajectory.json": "agent/trajectory.json", "reward.json": "verifier/reward.json",
+                    "details.json": "verifier/details.json"}
 PROVIDER_SDKS = {"openrouter": "openai", "anthropic": "anthropic", "openai": "openai", "google": "google.genai", "grok": "xai_sdk"}
 
 
@@ -66,6 +86,16 @@ def read_json(path: Path, default: Any = None) -> Any:
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return default
+
+
+def tail(path: Path, size: int = 24_000) -> str:
+    try:
+        with path.open("rb") as file:
+            file.seek(0, 2)
+            file.seek(max(0, file.tell() - size))
+            return file.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def write_json(path: Path, data: Any) -> None:
@@ -126,7 +156,9 @@ def run_presets() -> list[dict]:
 
 
 class RunManager:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, jobs_dirs: list[Path] | tuple[Path, ...] = ()):
+        self.jobs_dirs = [Path(path).expanduser() for path in jobs_dirs]
+        self._harbor_cache: dict[str, tuple[tuple, dict]] = {}
         self.root = validate_private_output(data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self._ownership = (self.root / ".server.lock").open("a+")
@@ -156,7 +188,72 @@ class RunManager:
             raise APIError(404, "Run not found.")
         return directory
 
+    def harbor_trials(self) -> dict[str, Path]:
+        """Finished native Harbor trials (with Harbor's result.json), by a run ID from their path."""
+        found = {}
+        for jobs in self.jobs_dirs:
+            for result in sorted(jobs.glob("*/*/result.json")):
+                if is_harbor_trial(result.parent):
+                    found[hashlib.sha256(str(result.parent.resolve()).encode()).hexdigest()[:12]] = result.parent
+        return found
+
+    def harbor_trial(self, run_id: str) -> Path | None:
+        if (self.root / run_id / "run.json").is_file() or not self.jobs_dirs:
+            return None
+        return self.harbor_trials().get(run_id)
+
+    def _cached(self, kind: str, trial: Path, build) -> dict:
+        files = [trial / "result.json", trial / WORLD_DIR / "state.json", trial / "verifier/reward.json",
+                 agent_eval_path(trial) or trial]
+        key = tuple(path.stat().st_mtime_ns if path.exists() else None for path in files)
+        cached = self._harbor_cache.get(f"{kind}:{trial}")
+        if cached is None or cached[0] != key:
+            cached = (key, build())
+            self._harbor_cache[f"{kind}:{trial}"] = cached
+        return cached[1]
+
+    def describe_harbor(self, run_id: str, trial: Path) -> dict:
+        def build() -> dict:
+            result = read_json(trial / "result.json", {})
+            state = read_json(trial / WORLD_DIR / "state.json", {})
+            world = (state.get("store") or {}).get("world") or {}
+            settings = state.get("settings") or {}
+            error = result.get("exception_info") or {}
+            stop = world.get("stop_reason")
+            stopped = error.get("exception_type") == "CancelledError" or world.get("killed") or stop in {
+                "kill_switch", "cancelled"}
+            model = ((result.get("config") or {}).get("agent") or {}).get("model_name")
+            config = {"scenario": settings.get("scenario"), "data_mode": settings.get("data_mode"), "model": model}
+            return {"id": run_id, "label": f"Harbor · {trial.parent.name} / {trial.name}", "mode": "model",
+                    "status": "stopped" if stopped else "failed" if error or not world else "completed",
+                    "created_at": result.get("started_at") or "", "updated_at": result.get("finished_at"),
+                    "model": model, "scenario": settings.get("scenario"), "data_mode": settings.get("data_mode"),
+                    "tool_profile": "published", "config": config, "error": error.get("exception_message"),
+                    "turns": world.get("turn", 0), "stop_reason": stop,
+                    "has_artifact": agent_eval_path(trial) is not None, "harbor_trial": str(trial)}
+
+        return dict(self._cached("describe", trial, build))
+
+    def detail_harbor(self, run_id: str, trial: Path) -> dict:
+        run = self.describe_harbor(run_id, trial)
+
+        def build() -> dict:
+            try:
+                snapshot = final_snapshot(read_trial_log(trial))
+            except (OSError, ValueError) as error:  # no agent log: the world and rewards alone
+                snapshot = {"phase": run["status"], "error": run["error"] or str(error),
+                            "world": world_store(trial).get("world"), "messages": [], "scores": reward_scores(trial)}
+            snapshot = json_safe(snapshot)
+            snapshot["long_horizon"] = activity_measurements(snapshot)
+            snapshot["downloads"] = [name for name, part in HARBOR_DOWNLOADS.items() if (trial / part).is_file()]
+            return snapshot
+
+        return {"run": run, "snapshot": self._cached("detail", trial, build),
+                "console": tail(trial / "agent/inspect.log")}
+
     def describe(self, run_id: str) -> dict:
+        if (trial := self.harbor_trial(run_id)) is not None:
+            return self.describe_harbor(run_id, trial)
         directory = self.directory(run_id)
         record = read_json(directory / "run.json", {})
         snapshot = read_json(directory / "snapshot.json", {})
@@ -179,10 +276,13 @@ class RunManager:
         with self.lock:
             items = [self.describe(p.parent.name) for p in self.root.glob("*/run.json")
                      if re.fullmatch(r"[a-f0-9]{12}", p.parent.name)]
+            items += [self.describe_harbor(run_id, trial) for run_id, trial in self.harbor_trials().items()]
         return sorted(items, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def detail(self, run_id: str) -> dict:
         with self.lock:
+            if (trial := self.harbor_trial(run_id)) is not None:
+                return self.detail_harbor(run_id, trial)
             directory = self.directory(run_id)
             snapshot = read_json(directory / "snapshot.json", {})
             # Old runs get the same read-only analysis without rewriting their saved records.
@@ -190,14 +290,7 @@ class RunManager:
             review = read_json(directory / "review.json", {})
             if isinstance(review, dict) and isinstance(review.get("summary"), str):
                 snapshot["review_note"] = review["summary"]
-            try:
-                with (directory / "console.log").open("rb") as file:
-                    file.seek(0, 2)
-                    file.seek(max(0, file.tell() - 24_000))
-                    console = file.read().decode("utf-8", errors="replace")
-            except OSError:
-                console = ""
-            return {"run": self.describe(run_id), "snapshot": snapshot, "console": console}
+            return {"run": self.describe(run_id), "snapshot": snapshot, "console": tail(directory / "console.log")}
 
     def start(self, config: RunConfig) -> dict:
         if config.models is not None and config.execution == "local":
@@ -379,6 +472,8 @@ class RunManager:
 
     def stop(self, run_id: str) -> dict:
         with self.lock:
+            if self.harbor_trial(run_id) is not None:  # finished and read-only
+                return self.describe(run_id)
             directory = self.directory(run_id)
             record = read_json(directory / "run.json", {})
             if record.get("parent_batch_id"):
@@ -420,7 +515,14 @@ class RunManager:
                 return resolved
         return None
 
-    def artifact(self, run_id: str) -> Path:
+    def artifact(self, run_id: str, name: str | None = None) -> Path:
+        if (trial := self.harbor_trial(run_id)) is not None:
+            path = trial / HARBOR_DOWNLOADS[name] if name in HARBOR_DOWNLOADS else agent_eval_path(trial)
+            if name not in (None, *HARBOR_DOWNLOADS) or path is None or not path.is_file():
+                raise APIError(404, "That file was not collected for this trial.")
+            return path
+        if name is not None:
+            raise APIError(404, "Not found.")
         directory = self.directory(run_id)
         record = read_json(directory / "run.json", {})
         if record.get("config", {}).get("execution", "local") != "local" and not record.get("parent_batch_id"):
@@ -563,8 +665,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, {"runs": self.server.manager.list()})
             elif re.fullmatch(r"/api/runs/[a-f0-9]{12}", path):
                 self._json(200, self.server.manager.detail(path.rsplit("/", 1)[1]))
-            elif re.fullmatch(r"/api/runs/[a-f0-9]{12}/artifact", path):
-                artifact = self.server.manager.artifact(path.split("/")[3])
+            elif re.fullmatch(r"/api/runs/[a-f0-9]{12}/artifact(/[a-z_]+\.json)?", path):
+                parts = path.split("/")
+                artifact = self.server.manager.artifact(parts[3], parts[5] if len(parts) > 5 else None)
                 self._send(200, artifact.read_bytes(), "application/octet-stream", artifact.name)
             elif path in {"/", "/index.html", "/app.js", "/styles.css", "/static/app.js", "/static/styles.css",
                           "/static/markdown-it.min.js", "/static/markdown.js"}:
@@ -602,6 +705,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the local refund-eval dashboard.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", type=Path, default=Path(".context/dashboard/runs"))
+    parser.add_argument("--jobs-dir", type=Path, action="append",
+                        help="Harbor jobs directory to list native trials from (repeatable; "
+                             "default .context/harbor_tasks/jobs, the adapter's sample job)")
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("port must be between 0 and 65535")
@@ -609,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     try:
-        manager = RunManager(args.data_dir)
+        manager = RunManager(args.data_dir, args.jobs_dir or [Path(".context/harbor_tasks/jobs")])
     except (RuntimeError, ValueError) as ex:
         parser.error(str(ex))
     try:

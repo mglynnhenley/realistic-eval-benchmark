@@ -164,6 +164,8 @@ The admin port is reachable only inside the world container. The browser's netwo
 
 Each trial's seed is derived from the task version and the trial name. Set `WORLD_SEED` to replay a recorded seed.
 
+The agent's `.eval` holds no world. `refund_eval.runtime.trial_artifacts` reads a trial directory as one Inspect log: the agent's log, with the world's store from `final_snapshot.json` (or from `state.json` and `events.jsonl`) and the scores from `reward.json` and `details.json`. Pass trial or job directories wherever these tools take `.eval` logs: storage upload, Scout, awareness, claims, company reruns, measurements and the realism loop's `collect`. Tools that open `.eval` files themselves read a merged copy, which is written to `<trial>/merged/`. To print merged paths for other tools, such as `inspect view`, run `uv run python -m refund_eval.runtime.trial_artifacts <trial or job dir>`. The dashboard lists finished trials found under `--jobs-dir` (default `.context/harbor_tasks/jobs`). They are read-only. Each shows its transcript, world, rewards, the `.eval`, the trajectory and the verifier files.
+
 To test without paid calls, run a fixture task with a `mockllm/model` target and the world's fake models. `REFUND_EVAL_FAKE_WORLD_MODELS=1` enables the fake models; they refuse to start if any API key is set:
 
 ```bash
