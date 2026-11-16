@@ -3,7 +3,6 @@
 import copy
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from types import SimpleNamespace
 
 import pytest
 from fixtures.harness_fakes import (
@@ -29,6 +28,7 @@ from refund_eval.world.interception import SESSION_END_KEY, ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox
 from refund_eval.world.state import (
     Email,
+    FollowUp,
     ScheduledEmail,
     load_world,
     save_world,
@@ -187,14 +187,14 @@ async def test_followup_at_session_boundary_does_not_generate(monkeypatch):
     world = harness.initial_world(load_scenario("train_refund"))
     deadline = sim_deadline(world, 1)
     world.requested_wakeup = deadline
+    world.follow_ups = [FollowUp(id="boundary", org="trainline", promised_at=world.now,
+                                 due_at=deadline, plan="Send the decision.")]
     save_world(world)
     calls = []
 
     async def followup(item):
         calls.append(item)
 
-    monkeypatch.setattr("refund_eval.sim.open_world.next_follow_up",
-                        lambda world: SimpleNamespace(due_at=deadline))
     monkeypatch.setattr("refund_eval.sim.router.follow_up", followup)
     await harness._follow_ups_before_wake(1, (9,))
     assert not calls
