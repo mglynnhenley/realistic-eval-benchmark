@@ -7,5 +7,6 @@
 - `server.py`: `/mcp` and `POST /turn` for the agent side; admin reads on 127.0.0.1.
 - `__main__.py`: `python -m refund_eval.world_service --help`.
 
-The Inspect path (`refund_eval.task`) does not use this package.
+The native Inspect path (`refund_eval.task`) does not use this package. In world-service mode
+(`-T world_url=...`, `refund_eval.agent.world_mode`) the Inspect agent reaches it over HTTP only.
 """

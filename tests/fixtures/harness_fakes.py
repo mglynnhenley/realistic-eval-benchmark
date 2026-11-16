@@ -31,6 +31,7 @@ from refund_eval.agent import adapters
 from refund_eval.agent.harness import refund_agent
 from refund_eval.agent.schedule import next_checkin
 from refund_eval.published import profile
+from refund_eval.runtime import turns
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.world.state import (
     WORLD_KEY,
@@ -249,7 +250,7 @@ def isolated_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(adapters, "tool_scope", fake_tool_scope)
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: {"configured": True})
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: {"configured": True})
-    monkeypatch.setattr(adapters, "advance_clock", fake_advance)
+    monkeypatch.setattr(turns, "advance_clock", fake_advance)
     monkeypatch.setattr(adapters, "load_scorers", lambda *args, **kwargs: [world_scorer()])
     yield
 

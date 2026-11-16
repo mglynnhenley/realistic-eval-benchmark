@@ -9,8 +9,8 @@ return value: MCP content blocks, and `ToolFailure` (shown as an MCP error resul
 where the adapter raises Inspect's ToolError.
 
 `schedule_wakeup` is `agent.harness.schedule_wakeup` without Inspect: same name,
-description and schema (a test checks them against the harness's ToolDef), same checks
-and messages.
+description and schema (a test checks them against the harness's ToolDef), and the same
+code (`runtime.turns.request_wakeup`).
 """
 
 from __future__ import annotations
@@ -18,13 +18,11 @@ from __future__ import annotations
 import inspect
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 import httpx
 import jsonschema
 
-from refund_eval.agent.schedule import LONDON
 from refund_eval.published.adapter import (
     PUBLIC_SEARCH_PROVENANCE,
     MCPService,
@@ -33,10 +31,10 @@ from refund_eval.published.adapter import (
 )
 from refund_eval.published.mcp import MCPRPCError
 from refund_eval.published.search import ExaPolicyDenied
+from refund_eval.runtime.turns import WakeupRequestError, request_wakeup
 from refund_eval.world.interception import charge_time
-from refund_eval.world.state import WORLD_KEY, world_tx
+from refund_eval.world.state import WORLD_KEY
 from refund_eval.world.store import world_store
-from refund_eval.world.timeutil import as_utc
 
 SCHEDULE_WAKEUP = "schedule_wakeup"
 SCHEDULE_WAKEUP_TOOL: dict[str, Any] = {
@@ -176,28 +174,12 @@ class NativeTool:
 
 
 def schedule_wakeup(arguments: dict[str, Any]) -> str:
-    """Record the agent's requested wake-up, as the harness's schedule_wakeup tool does."""
+    """Record the agent's requested wake-up (`runtime.turns.request_wakeup`, as the harness's tool does)."""
     try:
         jsonschema.validate(arguments, SCHEDULE_WAKEUP_TOOL["inputSchema"])
     except jsonschema.ValidationError as exc:
         raise ToolFailure(exc.message) from exc
-    at = arguments["at"]
     try:
-        local = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
-    except ValueError as ex:
-        raise ToolFailure("Use a London local time in YYYY-MM-DD HH:MM format.") from ex
-    if local.strftime("%Y-%m-%d %H:%M") != at:
-        raise ToolFailure("Use a London local time in YYYY-MM-DD HH:MM format.")
-    candidates = [local.replace(fold=fold) for fold in (0, 1)]
-    valid = [when for when in candidates
-             if as_utc(when).astimezone(LONDON).strftime("%Y-%m-%d %H:%M") == at]
-    if not valid:
-        raise ToolFailure("That London local time does not exist because the clocks change. Choose another time.")
-    with world_tx() as world:
-        future = [when for when in valid if as_utc(when) > as_utc(world.now)]
-        if not future:
-            raise ToolFailure("The wake-up time must be after the current time.")
-        when = min(future, key=as_utc)
-        world.requested_wakeup = when
-    zone = f" ({when:%Z})" if valid[0].utcoffset() != valid[-1].utcoffset() else ""
-    return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time{zone}."
+        return request_wakeup(arguments["at"])
+    except WakeupRequestError as exc:
+        raise ToolFailure(str(exc)) from exc

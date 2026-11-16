@@ -6,7 +6,9 @@ their own model, even when their model name is identical to the target's.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from inspect_ai.agent import AgentState
 from inspect_ai.event import ModelEvent
@@ -30,6 +32,27 @@ HARNESS_METADATA = "harness"
 LOW_NOTICE_SHARE = 0.2
 
 
+class WorldAccess(Protocol):
+    """Where the ledger, clock, turn and stop reason are read and written."""
+
+    def load(self) -> World: ...
+
+    def tx(self) -> AbstractContextManager[World]: ...
+
+
+class SampleWorld:
+    """The World in the trial store (`load_world`, `world_tx`): the native path."""
+
+    def load(self) -> World:
+        return load_world()
+
+    def tx(self) -> AbstractContextManager[World]:
+        return world_tx()
+
+
+SAMPLE_WORLD = SampleWorld()
+
+
 class TokenAccountingError(RuntimeError):
     """Usage is unavailable or inconsistent, so no further generation is safe."""
 
@@ -38,10 +61,10 @@ class TokenBudgetReached(Exception):
     """A normal trial stop, caught outside react so no more tools/calls run."""
 
 
-def prepare_ledger(budget: int | None) -> bool:
+def prepare_ledger(budget: int | None, host: WorldAccess = SAMPLE_WORLD) -> bool:
     """Restore a budget intact; never silently reset or disable it on resume."""
     problem = None
-    with world_tx() as world:
+    with host.tx() as world:
         ledger = world.token_ledger
         if ledger is None and budget is not None:
             if world.turn:
@@ -59,7 +82,7 @@ def prepare_ledger(budget: int | None) -> bool:
             world.stop_reason = STOP_TOKEN_ACCOUNTING_ERROR
     if problem:
         raise TokenAccountingError(problem)
-    return load_world().token_ledger is not None
+    return host.load().token_ledger is not None
 
 
 def runtime_notice(world: World, *, final: bool = False, session_end: datetime | None = None) -> ChatMessageUser:
@@ -105,7 +128,7 @@ def notice_due(mode: str, world: World, messages: list[ChatMessage],
     raise ValueError(f"Unknown budget_notice {mode!r}")
 
 
-def record_usage(output: ModelOutput) -> None:
+def record_usage(output: ModelOutput, host: WorldAccess = SAMPLE_WORLD) -> None:
     """Inspect normalizes input as uncached + separate cache-read/write counts.
 
     Reasoning is an output subset, and total_tokens already includes cache, so
@@ -122,7 +145,7 @@ def record_usage(output: ModelOutput) -> None:
         total = sum(counts)
         if min(counts) < 0 or total <= 0 or total != usage.total_tokens:
             problem = f"Incomplete or inconsistent target usage: {usage.model_dump()}."
-    with world_tx() as world:
+    with host.tx() as world:
         ledger = world.token_ledger
         assert ledger is not None
         if problem:
@@ -143,21 +166,25 @@ def record_usage(output: ModelOutput) -> None:
 
 
 class BudgetedModel(Model):
-    """Delegate target generations without replacing Inspect's compaction loop."""
+    """Delegate target generations without replacing Inspect's compaction loop.
+
+    `host` holds the ledger: the sample's World, or the harness's own view of the world
+    in world-service mode (`agent.world_mode`)."""
 
     def __init__(self, model: Model, state: AgentState, session_end: datetime | None = None,
-                 budget_notice: str = "every_step"):
+                 budget_notice: str = "every_step", host: WorldAccess = SAMPLE_WORLD):
         super().__init__(model.api, model.config, model.model_args)
         self._target = model
         self._state = state
         self._session_end = session_end
         self._budget_notice = budget_notice
+        self._host = host
 
     async def generate(self, input, tools=(), **kwargs) -> ModelOutput:
-        world = load_world()
+        world = self._host.load()
         assert world.token_ledger is not None
         if world.token_ledger.remaining == 0:
-            with world_tx() as world:
+            with self._host.tx() as world:
                 world.stop_reason = STOP_TOKEN_BUDGET
             raise TokenBudgetReached()
 
@@ -177,17 +204,17 @@ class BudgetedModel(Model):
             completed = [e for e in transcript().events[event_start:]
                          if isinstance(e, ModelEvent) and not e.pending and not e.error]
             for event in completed:
-                record_usage(event.output)
+                record_usage(event.output, self._host)
             raise
         try:
-            record_usage(output)
+            record_usage(output, self._host)
         except TokenAccountingError:
             self._state.output = output
             if output.choices:
                 self._state.messages.append(output.message)
             raise
 
-        world = load_world()
+        world = self._host.load()
         assert world.token_ledger is not None
         if world.token_ledger.remaining == 0:
             # Preserve the final response but do not execute tools or run more
@@ -195,7 +222,7 @@ class BudgetedModel(Model):
             self._state.output = output
             if output.choices:
                 self._state.messages.append(output.message)
-            with world_tx() as world:
+            with self._host.tx() as world:
                 world.turn += 1
                 world.stop_reason = STOP_TOKEN_BUDGET
                 if output.choices and not output.message.tool_calls:

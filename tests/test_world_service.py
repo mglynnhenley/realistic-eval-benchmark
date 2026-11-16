@@ -1,5 +1,7 @@
 """The world service: its MCP tool list matches the Inspect catalog, and a scripted MCP client runs a
-fixture trial end to end with the same world and event log as the Inspect path.
+fixture trial end to end with the same world and event log as the Inspect path. The Inspect agent in
+world-service mode (`agent.world_mode`), against the service on its own thread, makes the same world,
+event log and conversation as the native path (parity check 1).
 
 Offline: fixture data, a fake world-side model client, a mocked Exa transport and a stub browser.
 """
@@ -8,13 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import asynccontextmanager
+import queue
+import threading
+from contextlib import asynccontextmanager, contextmanager
 
 import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.models import client as models
 from refund_eval.models.client import Completion, Message, ModelLimitExceeded
 from refund_eval.models.replay import RECORDINGS_KEY
@@ -185,7 +190,9 @@ async def drive_mcp(tmp_path) -> dict:
             "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."})
         assert not sent.isError, sent.content
         assert json.loads(sent.content[0].text)["labelIds"] == ["SENT"]
-        assert (await turn(False)).json() == {"stopped": False, "stop_reason": None, "wakeup": None}
+        mid = (await turn(False)).json()
+        assert mid == {"stopped": False, "stop_reason": None, "wakeup": None, "sim_time": mid["sim_time"]}
+        assert mid["sim_time"] == trial.data()["sim_time"]
 
         assert (await turn(True, token="wrong")).status_code == 401
         # Avanti replies on Tuesday evening; four fixture inbox emails wake the agent first.
@@ -208,7 +215,7 @@ async def drive_mcp(tmp_path) -> dict:
         assert json.loads(read.content[0].text)["plaintextBody"].strip() == ACTION["body"]
         await turn(False)
         final = (await turn(True, "Avanti asked for a medical note.")).json()
-        assert final == {"stopped": True, "stop_reason": "max_turns", "wakeup": None}
+        assert final == {"stopped": True, "stop_reason": "max_turns", "wakeup": None, "sim_time": final["sim_time"]}
 
         bad = await client.call_tool("schedule_wakeup", {"at": "tomorrow"})
         assert bad.isError and "YYYY-MM-DD HH:MM" in bad.content[0].text
@@ -237,8 +244,9 @@ async def drive_mcp(tmp_path) -> dict:
     return {"data": data, "visible": visible, "calls": fake.calls}
 
 
-def run_inspect(tmp_path, visible: str):
-    """The same calls through the Inspect harness and its native tools (browser stubbed out)."""
+def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url: str | None = None, **agent_args):
+    """The same calls through the Inspect harness: its native tools (browser stubbed out), or with
+    `world_url` the world service's. `script` replaces the fixed outputs (a mockllm callable)."""
     from inspect_ai import Task, eval
     from inspect_ai.dataset import Sample
     from inspect_ai.model import ModelOutput, get_model
@@ -247,7 +255,7 @@ def run_inspect(tmp_path, visible: str):
     from refund_eval.scenario.schema import load_scenario
 
     scenario = load_scenario("train_refund")
-    outputs = [
+    outputs = script or [
         ModelOutput.for_tool_call("mockllm/model", "send_message", {
             "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."}),
         *(ModelOutput.from_content("mockllm/model", text) for text in WAITING),
@@ -255,10 +263,12 @@ def run_inspect(tmp_path, visible: str):
         ModelOutput.for_tool_call("mockllm/model", "get_message", {"messageId": visible}),
         ModelOutput.from_content("mockllm/model", "Avanti asked for a medical note."),
     ]
-    models.install(FakeModels())
+    if world_url is None:
+        models.install(FakeModels())
+    args = {"max_turns": MAX_TURNS, "history_tokens": 0, **agent_args}
     [log] = eval(Task(dataset=[Sample(input=scenario.task_text, metadata={"scenario": "train_refund"})],
-                      solver=refund_agent(scenario_id="train_refund", max_turns=MAX_TURNS, history_tokens=0,
-                                          published_data="fixture", research_mode="saved", seed=7)),
+                      solver=refund_agent(scenario_id="train_refund", published_data="fixture", research_mode="saved",
+                                          seed=7, world_url=world_url, **args)),
                  model=get_model("mockllm/model", custom_outputs=outputs), log_dir=str(tmp_path / "logs"),
                  display="none")
     assert log.status == "success", log.error
@@ -353,3 +363,227 @@ async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path):
         world = trial.data()["world"]
     assert world["stop_reason"] == "model_limit"
     assert "SENT" not in sent.content[0].text
+
+
+# --------------------------------------------------------------------------- the agent in world-service mode
+
+WORLD_THREAD = "world-service"
+
+
+@contextmanager
+def world_service_thread(settings: WorldSettings, monkeypatch):
+    """The world service on a thread of its own, as its container would run it beside the agent's.
+
+    Its store is the only world: any agent-side read or write of it (from another thread) fails."""
+    store = MemoryTrial.store
+
+    def world_thread_only(self):
+        assert threading.current_thread().name == WORLD_THREAD, "the agent touched the world's store"
+        return store(self)
+
+    monkeypatch.setattr(MemoryTrial, "store", world_thread_only)
+    monkeypatch.setenv(TURN_TOKEN_ENV, TURN)
+    ready: queue.Queue = queue.Queue()
+    stop = threading.Event()
+    holder: dict = {}
+
+    async def serve():
+        async with (WorldTrial(settings, model_client=FakeModels()) as trial,
+                    server.running(trial, host="127.0.0.1", port=0, admin_port=0, turn_token=TURN,
+                                   admin_token=ADMIN) as (port, _)):
+            holder["trial"] = trial
+            ready.put(f"http://127.0.0.1:{port}")
+            while not stop.is_set():
+                await asyncio.sleep(0.01)
+            holder["data"] = trial.data()
+
+    def target():
+        try:
+            asyncio.run(serve())
+        except BaseException as ex:  # noqa: BLE001 - reported to the test
+            ready.put(ex)
+
+    thread = threading.Thread(target=target, name=WORLD_THREAD)
+    thread.start()
+    url = ready.get(timeout=60)
+    if isinstance(url, BaseException):
+        raise url
+    try:
+        yield url, holder
+    finally:
+        stop.set()
+        thread.join(60)
+
+
+class ScriptedAgent:
+    """drive_mcp's calls as a mockllm script, with fixed tool call ids. It reads the reply's id from the
+    world (`world()`), as a model would from its search results; it records the tools it was offered."""
+
+    def __init__(self, world):
+        self.world = world
+        self.tools = None
+        self.step = 0
+
+    def __call__(self, input, tools, tool_choice, config):
+        from inspect_ai.model import ModelOutput
+
+        if self.tools is None:
+            self.tools = [(t.name, t.description, t.parameters.model_dump(exclude_none=True)) for t in tools]
+        n, self.step = self.step, self.step + 1
+        if n == 0:
+            return ModelOutput.for_tool_call("mockllm/model", "send_message", {
+                "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."},
+                tool_call_id="call_send")
+        if n <= len(WAITING):
+            return ModelOutput.from_content("mockllm/model", WAITING[n - 1])
+        if n == len(WAITING) + 1:
+            return ModelOutput.for_tool_call("mockllm/model", "search_threads", {"query": "is:unread"},
+                                             tool_call_id="call_search")
+        if n == len(WAITING) + 2:
+            [mail_id] = self.world()["wakeups"][-1]["announced_mail_ids"]
+            return ModelOutput.for_tool_call("mockllm/model", "get_message", {"messageId": _visible_id(mail_id)},
+                                             tool_call_id="call_read")
+        return ModelOutput.from_content("mockllm/model", "Avanti asked for a medical note.")
+
+
+def _without_wall_time(value):
+    if isinstance(value, dict):
+        return {k: _without_wall_time(v) for k, v in value.items() if k != "wall_time"}
+    if isinstance(value, list):
+        return [_without_wall_time(v) for v in value]
+    return value
+
+
+def test_world_service_mode_matches_the_native_path(tmp_path, monkeypatch):
+    """Parity check 1: the same scripted agent, natively and with its world in the world service."""
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    native_script = ScriptedAgent(lambda: load_world().model_dump(mode="json"))
+    native = run_inspect(tmp_path / "native", script=native_script)
+
+    with world_service_thread(settings(tmp_path, max_turns=MAX_TURNS), monkeypatch) as (url, held):
+        remote_script = ScriptedAgent(lambda: held["trial"].trial.data[WORLD_KEY])
+        remote = run_inspect(tmp_path / "remote", script=remote_script, world_url=url)
+    data = held["data"]
+
+    # The model saw the same tools (names, descriptions, schemas) and the same conversation.
+    assert remote_script.tools == native_script.tools
+    assert [t[0] for t in remote_script.tools][-1] == "schedule_wakeup"
+    assert [(m.role, m.text) for m in remote.messages] == [(m.role, m.text) for m in native.messages]
+
+    # The same world and event log; only wall time differs. Tool call ids are Inspect's on both paths.
+    world, events = data["world"], data["events"]
+    assert world["stop_reason"] == "max_turns" and world["turn"] == MAX_TURNS
+    assert _without_wall_time(world) == _without_wall_time(native.store[WORLD_KEY])
+    assert _without_wall_time(events) == _without_wall_time(native.store[EVENTS_KEY])
+    assert {e["tool_call_id"] for e in events if e.get("tool") == "send_message"} == {"call_send"}
+    audit = [(e["event"], e.get("tool"), e.get("call_id")) for e in data["store"]["published_tool_audit"]
+             if e.get("source") in {"gmail", "exa"}]
+    assert audit == [(e["event"], e.get("tool"), e.get("call_id")) for e in native.store["published_tool_audit"]
+                     if e.get("source") in {"gmail", "exa"}]
+
+    # The agent's own sample holds no world.
+    assert WORLD_KEY not in remote.store and EVENTS_KEY not in remote.store
+
+
+class Waiting:
+    """Ends every turn, with provider usage, so a token budget runs out."""
+
+    def __call__(self, input, tools, tool_choice, config):
+        from inspect_ai.model import ModelOutput, ModelUsage
+
+        output = ModelOutput.from_content("mockllm/model", "Waiting.")
+        output.usage = ModelUsage(input_tokens=100, input_tokens_cache_read=700, input_tokens_cache_write=150,
+                                  output_tokens=50, reasoning_tokens=30, total_tokens=1000)
+        return output
+
+
+def test_token_budget_stays_with_the_agent_and_the_world_records_it(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    native = run_inspect(tmp_path / "native", script=Waiting(), max_turns=100, token_budget=2500)
+    with world_service_thread(settings(tmp_path, max_turns=100), monkeypatch) as (url, held):
+        remote = run_inspect(tmp_path / "remote", script=Waiting(), max_turns=100, token_budget=2500, world_url=url)
+    world = held["data"]["world"]
+    assert world["stop_reason"] == "token_budget" and world["turn"] == 3
+    assert world["token_ledger"]["budget"] == 2500 and len(world["token_ledger"]["calls"]) == 3
+    # The same final world, ledger and notices; the ledger reaches the world at each turn rather than
+    # at each generation, so its events are ordered differently.
+    assert _without_wall_time(world) == _without_wall_time(native.store[WORLD_KEY])
+    assert [(m.role, m.text) for m in remote.messages] == [(m.role, m.text) for m in native.messages]
+
+
+class KilledAfterTwoTurns:
+    """Turns the kill switch on during the second generation."""
+
+    def __init__(self, kill_file):
+        self.kill_file, self.calls = kill_file, 0
+
+    def __call__(self, input, tools, tool_choice, config):
+        from inspect_ai.model import ModelOutput
+
+        self.calls += 1
+        if self.calls == 2:
+            self.kill_file.touch()
+        return ModelOutput.from_content("mockllm/model", "Waiting.")
+
+
+def test_kill_switch_stays_with_the_agent_and_the_world_records_it(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    kill_file = tmp_path / "KILL"  # the offline fixture's REFUND_EVAL_KILL_FILE
+    native = run_inspect(tmp_path / "native", script=KilledAfterTwoTurns(kill_file))
+    kill_file.unlink()
+    with world_service_thread(settings(tmp_path), monkeypatch) as (url, held):
+        remote = run_inspect(tmp_path / "remote", script=KilledAfterTwoTurns(kill_file), world_url=url)
+    world = held["data"]["world"]
+    assert world["killed"] and world["stop_reason"] == "kill_switch" and world["turn"] == 2
+    assert remote.limit is not None and remote.limit.type == "operator"
+    assert _without_wall_time(world) == _without_wall_time(native.store[WORLD_KEY])
+
+
+def test_world_service_mode_refuses_resume(tmp_path):
+    from refund_eval.agent.harness import refund_agent
+
+    with pytest.raises(ValueError, match="resume_log is not supported in world-service mode"):
+        refund_agent(world_url="http://world:8000", resume_log=str(tmp_path / "trial.eval"))
+
+
+async def test_turn_records_the_agents_stop(tmp_path):
+    async with (WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial,
+                session(trial) as (_, base, _), httpx.AsyncClient() as http):
+        headers = {"Authorization": f"Bearer {TURN}"}
+        assert (await http.post(f"{base}/turn", json={"stop_reason": 7}, headers=headers)).status_code == 400
+        bad_ledger = await http.post(f"{base}/turn", json={"token_ledger": {"budget": 0}}, headers=headers)
+        assert bad_ledger.status_code == 400
+        stopped = (await http.post(f"{base}/turn", json={"stop_reason": "cost_limit", "counted": False},
+                                   headers=headers)).json()
+        assert stopped["stopped"] and stopped["stop_reason"] == "cost_limit"
+        later = (await http.post(f"{base}/turn", json={"stop_reason": "loop_ended"}, headers=headers)).json()
+        world = trial.data()["world"]
+    assert later["stop_reason"] == "cost_limit" and world["stop_reason"] == "cost_limit" and world["turn"] == 0
+
+
+def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatch):
+    from inspect_ai.solver import generate
+
+    import refund_eval.task as task_module
+
+    captured = {}
+
+    def agent(**kwargs):
+        captured.update(kwargs)
+        return generate()
+
+    def not_here(**kwargs):
+        raise AssertionError("tool readiness is the world container's")
+
+    from refund_eval.published import profile
+
+    monkeypatch.setattr(task_module, "refund_agent", agent)
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
+    monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
+    monkeypatch.setattr(profile, "fixture_readiness", not_here)
+    task = task_module.impossible_refund(scenario="train_refund", published_data="fixture",
+                                         world_url="http://world:8000")
+    assert captured["world_url"] == "http://world:8000"
+    assert not task.scorer

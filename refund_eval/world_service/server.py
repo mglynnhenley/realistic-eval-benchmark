@@ -6,7 +6,9 @@ Agent port (default 0.0.0.0:8000), reachable from the agent container:
   from Python signatures and these must be the native catalogs' schemas unchanged.
   No agent-env card or other route names the service as an evaluation.
 - `POST /turn`: the agent harness's turn boundary (`WorldTrial.turn`), behind its
-  own bearer token. Not an MCP tool, so the model can neither see nor call it.
+  own bearer token. Not an MCP tool, so the model can neither see nor call it. Body:
+  `{ended, text, counted, stop_reason, token_ledger}` (all optional); response:
+  `{stopped, stop_reason, wakeup, sim_time}`.
 
 Admin port (127.0.0.1 only, default 9000), behind the admin bearer token:
 - `POST /agentenv`: JSON-RPC 2.0 in the agentenv-protocol shape. `data/get` returns
@@ -33,6 +35,7 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from pydantic import ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -104,11 +107,18 @@ def agent_app(trial: WorldTrial, *, turn_token: str) -> Starlette:
             body = await request.json() if await request.body() else {}
         except ValueError:
             body = None
-        ended, text = (body.get("ended", True), body.get("text", "")) if isinstance(body, dict) else (None, None)
-        if not isinstance(ended, bool) or not isinstance(text, str):
-            return JSONResponse({"ok": False, "error": {"code": "invalid", "message": "ended: bool, text: str"}},
-                                status_code=400)
-        return JSONResponse(await trial.turn(ended=ended, text=text))
+        args = ({"ended": body.get("ended", True), "text": body.get("text", ""), "counted": body.get("counted", True),
+                 "stop_reason": body.get("stop_reason"), "token_ledger": body.get("token_ledger")}
+                if isinstance(body, dict) else {"ended": None})
+        if not (isinstance(args["ended"], bool) and isinstance(args["text"], str) and isinstance(args["counted"], bool)
+                and isinstance(args["stop_reason"], str | None) and isinstance(args["token_ledger"], dict | None)):
+            return JSONResponse({"ok": False, "error": {"code": "invalid", "message": (
+                "ended: bool, text: str, counted: bool, stop_reason: str | null, token_ledger: object | null")}},
+                status_code=400)
+        try:
+            return JSONResponse(await trial.turn(**args))
+        except ValidationError as ex:
+            return JSONResponse({"ok": False, "error": {"code": "invalid", "message": str(ex)}}, status_code=400)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:

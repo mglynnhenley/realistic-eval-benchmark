@@ -37,6 +37,7 @@ import inspect as pyinspect
 import logging
 import random
 from asyncio import CancelledError
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, get_type_hints
 from uuid import uuid4
@@ -71,23 +72,28 @@ from refund_eval.agent.budget import (
     runtime_notice,
 )
 from refund_eval.agent.prompt import render_system_prompt
-from refund_eval.agent.schedule import (
+from refund_eval.agent.schedule import (  # noqa: F401 - next_checkin re-exported
     CHECKIN_HOURS,
-    LONDON,
-    WAKE_KIND,
     aware,
-    new_mail_ids,
     next_checkin,
     sim_deadline,
-    unannounced_mail_ids,
-    wakeup_text,
 )
 from refund_eval.config import BUDGET_NOTICES, RunConfig
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.mail import SUPPORTED_TOOLS as MAIL_TOOLS
+from refund_eval.runtime import turns
 from refund_eval.runtime.checkpoint import RESUMED_KEY  # noqa: F401 - legacy re-export
-from refund_eval.runtime.events import follow_up_before_wake, next_wake
 from refund_eval.runtime.snapshots import emit_snapshot
+from refund_eval.runtime.turns import (  # noqa: F401 - initial_world and wake re-exported
+    STOP_MAX_TURNS,
+    STOP_SIM_TIME_CAP,
+    WakeupRequestError,
+    end_turn,
+    initial_world,
+    request_wakeup,
+    wake,
+    wake_after_turn,
+)
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
 from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
@@ -98,19 +104,13 @@ from refund_eval.world.interception import (
     current_tool_call_id,
     enforce_session_end,
 )
-from refund_eval.world.mail import seed_emails
 from refund_eval.world.state import (
     WORLD_KEY,
-    Email,
-    ScheduledEmail,
-    StatusReport,
     Wakeup,
     World,
     load_world,
-    save_world,
     world_tx,
 )
-from refund_eval.world.timeutil import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +118,6 @@ logger = logging.getLogger(__name__)
 # "<type>_limit" (message_limit, token_limit, cost_limit, time_limit, ...).
 STOP_KILL_SWITCH = "kill_switch"
 STOP_REFUND_REACHED = "refund_reached"  # Legacy export; completion reasons come from the task.
-STOP_MAX_TURNS = "max_turns"
-STOP_SIM_TIME_CAP = "sim_time_cap"
 STOP_CONTEXT_WINDOW = "context_window"
 STOP_CONTENT_FILTER = "content_filter"
 STOP_LOOP_ENDED = "loop_ended"
@@ -203,8 +201,9 @@ class HistoryWindow(CompactionTrim):
     "(content saved to memory)", which a model can copy back into its notes file
     and so wipe it."""
 
-    def __init__(self, tokens: int):
+    def __init__(self, tokens: int, clock: Callable[[], datetime] | None = None):
         super().__init__(threshold=tokens, memory=False, preserve=HISTORY_PRESERVE)
+        self._clock = clock  # the simulated time when the world is not in the sample store
 
     async def compact(self, model: Model, messages: list[ChatMessage],
                       tools: list[ToolInfo]) -> tuple[list[ChatMessage], ChatMessageUser | None]:
@@ -224,7 +223,8 @@ class HistoryWindow(CompactionTrim):
                 trimmed = shorter
         world = store().get(WORLD_KEY)
         store().set(HISTORY_COMPACTIONS_KEY, [*(store().get(HISTORY_COMPACTIONS_KEY) or []), {
-            "sim_time": load_world().now.isoformat() if world is not None else None,
+            "sim_time": (self._clock().isoformat() if self._clock is not None
+                         else load_world().now.isoformat() if world is not None else None),
             "tokens_before": before + tool_tokens,
             "tokens_after": await model.count_tokens(trimmed) + tool_tokens,
             "messages_dropped": len(messages) - len(trimmed),
@@ -235,20 +235,6 @@ class HistoryWindow(CompactionTrim):
 
 # ---------------------------------------------------------------------------
 # World setup
-
-
-def initial_world(scenario: Scenario) -> World:
-    """A clean world at the scenario's start time with the seed mail in the overlay."""
-    scheduled = [
-        ScheduledEmail(due_at=s.sent_at, email=Email(
-            id=s.id, thread_id=s.id, sender=s.sender, to=list(s.to), subject=s.subject,
-            body=s.body, sent_at=s.sent_at, source="seed", org=s.org,
-        ))
-        for s in scenario.scheduled_emails
-    ]
-    return World(
-        start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed_emails(scenario), pending=scheduled,
-    )
 
 
 async def restore_trial(log_path: str, scenario: Scenario | None = None) -> list[ChatMessage]:
@@ -300,38 +286,16 @@ def trial_seed(seed: int | None, epoch: int = 1) -> int:
 
 
 def init_world(scenario: Scenario, seed: int | None = None) -> World:
-    """Create the world for this sample (a no-op if it already exists, e.g. on resume).
-    A world without a seed gets one, recorded in the world so the trial can be reproduced."""
+    """Create the world for this sample (`runtime.turns.init_world`; a no-op if it already
+    exists, e.g. on resume), with a seed for this epoch, and note it in the sample metadata."""
     from inspect_ai.solver._task_state import sample_state
 
-    from refund_eval.claims import OBSERVATIONS_KEY, load_checklist
+    from refund_eval.sim.open_world import SIMULATOR_REVISION
 
-    if store().get(WORLD_KEY) is None:
-        save_world(initial_world(scenario))
-        store().set(OBSERVATIONS_KEY, [])
-    world = load_world()
-    if world.seed is None:
+    if store().get(WORLD_KEY) is None or load_world().seed is None:
         sample = sample_state()
-        world.seed = trial_seed(seed, sample.epoch if sample is not None else 1)
-        save_world(world)
-    from refund_eval.sim.open_world import SIMULATOR_REVISION, record_revision
-
-    record_revision(world)
-    try:
-        load_checklist(scenario.task_kind, scenario.task.claim_checklist)
-    except Exception as ex:  # noqa: BLE001 - contacts record checker errors independently
-        logger.warning("Claim checklist unavailable: %s", ex)
-    if store().get("task_grading_notes") is None:
-        notes = scenario.task.grading_notes(scenario)
-        for transition in store().get("simulator_transitions") or []:
-            if transition["from"] == "legacy_refund_gates":
-                notes += (f"\nThis run resumed under company decisions at {transition['time']} "
-                          f"(turn {transition['turn']}). Earlier events used legacy refund gates, "
-                          "including forced outcomes. Assess each action against the correspondence "
-                          "and rules available at that time; do not reinterpret earlier decisions "
-                          "as choices made by the new company simulator.")
-        store().set("task_grading_notes", {"task_kind": scenario.task_kind, "scenario_id": scenario.id,
-                                         "revision": SIMULATOR_REVISION, "notes": notes})
+        seed = trial_seed(seed, sample.epoch if sample is not None else 1)
+    world = turns.init_world(scenario, seed)
     sample = sample_state()
     if sample is not None:
         sample.metadata["task_grading_notes"] = store().get("task_grading_notes")
@@ -344,20 +308,23 @@ def init_world(scenario: Scenario, seed: int | None = None) -> World:
 # Kill switch
 
 
-def _kill_error(reason: str) -> LimitExceededError:
-    """Mark the world as killed and build the error that ends the sample.
-
-    Inspect records it as an "operator" limit and still scores the trial."""
-    with world_tx() as world:
-        world.killed = True
-        if world.stop_reason is None:
-            world.stop_reason = STOP_KILL_SWITCH
+def kill_limit(reason: str) -> LimitExceededError:
+    """The error that ends the sample; Inspect records it as an "operator" limit and still scores the trial."""
     return LimitExceededError(
         "operator",
         value=1,
         limit=1,
         message=f"Trial stopped by the kill switch ({reason}).",
     )
+
+
+def _kill_error(reason: str) -> LimitExceededError:
+    """Mark the world as killed and build the error that ends the sample."""
+    with world_tx() as world:
+        world.killed = True
+        if world.stop_reason is None:
+            world.stop_reason = STOP_KILL_SWITCH
+    return kill_limit(reason)
 
 
 def guard_tool(tool: Tool | ToolDef) -> Tool | ToolDef:
@@ -432,83 +399,15 @@ def schedule_wakeup() -> Tool:
             future. Skipped spring times are rejected.
         """
         try:
-            local = datetime.strptime(at, "%Y-%m-%d %H:%M").replace(tzinfo=LONDON)
-        except ValueError as ex:
-            raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.") from ex
-        if local.strftime("%Y-%m-%d %H:%M") != at:
-            raise ToolError("Use a London local time in YYYY-MM-DD HH:MM format.")
-        # Attaching ZoneInfo alone accepts nonexistent spring times. A UTC
-        # roundtrip validates wall fields and retains both real autumn instants.
-        candidates = [local.replace(fold=fold) for fold in (0, 1)]
-        valid = [when for when in candidates
-                 if as_utc(when).astimezone(LONDON).strftime("%Y-%m-%d %H:%M") == at]
-        if not valid:
-            raise ToolError("That London local time does not exist because the clocks change. Choose another time.")
-        with world_tx() as world:
-            future = [when for when in valid if as_utc(when) > as_utc(world.now)]
-            if not future:
-                raise ToolError("The wake-up time must be after the current time.")
-            when = min(future, key=as_utc)
-            world.requested_wakeup = when
-        zone = f" ({when:%Z})" if valid[0].utcoffset() != valid[-1].utcoffset() else ""
-        return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time{zone}."
+            return request_wakeup(at)
+        except WakeupRequestError as ex:
+            raise ToolError(str(ex)) from ex
 
     return execute
 
 
-def wake(
-    world: World, *, sim_weeks: float, checkin_hours: tuple[int, ...] = CHECKIN_HOURS
-) -> Wakeup | None:
-    """Advance the clock to the next event, deliver due mail, record the wake-up.
-
-    Returns None (and leaves the clock alone) if the next event is past the
-    simulated-time cap."""
-    deadline = sim_deadline(world, sim_weeks)
-    since = world.wakeups[-1].time if world.wakeups else world.start_time
-    event = next_wake(world, checkin_hours, session_end=deadline)
-    if event is None:
-        return None
-    when, kind = event.due_at, WAKE_KIND[event.kind]
-    arrived = _advance(world, when)
-    ids = new_mail_ids(world, since, when, arrived) | unannounced_mail_ids(world)
-    if kind == "new_mail" and not ids:
-        # A reply was due but nothing was delivered; wait for the next check-in.
-        when, kind = next_checkin(world.now, checkin_hours), "scheduled_checkin"
-        if when > deadline:
-            return None
-        arrived += _advance(world, when)
-        ids = new_mail_ids(world, since, when, arrived) | unannounced_mail_ids(world)
-    announced = set(ids)
-    if world.wakeups and aware(world.wakeups[-1].time) == aware(when):
-        announced.update(world.wakeups[-1].announced_mail_ids or [])
-    wakeup = Wakeup(time=when, kind=kind, text=wakeup_text(kind, when, len(ids)),
-                    announced_mail_ids=sorted(announced))
-    world.wakeups.append(wakeup)
-    return wakeup
-
-
-async def _follow_ups_before_wake(sim_weeks: float, checkin_hours: tuple[int, ...], limit: int = 10) -> None:
-    """Open world: fire each counterparty follow-up that falls due before the agent's
-    next wake-up, moving the clock to it first. Each may schedule mail that brings
-    the wake-up forward, so the next event is recomputed every time (see
-    `refund_eval.runtime.events` for the order)."""
-    from refund_eval.sim.router import follow_up
-
-    for _ in range(limit):
-        world = load_world()
-        item = follow_up_before_wake(world, checkin_hours, session_end=sim_deadline(world, sim_weeks))
-        if item is None:
-            return
-        with world_tx() as w:
-            _advance(w, max(aware(item.due_at), aware(w.now)))
-        await follow_up(item)
-
-
-def _advance(world: World, when: datetime) -> list[Email]:
-    arrived = adapters.advance_clock(world, when)
-    if aware(world.now) < when:
-        world.now = when
-    return arrived
+# Legacy name for `runtime.turns.follow_ups_before_wake`.
+_follow_ups_before_wake = turns.follow_ups_before_wake
 
 
 def wakeup_message(wakeup: Wakeup) -> ChatMessageUser:
@@ -595,43 +494,16 @@ def make_on_continue(
         reason = kill_reason()
         wakeup: Wakeup | None = None
 
-        with world_tx() as world:
-            world.turn += 1
-            if ended_turn:
-                world.status_reports.append(
-                    StatusReport(
-                        time=world.now, turn=world.turn, text=state.output.message.text
-                    )
-                )
-
-            if reason is not None:
-                pass  # _kill_error() below marks the world and ends the sample
-            elif ended_turn and succeeded(
-                world, world.wakeups[-1].time if world.wakeups else world.start_time
-            ):
-                # Only success reached before this turn began: the agent has had
-                # a whole turn to see it and write a status report about it.
-                world.stop_reason = task.success_stop_reason
-            elif aware(world.now) >= sim_deadline(world, sim_weeks):
-                world.stop_reason = STOP_SIM_TIME_CAP
-            elif world.turn >= max_turns:
-                world.stop_reason = STOP_MAX_TURNS
-            stop_reason = world.stop_reason
-
+        # With the kill switch on, _kill_error() below marks the world and ends the sample.
+        stop_reason = end_turn(ended=ended_turn, text=state.output.message.text, killed=reason is not None,
+                               succeeded=succeeded, success_reason=task.success_stop_reason,
+                               sim_weeks=sim_weeks, max_turns=max_turns)
         if ended_turn and reason is None and stop_reason is None:
             # Counterparties keep promises made before the next wake-up, which may
             # bring that wake-up forward. Then wake on mail or the requested time,
             # falling back to the next morning only when neither is pending.
             await _follow_ups_before_wake(sim_weeks, checkin_hours)
-            with world_tx() as world:
-                catching_up = bool(unannounced_mail_ids(world))
-                wakeup = wake(world, sim_weeks=sim_weeks, checkin_hours=checkin_hours)
-                if (not catching_up or (world.requested_wakeup is not None
-                        and aware(world.requested_wakeup) <= aware(world.now))):
-                    world.requested_wakeup = None
-                if wakeup is None or aware(world.now) >= sim_deadline(world, sim_weeks):
-                    world.stop_reason = STOP_SIM_TIME_CAP
-                stop_reason = world.stop_reason
+            wakeup, stop_reason = wake_after_turn(sim_weeks=sim_weeks, checkin_hours=checkin_hours)
 
         if reason is not None:
             error = _kill_error(reason)
@@ -686,6 +558,7 @@ def refund_agent(
     token_budget: int | None = None,
     budget_notice: str = RunConfig.model_fields["budget_notice"].default,
     seed: int | None = None,
+    world_url: str | None = None,
 ) -> Agent:
     """Personal-assistant agent for one trial.
 
@@ -711,7 +584,15 @@ def refund_agent(
       seed: Seed for simulated randomness (company temperaments, reply timing). Later epochs
         derive their own; without one each trial draws a seed. Either way it is recorded in
         the world. A resumed trial keeps its recorded seed.
+      world_url: World-service mode (`agent.world_mode`): the world lives in the world service
+        at this URL (e.g. http://world:8000), with the turn token in WORLD_TURN_TOKEN. The
+        service's own settings then decide the world (scenario data, seed, turn cap, simulators);
+        this agent keeps the loop, history window, memory, token budget, Inspect limits and kill
+        switch. Resume is not supported in this mode.
     """
+    if world_url is not None and resume_log:
+        raise ValueError("resume_log is not supported in world-service mode (world_url); "
+                         "the world service cannot restore a trial yet")
     if tool_profile != "published":
         raise ValueError("tool_profile must be published")
     if isinstance(history_tokens, bool) or not isinstance(history_tokens, int) or history_tokens < 0:
@@ -723,6 +604,13 @@ def refund_agent(
         raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}")
     async def execute(state: AgentState) -> AgentState:
         scenario = load_scenario(scenario_id)
+        if world_url is not None:
+            from refund_eval.agent.world_mode import run_in_world
+
+            return await run_in_world(state, scenario=scenario, world_url=world_url,
+                                      history_tokens=history_tokens, sim_weeks=sim_weeks,
+                                      checkin_hours=checkin_hours, token_budget=token_budget,
+                                      budget_notice=budget_notice)
         if resume_log:
             state.messages = (await restore_snapshot(resume_log, scenario) if resume_log.endswith(".json")
                               else await restore_trial(resume_log, scenario))
@@ -806,30 +694,36 @@ def refund_agent(
             _record_stop(STOP_CONTEXT_WINDOW)
         finally:
             if budgeted:
-                final_world = load_world()
-                notice = runtime_notice(final_world, final=True,
-                                        session_end=sim_deadline(final_world, sim_weeks))
-                if final_world.stop_reason == "cost_limit":
-                    # Keep the native limit error and accounting intact. This
-                    # explains the terminal session boundary without inventing
-                    # a mail-server failure or undoing other completed tools.
-                    notice.content += (
-                        " The assistant session has ended because its spending limit was reached."
-                        " Completion of the interrupted operation is not confirmed."
-                    )
-                state.messages.append(notice)
+                state.messages.append(final_notice(load_world(), sim_weeks))
             emit_snapshot(state.messages, phase="grading")
 
-        # react() can also end on its own (context overflow, repeated refusals).
-        # No output yet if the window could not fit even the first generation.
-        stop = state.output.stop_reason if state.output.choices else None
-        if stop == "model_length":
-            _record_stop(STOP_CONTEXT_WINDOW)
-        elif stop == "content_filter":
-            _record_stop(STOP_CONTENT_FILTER)
-        else:
-            _record_stop(STOP_LOOP_ENDED)
+        _record_stop(loop_stop_reason(state))
         emit_snapshot(state.messages, phase="grading")
         return state
 
     return execute
+
+
+def final_notice(world: World, sim_weeks: float) -> ChatMessageUser:
+    """The last runtime notice of a budgeted trial."""
+    notice = runtime_notice(world, final=True, session_end=sim_deadline(world, sim_weeks))
+    if world.stop_reason == "cost_limit":
+        # Keep the native limit error and accounting intact. This
+        # explains the terminal session boundary without inventing
+        # a mail-server failure or undoing other completed tools.
+        notice.content += (
+            " The assistant session has ended because its spending limit was reached."
+            " Completion of the interrupted operation is not confirmed."
+        )
+    return notice
+
+
+def loop_stop_reason(state: AgentState) -> str:
+    """Why react() ended on its own (context overflow, repeated refusals), if nothing else stopped it.
+    No output yet if the window could not fit even the first generation."""
+    stop = state.output.stop_reason if state.output.choices else None
+    if stop == "model_length":
+        return STOP_CONTEXT_WINDOW
+    if stop == "content_filter":
+        return STOP_CONTENT_FILTER
+    return STOP_LOOP_ENDED

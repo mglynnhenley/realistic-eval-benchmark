@@ -177,6 +177,7 @@ def impossible_refund(
     artifact_dir: str | None = None,
     resume_log: str | None = None,
     seed: int | None = None,
+    world_url: str | None = None,
 ) -> Task:
     """The impossible refund.
 
@@ -209,6 +210,9 @@ def impossible_refund(
       seed: Seed for simulated randomness (company temperaments, reply timing); later epochs
         derive their own. Without one each trial draws a seed. Each trial's seed is recorded in
         its world, so `-T seed=<recorded>` reproduces it.
+      world_url: World-service mode: the world runs in `refund_eval.world_service` at this URL
+        (turn token in WORLD_TURN_TOKEN) and its settings decide the world; see
+        `refund_eval.agent.world_mode`. No Inspect scorers: the world's state is graded separately.
     """
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
@@ -280,10 +284,11 @@ def impossible_refund(
         )
 
         runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
-        status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
-                  hybrid_readiness(**runtime_args))
-        if not status["configured"]:
-            raise ValueError(status["reason"])
+        if world_url is None:  # in world-service mode the tools run in the world's container
+            status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
+                      hybrid_readiness(**runtime_args))
+            if not status["configured"]:
+                raise ValueError(status["reason"])
         mail_source = "gmail-fixture"
     eval_model = _eval_model_name()
     roles = default_model_roles(eval_model)
@@ -292,7 +297,7 @@ def impossible_refund(
         fetch_openrouter=cost_limit is not None,
     )
 
-    scorers = adapters.load_scorers()
+    scorers = adapters.load_scorers() if world_url is None else []
 
     return Task(
         dataset=[
@@ -327,6 +332,7 @@ def impossible_refund(
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **({"resume_log": resume_log} if resume_log else {}),
             **({"seed": seed} if seed is not None else {}),
+            **({"world_url": world_url} if world_url is not None else {}),
         ),
         scorer=scorers or None,
         epochs=trials,

@@ -1,16 +1,14 @@
-"""Own published tool connections and adapt clock and grading for each trial."""
+"""Own published tool connections and grading for each trial."""
 
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
 
 from inspect_ai.scorer import Scorer
 
 from refund_eval.config import RunConfig
 from refund_eval.scenario.schema import Scenario
-from refund_eval.world.state import Email, World
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +37,6 @@ def _not_built(ex: ImportError, package: str) -> bool:
     rather than because of a bug inside a module that does exist."""
     name = getattr(ex, "name", None) or ""
     return name == package or name.startswith(package + ".")
-
-
-def advance_clock(world: World, to: datetime) -> list[Email]:
-    """`refund_eval.world.clock.advance(world, to)`: move time forward, deliver due mail."""
-    try:
-        from refund_eval.world.clock import advance
-    except ImportError as ex:
-        if _not_built(ex, "refund_eval.world.clock"):
-            raise RuntimeError(
-                "refund_eval.world.clock.advance is needed to wake the agent."
-            ) from ex
-        raise
-    return list(advance(world, to))
 
 
 def load_scorers() -> list[Scorer]:

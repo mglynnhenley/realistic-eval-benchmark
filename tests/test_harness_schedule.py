@@ -185,10 +185,10 @@ def test_mail_that_arrived_while_working_counts_as_new():
 
 
 def test_new_mail_that_never_arrives_falls_back_to_checkin(monkeypatch):
-    from refund_eval.agent import adapters
+    from refund_eval.runtime import turns
 
     w = world_at(START, START + timedelta(hours=2))
-    monkeypatch.setattr(adapters, "advance_clock", lambda world, to: [])
+    monkeypatch.setattr(turns, "advance_clock", lambda world, to: [])
     wk = wake(w, sim_weeks=12)
     assert wk is not None and wk.kind == "scheduled_checkin"
     assert wk.time == datetime(2026, 9, 24, 9, 0, tzinfo=BST)
@@ -386,8 +386,8 @@ async def test_wakeup_format_errors_retain_existing_request(at):
 
 @pytest.mark.parametrize("earlier_mail", [False, True])
 async def test_repeated_hour_request_reaches_real_clock_and_earlier_mail_still_wins(monkeypatch, earlier_mail):
-    from refund_eval.agent import adapters
     from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.runtime import turns
     from refund_eval.world.clock import advance
     from refund_eval.world.state import load_world
     from refund_eval.world.timeutil import as_utc
@@ -401,7 +401,7 @@ async def test_repeated_hour_request_reaches_real_clock_and_earlier_mail_still_w
         world.pending.append(ScheduledEmail(due_at=expected, email=Email(
             id="before-second-fold", sender="support@example.com", to=["me@example.com"],
             subject="Update", body="An update.", sent_at=expected)))
-    monkeypatch.setattr(adapters, "advance_clock", advance)
+    monkeypatch.setattr(turns, "advance_clock", advance)
     notice = wake(world, sim_weeks=1)
     assert notice.kind == ("new_mail" if earlier_mail else "requested")
     assert as_utc(notice.time) == expected
