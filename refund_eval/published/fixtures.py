@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import copy
 import json
-import uuid
 from collections.abc import Callable
 from typing import Any
 
 from refund_eval.published.mail import GmailService, _search_key, _visible_id
+from refund_eval.world.ids import new_hex
 from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource
 from refund_eval.world.mailquery import MatchContext, parse_query
@@ -216,7 +216,7 @@ class FixtureGmailRemote:
             total = len(threads)
         data: dict[str, Any] = {"threads": threads[:size], "resultCountEstimate": str(total)}
         if len(threads) > size:
-            token = uuid.uuid4().hex
+            token = new_hex("page-token", 32)
             self._pages[token] = copy.deepcopy((args, threads[size:], total))
             data["nextPageToken"] = token
         return _result(data)

@@ -35,6 +35,7 @@ from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.killswitch import kill_reason
 from refund_eval.models import client as models
 from refund_eval.models.client import ModelClient, ModelLimitExceeded
+from refund_eval.models.replay import RecordingModelClient
 from refund_eval.published.adapter import MCPService, audit, fingerprint
 from refund_eval.published.profile import (
     PROFILE_KEY,
@@ -45,7 +46,7 @@ from refund_eval.runtime.events import follow_up_before_wake, next_wake
 from refund_eval.scenario.schema import Scenario, load_scenario
 from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
 from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
-from refund_eval.world import clock, event_log
+from refund_eval.world import clock, event_log, trial_snapshot
 from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.interception import (
@@ -225,7 +226,8 @@ class WorldTrial:
         self._writer = OutputWriter(settings.output_dir)
         self.trial = MemoryTrial(settings.scenario)  # as given, like the Inspect sample's metadata
         trial_store.install(self.trial)
-        models.install(self._model_client)
+        # Every world-side completion is kept in the store, so the trial can be replayed.
+        models.install(RecordingModelClient(self._model_client))
         try:
             init_world(scenario, settings.seed)
             store = world_store()
@@ -440,9 +442,9 @@ class WorldTrial:
         })
 
     def snapshot(self) -> dict[str, Any]:
-        """The whole trial store, written to the output directory first."""
+        """A `world.trial_snapshot` of the trial (the output directory is brought up to date first)."""
         self.persist()
-        return {"settings": self.settings.model_dump(mode="json"), "store": copy.deepcopy(dict(self.trial.store()))}
+        return trial_snapshot.capture(self.trial.store()).model_dump(mode="json")
 
     def health(self) -> dict[str, Any]:
         world = self.trial.store().get(WORLD_KEY) or {}

@@ -16,6 +16,8 @@ PURE_MODULES = [
     "refund_eval.world.mail",
     "refund_eval.world.mailquery",
     "refund_eval.world.snapshot",
+    "refund_eval.world.ids",
+    "refund_eval.world.trial_snapshot",
     "refund_eval.runtime.events",
     "refund_eval.agent.schedule",
     "refund_eval.agent.prompt",
@@ -23,6 +25,7 @@ PURE_MODULES = [
     "refund_eval.sim.common",
     "refund_eval.models.client",
     "refund_eval.models.openrouter",
+    "refund_eval.models.replay",
     "refund_eval.model_io",
     "refund_eval.model_pricing",
     "refund_eval.sim.consistency",
@@ -95,3 +98,18 @@ def test_installed_backend_holds_world_state_and_trial_facts(dict_trial):
     assert load_world().turn == 4 and dict_trial.data[WORLD_KEY]["turn"] == 4
     assert current_scenario_id() == "bills_price_rise"
     assert trial_store.trial_lock() is dict_trial.the_lock
+
+
+def test_trial_snapshot_and_seeded_ids_work_on_an_installed_backend(dict_trial):
+    from refund_eval.world import trial_snapshot
+    from refund_eval.world.ids import new_hex
+    from refund_eval.world.state import WORLD_KEY, World
+
+    dict_trial.data[WORLD_KEY] = World(start_time="2026-01-05T09:00:00Z", now="2026-01-05T09:00:00Z",
+                                       seed=3).model_dump(mode="json")
+    saved = trial_snapshot.capture()
+    first = [new_hex("interception"), new_hex("interception")]
+    dict_trial.data["later_state"] = True
+    trial_snapshot.restore(saved)
+    assert "later_state" not in dict_trial.data
+    assert [new_hex("interception"), new_hex("interception")] == first and first[0] != first[1]

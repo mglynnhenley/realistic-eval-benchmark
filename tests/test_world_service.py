@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -19,6 +17,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from refund_eval.models import client as models
 from refund_eval.models.client import Completion, Message
+from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published.adapter import _normalized
 from refund_eval.published.mail import _visible_id
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
@@ -26,6 +25,7 @@ from refund_eval.world import interception
 from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.state import WORLD_KEY
+from refund_eval.world.trial_snapshot import TrialSnapshot
 from refund_eval.world_service import server
 from refund_eval.world_service.__main__ import main as cli_main
 from refund_eval.world_service.settings import WorldSettings
@@ -58,17 +58,6 @@ class FakeModels:
         reply = {"open_world_action": ACTION, "response_consistency": {"consistent": True, "reason": "ok"}}[name]
         text = json.dumps(reply)
         return Completion(text=text, message=Message("assistant", text), stop_reason="stop")
-
-
-class Ids:
-    """Deterministic message and interception ids, so two runs can be compared field by field."""
-
-    def __init__(self) -> None:
-        self.n = 0
-
-    def uuid4(self) -> uuid.UUID:
-        self.n += 1
-        return uuid.UUID(int=(self.n << 64) | self.n)
 
 
 @pytest.fixture(autouse=True)
@@ -236,11 +225,16 @@ async def drive_mcp(tmp_path) -> dict:
         data = part["data"]
         health = await http.get(f"{admin}/health", headers={"Authorization": f"Bearer {ADMIN}"})
         assert health.json()["stopped"] is True
+        snap = await http.post(f"{admin}/agentenv", json={**body, "method": "snapshot"},
+                               headers={"Authorization": f"Bearer {ADMIN}"})
+        [snapshot_part] = snap.json()["result"]["parts"]
+        snapshot = snapshot_part["data"]
         unknown = await http.post(f"{admin}/agentenv", json={**body, "method": "data/reset"},
                                   headers={"Authorization": f"Bearer {ADMIN}"})
         assert unknown.json()["error"]["code"] == -32601
     assert {name for _, name in fake.calls} == {"open_world_action", "response_consistency"}
-    return {"data": data, "visible": visible}
+    assert TrialSnapshot.model_validate(snapshot).store[WORLD_KEY] == data["world"]
+    return {"data": data, "visible": visible, "calls": fake.calls}
 
 
 def run_inspect(tmp_path, visible: str):
@@ -281,8 +275,6 @@ def _without_call_ids(value):
 
 def test_scripted_mcp_trial_matches_the_inspect_path(tmp_path, monkeypatch):
     stub_browser(monkeypatch)
-    for module in ("refund_eval.world.interception", "refund_eval.published.mail"):
-        monkeypatch.setattr(f"{module}.uuid", SimpleNamespace(uuid4=(ids := Ids()).uuid4))
     with monkeypatch.context() as patch:
         no_inspect_runtime(patch)
         result = asyncio.run(drive_mcp(tmp_path))
@@ -307,11 +299,13 @@ def test_scripted_mcp_trial_matches_the_inspect_path(tmp_path, monkeypatch):
     assert state["stop_reason"] == "max_turns" and state["store"][WORLD_KEY] == world
     assert EVENTS_KEY not in state["store"]
 
-    # The Inspect path, given the same calls, the same seed and the same ids, makes the same world.
-    for module in ("refund_eval.world.interception", "refund_eval.published.mail"):
-        monkeypatch.setattr(f"{module}.uuid", SimpleNamespace(uuid4=(ids := Ids()).uuid4))
+    # Every world-side completion is recorded for replay.
+    recorded = data["store"][RECORDINGS_KEY]
+    assert [r["role"] for r in recorded] == [role for role, _ in result["calls"]]
+    assert all("response" in r for r in recorded)
+
+    # The Inspect path, given the same calls and the same seed (so the same ids), makes the same world.
     sample = run_inspect(tmp_path, result["visible"])
-    assert ids.n > 0
     assert _without_call_ids(sample.store[WORLD_KEY]) == _without_call_ids(world)
     assert _without_call_ids(sample.store[EVENTS_KEY]) == _without_call_ids(events)
     inspect_audit = [(e["event"], e.get("tool")) for e in sample.store["published_tool_audit"]

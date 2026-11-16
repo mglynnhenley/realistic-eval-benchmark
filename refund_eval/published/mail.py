@@ -12,7 +12,6 @@ import copy
 import hashlib
 import json
 import re
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
@@ -21,7 +20,8 @@ from bs4 import BeautifulSoup
 from jsonschema import Draft202012Validator, ValidationError
 
 from refund_eval.sim.mail import is_user_recipient, send_message
-from refund_eval.world.interception import ToolContext, remember_links
+from refund_eval.world.ids import new_hex
+from refund_eval.world.interception import ToolContext, new_message_id, remember_links
 from refund_eval.world.mailquery import MatchContext, parse_query
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import Email, load_world, world_tx
@@ -496,7 +496,7 @@ class GmailService:
         total = len(threads) if total is None else total
         data: dict[str, Any] = {"threads": threads[:size], "resultCountEstimate": str(total)}
         if len(threads) > size:
-            token = uuid.uuid4().hex
+            token = new_hex("page-token", 32)
             self._pages[token] = copy.deepcopy((arguments, threads[size:], template, total))
             data["nextPageToken"] = token
         return self._result("search_threads", data, template)
@@ -542,7 +542,7 @@ class GmailService:
         body = arguments.get("body")
         if body is None:
             body = BeautifulSoup(arguments.get("htmlBody", ""), "html.parser").get_text("\n")
-        mid = uuid.uuid4().hex[:16]
+        mid = new_message_id()
         native_tid = native_tid or mid
         raw_tid = native_tid
         for email, _ in self._locals():

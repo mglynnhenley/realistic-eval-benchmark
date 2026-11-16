@@ -35,6 +35,7 @@ from refund_eval.published.browser_runtimes import (
     docker_command,
 )
 from refund_eval.published.mcp import MCPRPCError, MCPStdioClient
+from refund_eval.world.ids import new_hex
 
 # Preserve the established imports while lifecycle implementation lives separately.
 __all__ = [
@@ -189,7 +190,7 @@ class PublishedBrowserService:
         async with self._call_lock:
             self._raise_if_failed()
             assert self._client is not None
-            self._active_call = {"tool": name, "tool_call_id": tool_call_id or f"browser-{uuid.uuid4().hex}"}
+            self._active_call = {"tool": name, "tool_call_id": tool_call_id or f"browser-{new_hex('browser-call', 32)}"}
             self._active_request_ids = []
             call = dict(self._active_call)
             completed = False

@@ -15,6 +15,7 @@ from inspect_ai.tool import ToolCallError
 from inspect_ai.util import Store, store
 from pydantic import BaseModel, Field
 
+from refund_eval.world import trial_snapshot
 from refund_eval.world.state import WORLD_KEY, World, save_world
 
 COUNTERPARTS_KEY = "simulated_counterparts"
@@ -40,14 +41,14 @@ def capture_checkpoint(
     """Capture every sample-store entry, including state introduced by new tools.
 
     No allowlist needs to stay in sync with the runtime. Inspect already records
-    these values in its sample store. Copy them so subsequent events cannot alter
-    this checkpoint.
+    these values in its sample store. The world's part is a trial snapshot
+    (`world/trial_snapshot.py`), split into the checkpoint's historical fields.
     """
-    saved = deepcopy(dict((store() if current_store is None else current_store).items()))
+    saved = trial_snapshot.capture(store() if current_store is None else current_store).store
     world = saved.pop(WORLD_KEY, None)
     return RunCheckpoint(
         messages=deepcopy(list(messages or [])),
-        world=world.model_dump(mode="json") if isinstance(world, World) else world,
+        world=world,
         counterparts=saved.pop(COUNTERPARTS_KEY, {}) or {},
         resume_state=saved,
     )
@@ -78,13 +79,9 @@ def restore_checkpoint(checkpoint: RunCheckpoint) -> None:
     if checkpoint.world is None:
         raise ValueError("No world to resume in checkpoint")
     world = World.model_validate(checkpoint.world)
-    current = store()
-    for key in list(current.keys()):
-        current.delete(key)
-    for key, value in checkpoint.resume_state.items():
-        current.set(key, deepcopy(value))
-    current.set(COUNTERPARTS_KEY, deepcopy(checkpoint.counterparts))
-    save_world(world)
+    trial_snapshot.restore(trial_snapshot.TrialSnapshot(
+        store={**checkpoint.resume_state, COUNTERPARTS_KEY: checkpoint.counterparts}), store())
+    save_world(world)  # validated, and logged as a world_init entry (as before)
 
 
 def repair_interrupted_tools(messages: list[ChatMessage]) -> tuple[list[ChatMessage], list[str]]:
