@@ -44,7 +44,8 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, model_client=None) -> int:
+    """`model_client` replaces the OpenRouter client (the Harbor world image's test-only fake models)."""
     args = parser().parse_args(argv)
     admin_token, turn_token = os.environ.get(ADMIN_TOKEN_ENV), os.environ.get(TURN_TOKEN_ENV)
     if not admin_token or not turn_token:
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         from refund_eval.world_service.server import serve_until_stopped
         from refund_eval.world_service.trial import WorldTrial
 
-        async with WorldTrial(settings) as trial:
+        async with WorldTrial(settings, model_client=model_client) as trial:
             await serve_until_stopped(trial, host=args.host, port=args.port, admin_port=args.admin_port,
                                       turn_token=turn_token, admin_token=admin_token)
 
