@@ -1,12 +1,13 @@
 """One trial's world, run without Inspect: setup, tool calls and turn boundaries.
 
 Setup follows the Inspect harness (`agent.harness.refund_agent`, sharing `init_world`
-from `runtime.turns`) and the mail and search part of `published.profile.published_tools`,
-in the same order, so the world and its event log start the same. `turn()` is the world's
-half of the harness's `on_continue`, with the same `runtime.turns` code: count the turn,
-save the agent's text as a status report, stop on success, the session cap or the turn
-cap, otherwise run due company follow-ups and wake the agent on mail, its requested time
-or the next check-in. The agent harness in world-service mode (`agent.world_mode`) calls it.
+from `runtime.turns`) and `published.profile.published_tools` (mail, search and the
+browser, which runs in this process), in the same order, so the world and its event log
+start the same. `turn()` is the world's half of the harness's `on_continue`, with the
+same `runtime.turns` code: count the turn, save the agent's text as a status report,
+stop on success, the session cap or the turn cap, otherwise run due company follow-ups
+and wake the agent on mail, its requested time or the next check-in. The agent harness
+in world-service mode (`agent.world_mode`) calls it.
 """
 
 from __future__ import annotations
@@ -15,7 +16,10 @@ import copy
 import hashlib
 import logging
 import os
+import tempfile
+import uuid
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any, Self
 
 import anyio
@@ -27,6 +31,7 @@ from refund_eval.killswitch import kill_reason
 from refund_eval.models import client as models
 from refund_eval.models.client import ModelClient, ModelLimitExceeded
 from refund_eval.models.replay import RecordingModelClient
+from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import MCPService, audit, fingerprint
 from refund_eval.published.profile import (
     PROFILE_KEY,
@@ -163,14 +168,25 @@ class WorldTrial:
             models.install(None)
 
     async def _open_tools(self, scenario: Scenario) -> None:
-        """Mail and search as `published_tools` builds them. Browser tools (step 9) join here."""
+        """Mail, search and the browser as `published_tools` builds them, in the same order and with
+        the same profile record, startup checks and audit. The browser runs here, in the world."""
+        from refund_eval.published import profile as published
+        from refund_eval.published.browser import PublishedBrowserService
+        from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
         from refund_eval.published.fixtures import (
             FIXTURE_MAIL_PROVENANCE,
             make_fixture_mail,
         )
+        from refund_eval.published.network import BrowserBoundary
 
-        data_mode = self.settings.data_mode
+        data_mode, browser_runtime = self.settings.data_mode, self.settings.browser_runtime
         fixture_path = validate_fixture_path(self.settings.inbox, data_mode=data_mode)
+        artifacts = validate_private_output(Path(self.settings.output_dir) / "browser")
+        runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
+        status = (published.fixture_readiness(**runtime_args) if data_mode == "fixture" else
+                  published.hybrid_readiness(**runtime_args))
+        if not status["configured"]:
+            raise ValueError(status["reason"])
         source = FixtureMailSource(fixture_path) if fixture_path is not None else make_mail_source("fixture", scenario)
         source = source.for_scenario(scenario)
         with world_tx() as world:
@@ -186,18 +202,30 @@ class WorldTrial:
                 fixture_web_config,
             )
 
-            public_read_urls = fixture_web_config(ctx)["public_read_urls"]
+            boundary_config = fixture_web_config(ctx)
             provenance = {"data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
-                          "web_dataset": FIXTURE_WEB_DATASET, "inbox": inbox}
+                          "web_dataset": FIXTURE_WEB_DATASET, "browser_image": DEFAULT_IMAGE,
+                          "web_sha256": fingerprint(boundary_config), "inbox": inbox}
         else:
-            public_read_urls = []
+            boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
             provenance = {"data_mode": "hybrid", **mode_details, "mail": FIXTURE_MAIL_PROVENANCE,
-                          "public_read_policy": "public_web", "search_provider": "exa", "inbox": inbox}
-        public_read_policy = "public_web" if data_mode == "hybrid" else "reviewed_urls"
+                          "browser_image": DEFAULT_IMAGE, "public_read_policy": "public_web",
+                          "search_provider": "exa", "inbox": inbox}
+        if data_mode == "hybrid" and scenario.id == "train_refund_late":
+            # The booking pages and lookup the late-refund scenario serves itself (as published_tools does).
+            from refund_eval.published.booking_channels import POLICY
+
+            boundary_config["scenario_channel_policy"] = POLICY
+        boundary = BrowserBoundary(ctx, **boundary_config)
+        channel_fields = ({"scenario_channel": boundary.scenario_channels.descriptor}
+                          if boundary.scenario_channels is not None else {})
+        provenance.update(channel_fields)
+        public_read_policy = boundary_config.get("public_read_policy", "reviewed_urls")
         world_store().set(PROFILE_KEY, {
-            "name": "published", "data_mode": data_mode, "fixture_provenance": provenance, **mode_details,
-            "config_sha256": fingerprint(provenance), "public_read_policy": public_read_policy,
-            "public_read_urls": public_read_urls,
+            "name": "published", "data_mode": data_mode, "fixture_provenance": provenance, **channel_fields,
+            **mode_details, "config_sha256": fingerprint(provenance), "browser_network": "unverified",
+            "browser_runtime": browser_runtime, "public_read_policy": public_read_policy,
+            "public_read_urls": boundary_config["public_read_urls"],
         })
 
         mail = make_fixture_mail(ctx, audit=audit)
@@ -218,11 +246,36 @@ class WorldTrial:
                                       api_key=os.environ.get(HYBRID_EXA_KEY_ENV))
         self._stack.push_async_callback(search.aclose)
         await self._add_tools(search, "exa", live_web=data_mode != "fixture")
+
+        async def handle_request(request: dict[str, Any]) -> dict[str, Any]:
+            # The browser serves requests from its own task, outside the MCP call: name the call there too.
+            with active_tool_call(request.get("tool_call_id")):
+                return await boundary(request)
+
+        spool = Path(self._stack.enter_context(tempfile.TemporaryDirectory(prefix="refund-browser-"))) / "exchange"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
+        browser = PublishedBrowserService(handle_request, spool_dir=spool, image=DEFAULT_IMAGE,
+                                          runtime=browser_runtime, audit_path=network_audit, audit=audit,
+                                          output_dir=artifacts / "files")
+        self._stack.push_async_callback(browser.aclose)
+        # Starts the browser, runs the interception canary and records the isolation evidence.
+        await self._add_tools(browser, "playwright")
+        manifest = getattr(browser, "security_manifest", {}) or {}
+        profile = world_store().get(PROFILE_KEY)
+        profile["browser_network"] = manifest.get("network_mode", "unverified")
+        profile["browser_audit"] = str(network_audit.relative_to(artifacts.parent))
+        profile["browser_runtime"] = browser_runtime
+        profile["browser_boundary"] = manifest
+        if manifest.get("evidence_version") == 2:
+            profile["evidence_version"] = 2
+        world_store().set(PROFILE_KEY, profile)
         names = [*self._tools, SCHEDULE_WAKEUP]
         if len(set(names)) != len(names):
             raise ValueError("World tool catalogs contain duplicate tool names")
-        audit({"event": "profile_ready", "data_mode": data_mode, **mode_details,
-               "public_read_policy": public_read_policy, "tools": list(self._tools)})
+        audit({"event": "profile_ready", **channel_fields, "data_mode": data_mode, **mode_details,
+               "public_read_policy": public_read_policy, "tools": list(self._tools),
+               "browser_boundary": getattr(browser, "security_manifest", None)})
 
     async def _add_tools(self, service: MCPService, source: str, *, live_web: bool = False) -> None:
         """`published.adapter.inspect_tools` without the Inspect ToolDefs."""

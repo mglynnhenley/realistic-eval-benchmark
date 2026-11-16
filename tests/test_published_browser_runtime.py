@@ -134,6 +134,32 @@ async def test_subprocess_namespace_evidence_requires_distinct_namespace_and_loo
         await runtime.verify_isolation()
 
 
+async def test_subprocess_browser_files_can_be_kept_in_an_output_directory(tmp_path, monkeypatch):
+    from refund_eval.published import browser_runtimes
+
+    started = {}
+
+    class Client:
+        def __init__(self, command, *, env, **kwargs):
+            started.update(env)
+
+        async def initialize(self):
+            return {}
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(browser_runtimes, "subprocess_readiness", lambda: {"configured": True})
+    monkeypatch.setattr(browser_runtimes, "MCPStdioClient", Client)
+    monkeypatch.setattr(SubprocessBrowserRuntime, "_namespace_available", lambda self, env: asyncio.sleep(0, False))
+    output = tmp_path / "world" / "browser" / "files"
+    browser = PublishedBrowserService(None, spool_dir=tmp_path / "exchange", runtime="subprocess",
+                                      audit_path=tmp_path / "audit.jsonl", output_dir=output)
+    await browser._runtime.start()
+    await browser._runtime.aclose()
+    assert started["REFUND_EVAL_BROWSER_OUTPUT"] == str(output.resolve()) and output.is_dir()
+
+
 def test_audit_cannot_be_placed_in_browser_exchange(tmp_path):
     with pytest.raises(ValueError, match="outside"):
         PublishedBrowserService(None, spool_dir=tmp_path, audit_path=tmp_path / "network.jsonl")

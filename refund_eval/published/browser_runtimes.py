@@ -207,10 +207,12 @@ class SubprocessBrowserRuntime:
     its manifest explicitly does not claim OS network isolation.
     """
 
-    def __init__(self, spool_dir: Path, *, timeout: float, audit_path: Path):
+    def __init__(self, spool_dir: Path, *, timeout: float, audit_path: Path, output_dir: Path | None = None):
         self.spool_dir = spool_dir
         self.timeout = timeout
         self.audit_path = audit_path
+        # Where the browser writes its files (console logs and their aliases); None: a temporary directory.
+        self.output_dir = output_dir
         self.client: MCPStdioClient | None = None
         self._directories: Any = None
         self._namespace = False
@@ -245,6 +247,9 @@ class SubprocessBrowserRuntime:
         home, workspace, output = (directory / name for name in ("home", "workspace", "output"))
         for path in (home, workspace, output):
             path.mkdir(mode=0o700)
+        if self.output_dir is not None:
+            output = self.output_dir
+            output.mkdir(mode=0o700, parents=True, exist_ok=True)
         env = subprocess_environment(home, self.spool_dir, workspace, output)
         self._namespace = await self._namespace_available(env)
         command = [shutil.which("node") or "node", str(subprocess_server_path())]

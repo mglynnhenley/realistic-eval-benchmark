@@ -26,4 +26,7 @@ class WorldSettings(BaseModel):
     simulator_model: str = DEFAULT_ROLE_MODEL
     grader_model: str = DEFAULT_GRADER_MODEL
     company_simulator: str | None = None
-    output_dir: str = DEFAULT_OUTPUT_DIR
+    # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
+    # (in a network namespace where the host allows one), as on the Inspect path.
+    browser_runtime: Literal["docker", "subprocess"] = "docker"
+    output_dir: str = DEFAULT_OUTPUT_DIR  # state.json, events.jsonl and browser/ (network audit, browser files)

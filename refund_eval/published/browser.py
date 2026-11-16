@@ -76,6 +76,9 @@ class PublishedBrowserService:
     navigation flag and an explicit tool_call_id. Return ``status``, ``headers``
     and ``body_base64``, or ``{"abort": True}``. It must never trust the container
     request or assume GET is read-only. No default network implementation exists.
+    ``output_dir`` keeps a subprocess browser's own files (console logs and their
+    aliases) there instead of a temporary directory; a Docker browser keeps them
+    inside its container.
     """
 
     def __init__(
@@ -89,6 +92,7 @@ class PublishedBrowserService:
         audit: Callable[[dict[str, Any]], None] | None = None,
         runtime: str = "docker",
         audit_path: str | Path | None = None,
+        output_dir: str | Path | None = None,
     ) -> None:
         self.request_handler = request_handler
         self.spool_dir = Path(spool_dir).resolve()
@@ -130,7 +134,8 @@ class PublishedBrowserService:
         self._active_probe: dict[str, Any] | None = None
         self._runtime = (DockerBrowserRuntime(self.spool_dir, image=image, timeout=timeout,
                                               audit_path=self.audit_path) if runtime == "docker" else
-                         SubprocessBrowserRuntime(self.spool_dir, timeout=timeout, audit_path=self.audit_path))
+                         SubprocessBrowserRuntime(self.spool_dir, timeout=timeout, audit_path=self.audit_path,
+                                                  output_dir=Path(output_dir).resolve() if output_dir else None))
         self.container_name = getattr(self._runtime, "container_name", None)
 
     async def _ensure_started(self) -> None:

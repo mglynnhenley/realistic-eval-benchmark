@@ -1,18 +1,28 @@
-"""The world service: its MCP tool list matches the Inspect catalog, and a scripted MCP client runs a
-fixture trial end to end with the same world and event log as the Inspect path. The Inspect agent in
+"""The world service: its MCP tool list and tool profile match the Inspect path's, a scripted MCP client
+runs a fixture trial end to end with the same world and event log as the Inspect path, and a browser
+form submission is intercepted in the world and answered by the company. The Inspect agent in
 world-service mode (`agent.world_mode`), against the service on its own thread, makes the same world,
 event log and conversation as the native path (parity check 1).
 
-Offline: fixture data, a fake world-side model client, a mocked Exa transport and a stub browser.
+Offline: fixture data, a fake world-side model client, a mocked Exa transport and a stub browser whose
+requests go through the world's browser boundary. With REFUND_EVAL_BROWSER_SMOKE=1 the parity and
+browser tests also run against the real browser (the locally built Docker image).
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import copy
+import html
 import json
+import os
 import queue
+import re
 import threading
+import uuid
 from contextlib import asynccontextmanager, contextmanager
+from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -25,6 +35,7 @@ from refund_eval.models.client import Completion, Message, ModelLimitExceeded
 from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published.adapter import _normalized
 from refund_eval.published.mail import _visible_id
+from refund_eval.published.profile import PROFILE_KEY
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.world import interception
 from refund_eval.world import store as trial_store
@@ -41,6 +52,8 @@ ADMIN, TURN = "admin-secret", "turn-secret"
 AVANTI = "customer.resolutions@avantiwestcoast.co.uk"
 WAITING = ["I emailed Avanti about the refund.", *["Still waiting for Avanti."] * 4]
 MAX_TURNS = 1 + len(WAITING) + 3  # send; wait for the reply; search, read, report
+SMOKE = pytest.mark.skipif(os.environ.get("REFUND_EVAL_BROWSER_SMOKE") != "1",
+                           reason="Requires the locally built pinned browser container")
 ACTION = {
     "decision": "evidence_required", "decision_basis": "We need a medical note.", "summary": "Asked for evidence.",
     "reply": True, "reply_after_hours": 2, "subject": "Your refund request", "body": "Please send a medical note.",
@@ -90,21 +103,59 @@ def offline(monkeypatch, tmp_path):
     models.install(None)
 
 
+def _schema(*names: str) -> dict:
+    return {"type": "object", "properties": {name: {"type": "string", "description": name} for name in names},
+            "required": list(names), "additionalProperties": False,
+            "$schema": "http://json-schema.org/draft-07/schema#"}
+
+
+STUB_BROWSER_CATALOG = {"tools": [
+    {"name": "browser_navigate", "description": "Navigate to a URL", "inputSchema": _schema("url")},
+    {"name": "browser_type", "description": "Type text into an element", "inputSchema": _schema("target", "text")},
+    {"name": "browser_click", "description": "Click an element", "inputSchema": _schema("target")},
+]}
+
+
+class FormBrowser:
+    """The browser without Chromium. Its page loads and form posts go to the world's browser boundary as
+    Chromium's would: `browser_navigate` loads a page, `browser_type` fills a field by `#id` and
+    `browser_click` submits the page's form."""
+
+    def __init__(self, request_handler, **kwargs):
+        self.handle = request_handler
+        self.security_manifest = {"verified": True, "evidence_version": 2, "mode": "stub", "network_mode": "none",
+                                  "interception_integrity": {"verified": True}}
+        self.page, self.fields = "", {}
+
+    async def list_tools(self):
+        return copy.deepcopy(STUB_BROWSER_CATALOG)
+
+    async def call_tool(self, name, arguments, *, tool_call_id=None):
+        if name == "browser_type":
+            self.fields[arguments["target"].lstrip("#")] = arguments["text"]
+            return {"content": [{"type": "text", "text": "Typed."}]}
+        if name == "browser_navigate":
+            url, method, body, headers = arguments["url"], "GET", b"", {}
+        else:
+            [action] = re.findall(r'<form action="([^"]+)" method="post"', self.page)
+            url, method, body = html.unescape(action), "POST", urlencode(self.fields).encode()
+            headers, self.fields = {"content-type": "application/x-www-form-urlencoded"}, {}
+        response = await self.handle({
+            "request_id": str(uuid.uuid4()), "url": url, "method": method, "headers": headers,
+            "body_base64": base64.b64encode(body).decode(), "resource_type": "document", "is_navigation": True,
+            "tool_call_id": tool_call_id})
+        self.page = base64.b64decode(response["body_base64"]).decode()
+        return {"content": [{"type": "text", "text": f"Status: {response['status']}\n{self.page}"}]}
+
+    async def aclose(self):
+        pass
+
+
 def stub_browser(monkeypatch):
-    """The Inspect catalog without Chromium: the browser lists no tools (they join the service in step 9)."""
+    """The Inspect catalog and the world service with `FormBrowser` in place of Chromium."""
     from refund_eval.published import browser, profile
 
-    class NoBrowser:
-        def __init__(self, *args, **kwargs):
-            self.security_manifest = {}
-
-        async def list_tools(self):
-            return {"tools": []}
-
-        async def aclose(self):
-            pass
-
-    monkeypatch.setattr(browser, "PublishedBrowserService", NoBrowser)
+    monkeypatch.setattr(browser, "PublishedBrowserService", FormBrowser)
     ready = {"configured": True, "reason": "test"}
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: ready)
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: ready)
@@ -128,35 +179,66 @@ def settings(tmp_path, **kwargs) -> WorldSettings:
 # --------------------------------------------------------------------------- schema parity
 
 
-async def inspect_catalog(data_mode: str) -> list[tuple[str, str, dict]]:
+async def inspect_catalog(scenario_id: str, data_mode: str, artifact_dir) -> tuple[list[tuple[str, str, dict]], dict]:
     from refund_eval.agent.harness import guard_tool, schedule_wakeup
     from refund_eval.published.profile import published_tools
     from refund_eval.scenario.schema import load_scenario
 
-    scenario = load_scenario("train_refund")
-    trial_store.install(MemoryTrial(scenario.id))
+    scenario = load_scenario(scenario_id)
+    trial = MemoryTrial(scenario.id)
+    trial_store.install(trial)
     try:
         init_world(scenario, 7)
-        async with published_tools(scenario, data_mode=data_mode) as tools:
+        async with published_tools(scenario, data_mode=data_mode, artifact_dir=str(artifact_dir)) as tools:
             tools = [guard_tool(t) for t in [*tools, schedule_wakeup()]]
-            return [(t.name, t.description, t.parameters.model_dump(exclude_none=True)) for t in tools]
+            return ([(t.name, t.description, t.parameters.model_dump(exclude_none=True)) for t in tools],
+                    copy.deepcopy(trial.store()[PROFILE_KEY]))
     finally:
         trial_store.install(None)
 
 
-@pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
-async def test_mcp_tool_list_matches_the_inspect_catalog(tmp_path, monkeypatch, data_mode):
-    stub_browser(monkeypatch)
-    expected = await inspect_catalog(data_mode)
-    async with (WorldTrial(settings(tmp_path, data_mode=data_mode), model_client=FakeModels()) as trial,
+# Run-specific: the network audit's file name, and a real browser's container, image and probe ids.
+RUN_SPECIFIC = {"browser_audit", "browser_boundary"}
+BOUNDARY_FIELDS = ("mode", "network_mode", "readonly_rootfs", "cap_drop", "package_version")
+
+
+@pytest.mark.parametrize("browser", ["stub", pytest.param("docker", marks=SMOKE)])
+@pytest.mark.parametrize(("scenario_id", "data_mode"), [
+    ("train_refund", "fixture"), ("train_refund", "hybrid"), ("train_refund_late", "hybrid")])
+async def test_mcp_tool_list_and_profile_match_the_inspect_path(tmp_path, monkeypatch, scenario_id, data_mode,
+                                                                 browser):
+    if browser == "stub":
+        stub_browser(monkeypatch)
+    expected, native_profile = await inspect_catalog(scenario_id, data_mode, tmp_path / "native")
+    async with (WorldTrial(settings(tmp_path, scenario=scenario_id, data_mode=data_mode),
+                           model_client=FakeModels()) as trial,
                 session(trial) as (client, _, _)):
         listed = (await client.list_tools()).tools
+        profile = trial.data()["store"][PROFILE_KEY]
+    assert {"browser_navigate", "browser_click"} <= {t.name for t in listed}
     assert [t.name for t in listed] == [name for name, _, _ in expected]
     assert [t.description for t in listed] == [description for _, description, _ in expected]
     for tool, (_, _, parameters) in zip(listed, expected, strict=True):
         # Equal up to the JSON Schema defaults Inspect's ToolParams writes out at the root.
         assert _normalized(tool.inputSchema, root=True) == _normalized(parameters, root=True), tool.name
     assert listed[-1].inputSchema == expected[-1][2]  # schedule_wakeup is exactly Inspect's
+
+    # The same profile record: provenance, scenario channel, browser network and runtime.
+    assert ({k: v for k, v in profile.items() if k not in RUN_SPECIFIC}
+            == {k: v for k, v in native_profile.items() if k not in RUN_SPECIFIC})
+    assert ("scenario_channel" in profile) == (scenario_id == "train_refund_late")
+    assert profile["browser_audit"].startswith("browser/") and profile["browser_audit"].endswith(".network.jsonl")
+    if browser == "stub":
+        assert profile["browser_boundary"] == native_profile["browser_boundary"]
+        return
+    boundary = profile["browser_boundary"]
+    assert profile["browser_network"] == "none" and boundary["verified"] is True
+    assert boundary["interception_integrity"]["verified"] is True
+    assert ({k: boundary[k] for k in BOUNDARY_FIELDS}
+            == {k: native_profile["browser_boundary"][k] for k in BOUNDARY_FIELDS})
+    records = [json.loads(line) for line in (tmp_path / "world" / profile["browser_audit"]).read_text().splitlines()]
+    assert [r["event"] for r in records if r["event"].startswith("browser_probe_")][-1] == "browser_probe_end"
+    assert any(r["event"] == "browser_isolation_verified" for r in records)
 
 
 # --------------------------------------------------------------------------- end to end
@@ -323,7 +405,8 @@ def test_scripted_mcp_trial_matches_the_inspect_path(tmp_path, monkeypatch):
     assert inspect_audit == [(e["event"], e.get("tool")) for e in audit if e.get("source") in {"gmail", "exa"}]
 
 
-async def test_caller_meta_names_the_tool_call(tmp_path):
+async def test_caller_meta_names_the_tool_call(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
     async with (WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial,
                 session(trial) as (client, _, _)):
         result = await client.call_tool("schedule_wakeup", {"at": "2026-09-30 10:00"},
@@ -355,7 +438,8 @@ class OutOfCredit(FakeModels):
         raise ModelLimitExceeded("402: out of credit")
 
 
-async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path):
+async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
     async with (WorldTrial(settings(tmp_path), model_client=OutOfCredit()) as trial,
                 session(trial) as (client, _, _)):
         sent = await client.call_tool("send_message", {
@@ -548,7 +632,8 @@ def test_world_service_mode_refuses_resume(tmp_path):
         refund_agent(world_url="http://world:8000", resume_log=str(tmp_path / "trial.eval"))
 
 
-async def test_turn_records_the_agents_stop(tmp_path):
+async def test_turn_records_the_agents_stop(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
     async with (WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial,
                 session(trial) as (_, base, _), httpx.AsyncClient() as http):
         headers = {"Authorization": f"Bearer {TURN}"}
@@ -587,3 +672,82 @@ def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatc
                                          world_url="http://world:8000")
     assert captured["world_url"] == "http://world:8000"
     assert not task.scorer
+
+
+# --------------------------------------------------------------------------- browser
+
+
+async def drive_browser_form(tmp_path) -> dict:
+    """Over MCP: open Trainline's authored contact page, fill and submit its form, then end turns until
+    the company's reply wakes the agent."""
+    from refund_eval.scenario.schema import load_scenario
+
+    scenario = load_scenario("train_refund")
+    fields = [("#email", scenario.user.email_addresses[0]), ("#booking_ref", scenario.journey.booking_ref),
+              ("#subject", "Cancelled train refund"), ("#message", "My train was cancelled. Please refund me.")]
+    async with (WorldTrial(settings(tmp_path, max_turns=20), model_client=FakeModels()) as trial,
+                session(trial) as (client, base, _), httpx.AsyncClient() as http):
+        opened = await client.call_tool("browser_navigate", {"url": scenario.org("trainline").contact_url})
+        assert not opened.isError, opened.content
+        for target, text in fields:
+            typed = await client.call_tool("browser_type", {"target": target, "text": text})
+            assert not typed.isError, typed.content
+        sent = await client.call_tool("browser_click", {"target": "button[type=submit]"})
+        assert not sent.isError, sent.content
+        turn = {"Authorization": f"Bearer {TURN}"}
+        assert (await http.post(f"{base}/turn", json={"ended": False}, headers=turn)).json()["wakeup"] is None
+        for _ in range(10):
+            woke = (await http.post(f"{base}/turn", json={"ended": True, "text": "Waiting."}, headers=turn)).json()
+            assert woke["stopped"] is False, woke
+            inbox = {e["id"]: e for e in trial.data()["world"]["overlay_inbox"]}
+            replies = [inbox[i] for i in woke["wakeup"]["announced_mail_ids"] if inbox[i]["source"] == "counterparty"]
+            if replies:
+                break
+        else:
+            pytest.fail("The company's reply never woke the agent")
+        data = trial.data()
+    assert "trainline" in replies[0]["sender"] and replies[0]["body"].strip() == ACTION["body"]
+    return data
+
+
+def check_browser_form(tmp_path, data) -> tuple[str, dict]:
+    events, audit = data["events"], data["store"]["published_tool_audit"]
+    [click] = [e["call_id"] for e in audit if e["event"] == "call" and e.get("tool") == "browser_click"]
+    session_id, request_id = click.rsplit(":", 1)
+    assert len(session_id) == 32 and request_id.isdigit()
+    # The form post was intercepted, answered by the simulator, and logged with the MCP call id.
+    [decision] = [e for e in audit if e["event"] == "browser_decision" and e.get("method") == "POST"]
+    assert decision["call_id"] == click and decision["action"] == "simulated"
+    [write] = [e for e in events if e["kind"] == "agent_write"]
+    assert write["tool_call_id"] == click
+    interception = write["payload"]["interception"]
+    assert interception["channel"] == "form" and interception["org"] == "trainline"
+    assert interception["payload"]["tool_call_id"] == click
+    # Browser evidence is under the output directory, next to state.json and events.jsonl.
+    state = json.loads((tmp_path / "world" / STATE_FILE).read_text())
+    profile = state["store"][PROFILE_KEY]
+    assert profile["browser_audit"].startswith("browser/")
+    assert profile["browser_boundary"]["interception_integrity"]["verified"] is True
+    assert next(e for e in audit if e["event"] == "profile_ready")["browser_boundary"] == profile["browser_boundary"]
+    return click, profile
+
+
+def test_browser_form_is_intercepted_and_answered_by_the_company(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    with monkeypatch.context() as patch:
+        no_inspect_runtime(patch)
+        data = asyncio.run(drive_browser_form(tmp_path))
+    check_browser_form(tmp_path, data)
+
+
+@SMOKE
+def test_real_browser_form_in_the_world_service(tmp_path, monkeypatch):
+    with monkeypatch.context() as patch:
+        no_inspect_runtime(patch)
+        data = asyncio.run(drive_browser_form(tmp_path))
+    click, profile = check_browser_form(tmp_path, data)
+    assert profile["browser_network"] == "none" and profile["browser_runtime"] == "docker"
+    records = [json.loads(line) for line in (tmp_path / "world" / profile["browser_audit"]).read_text().splitlines()]
+    assert any(r["event"] == "browser_probe_end" and r["boundary_verified"] for r in records)
+    assert any(r["event"] == "request" and r["request"]["method"] == "POST" and r["request"]["tool_call_id"] == click
+               for r in records)
