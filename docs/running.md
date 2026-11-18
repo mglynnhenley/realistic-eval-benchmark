@@ -138,7 +138,7 @@ scripts/prepare-late-refund-muse .context/muse-example
 
 Use a new output directory each time. The script freezes `openrouter/meta/muse-spark-1.3`, with `openrouter/anthropic/claude-opus-5.5` for both the simulator and financial consistency checker. It selects the bundled inbox, hybrid web, `research_mode=auto`, Modal with a subprocess browser, one trial and concurrency one, 40 million target tokens, a 60,000-token history window, 10,000 generations, twelve simulated weeks and a 36,000-second wall-time limit. It does not resume an old log.
 
-The trial has an explicit **$1,000 ceiling**, not an estimated cost; in-flight calls can overshoot it. Sandbox compute and subsequent Scout grading cost extra. Preparation makes no model calls and prints the separate launch command. After configuring Modal and exporting `OPENROUTER_API_KEY` as described in [Harbor setup](harbor.md#setup), launch only when ready:
+The trial has an explicit **$1,000 ceiling**, not an estimated cost; in-flight calls can overshoot it. Sandbox compute and subsequent Scout grading cost extra. Preparation makes no model calls and prints the separate launch command. After configuring Modal and setting `OPENROUTER_API_KEY` as described in [Harbor setup](harbor.md#setup), launch only when ready:
 
 ```bash
 scripts/harbor harbor run -c .context/muse-example/job.json

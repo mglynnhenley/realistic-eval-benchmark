@@ -4,4 +4,11 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export PYTHONPATH="$repo_dir${PYTHONPATH:+:$PYTHONPATH}"
 export HARBOR_TELEMETRY="${HARBOR_TELEMETRY:-0}"
+if [ "$#" -gt 0 ] && [ -f "$repo_dir/.env" ]; then
+    set -- python -c 'import os, sys
+from dotenv import load_dotenv
+
+load_dotenv(sys.argv[1])
+os.execvp(sys.argv[2], sys.argv[2:])' "$repo_dir/.env" "$@"
+fi
 exec uv run --frozen --project "$repo_dir/integrations/harbor" "$@"
