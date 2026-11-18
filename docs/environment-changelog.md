@@ -24,9 +24,9 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 5.0 — 2026-11-18
+## 6.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: e6c08d5875dc00db967075e83bde5237d3e6017318ae63a79260edcdaa2a3100
+- Fingerprint: 1b72584491f65ef1ddedeab1d03f244f635f92126227a10bb3e720824803dc20
 - Trial round: separately coordinated rerun, not yet run.
 - Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; record failed-reply evidence including HTTP status, settle failures with framed request-byte bounds at the highest applicable token rate plus fixed request charges (failing closed per model on unpriceable components, ignoring unused modality/plugin prices), and allow two individually budgeted retries before stopping (MAT-144).
 
