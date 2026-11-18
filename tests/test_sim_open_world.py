@@ -259,7 +259,9 @@ def live_web(sim, monkeypatch):
     store().set(research.MODE_KEY, "live")
     searches = []
 
-    async def search(query, objective, *, scenario):
+    async def search(query, objective, *, scenario, request_budget=None):
+        if request_budget is not None:
+            request_budget.consume()
         searches.append(query)
         return "Title: Refunds\nURL: https://www.thetrainline.com/terms\nRefunds must be claimed within 28 days."
 
