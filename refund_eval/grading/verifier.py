@@ -122,11 +122,13 @@ def _resolve(value: Any, attachments: dict[str, str]) -> Any:
     return value
 
 
-def read_eval_messages(path: Path) -> list[dict[str, Any]]:
-    """The messages of the single sample in an Inspect `.eval` log (a zip), read without Inspect."""
+def read_eval_messages(path: Path) -> list[dict[str, Any]] | None:
+    """Read the single sample's messages without Inspect; an interrupted log may have no sample."""
     try:
         with zipfile.ZipFile(path) as log:
             names = [n for n in log.namelist() if n.startswith("samples/") and n.endswith(".json")]
+            if not names and "_journal/start.json" in log.namelist() and "header.json" not in log.namelist():
+                return None
             if len(names) != 1:
                 raise VerifierInputError(f"{path} holds {len(names)} samples; expected one trial")
             sample = json.loads(log.read(names[0]))
@@ -148,7 +150,8 @@ def read_transcript(artifacts: Path | None) -> tuple[list[dict[str, Any]] | None
     if len(logs) > 1:
         raise VerifierInputError(f"{len(logs)} .eval logs in {artifacts}; expected one")
     if logs:
-        return read_eval_messages(logs[0]), logs[0].name
+        messages = read_eval_messages(logs[0])
+        return messages, logs[0].name if messages is not None else None
     if (artifacts / TRANSCRIPT_FILE).is_file():
         messages = _read_json(artifacts / TRANSCRIPT_FILE, "transcript")
         if not isinstance(messages, list) or not all(isinstance(m, dict) for m in messages):

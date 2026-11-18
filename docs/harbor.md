@@ -154,7 +154,8 @@ Save a RunConfig JSON file. For example, this config prepares one Docker trial:
   "trials": 1,
   "concurrency": 1,
   "time_limit": 180,
-  "cost_limit": 1
+  "cost_limit": 1,
+  "world_cost_limit": 1
 }
 ```
 
@@ -173,9 +174,15 @@ and trial name. An explicit seed applies to all attempts; the host's
 resuming prior logs are not supported by this command.
 
 Review the record before running the separately printed paid launch command.
-**The dollar limit caps only the target**, not the world models or sandbox
-compute; get approval for those costs before launching. Use `"execution":
-"modal"` to prepare a Modal job.
+`cost_limit` is target-only; the required `world_cost_limit` is a separate
+per-trial USD allowance shared by the simulator and grader. The world checks
+provider-reported charges after each request, does not retry failed requests,
+and stops issuing requests if the allowance is reached or a charge cannot be
+reconciled. A final in-flight request can take spend past the allowance; this
+is not a hard invoice ceiling. Check `store.world_model_budget` in world
+`state.json` for known spend and settlement status. Sandbox compute and
+external tools are not covered. Get approval for the full costs before
+launching. Use `"execution": "modal"` to prepare a Modal job.
 
 ### Generate a task and sample job
 
@@ -183,7 +190,7 @@ Generate a task. This launches nothing. The output directory holds the source an
 
 ```bash
 scripts/harbor python -m refund_eval.harbor.adapter \
-  --scenario train_refund_late --out .context/harbor_tasks
+  --scenario train_refund_late --out .context/harbor_tasks --world-cost-limit 1
 ```
 
 This writes `.context/harbor_tasks/train_refund_late/` with the following parts:
@@ -202,6 +209,7 @@ The adapter also writes these files next to the task:
 World settings are fixed in the task: scenario, simulated weeks, turn cap, data mode, research mode, and the simulator and grader models. The target's budgets are agent options in the job: `cost_limit`, `token_budget`, `history_tokens`, `budget_notice`, `time_limit` and `reasoning`. The agent is `refund_eval.harbor.installed_agent:RefundInstalledAgent`.
 
 Running `job.yaml` is paid: it calls OpenRouter for the target, the simulator and the grader. Both containers receive `OPENROUTER_API_KEY` from the project’s `.env` or the host shell when launched through `scripts/harbor`. Use `-y` to accept Harbor's prompt about task environment variables.
+Only the keyless fake-world mode can start a native world without a world-model allowance.
 
 Each trial collects the following:
 
@@ -222,6 +230,7 @@ To test without paid calls, run a fixture task with a `mockllm/model` target and
 env -u OPENROUTER_API_KEY PYTHON_DOTENV_DISABLED=1 REFUND_EVAL_FAKE_WORLD_MODELS=1 scripts/harbor harbor run -y -c <job with model_name: mockllm/model>
 scripts/harbor python -m pytest -q tests/test_harbor_native_task.py
 uv run pytest -q tests/test_harbor_native_world.py
+REFUND_EVAL_NATIVE_DOCKER_SMOKE=1 uv run pytest -q tests/test_harbor_native_lifecycle.py
 ```
 
 ### Parity gate

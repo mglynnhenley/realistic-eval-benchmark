@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import zipfile
 
 import pytest
 from fixtures.grading import trial_messages, trial_world
@@ -86,6 +87,15 @@ def test_without_a_transcript_only_world_keys_are_written_with_the_same_values(t
     assert {k for k in reward if k.startswith("long_horizon_activity.")} == {
         f"long_horizon_activity.{k}" for k in checks.WORLD_LONG_HORIZON_KEYS}
     assert all(full[k] == v for k, v in reward.items())
+
+
+def test_unfinished_inspect_archive_does_not_block_world_grading(tmp_path):
+    _, _, state, events, artifacts = legacy_trial(tmp_path)
+    with zipfile.ZipFile(artifacts / "interrupted.eval", "w") as archive:
+        archive.writestr("_journal/start.json", "{}")
+    reward, details = run_verifier(state, events, artifacts)
+    assert reward == run_verifier(state, events)[0]
+    assert details["inputs"]["transcript"] is None
 
 
 def test_event_log_mismatch_is_a_key_not_a_crash(tmp_path):

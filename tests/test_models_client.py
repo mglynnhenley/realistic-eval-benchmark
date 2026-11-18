@@ -335,6 +335,18 @@ async def test_openrouter_credit_limit_is_a_model_limit():
         await client.complete("simulator", [Message("user", "x")])
 
 
+async def test_budgeted_openrouter_uses_only_reported_charges_and_disables_sdk_retries(monkeypatch):
+    from refund_eval.world_service.settings import WorldSettings
+
+    monkeypatch.setattr(model_pricing.httpx, "get", lambda *a, **k: pytest.fail("not a provider-reported charge"))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+        200, json=reply({"role": "assistant", "content": "{}"}))))
+    sdk = AsyncOpenAI(api_key="not-a-key", http_client=http, max_retries=2)
+    client = OpenRouterClient.from_settings(WorldSettings(world_cost_limit=1), client=sdk)
+    assert client.client.max_retries == 0
+    assert (await client.complete("simulator", [])).usage.cost is None
+
+
 def test_openrouter_roles_come_from_settings_and_must_be_openrouter_models(monkeypatch):
     from refund_eval.config import RunConfig
 

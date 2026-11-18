@@ -146,13 +146,16 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
 class OpenRouterClient:
     def __init__(self, roles: Mapping[Role, str], *, api_key: str | None = None,
                  base_url: str = OPENROUTER_BASE_URL, prices: Mapping[str, Mapping[str, float]] | None = None,
-                 client: AsyncOpenAI | None = None) -> None:
+                 client: AsyncOpenAI | None = None, require_reported_cost: bool = False) -> None:
         for role, name in roles.items():
             if not name.startswith(PREFIX):
                 raise ValueError(f"{role} model must be an openrouter/ model, not {name!r}")
         self.roles = dict(roles)
         self.prices = dict(prices or {})
         self.client = client or AsyncOpenAI(api_key=api_key or os.environ.get(API_KEY_ENV), base_url=base_url)
+        if require_reported_cost:
+            self.client = self.client.with_options(max_retries=0)
+            self.prices = {}
         self.usage_by_model: dict[str, Usage] = {}
         self.usage_by_role: dict[str, Usage] = {}
 
@@ -164,11 +167,12 @@ class OpenRouterClient:
 
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
-        if prices is None:
+        require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
+        if prices is None and not require_reported_cost:
             from refund_eval.model_pricing import openrouter_prices
 
             prices = openrouter_prices(roles.values())
-        return cls(roles, prices=prices, **kwargs)
+        return cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
 
     def model_name(self, role: Role) -> str:
         if role not in self.roles:

@@ -144,7 +144,8 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
 
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
-               cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED) -> Path:
+               cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
+               world_cost_limit: float | None = None) -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
@@ -173,6 +174,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "SOURCE_SHA256": source_sha256, "AGENT_TIMEOUT": float(agent_timeout),
         "VERIFIER_TIMEOUT": float(verifier_timeout), "CPUS": cpus, "MEMORY_MB": memory_mb,
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
+        "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):
@@ -238,6 +240,10 @@ def validate_and_index(out: Path, task_dir: Path, job: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from pydantic import TypeAdapter
+
+    from refund_eval.config import CostCap
+
     defaults = RunConfig.model_fields
     p = argparse.ArgumentParser(prog="python -m refund_eval.harbor.adapter", description=__doc__.split("\n")[0])
     p.add_argument("--scenario", required=True, choices=scenario_names())
@@ -249,18 +255,24 @@ def main(argv: list[str] | None = None) -> int:
                    help="Organisation research mode (default: %(default)s)")
     p.add_argument("--simulator-model", default=DEFAULT_ROLE_MODEL)
     p.add_argument("--grader-model", default=DEFAULT_GRADER_MODEL)
+    p.add_argument("--world-cost-limit", type=float, help="Per-trial world model USD allowance; required for paid runs")
     p.add_argument("--agent-timeout", type=float, default=39_600, help="Harbor agent timeout in seconds")
     p.add_argument("--verifier-timeout", type=float, default=600)
     p.add_argument("--cpus", type=int, default=2)
     p.add_argument("--memory-mb", type=int, default=4096)
     args = p.parse_args(argv)
+    if args.world_cost_limit is not None:
+        try:
+            TypeAdapter(CostCap).validate_python(args.world_cost_limit)
+        except ValueError:
+            p.error("--world-cost-limit must be finite and in (0, 1000]")
     out = validate_private_output(args.out)
     out.mkdir(parents=True, exist_ok=True)
     task_dir = write_task(out, scenario=args.scenario, data_mode=args.data_mode, sim_weeks=args.sim_weeks,
                           max_turns=args.max_turns, research_mode=args.research_mode,
                           simulator_model=args.simulator_model, grader_model=args.grader_model,
                           agent_timeout=args.agent_timeout, verifier_timeout=args.verifier_timeout,
-                          cpus=args.cpus, memory_mb=args.memory_mb)
+                          cpus=args.cpus, memory_mb=args.memory_mb, world_cost_limit=args.world_cost_limit)
     job = sample_job(out, task_dir, scenario=args.scenario)
     validate_and_index(out, task_dir, job)
     header = ("# Sample Harbor job for the native refund task; the adapter does not launch it.\n"
