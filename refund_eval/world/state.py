@@ -130,6 +130,7 @@ class CaseState(BaseModel):
     facts_given: list[str] = Field(default_factory=list)
     promises: list[str] = Field(default_factory=list)
     history: list[str] = Field(default_factory=list)  # short log lines
+    notes: list[str] = Field(default_factory=list)
     final_response_at: datetime | None = None  # when an open-world final response reaches the customer
     decisions: list[dict] = Field(default_factory=list)  # legacy records; new decisions live in World.interactions
 

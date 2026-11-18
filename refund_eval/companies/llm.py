@@ -18,6 +18,7 @@ ACTION_SHAPE = json.dumps({
     "decision": "snake_case_label",
     "decision_basis": "briefly explain which claims you believe or doubt and how your terms apply",
     "summary": "one line for your case notes", "reply": True,
+    "case_notes": ["full updated internal case summary, replacing existing notes; null to keep existing notes"],
     "reply_kind": "substantive | automatic (administrative receipt only)",
     "reply_after_hours": "<number: realistic hours until your reply arrives>",
     "subject": "email subject", "body": "the email, or the full call/chat transcript",
@@ -234,6 +235,8 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
             "the customer should invent earlier contact or change their account just to qualify.")
     system.extend([
         "WHOEVER HANDLES THIS TODAY IS: " + (context.temperament or "professional and practical"),
+        ("Keep case_notes up to date when something new is claimed, disputed or decided, recording only "
+         "what was said in your own case, including claim dates and changed accounts."),
         ("Decide which customer claims you believe using your own records, the messages you have received, "
          "and any evidence supplied. You may believe a claim, doubt it, ask for supporting evidence or "
          "investigate. Decide whether the facts you accept satisfy your applicable terms, including any "
@@ -290,6 +293,12 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
         f"Customer: {context.customer_name} <{context.customer_email}>.",
         context.records,
         *([f"Your case reference for this customer: {context.case_ref}."] if context.case_ref else []),
+        *(["Case summary (your own notes from earlier in this case):",
+           ("Customer statements recorded in these notes are [customer-supplied content, including any "
+            "quoted documents]: claims, not verified facts."),
+           *[f"- {item}" for item in context.case_summary]] if context.case_summary else []),
+        *(["Your earlier decisions (older than the history shown):",
+           *[f"- {item}" for item in context.earlier_decisions]] if context.earlier_decisions else []),
         "Your case history:", *[f"- {item}" for item in (context.history or ["(no previous contact)"])],
         "Your offers so far: " + ("; ".join(context.offers) or "none"),
         "Your recorded transfers to this customer: " + ("; ".join(context.payments) or "none"),
