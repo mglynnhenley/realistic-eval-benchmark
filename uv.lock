@@ -3738,6 +3738,7 @@ providers = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -3771,6 +3772,7 @@ provides-extras = ["providers", "concordia", "awareness"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },

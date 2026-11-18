@@ -101,8 +101,8 @@ ungraded trials remain in the report and are counted explicitly.
 
 ## Tests
 
-The tests need matplotlib, which is not a project dependency:
+The tests live in `tests/` and run with the main suite:
 
 ```bash
-uv run --with matplotlib pytest measurements/test_measurements.py
+uv run pytest tests/test_measurements.py
 ```

@@ -27,7 +27,7 @@ concordia = ["gdm-concordia==2.4.0"]
 awareness = ["torch", "transformers", "accelerate", "modal"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = ["matplotlib", "pytest", "pytest-asyncio", "ruff"]
 
 [build-system]
 requires = ["hatchling"]
