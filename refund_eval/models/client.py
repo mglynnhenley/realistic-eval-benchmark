@@ -86,6 +86,7 @@ class Completion:
     stop_reason: StopReason = "unknown"
     usage: Usage | None = None
     model: str = ""
+    cost_method: Literal["actual", "generation_lookup", "estimate"] | None = None
 
     @property
     def tool_calls(self) -> list[ToolCall]:

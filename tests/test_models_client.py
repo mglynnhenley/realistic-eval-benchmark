@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -355,16 +356,158 @@ async def test_openrouter_credit_limit_is_a_model_limit():
         await client.complete("simulator", [Message("user", "x")])
 
 
-async def test_budgeted_openrouter_uses_only_reported_charges_and_disables_sdk_retries(monkeypatch):
+async def test_budgeted_openrouter_loads_fallback_prices_and_disables_sdk_retries(monkeypatch):
     from refund_eval.world_service.settings import WorldSettings
 
-    monkeypatch.setattr(model_pricing.httpx, "get", lambda *a, **k: pytest.fail("not a provider-reported charge"))
+    monkeypatch.setattr(model_pricing, "openrouter_prices", lambda models: {})
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
-        200, json=reply({"role": "assistant", "content": "{}"}))))
+        200, json=reply({"role": "assistant", "content": "{}"}, usage={"prompt_tokens": 1,
+                         "completion_tokens": 1, "total_tokens": 2, "cost": 0.1}))))
     sdk = AsyncOpenAI(api_key="not-a-key", http_client=http, max_retries=2)
     client = OpenRouterClient.from_settings(WorldSettings(world_cost_limit=1), client=sdk)
     assert client.client.max_retries == 0
-    assert (await client.complete("simulator", [])).usage.cost is None
+    assert (await client.complete("simulator", [])).usage.cost == 0.1
+
+
+@pytest.mark.parametrize("budgeted", [False, True])
+@pytest.mark.parametrize("error", [httpx.ConnectError("offline"), TypeError("invalid model catalog"),
+                                   ValueError("invalid prompt price"), RuntimeError("unexpected")])
+def test_openrouter_catalog_failure_only_falls_back_when_budgeted(monkeypatch, budgeted, error):
+    from refund_eval.world_service.settings import WorldSettings
+
+    def unavailable(models):
+        raise error
+
+    monkeypatch.setattr(model_pricing, "openrouter_prices", unavailable)
+    settings = WorldSettings(world_cost_limit=1 if budgeted else None)
+    sdk = AsyncOpenAI(api_key="not-a-key")
+    if not budgeted or isinstance(error, RuntimeError):
+        with pytest.raises(type(error), match=str(error)):
+            OpenRouterClient.from_settings(settings, client=sdk)
+    else:
+        assert OpenRouterClient.from_settings(settings, client=sdk).prices == {}
+
+
+@pytest.mark.parametrize("mode", ["lookup", "native_lookup", "lookup_zero", "unfinished", "cancelled",
+                                 "lookup_zero_tokens", "estimate", "tokens", "exceeds", "unknown", "multiple",
+                                 "actual", "reported_zero_lookup", "reported_zero_estimate", "reported_zero_unknown",
+                                 "null", "zero", "partial", "short_total", "negative_cache"])
+async def test_world_charge_settlement(monkeypatch, mode):
+    from refund_eval.models.budget import WORLD_BUDGET_KEY, BudgetedWorldModels
+    from refund_eval.models.replay import RECORDINGS_KEY, RecordingModelClient
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    requests = []
+    unsettled = {"lookup_zero", "unfinished", "cancelled", "lookup_zero_tokens", "unknown", "null", "zero",
+                 "partial", "short_total", "negative_cache", "reported_zero_unknown"}
+
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("refund_eval.models.openrouter.anyio.sleep", no_sleep)
+
+    def handler(request):
+        requests.append(request)
+        assert request.headers["authorization"] == "Bearer not-a-key"
+        if request.method == "GET":
+            assert request.url.path == "/api/v1/generation" and request.url.params["id"] == "gen-1"
+            if mode in {"lookup", "native_lookup", "lookup_zero", "unfinished", "cancelled", "lookup_zero_tokens",
+                        "reported_zero_lookup"}:
+                data = {"total_cost": 0.25, "finish_reason": "stop", "tokens_prompt": 200, "tokens_completion": 100}
+                if mode == "lookup" and sum(r.method == "GET" for r in requests) == 1:
+                    return httpx.Response(404, json={"error": {"message": "not ready"}})
+                if mode == "native_lookup":
+                    data = {"total_cost": 0.25, "native_finish_reason": "stop", "native_tokens_prompt": 200,
+                            "native_tokens_completion": 100}
+                if mode == "lookup_zero":
+                    data["total_cost"] = 0
+                if mode == "unfinished":
+                    data["finish_reason"] = None
+                if mode == "cancelled":
+                    data["cancelled"] = True
+                if mode == "lookup_zero_tokens":
+                    data["tokens_completion"] = 0
+                return httpx.Response(200, json={"data": data})
+            return httpx.Response(404, json={"error": {"message": "not ready"}})
+        payload = reply({"role": "assistant", "content": "ok"})
+        usage = {"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300}
+        if mode == "tokens":
+            usage["cost"] = -1
+        if mode in {"exceeds", "multiple"}:
+            usage = {"prompt_tokens": 100_000, "completion_tokens": 100, "total_tokens": 100_100}
+        if mode == "actual":
+            usage["cost"] = 0.25
+        if mode.startswith("reported_zero"):
+            usage["cost"] = 0
+        if mode == "zero":
+            usage["completion_tokens"] = 0
+        if mode == "partial":
+            del usage["prompt_tokens"]
+        if mode == "short_total":
+            usage["total_tokens"] = 250
+        if mode == "negative_cache":
+            usage["prompt_tokens_details"] = {"cached_tokens": -1}
+        payload["usage"] = None if mode in {"lookup", "native_lookup", "null"} else usage
+        return httpx.Response(200, json=payload)
+
+    name = "openrouter/anthropic/claude-opus-5.5"
+    client = openrouter(handler, require_reported_cost=True,
+                        prices={} if mode in {"unknown", "reported_zero_unknown"} else {name: {"input": 1, "output": 5}})
+    budget = BudgetedWorldModels(RecordingModelClient(client), 0.001 if mode == "exceeds" else 1, lambda: None)
+    try:
+        if mode in unsettled | {"exceeds"}:
+            with pytest.raises(ModelLimitExceeded):
+                await budget.complete("simulator", [Message("user", "hello")], max_tokens=100_000)
+            state = store.world_store().get(WORLD_BUDGET_KEY)
+            assert state["status"] == ("exhausted" if mode == "exceeds" else "unknown")
+            assert (state["spent_usd"] > 0) == (mode == "exceeds")
+            saved = store.world_store().get(RECORDINGS_KEY)[0]["response"]
+            if mode != "exceeds":
+                assert saved["usage"] is None or saved["usage"]["cost"] is None
+                assert saved["cost_method"] is None
+        else:
+            result = await budget.complete("simulator", [Message("user", "hello")], max_tokens=100_000)
+            method = ("generation_lookup" if mode in {"lookup", "native_lookup", "reported_zero_lookup"} else
+                      "actual" if mode == "actual" else "estimate")
+            assert result.cost_method == method
+            assert budget.spent == Decimal(str(result.usage.cost))
+            if mode in {"tokens", "reported_zero_estimate"}:
+                assert result.usage.cost == 0.0015
+            saved = store.world_store().get(RECORDINGS_KEY)[0]["response"]
+            assert saved["cost_method"] == method
+            if mode == "multiple":
+                with pytest.raises(ModelLimitExceeded, match="allowance reached"):
+                    await budget.complete("simulator", [], max_tokens=100_000)
+                assert budget.spent >= 1
+        if mode in unsettled | {"multiple", "exceeds"}:
+            count = len(requests)
+            with pytest.raises(ModelLimitExceeded, match="no further requests"):
+                await budget.complete("simulator", [])
+            assert len(requests) == count
+        if mode == "actual":
+            assert len(requests) == 1
+        elif mode in unsettled | {"estimate", "tokens", "exceeds", "reported_zero_estimate"}:
+            assert sum(r.method == "GET" for r in requests) == 3
+    finally:
+        store.install(previous)
+        await client.client.close()
+
+
+async def test_unbudgeted_reported_zero_cost_is_unchanged():
+    def handler(request):
+        assert request.method == "POST"
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+            "prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300, "cost": 0}))
+
+    client = openrouter(handler)
+    try:
+        result = await client.complete("simulator", [])
+        assert result.cost_method == "actual" and result.usage.cost == 0
+    finally:
+        await client.client.close()
 
 
 def test_openrouter_roles_come_from_settings_and_must_be_openrouter_models(monkeypatch):

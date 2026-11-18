@@ -11,12 +11,15 @@ or key limit reached) is raised as ModelLimitExceeded.
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-from openai import APIStatusError, AsyncOpenAI
+import anyio
+import httpx
+from openai import APIError, APIStatusError, AsyncOpenAI
 from pydantic import BaseModel
 
 from refund_eval.models.client import (
@@ -131,8 +134,8 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
     write = getattr(details, "cache_write_tokens", None) if details is not None else None
     output_details = getattr(raw, "completion_tokens_details", None)
     usage = Usage(
-        input_tokens=raw.prompt_tokens - (read or 0) - (write or 0), output_tokens=raw.completion_tokens,
-        total_tokens=raw.total_tokens, input_tokens_cache_read=read, input_tokens_cache_write=write,
+        input_tokens=(raw.prompt_tokens or 0) - (read or 0) - (write or 0), output_tokens=raw.completion_tokens or 0,
+        total_tokens=raw.total_tokens or 0, input_tokens_cache_read=read, input_tokens_cache_write=write,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", None) if output_details is not None else None,
     )
     reported = getattr(raw, "cost", None)  # OpenRouter's own charge for the call
@@ -141,6 +144,34 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
     elif prices is not None:
         usage.cost = cost_from_prices(usage, prices)
     return usage
+
+
+def _valid_cost(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
+def _token_count(value: Any, *, minimum: int = 1) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
+    if not prices or not {"input", "output"} <= prices.keys():
+        return None
+    if not all(_valid_cost(price) for price in prices.values()):
+        return None
+    if raw is None:
+        return None
+    prompt, completion, tokens = raw.prompt_tokens, raw.completion_tokens, raw.total_tokens
+    if not all(_token_count(count) for count in (prompt, completion, tokens)) or tokens < prompt + completion:
+        return None
+    details = getattr(raw, "prompt_tokens_details", None)
+    cached = [getattr(details, field, None) for field in ("cached_tokens", "cache_write_tokens")]
+    for count in cached:
+        if count is not None and not _token_count(count, minimum=0):
+            return None
+    if sum(count or 0 for count in cached) > prompt:
+        return None
+    return math.ceil(tokens * max(prices.values()) * 1000) / 1_000_000_000
 
 
 class OpenRouterClient:
@@ -152,10 +183,10 @@ class OpenRouterClient:
                 raise ValueError(f"{role} model must be an openrouter/ model, not {name!r}")
         self.roles = dict(roles)
         self.prices = dict(prices or {})
+        self.require_reported_cost = require_reported_cost
         self.client = client or AsyncOpenAI(api_key=api_key or os.environ.get(API_KEY_ENV), base_url=base_url)
         if require_reported_cost:
             self.client = self.client.with_options(max_retries=0)
-            self.prices = {}
         self.usage_by_model: dict[str, Usage] = {}
         self.usage_by_role: dict[str, Usage] = {}
 
@@ -168,16 +199,44 @@ class OpenRouterClient:
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
         require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
-        if prices is None and not require_reported_cost:
+        if prices is None:
             from refund_eval.model_pricing import openrouter_prices
 
-            prices = openrouter_prices(roles.values())
+            try:
+                prices = openrouter_prices(roles.values())
+            except (httpx.RequestError, httpx.HTTPStatusError, TypeError, ValueError):
+                if not require_reported_cost:
+                    raise
+                prices = {}
         return cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
 
     def model_name(self, role: Role) -> str:
         if role not in self.roles:
             raise ValueError(f"No model for the {role} role")
         return self.roles[role]
+
+    async def _generation_cost(self, generation_id: str | None) -> tuple[float | None, bool]:
+        if not generation_id:
+            return None, False
+        found = False
+        for attempt in range(3):
+            if attempt:
+                await anyio.sleep(1)
+            try:
+                record = await self.client.with_options(max_retries=0, timeout=5).get(
+                    "/generation", cast_to=dict, options={"params": {"id": generation_id}})
+                found = True
+                data = record.get("data", {})
+                cost = data.get("total_cost")
+                finished = data.get("finish_reason") or data.get("native_finish_reason")
+                prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
+                completion = data.get("tokens_completion") or data.get("native_tokens_completion")
+                if (_valid_cost(cost) and cost > 0 and data.get("cancelled") is not True
+                        and finished and _token_count(prompt) and _token_count(completion)):
+                    return float(cost), True
+            except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):
+                continue
+        return None, found
 
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
@@ -209,7 +268,23 @@ class OpenRouterClient:
         text = (raw.content if raw is not None else None) or ""
         calls = [ToolCall(id=c.id, function=c.function.name, arguments=_arguments(c.function.arguments))
                  for c in (getattr(raw, "tool_calls", None) or []) if getattr(c, "function", None) is not None]
-        usage = _usage(result.usage, self.prices.get(name))
+        usage = _usage(result.usage, None)
+        cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
+        if self.require_reported_cost and usage is not None and usage.cost == 0:
+            cost_method = None
+        if cost_method is None:
+            if self.require_reported_cost and usage is not None:
+                usage.cost = None
+            cost, found = await self._generation_cost(result.id) if self.require_reported_cost else (None, False)
+            if cost is not None:
+                cost_method = "generation_lookup"
+            else:
+                cost = (None if found else _estimate(result.usage, self.prices.get(name))) if self.require_reported_cost else (
+                        cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
+                cost_method = "estimate" if cost is not None else None
+            if cost is not None:
+                usage = usage or Usage()
+                usage.cost = cost
         if usage is not None:
             self.usage_by_model[name] = self.usage_by_model.get(name, Usage()) + usage
             self.usage_by_role[role] = self.usage_by_role.get(role, Usage()) + usage
@@ -217,4 +292,4 @@ class OpenRouterClient:
             text=text, message=Message("assistant", text, tool_calls=calls,
                                        native=raw.model_dump(exclude_none=True) if raw is not None else None),
             stop_reason=_STOP.get(choice.finish_reason, "unknown") if choice is not None else "unknown",
-            usage=usage, model=name)
+            usage=usage, model=name, cost_method=cost_method)
