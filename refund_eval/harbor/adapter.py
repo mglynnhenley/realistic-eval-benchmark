@@ -54,7 +54,7 @@ DATASET_NAME = f"{ORG}/impossible-refund"
 AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
 SOURCE_FILES = ["refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"]
 AGENT_MODULES = {
-    "": "__init__ config killswitch model_pricing output_paths task",
+    "": "__init__ config environment_version killswitch model_pricing output_paths task",
     "agent": "__init__ adapters budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
