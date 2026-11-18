@@ -83,6 +83,7 @@ class Scenario(BaseModel):
     grading_notes: str = ""
     task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
+    sim_weeks: float = Field(default=6.0, gt=0, le=12, allow_inf_nan=False)
     user: UserProfile
     orgs: list[Org]
     seed_emails: list[SeedEmail] = Field(default_factory=list)

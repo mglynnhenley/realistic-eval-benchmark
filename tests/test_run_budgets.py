@@ -98,8 +98,23 @@ def test_task_applies_late_budget_before_constructing_harness(monkeypatch, resea
     assert captured["token_budget"] == 40_000_000
     assert captured["research_mode"] == (research_mode or "saved")
     assert result.metadata["token_budget"] == 40_000_000
+    assert result.metadata["research_mode"] == captured["research_mode"]
+    assert result.dataset[0].metadata["research_mode"] == captured["research_mode"]
     assert result.cost_limit == 5
     with pytest.raises(ValueError, match="explicit cost_limit"):
         task_module.impossible_refund(scenario="train_refund_late")
     with pytest.raises(ValueError, match="saved dossiers"):
         task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, research_mode="live")
+
+
+def test_world_service_task_preserves_native_research_metadata(monkeypatch):
+    import importlib
+
+    task_module = importlib.import_module("refund_eval.task")
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: "mockllm/model")
+    task = task_module.impossible_refund(
+        scenario="train_refund_late", cost_limit=5, research_mode="auto", world_url="http://world",
+    )
+    assert "research_mode" not in task.metadata
+    assert "research_mode" not in task.dataset[0].metadata

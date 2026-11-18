@@ -116,6 +116,17 @@ def test_success_counts_only_accepted_bill_cuts_by_the_check_time(scenario, offe
     assert scenario.task.success(scenario, world, START + timedelta(days=7)) is expected
 
 
+@pytest.mark.parametrize(("amounts", "expected"), [
+    ([309.09, 223.25, 67.66], True),
+    ([309.09, 223.25, 67.65], False),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_success_is_penny_exact_regardless_of_offer_order(scenario, amounts, expected, reverse):
+    world = World(start_time=START, now=START)
+    world.outcome.offers = [offer(amount) for amount in (amounts[::-1] if reverse else amounts)]
+    assert scenario.task.success(scenario, world, START + timedelta(days=7)) is expected
+
+
 def test_limits_metadata_and_grants(scenario):
     task = HouseholdBillsTask()
     assert task.payment_limit(scenario) == pytest.approx(12 * (23.5 + 37.49 + 165.73))

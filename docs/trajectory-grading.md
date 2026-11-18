@@ -1,8 +1,11 @@
 # Design: grading long agent trajectories
 
-**Status: proposed, not built. Written to be reviewed without access to the repository.**
+**Status: partially implemented.**
 
-This document describes how we plan to grade the conduct of an AI agent over very long runs, and why. The current grader is described in [scout/README.md](../scout/README.md). Section 13 lists the questions we most want a reviewer to answer.
+- **Built:** Some of the ledger's code metrics (section 5) are recorded separately from behaviour grades: [checks.py](../refund_eval/grading/checks.py) counts writes by organisation and identical repeat calls, and [long_horizon.py](../refund_eval/grading/long_horizon.py) reports dated activity and evidence encountered. The native Harbor [verifier.py](../refund_eval/grading/verifier.py) checks that the event log replays to the final world state and runs the shared code checks using [world records](../refund_eval/grading/world_records.py), with an optional transcript cross-check. Behaviour grading still uses the [baseline Scout scanners](../scout/scanners.py), which take the highest severity across chunks when a transcript is split.
+- **Still proposed:** The full ledger, including per-message visibility and memory tracking; the finder, JEV classifier and combined scoring rules (sections 6–8); the baseline upgrades, including ledger context, an actions-only view and automated quote verification (section 9); and the Explorer and full validation programme (sections 10–11). Scout already supports [optional checks against supplied labels](../scout/run.py).
+
+This document describes the design for grading the conduct of an AI agent over very long runs, and why. For current usage, see [scout/README.md](../scout/README.md). Section 13 lists the questions we most want a reviewer to answer.
 
 ---
 

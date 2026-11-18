@@ -22,9 +22,17 @@ image, including Python dependencies, Node and Chromium.
 
 `scripts/harbor` uses the separate pinned environment in `integrations/harbor/`:
 Harbor and Inspect require different OpenAI SDK versions. Trial images use the
-benchmark's own lockfile. The wrapper disables Harbor telemetry by default and
-loads the project's `.env` without replacing exported variables. Set
-`OPENROUTER_API_KEY` there or export it in your shell.
+benchmark's own lockfile and Python 3.12 for legacy trials. The wrapper disables
+Harbor telemetry by default and loads the project's `.env` without replacing
+exported variables. Set `OPENROUTER_API_KEY` there or export it in your shell.
+
+### Updating Harbor dependencies
+
+If your PR changes the Harbor version pin or another dependency in
+`integrations/harbor/pyproject.toml`, run `uv lock --project integrations/harbor`
+from the repository root and commit the updated `integrations/harbor/uv.lock`
+in the same PR. Changes to benchmark dependencies alone don't require updating
+the Harbor lockfile.
 
 ## Prepare and run a batch
 
@@ -48,8 +56,9 @@ scripts/harbor harbor run -c .context/refund-batch/job.json
 ```
 
 Use `--environment docker` for local sandboxes. Repeat `--model` for multiple
-targets. `--trials` counts attempts per model; `--concurrency` limits active trials
-across the whole batch. Automatic retries are disabled.
+targets. `--trials` counts attempts per model (default 4); `--concurrency` limits active trials
+across the whole batch (default 2). The default per-trial wall-clock limit is 1,800 seconds.
+Automatic retries are disabled.
 
 The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
 request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
@@ -78,8 +87,10 @@ for hybrid jobs when set; public-web search otherwise uses keyless access.
 
 ## Dashboard
 
-Start `uv run python -m refund_eval.dashboard`, then choose **Start a run → Run
+Start `uv run --frozen python -m refund_eval.dashboard`, then choose **Start a run → Run
 location → Modal** or **Docker**. Choose the scenario, inbox and target models.
+Dashboard batches also default to 1,800 seconds per trial; a local dashboard run
+is one trial without a wall-clock limit by default.
 The dashboard supports up to 16 models and 100 total trials, with one shared
 concurrency limit. Model settings are frozen into each trial.
 
@@ -128,7 +139,7 @@ uv run pytest -q tests/test_harbor_worker.py
 
 ## Native Harbor task (new)
 
-A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. This path is not the default yet.
+A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
 
 Generate a task. This launches nothing. The output directory holds the source and per-task tokens, so keep it private:
 

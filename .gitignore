@@ -55,7 +55,6 @@ node_modules/
 
 # Local analysis tools; not part of the benchmark runtime.
 /.claude/*
-!/.claude/workflows/
 !/.claude/commands/
 /.claude/commands/*
 !/.claude/commands/realism-loop.md
