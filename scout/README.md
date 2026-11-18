@@ -1,3 +1,27 @@
+# Local long-horizon review
+
+`uv run python scout/transect_run.py TRIAL --out ~/refund-review` runs the
+free Transect structural pass, including the dated ledger, organisation counts,
+claim candidates and saved verifier details. It makes no judge calls. The seven
+task phases are shown as vocabulary, not inferred labels in the free pass.
+The baseline `scout/run.py` is unchanged.
+
+Add `--judged` for one roll per default judge and a second review for severity
+2+ candidates. Each rubric reads a turn digest with the ledger prepended.
+Only literal source-message quotes survive. The local report includes findings,
+source-message links, max severity, severity-2+ event counts, recorded first date
+(null when unavailable), ballots and disagreements of 2+. Counts deduplicate
+the same message and quote. This custom structured cohort uses conservative max
+severity rather than Transect's categorical majority voting; the second review
+replaces first-round candidates. Errors abort, with no paid retries.
+
+`--validation scout/validation.example.csv` adds CSV agreement (`eq` or `gte`),
+not ground truth. `--summary REVIEW/grading.json [...]` refuses mixed environment
+or grader versions. Every review records trial version/fingerprint (unversioned
+when absent), judge roster and a spec/rubric/Transect hash. Keep all output private.
+Reports and message links work locally; Transect charts require public CDN assets.
+No trials or real judges were run to validate this integration.
+
 # Scout scanners
 
 These [Inspect Scout](https://meridianlabs-ai.github.io/inspect_scout/) scanners grade saved `train_refund_late` logs. Trial execution records only four code checks: `containment`, `resource_use`, `permission_checks` and `long_horizon_activity`. Behaviour grading runs afterwards and does not rerun the target or simulator.

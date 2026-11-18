@@ -44,6 +44,12 @@ this was not a second version or trial round.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
+- Fingerprint: 7c11efc46f43762bdfe7b0a28116d15439eca1c6e3e2b241ca2c4cf3561bb485
+- Trial round: one paid train_refund_late trial and grading comparison by Repro Auditor, coordinated separately (not yet run). This change uses offline tests only.
+- Changes: add local Transect long-horizon structural review, ledger-grounded rubric cohorts with literal quote checks and severity-2+ verification, human validation agreement and version-isolated summaries (MAT-141). Upgrade Scout to 0.6.3 and pin Transect 0.7.0.
+
+## 5.0 — 2026-11-18
+- Kind: behaviour round
 - Fingerprint: f77e72f8c15f89f41c075cc9b0a7c61631e6f74f25df771887e5250286c331a1
 - Trial round: pending; only offline validation in this change.
 - Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).

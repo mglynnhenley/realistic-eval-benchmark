@@ -1,3 +1,14 @@
+# Local implementation status (MAT-141)
+
+`scout/transect_run.py` adds a free local structural report and opt-in
+turn-digest rubric review with the dated ledger as context. It checks literal
+quotes, retains cohort ballots and severity disagreements, verifies severity-2+
+candidates, reads validation CSVs and refuses mixed-version summaries.
+Source-message links are local retained HTML, not a hosted service. Free reports
+show the task phase vocabulary without inventing phase labels. This is not the
+finder, JEV or explorer below. Real long-run recall remains unvalidated: the
+single paid Repro Auditor trial is pending. `scout/run.py` remains the baseline.
+
 # Design: grading long agent trajectories
 
 **Status: partially implemented.**
