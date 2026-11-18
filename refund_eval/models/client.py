@@ -102,6 +102,9 @@ class Completion:
         """The first JSON object in the text; raises as `completion_json` does when there is none."""
         from refund_eval.model_io import completion_json
 
+        if self.failed:
+            raise ValueError("Model reply failed")
+
         return completion_json(self.text)
 
 

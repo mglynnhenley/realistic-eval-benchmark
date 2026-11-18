@@ -112,6 +112,35 @@ async def test_content_filter_stop_is_a_refusal_even_with_valid_json(fake, conte
         await LLMCompanySimulator().respond(CompanyEvent(incoming="Hello"), context)
 
 
+async def test_failed_company_reply_is_not_parsed_even_with_valid_json(fake, context):
+    output = Completion(text=json.dumps(ACTION), message=Message("assistant", ""), failed=True)
+    fake(output)
+    with pytest.raises(ValueError, match="reply failed"):
+        await LLMCompanySimulator().respond(CompanyEvent(incoming="Hello"), context)
+    with pytest.raises(ValueError, match="reply failed"):
+        output.json()
+
+
+async def test_failed_structured_reply_is_retried_without_parsing(fake):
+    from refund_eval.model_io import generate_structured
+
+    failed = Completion(text=json.dumps(ACTION), message=Message("assistant", ""), failed=True)
+    client = fake(failed, ACTION)
+    parsed, _raw, error = await generate_structured(
+        client, shared="context", task="decide", schema=CompanyAction, name="action", system="system")
+    assert parsed == CompanyAction.model_validate(ACTION)
+    assert error is None and len(client.calls) == 2
+
+
+async def test_failed_research_reply_does_not_execute_tool_calls(fake):
+    failed = Completion(text="", message=Message("assistant", "", tool_calls=[ToolCall("c1", "nope", {})]), failed=True)
+    fake(failed)
+    record = await research.research_live(LATE.org("trainline"), scenario=LATE)
+    assert record["tool_calls"] == []
+    assert record["dossier"] is None
+    assert record["errors"] == ["model: Research model reply failed"]
+
+
 async def test_consistency_check_uses_the_grader_role_and_never_swallows_limits(fake):
     world = World(start_time="2026-01-05T09:00:00Z", now="2026-01-05T09:00:00Z")
     action, org = CompanyAction.model_validate(ACTION), LATE.org("trainline")
@@ -498,7 +527,8 @@ async def test_world_charge_settlement(monkeypatch, mode):
 
 @pytest.mark.parametrize("kind", ["body_error", "choice_error", "empty_choices", "error_finish", "unknown_empty",
                                   "length", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
-                                  "explicit", "success", "request_price", "reasoning_price", "unknown_price"])
+                                  "explicit", "success", "request_price", "reasoning_price", "unknown_price",
+                                  "normal_empty", "private_error"])
 async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
     import math
 
@@ -516,6 +546,10 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
     store.install(MemoryTrial("train_refund_late"))
     requests = []
     error = {"code": 502, "message": "provider failed"}
+    if kind == "private_error":
+        from urllib.parse import quote_plus
+
+        error["message"] = quote_plus(quote_plus(LATE.user.email_addresses[0]))
 
     async def no_sleep(seconds):
         pass
@@ -536,7 +570,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
         payload = reply({"role": "assistant", "content": ""}, finish="unknown")
         payload["usage"] = None
         if kind in {"body_error", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
-                    "request_price", "reasoning_price"}:
+                    "request_price", "reasoning_price", "private_error"}:
             payload = {"id": "gen-1", "error": error}
         if kind == "choice_error":
             payload["choices"][0]["error"] = error
@@ -544,6 +578,8 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             payload["choices"] = []
         if kind == "error_finish":
             payload["choices"][0]["finish_reason"] = "error"
+        if kind == "normal_empty":
+            payload["choices"][0]["finish_reason"] = "stop"
         if kind in {"length", "explicit"}:
             payload["choices"][0]["finish_reason"] = "length"
             payload["choices"][0]["message"]["content"] = "truncated"
@@ -574,14 +610,14 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
         else:
             result = await budget.complete("simulator", messages, **settings)
             assert not result.failed
-            assert result.text == ("truncated" if kind == "explicit" else "ok")
+            assert result.text == "ok"
         recordings = store.world_store().get(RECORDINGS_KEY)
         expected_count = 3 if kind == "three" else 1 if kind in {
-            "allowance", "no_price", "unknown_price", "explicit", "success"} else 2
+            "allowance", "no_price", "unknown_price", "success"} else 2
         assert len(requests) == len(recordings) == expected_count
         assert all(body["max_tokens"] == (123 if kind == "explicit" else WORLD_MAX_OUTPUT_TOKENS) for body in requests)
         first = recordings[0]["response"]
-        assert first["failed"] == (kind not in {"explicit", "success"})
+        assert first["failed"] == (kind != "success")
         assert first["generation_id"] == "gen-1"
         assert first["http_status"] == 200
         prompt = {"messages": requests[0]["messages"], "tools": [tool["function"] for tool in requests[0]["tools"]],
@@ -603,6 +639,10 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             assert budget.spent < budget.limit and Decimal(str(bound)) > budget.limit - budget.spent
         if kind == "length":
             assert first["raw_finish_reason"] == "length"
+        if kind == "private_error":
+            from refund_eval.published import REDACTED_SCENARIO_VALUE
+
+            assert first["error"] == REDACTED_SCENARIO_VALUE
         if kind in {"body_error", "choice_error"}:
             assert first["error"] == error
             replayed = await ReplayModelClient(recordings).complete(
@@ -638,6 +678,76 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             mismatch = BudgetedWorldModels(ReplayModelClient(recordings), float(budget.limit), lambda: None)
             with pytest.raises(ReplayMismatch, match="differs from its recording"):
                 await mismatch.complete("simulator", [Message("user", "different request")], **settings)
+    finally:
+        store.install(previous)
+        await client.client.close()
+
+
+@pytest.mark.parametrize("kind", ["timeout", "http", "plain", "three", "allowance", "no_price", "402"])
+async def test_world_request_exceptions_are_screened_charged_and_replayed(monkeypatch, kind):
+    from urllib.parse import quote_plus
+
+    from refund_eval.models.budget import BudgetedWorldModels
+    from refund_eval.models.replay import (
+        RECORDINGS_KEY,
+        RecordingModelClient,
+        ReplayModelClient,
+    )
+    from refund_eval.published import REDACTED_SCENARIO_VALUE
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    private = quote_plus(quote_plus(LATE.user.email_addresses[0]))
+    requests = []
+
+    def handler(request):
+        assert request.method == "POST"
+        requests.append(json.loads(request.content))
+        if len(requests) > 1 and kind != "three":
+            return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+                "prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.001}))
+        if kind in {"http", "402"}:
+            return httpx.Response(402 if kind == "402" else 500, json={"error": {"message": private}})
+        if kind == "plain":
+            raise RuntimeError(private)
+        raise httpx.ReadTimeout(private, request=request)
+
+    name = "openrouter/anthropic/claude-opus-5.5"
+    client = openrouter(handler, require_reported_cost=True,
+                        prices={} if kind == "no_price" else {name: {"input": 1, "output": 6}})
+    budget = BudgetedWorldModels(RecordingModelClient(client), 0.2 if kind == "allowance" else 1, lambda: None)
+    messages = [Message("user", "hello")]
+    stopped = kind in {"three", "allowance", "no_price", "402"}
+    try:
+        if stopped:
+            with pytest.raises(ModelLimitExceeded):
+                await budget.complete("simulator", messages)
+        else:
+            assert (await budget.complete("simulator", messages)).text == "ok"
+        recordings = store.world_store().get(RECORDINGS_KEY)
+        assert len(requests) == len(recordings) == (3 if kind == "three" else 1 if stopped else 2)
+        evidence = recordings[0]["error"]
+        assert private not in json.dumps(recordings)
+        if kind in {"http", "plain", "402"}:
+            assert REDACTED_SCENARIO_VALUE in evidence["message"]
+        assert evidence["limit"] == (kind == "402")
+        if kind in {"no_price", "402"}:
+            assert budget.spent == 0
+        else:
+            charged = Decimal(str(evidence["worst_case_cost"]))
+            assert charged > 0
+            assert budget.spent == charged * (3 if kind == "three" else 1) + (Decimal(0) if stopped else Decimal("0.001"))
+        replay = ReplayModelClient(recordings)
+        replay_budget = BudgetedWorldModels(replay, float(budget.limit), lambda: None)
+        if stopped:
+            with pytest.raises(ModelLimitExceeded):
+                await replay_budget.complete("simulator", messages)
+        else:
+            assert (await replay_budget.complete("simulator", messages)).text == "ok"
+        assert replay.position == len(recordings)
+        assert replay_budget.spent == budget.spent
     finally:
         store.install(previous)
         await client.client.close()

@@ -327,6 +327,8 @@ class LLMCompanySimulator:
         output = await as_client(self.model).complete(
             "simulator", build_messages(event, context), temperature=1.0, schema=OutputSchema(
                 "open_world_action", CompanyAction, "What this organisation or person does in response."))
+        if output.failed:
+            raise ValueError("Company model reply failed")
         if output.stop_reason == "content_filter":
             raise CompanyModelRefusal("Company model provider refused the response.")
         data = output.json()

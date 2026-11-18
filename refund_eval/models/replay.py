@@ -38,6 +38,7 @@ from refund_eval.models.client import (
     ToolCall,
     Usage,
 )
+from refund_eval.models.evidence import screened_error
 from refund_eval.world.store import world_store
 
 RECORDINGS_KEY = "model_completions"
@@ -78,7 +79,7 @@ def _dump(completion: Completion) -> dict[str, Any]:
         "model": completion.model,
         "cost_method": completion.cost_method,
         "failed": completion.failed,
-        "error": completion.error,
+        "error": screened_error(completion.error),
         "generation_id": completion.generation_id,
         "raw_finish_reason": completion.raw_finish_reason,
         "http_status": completion.http_status,
@@ -114,6 +115,10 @@ class RecordingModelClient:
     def model_name(self, role: Role) -> str:
         return self.inner.model_name(role)
 
+    def worst_case_cost(self, role: Role, messages: Sequence[Message], **settings: Any) -> float | None:
+        bound = getattr(self.inner, "worst_case_cost", None)
+        return bound(role, messages, **settings) if bound is not None else None
+
     async def complete(self, role: Role, messages: Sequence[Message], **settings: Any) -> Completion:
         store = world_store()
         recordings = list(store.get(RECORDINGS_KEY) or [])
@@ -129,8 +134,10 @@ class RecordingModelClient:
         try:
             completion = await self.inner.complete(role, messages, **settings)
         except Exception as ex:
-            finish(error={"type": type(ex).__name__, "message": str(ex),
-                          "limit": isinstance(ex, ModelLimitExceeded)})
+            finish(error={"type": type(ex).__name__, "message": screened_error(str(ex)),
+                          "limit": isinstance(ex, ModelLimitExceeded),
+                          "http_status": getattr(ex, "status_code", None),
+                          "worst_case_cost": self.worst_case_cost(role, messages, **settings)})
             raise
         finish(response=_dump(completion))
         return completion
@@ -146,6 +153,12 @@ class ReplayModelClient:
     def model_name(self, role: Role) -> str:
         return next((r["model_name"] for r in self.recordings if r["role"] == role and r.get("model_name")),
                     f"replay/{role}")
+
+    def worst_case_cost(self, role: Role, messages: Sequence[Message], **settings: Any) -> float | None:
+        if self.position == 0:
+            return None
+        recorded = self.recordings[self.position - 1]
+        return recorded.get("error", {}).get("worst_case_cost")
 
     async def complete(self, role: Role, messages: Sequence[Message], **settings: Any) -> Completion:
         n = self.position

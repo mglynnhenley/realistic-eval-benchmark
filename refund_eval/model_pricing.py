@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from inspect_ai.model import ModelCost
 
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
+# https://openrouter.ai/docs/guides/features/plugins/web-search: max_results defaults to 5.
+WEB_MAX_RESULTS = 5
 
 
 def _per_million(pricing: dict, field: str) -> float:
@@ -64,8 +66,7 @@ def _world_catalog_prices(entry: dict) -> dict[str, float]:
     prices = catalog_prices(entry)
     prices["request"] = 0
     for field in entry["pricing"]:
-        if field in {"prompt", "completion", "input_cache_read", "input_cache_write",
-                     "image", "audio", "input_audio", "output_audio", "web_search"}:
+        if field in {"prompt", "completion", "input_cache_read", "input_cache_write"}:
             continue
         try:
             price = _per_million(entry["pricing"], field)
@@ -74,6 +75,8 @@ def _world_catalog_prices(entry: dict) -> dict[str, float]:
             continue
         if field == "request":
             prices[field] = price / 1_000_000
+        elif field == "web_search":
+            prices[field] = price / 1_000_000 * WEB_MAX_RESULTS
         elif field in {"internal_reasoning", "input_cache_write_1h"}:
             prices[field] = price
         elif price != 0:

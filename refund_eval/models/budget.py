@@ -12,7 +12,9 @@ from refund_eval.models.client import (
     ModelClient,
     ModelLimitExceeded,
     Role,
+    Usage,
 )
+from refund_eval.models.evidence import screened_error
 from refund_eval.world.store import world_store
 
 WORLD_BUDGET_KEY = "world_model_budget"
@@ -47,9 +49,16 @@ class BudgetedWorldModels:
                 self.persist()
                 try:
                     completion = await self.recorded.complete(role, messages, **settings)
-                except Exception as error:
+                except ModelLimitExceeded:
                     self._mark("unknown")
-                    raise ModelLimitExceeded("World model request failed without a reconciled charge") from error
+                    raise
+                except Exception as error:  # noqa: BLE001 - charge every failed request before retrying
+                    estimate = getattr(self.recorded, "worst_case_cost", None)
+                    bound = estimate(role, messages, **settings) if estimate is not None else None
+                    completion = Completion(
+                        text="", message=Message("assistant", ""), usage=Usage(cost=bound), failed=True,
+                        cost_method="worst_case" if bound is not None else None, worst_case_cost=bound,
+                        error={"type": type(error).__name__, "message": screened_error(str(error))})
                 reported = completion.usage.cost if completion.usage else None
                 cost = Decimal(str(reported)) if reported is not None else None
                 if cost is None or not cost.is_finite() or cost < 0:

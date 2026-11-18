@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 6.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: 1b72584491f65ef1ddedeab1d03f244f635f92126227a10bb3e720824803dc20
+- Fingerprint: 2d998455d8fe2dedb58b2add490077ce78aca9e43e20b2f36be36081d0ea2835
 - Trial round: separately coordinated rerun, not yet run.
-- Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; record failed-reply evidence including HTTP status, settle failures with framed request-byte bounds at the highest applicable token rate plus fixed request charges (failing closed per model on unpriceable components, ignoring unused modality/plugin prices), and allow two individually budgeted retries before stopping (MAT-144).
+- Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; reject empty, truncated and provider-failed replies before parsing, screen recorded diagnostics with the private-value guard, and charge failed replies and request exceptions at a framed request-byte bound when actual charges are unavailable. Include the highest token rate, fixed request and five-result web-search charges; fail closed per model on nonzero modality or unpriceable components. Allow two individually budgeted retries before stopping; provider 402 limits still stop immediately (MAT-144).
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
