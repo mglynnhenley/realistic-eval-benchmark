@@ -237,7 +237,7 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     dynamic_org = org.kind.startswith("dynamic_") and org.kind != "dynamic_personal"
     shared = company_store.load_entry(scenario, org) if dynamic_org and company_store.enabled() else None
     if shared:
-        org = Org.model_validate(shared["org"])
+        org = Org.model_validate(shared["org"]).model_copy(update={"contact_emails": org.contact_emails})
         record = shared.get("research")
         rules = shared.get("rules")
         examples = shared.get("examples") or []
@@ -321,7 +321,8 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
             pinned = company_store.save_entry(scenario, org, entry)
             source = "generated_and_saved" if pinned is entry else "shared_entry"
             if pinned is not entry:
-                org = Org.model_validate(pinned["org"])
+                org = Org.model_validate(pinned["org"]).model_copy(
+                    update={"contact_emails": org.contact_emails})
                 world_store().set(RULES_KEY, {**(world_store().get(RULES_KEY) or {}), org.key: pinned.get("rules")})
                 from refund_eval.sim.counterparts import REGISTRY_KEY
 
