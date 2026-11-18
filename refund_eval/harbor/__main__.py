@@ -308,6 +308,8 @@ def main() -> None:
     parser.add_argument("--reasoning", action="store_true", help="Return the target's reasoning (OpenRouter models)")
     parser.add_argument("--scenario", choices=scenario_names(),
                         default=TrialSettings.model_fields["scenario"].default)
+    parser.add_argument("--seed", type=int,
+                        help="Non-negative seed for simulated randomness; omit to draw one per trial")
     parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default=argparse.SUPPRESS,
                         help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")

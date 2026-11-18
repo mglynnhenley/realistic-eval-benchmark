@@ -67,6 +67,7 @@ class TrialSettings(AgentOptions):
     grader_model: str | None = None
     reasoning: bool = False  # ask OpenRouter to return the target's reasoning
     scenario: str = RunConfig.model_fields["scenario"].default
+    seed: int | None = Field(default=None, ge=0, strict=True)
 
     @field_validator("scenario")
     @classmethod
