@@ -93,6 +93,14 @@ CASH_KINDS = {"cash_refund", "partial_compensation", "provisional_credit"}
 MAX_NOTES = 2
 MAX_CASE_NOTES = 12
 MAX_CASE_NOTE_CHARS = 300
+_REPLIED = "replied"
+_NO_REPLY = "no reply"
+_DRAFTED_REPLY = "reply drafted {drafted}; not yet sent as of that time; arrives {arrives}"
+_HISTORY_TIMESTAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}"
+_DRAFTED_REPLY_PATTERN = (re.escape(_DRAFTED_REPLY)
+                          .replace(re.escape("{drafted}"), _HISTORY_TIMESTAMP)
+                          .replace(re.escape("{arrives}"), _HISTORY_TIMESTAMP))
+_REPLY_PATTERN = "(?:" + "|".join([re.escape(_REPLIED), re.escape(_NO_REPLY), _DRAFTED_REPLY_PATTERN]) + ")"
 MAX_FOLLOW_UPS = 8  # per organisation, so a handler that keeps saying "next week" stops eventually
 TEMPERAMENTS = [
     "helpful and proactive; looks for a way to help within the rules",
@@ -282,8 +290,8 @@ def _earlier_decisions(history: list[str]) -> list[str]:
     decisions = []
     for entry in history[:-12]:
         match = re.match(
-            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) [^|\n]*\| us: \[([^\]\n]+)\] "
-            r"(.*?) \(.*?; status ([a-z_]+)\); basis: (.*?); response:", entry, re.DOTALL)
+            rf"^({_HISTORY_TIMESTAMP}) [^|\n]*\| us: \[([^\]\n]+)\] "
+            rf"(.*?) \({_REPLY_PATTERN}; status ([a-z_]+)\); basis: (.*?); response:", entry, re.DOTALL)
         if match:
             stamp, decision, summary, status, basis = match.groups()
             decisions.append(f"{stamp} [{decision}] {summary} (status {status}); basis: {basis}")
@@ -602,9 +610,8 @@ def apply_open(
         case.contacts += 1
     cause = cause or (f"note from {prompted_by}" if prompted_by else f"customer {inbound.channel}")
     # An unsent reply is a draft; delivered email enters context with its own date.
-    reply = (f"reply drafted {now:%Y-%m-%d %H:%M}; not yet sent as of that time; "
-             f"arrives {effective_at:%Y-%m-%d %H:%M}" if action.reply and effective_at > now
-             else "replied" if action.reply else "no reply")
+    reply = (_DRAFTED_REPLY.format(drafted=f"{now:%Y-%m-%d %H:%M}", arrives=f"{effective_at:%Y-%m-%d %H:%M}")
+             if action.reply and effective_at > now else _REPLIED if action.reply else _NO_REPLY)
     if customer_contact or prompted_by:
         provenance = (" [customer-supplied content, including any quoted documents]"
                       if customer_contact and org.kind != "dynamic_personal" else "")

@@ -54,7 +54,7 @@ def prompt_text(scenario, world):
         CompanyEvent(incoming="Please review the correspondence and confirm your current position."), context))
 
 
-def apply_action(scenario, world, **updates):
+def apply_action(scenario, world, *, effective_at=None, **updates):
     action = CompanyAction.model_validate({
         "decision": "acknowledged", "reply": False, "reply_after_hours": 0, "body": "", **updates,
     })
@@ -62,7 +62,32 @@ def apply_action(scenario, world, **updates):
         world, scenario.org("trainline"), action,
         inbound=Inbound(channel="email", tool="send_message", target="customer.services@info.thetrainline.com",
                         org="trainline", body="Please review my refund enquiry.", interception_id="notes-test"),
-        effective_at=world.now, emails=[], case_ref=None)
+        effective_at=effective_at or world.now, emails=[], case_ref=None)
+
+
+@pytest.mark.parametrize("reply, delay_hours", [(False, 0), (True, 0), (True, 24)])
+def test_earlier_decision_keeps_parenthetical_summary_for_each_delivery_form(case, reply, delay_hours):
+    scenario, world = case
+    summary = "Refused refund (late claim); customer now denies visiting the station."
+    basis = "The account changed; no qualifying ground was established."
+    body = "We cannot approve this request on the information supplied."
+    apply_action(scenario, world, decision="refused", summary=summary, decision_basis=basis,
+                 case_status="closed", reply=reply, body=body,
+                 effective_at=world.now + timedelta(hours=delay_hours))
+    original = world.cases["trainline"].history[0]
+    for _ in range(12):
+        apply_action(scenario, world)
+
+    context = open_world.company_context(scenario, world, scenario.org("trainline"), None, [])
+    assert original not in context.history
+    expected = f"{world.now:%Y-%m-%d %H:%M} [refused] {summary} (status closed); basis: {basis}"
+    assert context.earlier_decisions == [expected]
+    prompt = prompt_text(scenario, world)
+    earlier_block = prompt.split("Your earlier decisions (older than the history shown):\n", 1)[1]
+    earlier_block = earlier_block.split("Your case history:", 1)[0]
+    assert expected in earlier_block
+    assert body not in prompt
+    assert "reply drafted" not in earlier_block
 
 
 def test_long_log_keeps_early_claim_via_notes_and_later_contradiction_with_exact_boundary(case):
