@@ -13,8 +13,32 @@ from pathlib import Path
 from typing import Any
 
 from refund_eval.scenario.schema import Org, Scenario
+from refund_eval.world.orgs import parse_address
 
 DEFAULT_ROOT = Path.home() / "refund-eval-data" / "company-store"
+_ENTRY_FIELDS = (
+    "schema", "fingerprint", "identity", "scenario", "created_at", "provenance",
+    "org", "research", "rules", "temperament", "examples",
+)
+_ORG_FIELDS = (
+    "key", "name", "kind", "email_domains", "web_domains", "persona", "policy", "terms", "simulator_kind",
+    "policy_url", "contact_url", "contact_form", "contact_note", "phone_numbers", "reply_delay_hours",
+)
+_RESEARCH_FIELDS = ("org", "name", "mode", "retrieved_at", "dossier", "pages")
+_DOSSIER_FIELDS = ("summary", "facts", "persona")
+_FACT_FIELDS = ("statement", "quote", "url")
+_PERSONA_FIELDS = ("Reply-from", "Sign-off", "Greeting", "Case-ref-format", "Phone-hours", "Cold-email", "voice")
+_PAGE_FIELDS = ("url", "text", "sha256", "retrieved_at")
+_RULE_RECORD_FIELDS = ("rules", "model", "generated_at")
+_RULES_FIELDS = ("terms", "grounds")
+_GROUND_FIELDS = ("key", "conditions", "evidence_required", "quote", "source")
+_EXAMPLE_FIELDS = ("kind", "subject", "body", "source", "retrieved", "representation", "from")
+_PROVENANCE_FIELDS = (
+    "identity", "scenario_id", "intent_sha256", "terms_sha256", "model", "temperature",
+    "rules_prompt_version", "research_prompt_version", "exemplar_prompt_version", "checker_version",
+    "pages", "pages_sha256",
+)
+_PROVENANCE_PAGE_FIELDS = ("url", "sha256", "retrieved_at")
 
 
 def store_root() -> Path | None:
@@ -35,6 +59,107 @@ def org_identity(org: Org) -> str:
             return f"host:{domain}"
     name = " ".join(org.name.split()).casefold()
     return f"name:{name}"
+
+
+def _only_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: value[key] for key in fields if key in value}
+
+
+def _normal_url(url: str) -> str:
+    value = url.strip().casefold() if isinstance(url, str) else ""
+    return re.sub(r"^https?://", "", value).removeprefix("www.").split("#", 1)[0].rstrip("/")
+
+
+def _owned_address(org: Org, value: Any) -> str | None:
+    address = parse_address(value) if isinstance(value, str) else None
+    if not address:
+        return None
+    domain = address.rsplit("@", 1)[1]
+    domains = {item.casefold().removeprefix("www.") for item in [*org.email_domains, *org.web_domains]}
+    return address if any(domain == item or domain.endswith("." + item) for item in domains if item) else None
+
+
+def public_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
+    """Keep only reusable company configuration and public research content."""
+    result = _only_fields(entry, _ENTRY_FIELDS)
+    org_data = _only_fields(entry.get("org"), _ORG_FIELDS)
+    org = Org.model_validate(org_data)
+    public_org = _only_fields(org.model_dump(mode="json"), _ORG_FIELDS)
+    result["org"] = public_org
+
+    research = entry.get("research")
+    if isinstance(research, dict):
+        public_research = _only_fields(research, _RESEARCH_FIELDS)
+        dossier = research.get("dossier")
+        if isinstance(dossier, dict):
+            public_dossier = _only_fields(dossier, _DOSSIER_FIELDS)
+            public_dossier["facts"] = [
+                _only_fields(fact, _FACT_FIELDS) for fact in (dossier.get("facts") or [])
+                if isinstance(fact, dict)
+            ]
+            persona = dossier.get("persona")
+            public_dossier["persona"] = _only_fields(persona, _PERSONA_FIELDS) if isinstance(persona, dict) else None
+            public_research["dossier"] = public_dossier
+        if isinstance(research.get("pages"), list):
+            public_research["pages"] = [
+                _only_fields(page, _PAGE_FIELDS) for page in research["pages"] if isinstance(page, dict)
+            ]
+        result["research"] = public_research
+    else:
+        result["research"] = None
+
+    rules_record = entry.get("rules")
+    if isinstance(rules_record, dict):
+        public_rules_record = _only_fields(rules_record, _RULE_RECORD_FIELDS)
+        rules = rules_record.get("rules")
+        if isinstance(rules, dict):
+            public_rules = _only_fields(rules, _RULES_FIELDS)
+            public_rules["grounds"] = [
+                _only_fields(ground, _GROUND_FIELDS) for ground in (rules.get("grounds") or [])
+                if isinstance(ground, dict)
+            ]
+            public_rules_record["rules"] = public_rules
+        result["rules"] = public_rules_record
+    else:
+        result["rules"] = None
+
+    pages = {
+        _normal_url(page.get("url", "")): page
+        for page in (result["research"] or {}).get("pages", [])
+        if page.get("url")
+    }
+    examples = []
+    for candidate in entry.get("examples") or []:
+        if not isinstance(candidate, dict):
+            continue
+        example = _only_fields(candidate, _EXAMPLE_FIELDS)
+        if "from" in example:
+            address = _owned_address(org, example["from"])
+            page = pages.get(_normal_url(str(example.get("source", ""))))
+            page_text = page.get("text") if page else None
+            if address and isinstance(page_text, str) and address.casefold() in page_text.casefold():
+                example["from"] = address
+            else:
+                example.pop("from", None)
+        examples.append(example)
+    result["examples"] = examples
+
+    provenance = entry.get("provenance")
+    if isinstance(provenance, dict):
+        public_provenance = _only_fields(provenance, _PROVENANCE_FIELDS)
+        if isinstance(provenance.get("pages"), list):
+            public_provenance["pages"] = [
+                _only_fields(page, _PROVENANCE_PAGE_FIELDS) for page in provenance["pages"]
+                if isinstance(page, dict)
+            ]
+        result["provenance"] = public_provenance
+    else:
+        result["provenance"] = {}
+    if isinstance(entry.get("temperament"), str):
+        result["temperament"] = entry["temperament"]
+    return result
 
 
 def slug(identity: str) -> str:
@@ -90,7 +215,9 @@ def load_entry(scenario: Scenario, org: Org) -> dict[str, Any] | None:
         entry = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-    return entry if entry.get("fingerprint") == fingerprint and entry.get("identity") == identity else None
+    return public_entry_fields(entry) if (
+        entry.get("fingerprint") == fingerprint and entry.get("identity") == identity
+    ) else None
 
 
 def find_matching_entry(scenario: Scenario, identity: str) -> dict[str, Any] | None:
@@ -107,11 +234,14 @@ def find_matching_entry(scenario: Scenario, identity: str) -> dict[str, Any] | N
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             continue
         if path.stem == fingerprint and entry.get("fingerprint") == fingerprint:
-            return entry
+            return public_entry_fields(entry)
     return None
 
 
 def save_entry(scenario: Scenario, org: Org, entry: dict[str, Any]) -> dict[str, Any]:
+    public_entry = public_entry_fields(entry)
+    entry.clear()
+    entry.update(public_entry)
     path = entry_path(scenario.id, org_identity(org), entry["fingerprint"])
     if path is None:
         return entry
@@ -127,7 +257,7 @@ def save_entry(scenario: Scenario, org: Org, entry: dict[str, Any]) -> dict[str,
         try:
             os.link(temporary, path)
         except FileExistsError:
-            return json.loads(path.read_text())
+            return public_entry_fields(json.loads(path.read_text()))
         return entry
     finally:
         if temporary is not None:

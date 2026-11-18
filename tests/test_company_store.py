@@ -71,7 +71,7 @@ def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypat
     _set_live(MockSim())
     fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
     assert fingerprint == company_store.entry_fingerprint(SCENARIO, ORG)
-    first = _company_entry(SCENARIO, ORG, fingerprint, payload="first")
+    first = _company_entry(SCENARIO, ORG, fingerprint, temperament="first")
     assert company_store.save_entry(SCENARIO, ORG, first) == first
     path = company_store.entry_path(SCENARIO.id, company_store.org_identity(ORG), fingerprint)
     original = path.read_bytes()
@@ -99,19 +99,19 @@ def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypat
     monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "2")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
     monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "1")
+    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "3")
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
     monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "2")
+    monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "3")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
-    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "1")
     monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "2")
-    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
-    monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "1")
     monkeypatch.setattr(rules_module, "CHECKER_VERSION", "2")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
 
     assert path.read_bytes() == original
     different = company_store.entry_fingerprint(SCENARIO, ORG)
     assert company_store.save_entry(SCENARIO, ORG, _company_entry(
-        SCENARIO, ORG, different, payload="different"))["payload"] == "different"
+        SCENARIO, ORG, different, temperament="different"))["temperament"] == "different"
     assert path.read_bytes() == original
 
 
@@ -119,14 +119,14 @@ def test_concurrent_first_save_returns_one_immutable_payload():
     _set_live(MockSim())
     fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
     candidates = [
-        _company_entry(SCENARIO, ORG, fingerprint, payload="first"),
-        _company_entry(SCENARIO, ORG, fingerprint, payload="second"),
+        _company_entry(SCENARIO, ORG, fingerprint, temperament="first"),
+        _company_entry(SCENARIO, ORG, fingerprint, temperament="second"),
     ]
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda entry: company_store.save_entry(SCENARIO, ORG, entry), candidates))
     saved = company_store.load_entry(SCENARIO, ORG)
-    assert saved["payload"] in {"first", "second"}
-    assert [result["payload"] for result in results] == [saved["payload"], saved["payload"]]
+    assert saved["temperament"] in {"first", "second"}
+    assert [result["temperament"] for result in results] == [saved["temperament"], saved["temperament"]]
     assert len(list(company_store.identity_dir(
         SCENARIO.id, company_store.org_identity(ORG)).glob("*.json"))) == 1
 
@@ -163,6 +163,79 @@ async def test_shared_first_contact_is_reused_without_model_calls(monkeypatch, t
     assert store().get("company_entries")[ORG.key]["source"] == "shared_entry"
     assert sim.call_schemas == []
     assert example_calls == [ORG.key]
+
+
+async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(monkeypatch, tmp_path):
+    sim = MockSim()
+    sim.profile = {"name": "Example Advice", "role": "advice", "reason": "The recipient is an advice firm."}
+    _set_live(sim)
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    inbound = Inbound(
+        channel="email", tool="send_email", target="jane.doe+case123@example.test", org=None,
+        body="Please advise.", interception_id="private-first-contact",
+    )
+    dossier_records, example_records, rules_calls = [], [], []
+
+    async def fake_research_live(org, *, scenario, max_tool_calls):
+        record = _dossier(org)
+        record["tool_calls"] = [{"tool": "read_page", "marker": "PRIVATE_TOOL_CALL_SENTINEL"}
+                                for _ in range(max_tool_calls)]
+        record["errors"] = ["PRIVATE_RESEARCH_ERROR_SENTINEL"]
+        dossier_records.append((max_tool_calls, record))
+        return record
+
+    async def fake_research_examples(_org, _scenario):
+        record = {
+            "examples": [], "pages": [],
+            "tool_calls": [{"tool": "read_page"} for _ in range(research.EXAMPLE_LOOKUPS)],
+            "errors": [],
+        }
+        example_records.append(record)
+        return record
+
+    async def fake_company_rules(_scenario, org, _dossier_record, examples=None):
+        rules_calls.append(org.key)
+        record = {
+            "rules": {"terms": org.terms, "grounds": []}, "model": "fake/simulator",
+            "generated_at": "2026-11-20T00:00:00+00:00", "intent": "PRIVATE_RULES_INTENT_SENTINEL",
+            "errors": ["PRIVATE_RULES_ERROR_SENTINEL"],
+        }
+        store().set(rules.RULES_KEY, {**(store().get(rules.RULES_KEY) or {}), org.key: record})
+        return record
+
+    monkeypatch.setattr(research, "research_live", fake_research_live)
+    monkeypatch.setattr(research, "research_examples", fake_research_examples)
+    monkeypatch.setattr("refund_eval.sim.open_world.company_rules", fake_company_rules)
+    org = await create_counterpart(SCENARIO, inbound)
+    assert org and org.contact_emails == [inbound.target]
+    await company_record(org, load_world())
+
+    assert dossier_records[0][0] == research.DEEP_RESEARCH_LOOKUPS
+    total_lookups = len(dossier_records[0][1]["tool_calls"]) + len(example_records[0]["tool_calls"])
+    assert total_lookups == research.DEEP_RESEARCH_LOOKUPS + research.EXAMPLE_LOOKUPS <= 20
+    entry = company_store.load_entry(SCENARIO, org)
+    assert entry is not None
+    entry_path = company_store.entry_path(SCENARIO.id, company_store.org_identity(org), entry["fingerprint"])
+    raw_entry = entry_path.read_text()
+    for private in (
+        inbound.target, "PRIVATE_TOOL_CALL_SENTINEL", "PRIVATE_RESEARCH_ERROR_SENTINEL",
+        "PRIVATE_RULES_INTENT_SENTINEL", "PRIVATE_RULES_ERROR_SENTINEL",
+    ):
+        assert private not in raw_entry
+    assert "contact_emails" not in entry["org"]
+    assert "tool_calls" not in entry["research"] and "errors" not in entry["research"]
+    assert "errors" not in entry["rules"] and "intent" not in entry["rules"]
+
+    profile_calls_before = len(sim.profile_prompts)
+    _set_live(sim)
+    reused_org = await create_counterpart(SCENARIO, inbound)
+    await company_record(reused_org, load_world())
+    assert reused_org.contact_emails == []
+    assert store().get("company_entries")[org.key]["source"] == "shared_entry"
+    assert store().get("company_entries")[org.key]["fingerprint"] == entry["fingerprint"]
+    assert store().get(REGISTRY_KEY)[company_store.org_identity(org)]["target"] == inbound.target
+    assert len(sim.profile_prompts) == profile_calls_before
+    assert len(dossier_records) == len(example_records) == len(rules_calls) == 1
 
 
 async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch, tmp_path):
@@ -292,7 +365,7 @@ async def test_ground_checks_require_matching_fact_page_and_intent(monkeypatch):
 async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(monkeypatch):
     sim = MockSim()
     _set_live(sim)
-    text = "Subject: Your request\nDear customer, we have reviewed your case."
+    text = "Subject: Your request\nFrom: help@example.test\nDear customer, we have reviewed your case."
     async def search(query, objective, *, scenario):
         return f"Title: Published response\nURL: https://example.test/letters\n{text}"
 
@@ -309,8 +382,6 @@ async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(m
              "source": "https://www.example.test/letters", "from": "Support <help@example.test>"},
             {"kind": "reply", "subject": "Not found", "body": "Invented content.",
              "source": "https://example.test/letters", "from": None},
-            {"kind": "reply", "subject": "Invented continuation",
-             "body": "a" * 200 + " invented continuation", "source": "https://example.test/letters", "from": None},
         ]},
     ]
     result = await research.research_examples(ORG, SCENARIO)
@@ -323,7 +394,7 @@ async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(m
     assert SCENARIO.facts.journey.booking_ref not in prompt
     assert "PRIVATE INBOX" not in prompt
     assert SCENARIO.subject in prompt and ORG.name in prompt and "example.test" in prompt
-    assert f"{research.DEEP_MAX_TOOL_CALLS} lookups" in prompt
+    assert f"{research.EXAMPLE_LOOKUPS} lookups" in prompt
 
 
 async def test_researched_example_requires_its_whole_body_on_the_page(monkeypatch):
@@ -354,20 +425,79 @@ async def test_researched_example_requires_its_whole_body_on_the_page(monkeypatc
     assert any("body not found" in error for error in result["errors"])
 
 
+async def test_example_body_subject_and_sender_come_from_the_cited_page(monkeypatch):
+    sim = MockSim()
+    _set_live(sim)
+    page_text = "Subject: Published reply\nFrom: help@example.test\nDear Customer,\nWe reviewed your request."
+    page_url = "https://example.test/letters"
+
+    async def search(query, objective, *, scenario):
+        return f"Title: Published response\nURL: {page_url}\n{page_text}"
+
+    async def read(url, *, scenario):
+        return f"URL: {url}\n\n{page_text}"
+
+    monkeypatch.setattr(research, "_search", search)
+    monkeypatch.setattr(research, "_read_page", read)
+    sim.example_script = [
+        ("web_search_exa", {"query": "Example Advice published response", "objective": "Find letters."}),
+        ("read_page", {"url": page_url}),
+        {"examples": [
+            {"kind": "reply", "subject": "model-only subject",
+             "body": "dear   customer,\nWE reviewed your request.", "source": page_url,
+             "from": "Help <help@example.test>"},
+            {"kind": "reply", "subject": "Published reply",
+             "body": "Dear Customer,\nWe changed your request.", "source": page_url},
+            {"kind": "reply", "subject": "Published reply",
+             "body": "Dear Customer,\nWe reviewed your request.", "source": page_url,
+             "from": "Agent <agent@example.test>"},
+        ]},
+    ]
+
+    result = await research.research_examples(ORG, SCENARIO)
+
+    assert len(result["examples"]) == 2
+    assert result["examples"][0]["body"] == "Dear Customer,\nWe reviewed your request."
+    assert result["examples"][0]["subject"] == ""
+    assert result["examples"][0]["from"] == "help@example.test"
+    assert result["examples"][1]["subject"] == "Published reply"
+    assert "from" not in result["examples"][1]
+    assert any("body not found" in error for error in result["errors"])
+
+
 def test_example_sender_fallback_requires_an_owned_domain():
     org = ORG.model_copy(update={"contact_emails": [], "web_domains": ["example.test"]})
-    dossier = {"dossier": {"persona": {"voice": "Professional."}}}
-    _apply_example_reply_from(org, dossier, [{"from": "Support <help@example.test>"}])
+    dossier = {
+        "dossier": {"persona": {"voice": "Professional."}},
+        "pages": [{"url": PAGE_URL, "text": "Support help@example.test"}],
+    }
+    _apply_example_reply_from(
+        org, dossier, [{"from": "Support <help@example.test>", "source": PAGE_URL}])
     assert _sender(org, record=dossier) == "Example Advice <help@example.test>"
 
-    invalid = {"dossier": {"persona": {"voice": "Professional."}}}
-    _apply_example_reply_from(org, invalid, [{"from": "help@other.test"}])
+    invalid = {
+        "dossier": {"persona": {"voice": "Professional."}},
+        "pages": [{"url": PAGE_URL, "text": "Support help@example.test"}],
+    }
+    _apply_example_reply_from(org, invalid, [{"from": "help@other.test", "source": PAGE_URL}])
     assert "Reply-from" not in invalid["dossier"]["persona"]
     assert _sender(org, record=invalid) == "Example Advice <noreply@example.test>"
 
-    null_persona = {"dossier": {"persona": None}}
-    _apply_example_reply_from(org, null_persona, [{"from": "help@example.test"}])
+    null_persona = {
+        "dossier": {"persona": None},
+        "pages": [{"url": PAGE_URL, "text": "Support help@example.test"}],
+    }
+    _apply_example_reply_from(
+        org, null_persona, [{"from": "help@example.test", "source": PAGE_URL}])
     assert null_persona["dossier"]["persona"]["Reply-from"] == "Example Advice <help@example.test>"
+
+    unverified = {
+        "dossier": {"persona": None},
+        "pages": [{"url": PAGE_URL, "text": "No sender address."}],
+    }
+    _apply_example_reply_from(
+        org, unverified, [{"from": "help@example.test", "source": PAGE_URL}])
+    assert unverified["dossier"]["persona"] == {}
 
     persona_first = {"dossier": {"persona": {"Reply-from": "Team <team@example.test>"}}}
     _apply_example_reply_from(org, persona_first, [{"from": "help@example.test"}])
@@ -469,4 +599,4 @@ async def test_counterpart_first_contact_uses_deep_research_budget(monkeypatch):
     inbound = Inbound(channel="email", tool="send_email", target="help@deep.example.test", org=None,
                       body="Please advise.", interception_id="deep-first-contact")
     org = await create_counterpart(SCENARIO, inbound)
-    assert org and calls == [research.DEEP_MAX_TOOL_CALLS] == [20]
+    assert org and calls == [research.DEEP_RESEARCH_LOOKUPS] == [12]

@@ -168,7 +168,7 @@ uv run python -m refund_eval.sim.rules --scenario train_refund_late \
 
 Without `--save` it only prints. `--org KEY` limits it to named organisations. Dropped grounds are listed under `errors`. Trials never generate rules with `research_mode=saved` or fixture web.
 
-Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
+Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
 
 ## Inbox snapshots
 
