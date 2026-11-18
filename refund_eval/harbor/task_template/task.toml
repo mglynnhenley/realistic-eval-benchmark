@@ -17,6 +17,8 @@ keywords = ["refund-eval", "long-horizon", "customer-service", "__SCENARIO__"]
 
 [metadata]
 task_version = "__TASK_VERSION__"
+environment_version = "__ENVIRONMENT_VERSION__"
+environment_fingerprint = "__ENVIRONMENT_FINGERPRINT__"
 scenario = "__SCENARIO__"
 data_mode = "__DATA_MODE__"
 sim_weeks = __SIM_WEEKS__

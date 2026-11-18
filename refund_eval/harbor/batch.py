@@ -63,6 +63,7 @@ def prepare(out: Path, config: RunConfig) -> Path:
         "schema_version": 1,
         "config": config.model_dump(mode="json"),
         "task": {"path": task.name, "digest": task_digest, "version": metadata["task_version"],
+                 "environment_version": metadata["environment_version"], "environment_fingerprint": metadata["environment_fingerprint"],
                  "source_sha256": metadata["source_sha256"], "rules_sha256": metadata["rules_sha256"]},
         "job": {"path": job_path.name, "sha256": hashlib.sha256(job_bytes).hexdigest(), "max_retries": 0},
         "seed_policy": metadata["seed_policy"],

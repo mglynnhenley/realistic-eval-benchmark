@@ -38,6 +38,7 @@ from refund_eval.config import (
     RunConfig,
     resolve_cost_limits,
 )
+from refund_eval.environment_version import ENVIRONMENT_VERSION
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.realism.track import realism_version
 from refund_eval.scenario.schema import load_scenario
@@ -313,6 +314,7 @@ def impossible_refund(
                 input=task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
                           "realism_version": realism_version(sc.id),
+                          "environment_version": ENVIRONMENT_VERSION,
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
