@@ -13,7 +13,7 @@ from inspect_ai.util import store
 from refund_eval.companies import exemplars
 from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim import company_store, research, rules
-from refund_eval.sim.counterparts import create_counterpart
+from refund_eval.sim.counterparts import REGISTRY_KEY, create_counterpart
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.open_world import (
     COMPANIES_KEY,
@@ -169,8 +169,11 @@ async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch,
     sim = MockSim()
     _set_live(sim)
     concurrent_org = ORG.model_copy(update={"key": "dynamic_concurrent_test"})
+    other_org = concurrent_org.model_copy(update={"name": "Another Advice"})
     _seed_dossier(concurrent_org)
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    identity = company_store.org_identity(concurrent_org)
+    store().set(REGISTRY_KEY, {identity: {"org": other_org.model_dump(mode="json"), "source": "simulator_inference"}})
 
     async def no_examples(_org, _scenario):
         return {"examples": [], "pages": [], "errors": []}
@@ -182,14 +185,43 @@ async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch,
     ]
     results = await asyncio.gather(
         company_record(concurrent_org, load_world()),
-        company_record(concurrent_org, load_world()),
+        company_record(other_org, load_world()),
     )
     entry = company_store.load_entry(SCENARIO, concurrent_org)
     assert entry is not None
+    assert [result[0].name for result in results] == [entry["org"]["name"], entry["org"]["name"]]
     assert [result[1] for result in results] == [entry["research"], entry["research"]]
     assert store().get(COMPANIES_KEY)[concurrent_org.key]["rules"] == entry["rules"]
+    assert store().get(COMPANIES_KEY)[concurrent_org.key]["org"]["name"] == entry["org"]["name"]
+    assert store().get(REGISTRY_KEY)[identity]["org"]["name"] == entry["org"]["name"]
+    assert store().get("company_entries")[concurrent_org.key]["fingerprint"] == entry["fingerprint"]
     assert len(list(company_store.identity_dir(
         SCENARIO.id, company_store.org_identity(concurrent_org)).glob("*.json"))) == 1
+
+
+async def test_changed_org_terms_generate_a_new_shared_entry(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    _seed_dossier()
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    await company_record(ORG, load_world())
+    first = company_store.load_entry(SCENARIO, ORG)
+    assert first is not None
+    first_path = company_store.entry_path(SCENARIO.id, company_store.org_identity(ORG), first["fingerprint"])
+    original = first_path.read_bytes()
+
+    changed_org = ORG.model_copy(update={"terms": "Refund requests may be made within 30 days."})
+    _set_live(sim)
+    _seed_dossier(changed_org)
+    await company_record(changed_org, load_world())
+    second = company_store.load_entry(SCENARIO, changed_org)
+
+    assert second is not None and second["fingerprint"] != first["fingerprint"]
+    assert first_path.read_bytes() == original
+    assert len(list(company_store.identity_dir(
+        SCENARIO.id, company_store.org_identity(ORG)).glob("*.json"))) == 2
+    assert len(sim.rules_prompts) == 2
 
 
 async def test_generation_retries_once_then_saves_or_records_two_failures(monkeypatch, tmp_path):
@@ -277,6 +309,8 @@ async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(m
              "source": "https://www.example.test/letters", "from": "Support <help@example.test>"},
             {"kind": "reply", "subject": "Not found", "body": "Invented content.",
              "source": "https://example.test/letters", "from": None},
+            {"kind": "reply", "subject": "Invented continuation",
+             "body": "a" * 200 + " invented continuation", "source": "https://example.test/letters", "from": None},
         ]},
     ]
     result = await research.research_examples(ORG, SCENARIO)
@@ -292,6 +326,34 @@ async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(m
     assert f"{research.DEEP_MAX_TOOL_CALLS} lookups" in prompt
 
 
+async def test_researched_example_requires_its_whole_body_on_the_page(monkeypatch):
+    sim = MockSim()
+    _set_live(sim)
+    page_text = "a" * 200
+
+    async def search(query, objective, *, scenario):
+        return f"Title: Published response\nURL: https://example.test/letters\n{page_text}"
+
+    async def read(url, *, scenario):
+        return f"URL: {url}\n\n{page_text}"
+
+    monkeypatch.setattr(research, "_search", search)
+    monkeypatch.setattr(research, "_read_page", read)
+    sim.example_script = [
+        ("web_search_exa", {"query": "Example Advice published response", "objective": "Find letters."}),
+        ("read_page", {"url": "https://example.test/letters"}),
+        {"examples": [{
+            "kind": "reply", "subject": "Invented continuation",
+            "body": page_text + " invented continuation", "source": "https://example.test/letters",
+        }]},
+    ]
+
+    result = await research.research_examples(ORG, SCENARIO)
+
+    assert result["examples"] == []
+    assert any("body not found" in error for error in result["errors"])
+
+
 def test_example_sender_fallback_requires_an_owned_domain():
     org = ORG.model_copy(update={"contact_emails": [], "web_domains": ["example.test"]})
     dossier = {"dossier": {"persona": {"voice": "Professional."}}}
@@ -302,6 +364,10 @@ def test_example_sender_fallback_requires_an_owned_domain():
     _apply_example_reply_from(org, invalid, [{"from": "help@other.test"}])
     assert "Reply-from" not in invalid["dossier"]["persona"]
     assert _sender(org, record=invalid) == "Example Advice <noreply@example.test>"
+
+    null_persona = {"dossier": {"persona": None}}
+    _apply_example_reply_from(org, null_persona, [{"from": "help@example.test"}])
+    assert null_persona["dossier"]["persona"]["Reply-from"] == "Example Advice <help@example.test>"
 
     persona_first = {"dossier": {"persona": {"Reply-from": "Team <team@example.test>"}}}
     _apply_example_reply_from(org, persona_first, [{"from": "help@example.test"}])

@@ -186,12 +186,13 @@ def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict
     dossier = (record or {}).get("dossier")
     if not dossier:
         return
-    persona = dossier.get("persona")
-    if persona and persona.get("Reply-from"):
+    persona = dossier.get("persona") or {}
+    dossier["persona"] = persona
+    if persona.get("Reply-from"):
         return
     for example in examples:
         if address := own_address(org, example.get("from")):
-            dossier.setdefault("persona", {})["Reply-from"] = f"{org.name} <{address}>"
+            persona["Reply-from"] = f"{org.name} <{address}>"
             return
 
 
@@ -225,9 +226,7 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
 
     scenario = current_scenario()
     dynamic_org = org.kind.startswith("dynamic_") and org.kind != "dynamic_personal"
-    shared = company_store.find_matching_entry(scenario, company_store.org_identity(org)) if (
-        dynamic_org and company_store.enabled()
-    ) else None
+    shared = company_store.load_entry(scenario, org) if dynamic_org and company_store.enabled() else None
     if shared:
         org = Org.model_validate(shared["org"])
         record = shared.get("research")
@@ -312,7 +311,15 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
             pinned = company_store.save_entry(scenario, org, entry)
             source = "generated_and_saved" if pinned is entry else "shared_entry"
             if pinned is not entry:
+                org = Org.model_validate(pinned["org"])
                 world_store().set(RULES_KEY, {**(world_store().get(RULES_KEY) or {}), org.key: pinned.get("rules")})
+                from refund_eval.sim.counterparts import REGISTRY_KEY
+
+                registry = dict(world_store().get(REGISTRY_KEY) or {})
+                identity = company_store.org_identity(org)
+                if identity in registry:
+                    registry[identity] = {**registry[identity], "org": org.model_dump(mode="json")}
+                    world_store().set(REGISTRY_KEY, registry)
             record, rules, temperature_value, examples = (
                 pinned["research"], pinned.get("rules"), pinned.get("temperament"), pinned.get("examples") or [])
             entry_metadata = {
