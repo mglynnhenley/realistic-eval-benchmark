@@ -16,6 +16,8 @@ phases using the same cohort, one roll per model, with its phase verifier off
 (cohort majority is the correction) and narration off. Rubric severity-2+
 verification remains on.
 Its phase answer adapter disables the pinned library's automatic answer retries.
+Unknown chunks are counted explicitly: without supported findings, insufficient
+evidence yields `unknown`, not severity 0, and fails numeric validation checks.
 Only literal source-message quotes survive. The local report includes findings,
 source-message links, max severity, severity-2+ event counts, recorded first date
 (null when unavailable), ballots and disagreements of 2+. Counts deduplicate
