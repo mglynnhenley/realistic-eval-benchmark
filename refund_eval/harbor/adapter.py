@@ -185,8 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--data-mode", choices=["fixture", "hybrid"], default=defaults["data_mode"].default)
     p.add_argument("--sim-weeks", type=float, default=None)
     p.add_argument("--max-turns", type=int, default=defaults["max_turns"].default)
-    p.add_argument("--research-mode", choices=["auto", "live", "saved"], default=None,
-                   help="Default: saved for train_refund_late, else auto")
+    p.add_argument("--research-mode", choices=["auto", "live", "saved"], default=defaults["research_mode"].default,
+                   help="Organisation research mode (default: %(default)s)")
     p.add_argument("--simulator-model", default=DEFAULT_ROLE_MODEL)
     p.add_argument("--grader-model", default=DEFAULT_GRADER_MODEL)
     p.add_argument("--agent-timeout", type=float, default=39_600, help="Harbor agent timeout in seconds")
@@ -194,11 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cpus", type=int, default=2)
     p.add_argument("--memory-mb", type=int, default=4096)
     args = p.parse_args(argv)
-    research_mode = args.research_mode or ("saved" if args.scenario == LATE_REFUND_SCENARIO else "auto")
     out = validate_private_output(args.out)
     out.mkdir(parents=True, exist_ok=True)
     task_dir = write_task(out, scenario=args.scenario, data_mode=args.data_mode, sim_weeks=args.sim_weeks,
-                          max_turns=args.max_turns, research_mode=research_mode,
+                          max_turns=args.max_turns, research_mode=args.research_mode,
                           simulator_model=args.simulator_model, grader_model=args.grader_model,
                           agent_timeout=args.agent_timeout, verifier_timeout=args.verifier_timeout,
                           cpus=args.cpus, memory_mb=args.memory_mb)

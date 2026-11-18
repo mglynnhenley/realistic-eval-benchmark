@@ -51,7 +51,7 @@ def test_task_loads_with_harbors_task_model(generated):
     assert meta["task_version"] == adapter.TASK_VERSION and meta["scenario"] == "train_refund_late"
     assert meta["rules_sha256"] == adapter.rules_sha256("train_refund_late") != "none"
     assert len(meta["source_sha256"]) == 64 and "trial name" in meta["seed_policy"]
-    assert (meta["sim_weeks"], meta["research_mode"], meta["data_mode"]) == (12.0, "saved", "hybrid")
+    assert (meta["sim_weeks"], meta["research_mode"], meta["data_mode"]) == (12.0, "auto", "hybrid")
     assert config.verifier.environment_mode.value == "separate"
     [collect] = config.verifier.collect
     assert collect.service == "world" and "127.0.0.1:9000/agentenv" in collect.command
@@ -78,6 +78,7 @@ def test_compose_world_sidecar(generated):
     assert world["security_opt"] == ["seccomp=unconfined"]
     assert world["environment"]["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY:-}"
     assert world["environment"]["WORLD_TRIAL"] == "${COMPOSE_PROJECT_NAME}"
+    assert world["environment"]["WORLD_RESEARCH_MODE"] == "auto"
     assert world["environment"]["WORLD_ADMIN_TOKEN"].startswith("${WORLD_ADMIN_TOKEN:-")
     # The admin token is the world's only; `main` gets the turn token through the task env.
     assert "WORLD_ADMIN_TOKEN" not in Task(generated / "train_refund_late").config.environment.env
@@ -86,6 +87,16 @@ def test_compose_world_sidecar(generated):
     assert "HEALTHCHECK" in dockerfile and "8000" in dockerfile and "refund_eval.harbor.world_entrypoint" in dockerfile
     for text in (dockerfile, (environment / "docker-compose.yaml").read_text()):
         assert "__" not in text.replace("__env", "")
+
+
+@pytest.mark.parametrize("mode", ["auto", "saved", "live"])
+def test_adapter_preserves_explicit_research_mode(tmp_path, mode):
+    assert adapter.main(["--scenario", "train_refund_late", "--out", str(tmp_path),
+                         "--research-mode", mode]) == 0
+    task_dir = tmp_path / "train_refund_late"
+    assert Task(task_dir).config.metadata["research_mode"] == mode
+    compose = yaml.safe_load((task_dir / "environment" / "docker-compose.yaml").read_text())
+    assert compose["services"]["world"]["environment"]["WORLD_RESEARCH_MODE"] == mode
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not installed")

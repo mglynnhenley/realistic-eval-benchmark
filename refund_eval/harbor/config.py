@@ -55,7 +55,7 @@ class TrialSettings(AgentOptions):
     cost_limit: CostLimit = 1.0
     time_limit: int = Field(default=1800, ge=1, le=72000)
     trial_deadlines: dict | None = None
-    research_mode: Literal["auto", "live", "saved"] = "auto"
+    research_mode: Literal["auto", "live", "saved"] = RunConfig.model_fields["research_mode"].default
     simulator_model: str | None = None
     grader_model: str | None = None
     reasoning: bool = False  # ask OpenRouter to return the target's reasoning

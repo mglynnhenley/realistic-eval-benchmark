@@ -1180,6 +1180,7 @@
       if (selectedScenario) scenarioSelect.value = selectedScenario.name;
       if (!state.defaultsApplied && state.config.model_defaults) {
         if (!state.dataModeEdited) $("data-mode").value = state.config.model_defaults.data_mode;
+        $("research-mode").value = state.config.model_defaults.research_mode;
         state.defaultsApplied = true;
         applyRunPreset();
       }
@@ -1621,7 +1622,6 @@
   $("scenario").addEventListener("change", () => {
     if ($("scenario").value === "train_refund_late") {
       $("token-budget").value = "40000000";
-      $("research-mode").value = "saved";
       $("cost-limit").value = "";
       $("batch-trials").value = "1";
       modelCostLimits.clear();

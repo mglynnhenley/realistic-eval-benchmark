@@ -35,7 +35,7 @@ the Harbor lockfile.
 
 ## Prepare and run a batch
 
-Preparing a job launches nothing. Choose a new ignored output directory for each job. This example freezes a late-refund configuration with one trial and an explicit $150 model-cost ceiling:
+Preparing a job launches nothing. Choose a new ignored output directory for each job. This example freezes a late-refund configuration with one trial and an explicit $150 model-cost ceiling. Research mode defaults to `auto` for both batch preparation and the native task adapter:
 
 ```bash
 scripts/harbor python -m refund_eval.harbor \

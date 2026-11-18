@@ -18,11 +18,12 @@ def test_late_refund_requires_explicit_cap_and_defaults_to_frozen_40m(config_typ
         config_type(scenario="train_refund_late")
     config = config_type(scenario="train_refund_late", cost_limit=5)
     assert config.token_budget == 40_000_000
-    assert config.research_mode == "saved"
+    assert config.research_mode == "auto"
     assert config_type().cost_limit == 1
     assert config_type().token_budget is None
     assert config_type().research_mode == "auto"
     assert config_type(scenario="train_refund_late", cost_limit=5, research_mode="auto").research_mode == "auto"
+    assert config_type(scenario="train_refund_late", cost_limit=5, research_mode="saved").research_mode == "saved"
     with pytest.raises(ValidationError, match="saved dossiers"):
         config_type(scenario="train_refund_late", cost_limit=5, research_mode="live")
 
@@ -57,7 +58,7 @@ def test_local_worker_resolves_only_its_target_cap(tmp_path):
     loaded = load_config(tmp_path)
     assert loaded["cost_limit"] == 25
     assert loaded["token_budget"] == 300_000
-    assert loaded["research_mode"] == "saved"
+    assert loaded["research_mode"] == "auto"
 
 
 def test_saved_late_worker_does_not_backfill_a_cost_cap(tmp_path):
@@ -93,10 +94,10 @@ def test_task_applies_late_budget_before_constructing_harness(monkeypatch, resea
         return original(**kwargs)
 
     monkeypatch.setattr(task_module, "refund_agent", capture)
-    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5,
-                                           research_mode=research_mode)
+    kwargs = {} if research_mode is None else {"research_mode": research_mode}
+    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, **kwargs)
     assert captured["token_budget"] == 40_000_000
-    assert captured["research_mode"] == (research_mode or "saved")
+    assert captured["research_mode"] == (research_mode or "auto")
     assert result.metadata["token_budget"] == 40_000_000
     assert result.metadata["research_mode"] == captured["research_mode"]
     assert result.dataset[0].metadata["research_mode"] == captured["research_mode"]

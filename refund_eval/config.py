@@ -49,7 +49,7 @@ def resolve_cost_limits(cost_limit: CostLimit, models: list[str], *, scenario: s
 
 
 def scenario_budget_defaults(values):
-    """No implicit late-refund dollar cap; freeze its dossiers and target budget."""
+    """No implicit late-refund dollar cap; freeze its dossiers, set its target budget and restrict research modes."""
     if isinstance(values, dict) and "sim_weeks" not in values and values.get("scenario") in scenario_names():
         values = {**values, "sim_weeks": load_scenario(values["scenario"]).sim_weeks}
     if isinstance(values, dict) and values.get("scenario") == LATE_REFUND_SCENARIO:
@@ -57,10 +57,9 @@ def scenario_budget_defaults(values):
         if "cost_limit" not in values:
             raise ValueError("train_refund_late requires an explicit cost_limit for each target model")
         values.setdefault("token_budget", LATE_REFUND_TOKEN_BUDGET)
-        values.setdefault("research_mode", "saved")
         if values.get("token_budget") is None:
             raise ValueError("train_refund_late requires a token_budget")
-        if values.get("research_mode") not in {"saved", "auto"}:
+        if "research_mode" in values and values["research_mode"] not in {"saved", "auto"}:
             raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
     return values
 

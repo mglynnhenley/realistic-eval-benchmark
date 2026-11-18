@@ -203,8 +203,8 @@ def impossible_refund(
       working_limit: Optional Inspect working-time limit in seconds.
       tool_profile: Published MCP tools.
       published_data: "fixture" for local data, or "hybrid" for local mail and live public web.
-      research_mode: Open-world research on each organisation: "auto" uses a committed dossier when
-        fresh and researches otherwise, "live" always researches, "saved" never searches.
+      research_mode: Open-world research on each organisation: "auto" (default) uses a committed dossier
+        when fresh and researches otherwise, "live" always researches, "saved" never searches.
       company_simulator: Simulator kind (e.g. "concordia") for every organisation except personal contacts.
       fixture_path: Optional per-run inbox JSON for either fixture or hybrid data.
       seed: Seed for simulated randomness (company temperaments, reply timing); later epochs
@@ -220,7 +220,7 @@ def impossible_refund(
         sim_weeks = sc.sim_weeks
     late_refund = sc.id == LATE_REFUND_SCENARIO
     if research_mode is None:
-        research_mode = "saved" if late_refund else "auto"
+        research_mode = RunConfig.model_fields["research_mode"].default
     if late_refund:
         if cost_limit is None or cost_limit == "default":
             raise ValueError("train_refund_late requires an explicit cost_limit")

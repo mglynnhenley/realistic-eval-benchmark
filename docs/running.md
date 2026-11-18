@@ -53,7 +53,7 @@ For OpenRouter and Inspect `openai-api` targets, pass `-M strict_tools=false` wh
 
 Use the explicit [late-refund example in the README](../README.md#run-a-late-refund-trial) to start a twelve-week trial. The target model is selected independently from the simulator (`openrouter/anthropic/claude-opus-5.5` by default) and its financial consistency-check role (`openrouter/anthropic/claude-haiku-4.5`). All trial model roles count towards the cost cap. Runs record code checks; grade late-refund behaviours afterwards [with Scout](#grading-saved-runs-with-scout), at a separate cost.
 
-Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. The README example explicitly selects `research_mode=auto`; omitting it uses `saved` for late refund. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
+Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. The README example explicitly selects `research_mode=auto`, which is also the default. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
 
 Prices come from Inspect, explicit `--model-cost-config` overrides, bundled default prices or OpenRouter's public model catalog. If a required price is unavailable, setup fails before model execution. The catalog lookup itself makes no model calls.
 
@@ -74,7 +74,7 @@ Pass task settings as `-T name=value`:
 | `published_data` | `hybrid` | Hybrid web or fixture web data. |
 | `fixture_path` | scenario inbox, or the shared bundled inbox | An explicit local inbox JSON file. |
 | `company_simulator` | none | Override the simulator implementation for every company, for example `concordia`. Personal contacts are unchanged. |
-| `research_mode` | `auto`; `saved` for late refund | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial. |
+| `research_mode` | `auto` | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial where supported. |
 | `max_turns` | `1000` | Maximum target model generations. |
 | `sim_weeks` | `6` | Maximum simulated duration. |
 | `cost_limit` | `1`; explicit for late refund | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
@@ -121,7 +121,7 @@ Use the same source revision, Python version, lockfile, scenario and inbox snaps
 
 ## Late-refund runs
 
-A twelve-week late-refund configuration uses `token_budget=40000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Late-refund research accepts `saved` (the default) or `auto`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
+A twelve-week late-refund configuration uses `token_budget=40000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Inspect and dashboard late-refund launches accept `auto` (the default) or `saved`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
 
 The ledger lives in saved world state and survives trimming and resume. A final response can exceed the remaining budget; its full usage and overrun are saved. `stop_reason=token_budget` means the intended compute limit ended the trial. Missing usage fails with a token-accounting error. A cost-ended trial is reported separately. Inspect's general `token_limit` is a separate guard and is not a substitute for this ledger.
 

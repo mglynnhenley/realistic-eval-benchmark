@@ -130,6 +130,36 @@ vm.runInNewContext(load + preset, context);
     assert output["removed"] == config["model_defaults"]["scenario"]
 
 
+def test_selecting_late_refund_preserves_the_research_mode():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to exercise dashboard scenario selection")
+    result = subprocess.run(
+        [node, "-e", """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8');
+const change = source.slice(source.indexOf('  $("scenario").addEventListener("change"'),
+                            source.indexOf('  $("run-preset").addEventListener("change"'));
+const elements = new Map();
+let onChange;
+const $ = (id) => {
+  if (!elements.has(id)) elements.set(id, {value: '', dataset: {}, addEventListener: (_, cb) => { onChange = cb; }});
+  return elements.get(id);
+};
+vm.runInNewContext(change, {$, modelCostLimits: new Map(), updateBatchSettings() {}, markPresetCustom() {}});
+$('scenario').value = 'train_refund_late';
+const modes = ['auto', 'saved'].map(mode => {
+  $('research-mode').value = mode;
+  onChange();
+  return $('research-mode').value;
+});
+process.stdout.write(JSON.stringify(modes));
+"""], capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
+    )
+    assert json.loads(result.stdout) == ["auto", "saved"]
+
+
 def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "execution_readiness", lambda _: {"configured": True, "reason": "test"})
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
