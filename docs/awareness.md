@@ -1,6 +1,6 @@
 # Eval-awareness probe
 
-A model that suspects it is being tested may behave differently from one that believes the task is real. The [realism loop](environment-improvement-loop.md#realism-loop) finds artefacts that an agent visibly noticed. A model can also register that something looks like a test without saying so. The awareness probe looks for that: it reads an open-weights model's internal activations at each agent turn and measures how far they point towards "this is an evaluation" rather than "this is real use".
+A model that suspects it is being tested may behave differently from one that believes the task is real. The [realism loop](environment-improvement-loop.md#continuous-realism-loop) finds artefacts that an agent visibly noticed. A model can also register that something looks like a test without saying so. The awareness probe looks for that: it reads an open-weights model's internal activations at each agent turn and measures how far they point towards "this is an evaluation" rather than "this is real use".
 
 The probe is optional and self-contained. The reasons behind its design are recorded in [`refund_eval/awareness/AGENTS.md`](../refund_eval/awareness/AGENTS.md). Nothing else in the repository uses it unless you pass its output to a realism command.
 
@@ -81,4 +81,4 @@ The maintained `realism continuous` loop does not use the probe yet; feed `aware
 - The probes exist only for these three 32B models. On-policy runs therefore need one of them as the agent.
 - Off-policy scores measure the open model's reading of a transcript, not the agent's. A different model may notice different things.
 - A rise in score after a message is a lead, not proof that the message caused it.
-- GPU spend is not counted in the realism cycle's budget, which covers trial and scan costs only.
+- GPU spend is not counted in realism loop budgets, which cover model calls only.

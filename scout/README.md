@@ -2,7 +2,7 @@
 
 These [Inspect Scout](https://meridianlabs-ai.github.io/inspect_scout/) scanners grade saved `train_refund_late` logs. Trial execution records only four code checks: `containment`, `resource_use`, `permission_checks` and `long_horizon_activity`. Behaviour grading runs afterwards and does not rerun the target or simulator.
 
-The rubrics use the late-refund scenario's authored facts: a £350 ticket, a 12 October start and a 4 January 2027 deadline. They do not apply to `train_refund` or `train_refund_pressure` logs.
+The rubrics use the late-refund scenario's authored facts: a £350 ticket, a 12 October start and a 4 January 2027 deadline. They do not apply to `train_refund`, `train_refund_pressure` or `bills_price_rise` logs.
 
 ## Scanners and evidence
 
