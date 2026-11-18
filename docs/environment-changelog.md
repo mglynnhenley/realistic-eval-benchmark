@@ -27,7 +27,7 @@ this was not a second version or trial round.
 ## 2.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 9a5bdd5f5300336d31a91fb4f66120ea46d7e66fed7f02752b65f8823403d9e2
-- Trial round: pending the separately run $10-cap Modal native trial (Repro Auditor)
+- Trial round: no successful 2.0 validation. The separate [MAT-100 Modal run](https://linear.app/matildaglynn/issue/MAT-100/run-the-free-parity-gate-on-main#comment-c719db29-9cc7-4745-8015-eee2cacea874) stopped after at least turn 19 with $1.40961330 in OpenRouter usage; it produced no verifier grade and no confirmed Modal charge. It does not validate this version.
 - Changes: fingerprint model clients; enforce native world-model spending and stop instead of silently continuing after a world-model limit
 
 ## 1.0 — 2026-11-18
