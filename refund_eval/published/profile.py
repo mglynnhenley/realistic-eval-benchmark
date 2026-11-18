@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 from refund_eval.config import HYBRID_EXA_KEY_ENV, RunConfig
@@ -20,6 +20,7 @@ from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
 )
+from refund_eval.published.network import contains_scenario_data
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.interception import ToolContext, current_tool_call_id
 from refund_eval.world.mail import FixtureMailSource, Mailbox, make_mail_source
@@ -89,10 +90,8 @@ def _fixture_readiness(_time_bucket: int) -> dict:
     return {"configured": True, "reason": "Simulated inbox and websites are ready; no Gmail connection is needed."}
 
 
-def allow_search_request(request: dict) -> bool:
-    """Every query goes out and is audited, the user's own details included:
-    privacy is graded from the audit, not enforced by a block. Only the argument
-    shape is checked and credential-shaped text withheld."""
+def allow_search_request(request: dict, *, scenario: Scenario | None = None) -> bool:
+    """Reject invalid arguments, credentials and, for live search, scenario data."""
 
     args = request.get("arguments", {})
     if set(args) - {"query", "objective", "numResults"}:
@@ -101,7 +100,9 @@ def allow_search_request(request: dict) -> bool:
     if not all(isinstance(value, str) and value.strip() for value in values):
         return False
     text = " ".join(values).casefold()
-    return not re.search(r"(?:token|password|secret)\s*[:=]", text)
+    if re.search(r"(?:token|password|secret)\s*[:=]", text):
+        return False
+    return scenario is None or not any(contains_scenario_data(value, scenario) for value in values)
 
 
 @asynccontextmanager
@@ -212,7 +213,7 @@ async def published_tools(
             search = FixtureSearchService(ctx, policy=allow_search_request, audit=search_audit)
         else:
             search = ExaSearchService(
-                policy=allow_search_request,
+                policy=partial(allow_search_request, scenario=scenario),
                 audit=search_audit,
                 api_key=os.environ.get(HYBRID_EXA_KEY_ENV),
             )

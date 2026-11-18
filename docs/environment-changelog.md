@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 3.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: 998cbdd21dc9dcda6018cb5cd0ff7e77cd08a81f6fd28f90da78970ac6767d7b
+- Trial round: pending; only offline validation in this change.
+- Changes: block marked private scenario details before live search and public-page navigation (MAT-131).
+
 ## 2.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 9a5bdd5f5300336d31a91fb4f66120ea46d7e66fed7f02752b65f8823403d9e2

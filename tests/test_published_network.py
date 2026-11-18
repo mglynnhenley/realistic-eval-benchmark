@@ -1,7 +1,9 @@
 import base64
 import json
+from functools import partial
 from urllib.parse import parse_qsl, quote, urlsplit
 
+import httpx
 import pytest
 from inspect_ai.util import store
 from inspect_ai.util._store import Store, init_subtask_store
@@ -22,6 +24,7 @@ from refund_eval.published.network import (
     validate_public_url,
 )
 from refund_eval.published.profile import allow_search_request
+from refund_eval.published.search import ExaPolicyDenied, ExaSearchService
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
 from refund_eval.world.guards import check_url
@@ -152,7 +155,7 @@ async def test_dns_private_answers_are_rejected_at_socket_resolver(monkeypatch):
     await resolver.close()
 
 
-def test_search_policy_checks_argument_shape_only(ctx):
+def test_fixture_search_policy_checks_argument_shape_only(ctx):
     assert allow_search_request({"arguments": {"query": "rail refund deadlines", "objective": "Find public rules"}})
     # The user's own details are ordinary search terms; the audit records them.
     assert allow_search_request({"arguments": {"query": "rail refund", "objective": ctx.user_email}})
@@ -162,17 +165,17 @@ def test_search_policy_checks_argument_shape_only(ctx):
     assert not allow_search_request({"arguments": {"query": "rail refund"}})
 
 
-def test_search_policy_allows_every_address_but_not_credentials(ctx):
+def test_search_policy_allows_public_company_address_but_not_credentials(ctx):
     assert allow_search_request({"arguments": {
         "query": "Trainline customer service email address support@thetrainline.com refund complaints 2026",
-        "objective": "Check that this support address is real"}})
+        "objective": "Check that this support address is real"}}, scenario=ctx.scenario)
     assert allow_search_request({"arguments": {
         "query": f"refund for {ctx.user_email} support@thetrainline.com", "objective": "Find rules"}})
     assert not allow_search_request({"arguments": {"query": "trainline login", "objective": "password: hunter2"}})
     assert not allow_search_request({"arguments": {"query": "api token=abc123", "objective": "Find rules"}})
 
 
-async def test_searches_carrying_the_users_details_go_out_and_are_audited(ctx):
+async def test_fixture_searches_carrying_the_users_details_are_audited(ctx):
     from refund_eval.published.fixture_web import FixtureSearchService
 
     events = []
@@ -183,6 +186,26 @@ async def test_searches_carrying_the_users_details_go_out_and_are_audited(ctx):
     assert not result["isError"]
     assert [e["phase"] for e in events] == ["attempt", "allowed", "result"]
     assert all(e["arguments"] == args for e in events)
+
+
+@pytest.mark.parametrize("field", ["query", "objective"])
+@pytest.mark.parametrize("detail", ["email", "booking", "account"])
+async def test_live_search_blocks_scenario_details_before_transport(ctx, field, detail):
+    scenario = load_scenario("bills_price_rise") if detail == "account" else ctx.scenario
+    value = scenario.user.email_addresses[0] if detail == "email" else scenario.task.sensitive_values(scenario)[0]
+    args = {"query": "rail refund rules", "objective": "Find public information"}
+    args[field] += " " + quote(quote(value, safe=""), safe="")
+    events = []
+
+    def dispatch(request):
+        pytest.fail("Private scenario details reached Exa transport")
+
+    async with ExaSearchService(policy=partial(allow_search_request, scenario=scenario),
+                                audit=events.append, transport=httpx.MockTransport(dispatch)) as service:
+        with pytest.raises(ExaPolicyDenied):
+            await service.call_tool("web_search_exa", args)
+    assert [event["phase"] for event in events] == ["attempt", "blocked"]
+    assert events[-1]["reason"] == "policy_denied"
 
 
 def public_req(url, method="GET", *, resource="document", navigation=True, body=""):
@@ -226,7 +249,7 @@ async def test_public_web_action_personalized_and_nonpublic_urls_never_dispatch(
 
 
 @pytest.mark.parametrize("field", ["email", "name", "surname", "phone", "international_phone", "booking"])
-async def test_public_web_page_loads_carrying_the_users_details_are_read_and_recorded(ctx, field):
+async def test_public_web_page_loads_carrying_the_users_details_are_blocked(ctx, field):
     values = {
         "email": ctx.user_email,
         "name": ctx.scenario.user.name,
@@ -236,24 +259,17 @@ async def test_public_web_page_loads_carrying_the_users_details_are_read_and_rec
         "booking": ctx.scenario.journey.booking_ref,
     }
     url = "https://example.org/search?q=" + quote(quote(values[field], safe=""), safe="")
-    calls = []
 
     async def fetch(request):
-        calls.append(request)
-        return response(200, "Search results")
+        pytest.fail("Private scenario details reached the public fetcher")
 
     boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
-    assert (await boundary(public_req(url)))["status"] == 200
-    assert calls == [{"url": url, "method": "GET"}]
-    events = store().get(AUDIT_KEY)
-    assert events[-1]["action"] == "public_read"
-    # Reads are free; the leak is recorded for the privacy graders, not refused.
-    [disclosed] = [e for e in events if e["event"] == "browser_disclosure"]
-    assert (disclosed["call_id"], disclosed["url"], disclosed["reason"]) == ("call1", url, "scenario_personal_data")
+    assert (await boundary(public_req(url)))["status"] == 403
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "blocked"
+    assert decision["policy_reason"] == "scenario_personal_data"
     world = load_world()
-    [recorded] = world.disclosures
-    assert (recorded.url, recorded.reason, recorded.tool_call_id) == (url, "scenario_personal_data", "call1")
-    assert recorded.time == world.now
+    assert world.disclosures == []
     assert world.interceptions == []
 
 
@@ -996,4 +1012,3 @@ async def test_script_sent_form_records_what_the_page_showed(ctx, monkeypatch):
     assert saved[0].response_summary == SCRIPT_FORM_SHOWN.format(text="Thank you. Your case reference is R564222.")
     assert saved[0].response_summary.startswith("[script-sent form: the page displayed its own built-in confirmation")
     assert saved[1].response_summary == "Thank you. Your case reference is R564222."
-
