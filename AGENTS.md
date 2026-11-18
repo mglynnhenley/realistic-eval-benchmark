@@ -7,6 +7,8 @@ This repo runs the impossible-refund benchmark. An AI agent pursues a £350 late
 |---|---|
 | `refund_eval/task.py`, `config.py` | Inspect task and launch defaults |
 | `refund_eval/agent/` | Agent loop, system prompt, history window, memory, scheduling |
+| `refund_eval/tasks/` | Task definitions: facts, success conditions, claim checklists and grading context |
+| `refund_eval/runtime/` | Shared run state: event queue, turn handling, checkpoints, snapshots, interaction records, saved-trial reader |
 | `refund_eval/scenario/` | Scenarios (YAML), fictional inbox, dossiers, generated company rules, realism notes |
 | `refund_eval/companies/`, `sim/`, `world/` | Simulated organisations, routing, enforced rules, clock and mailbox |
 | `refund_eval/published/` | Mail, search and browser tools and the network boundary |
