@@ -10,7 +10,7 @@ ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
     "refund_eval/world", "refund_eval/world_service", "refund_eval/published",
     "refund_eval/agent", "refund_eval/tasks", "refund_eval/grading",
-    "refund_eval/claims", "scout",
+    "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scout",
 )
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,8 +22,8 @@ def environment_fingerprint() -> str:
     when Git's file inventory is unavailable.
     """
     for name in ENVIRONMENT_PATHS:
-        if not (ROOT / name).is_dir():
-            raise FileNotFoundError(f"Missing environment directory: {name}")
+        if not (ROOT / name).exists():
+            raise FileNotFoundError(f"Missing environment path: {name}")
     filenames = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *ENVIRONMENT_PATHS],
         cwd=ROOT,

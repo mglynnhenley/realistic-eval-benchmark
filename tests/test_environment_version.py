@@ -62,5 +62,16 @@ def test_fingerprint_inventory(tmp_path, monkeypatch):
 
 def test_missing_environment_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(environment, "ROOT", tmp_path)
-    with pytest.raises(FileNotFoundError, match="Missing environment directory"):
+    with pytest.raises(FileNotFoundError, match="Missing environment path"):
         environment.environment_fingerprint()
+
+
+def test_fingerprint_includes_individual_files(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    source = tmp_path / "config.py"
+    source.write_text("DEFAULT = 1\n")
+    monkeypatch.setattr(environment, "ROOT", tmp_path)
+    monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("config.py",))
+    before = environment.environment_fingerprint()
+    source.write_text("DEFAULT = 2\n")
+    assert environment.environment_fingerprint() != before

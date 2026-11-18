@@ -10,12 +10,14 @@ Update `ENVIRONMENT_VERSION` in `refund_eval/environment_version.py`, then add a
 newest-first entry below with the current fingerprint, printed by
 `uv run --frozen python -m refund_eval.environment_version`. The fingerprint hashes
 environment file names and contents, excluding Git-ignored files and Python
-caches. Computing it requires Git and a checkout so private local data is never
+caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
+`refund_eval/config.py` defaults as well as the scenario, agent and grading code.
+Computing it requires Git and a checkout so private local data is never
 included by an unfiltered fallback. The changelog test checks the version,
 fingerprint and bump kind.
 
 ## 1.0 — 2026-11-18
 - Kind: baseline
-- Fingerprint: 752dcd6e43c1ea904da043d4298ddcce7bdff2c6c784af57014ae79ebb9542a0
+- Fingerprint: 5fac7ea66dd71803ce49db8c778136a01180fce1065bc25fd6730b012fb78270
 - Trial round: none
-- Changes: baseline for main @ 6436295 (MAT-119)
+- Changes: baseline for main @ ce407c0 (MAT-119)
