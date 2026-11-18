@@ -199,6 +199,21 @@ def subprocess_readiness() -> dict[str, Any]:
         return {"configured": False, "reason": "Browser runtime: packaged component check failed."}
 
 
+# Kernels with built-in tunnel drivers (Modal's VMs) add these fallback devices to every new network
+# namespace; they have no addresses or routes, so the namespace is still loopback-only.
+FALLBACK_TUNNELS = frozenset({"tunl0", "gre0", "gretap0", "erspan0", "ip_vti0", "ip6_vti0", "sit0", "ip6tnl0",
+                              "ip6gre0"})
+
+
+def _loopback_only(process_id: int, interfaces: list[str]) -> bool:
+    if interfaces == ["lo"]:
+        return True
+    if "lo" not in interfaces or not set(interfaces) - {"lo"} <= FALLBACK_TUNNELS:
+        return False
+    routes = Path(f"/proc/{process_id}/net/route").read_text().splitlines()[1:]
+    return not any(line.strip() for line in routes)
+
+
 class SubprocessBrowserRuntime:
     """Run browser and MCP inside the trial sandbox, with explicit isolation evidence.
 
@@ -288,11 +303,14 @@ class SubprocessBrowserRuntime:
                 interfaces = sorted(line.split(":", 1)[0].strip() for line in devices)
             except OSError as error:
                 raise BrowserBoundaryError("Cannot verify browser network namespace") from error
-            if namespace == worker_namespace or interfaces != ["lo"]:
+            if namespace == worker_namespace or not _loopback_only(process_id, interfaces):
                 raise BrowserBoundaryError("Browser network namespace is not isolated")
             manifest.update({"verified": True, "mode": "subprocess-netns", "network_mode": "none",
                              "namespace_verified": True, "namespace_id": namespace,
-                             "worker_namespace_id": worker_namespace, "network_interfaces": interfaces})
+                             "worker_namespace_id": worker_namespace,
+                             "network_interfaces": [name for name in interfaces if name not in FALLBACK_TUNNELS]})
+            if fallback := [name for name in interfaces if name in FALLBACK_TUNNELS]:
+                manifest["fallback_tunnels_without_routes"] = fallback
             manifest.pop("namespace_unavailable_reason", None)
         return manifest
 

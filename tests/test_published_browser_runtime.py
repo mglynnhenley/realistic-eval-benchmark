@@ -134,6 +134,26 @@ async def test_subprocess_namespace_evidence_requires_distinct_namespace_and_loo
         await runtime.verify_isolation()
 
 
+async def test_subprocess_namespace_accepts_kernel_fallback_tunnels_without_routes(tmp_path, monkeypatch):
+    class Client:
+        process_id = 12345
+
+    runtime = SubprocessBrowserRuntime(tmp_path, timeout=90, audit_path=tmp_path / "audit")
+    runtime.client = Client()
+    runtime._namespace = True
+    runtime._component_info = {"chromium_executable": "/opt/chromium"}
+    monkeypatch.setattr(os, "readlink", lambda path: "net:[2]" if "/12345/" in path else "net:[1]")
+    files = {"dev": "header\nheader\n lo: 0\n tunl0: 0\n sit0: 0\n", "route": "Iface\tDestination\n"}
+    monkeypatch.setattr(Path, "read_text", lambda self: files[self.name])
+    manifest = await runtime.verify_isolation()
+    assert manifest["verified"] is True
+    assert manifest["network_interfaces"] == ["lo"]
+    assert manifest["fallback_tunnels_without_routes"] == ["sit0", "tunl0"]
+    files["route"] += "tunl0\t00000000\n"
+    with pytest.raises(BrowserBoundaryError, match="not isolated"):
+        await runtime.verify_isolation()
+
+
 async def test_subprocess_browser_files_can_be_kept_in_an_output_directory(tmp_path, monkeypatch):
     from refund_eval.published import browser_runtimes
 
