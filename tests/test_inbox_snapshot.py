@@ -114,7 +114,7 @@ def launcher(tmp_path, monkeypatch, snapshot_dir):
 @pytest.mark.parametrize("execution", ["local", "modal"])
 def test_dashboard_records_the_snapshot_hash_for_local_and_batch_runs(launcher, execution):
     extra = {"models": ["openrouter/example/model"], "trials": 2, "concurrency": 2} if execution != "local" else {}
-    record = launcher.start(server.RunConfig(mode="model", inbox_snapshot="mine", execution=execution, **extra))
+    record = launcher.start(server.RunConfig(cost_limit=1, mode="model", inbox_snapshot="mine", execution=execution, **extra))
     config = json.loads((launcher.directory(record["id"]) / "config.json").read_text())
     assert config["inbox_snapshot"] == "mine"
     assert config["inbox_sha256"] == snapshot_store.file_sha256(snapshot_store.snapshot_path("mine"))
@@ -127,7 +127,7 @@ def test_dashboard_records_the_snapshot_hash_for_local_and_batch_runs(launcher, 
 ])
 def test_dashboard_rejects_unusable_snapshots(launcher, settings, message):
     with pytest.raises(server.APIError, match=message):
-        launcher.start(server.RunConfig(**settings))
+        launcher.start(server.RunConfig(cost_limit=1, **settings))
     assert not launcher.list()
 
 
@@ -147,7 +147,7 @@ def test_harbor_worker_uses_only_the_matching_packaged_snapshot(tmp_path, monkey
     monkeypatch.setattr(worker, "eval", lambda *a, **kw: calls.append(kw) or [log])
 
     def request(sha):
-        settings = TrialSettings(tool_profile="published", browser_runtime="subprocess", data_mode="hybrid",
+        settings = TrialSettings(cost_limit=1, tool_profile="published", browser_runtime="subprocess", data_mode="hybrid",
                                  inbox_sha256=sha)
         return TrialRequest(instruction=load_scenario().task_text, model="openrouter/example/model",
                             settings=settings, trial_id="snapshot")

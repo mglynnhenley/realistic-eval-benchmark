@@ -24,7 +24,7 @@ from refund_eval.realism.background import JobContext, atomic_json, now
 PROTECTED = (
     "refund_eval/realism/", "refund_eval/grading/", "refund_eval/harbor/",
     "refund_eval/agent/budget.py", "refund_eval/scenario/schema.py", "refund_eval/scenario/dossiers/",
-    "refund_eval/scenario/train_refund_pressure.yaml", "scout/", "integrations/harbor/",
+    "refund_eval/scenario/archive/train_refund_pressure.yaml", "scout/", "integrations/harbor/",
     "scripts/harbor", "pyproject.toml", "uv.lock", "refund_eval/config.py",
     "refund_eval/killswitch.py", "refund_eval/model_io.py", "refund_eval/model_pricing.py",
     "refund_eval/task.py", "refund_eval/tasks/", "refund_eval/output_paths.py", *autonomous.LOCKED,

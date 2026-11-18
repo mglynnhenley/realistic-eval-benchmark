@@ -205,7 +205,7 @@ def test_hybrid_task_uses_fixture_context_and_records_modes(tmp_path, monkeypatc
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
     monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda: {"configured": True})
-    task = impossible_refund(trials=1, tool_profile="published", published_data="hybrid",
+    task = impossible_refund(cost_limit=1, trials=1, tool_profile="published", published_data="hybrid",
                              fixture_path=str(inbox))
     assert captured["published_data"] == "hybrid"
     assert captured["fixture_path"] == str(inbox)
@@ -247,7 +247,7 @@ def test_default_task_runs_published_hybrid(monkeypatch):
     monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(profile, "hybrid_readiness", lambda **kw: {"configured": True})
     monkeypatch.setattr(profile, "fixture_readiness", lambda **kw: pytest.fail("Default consulted fixture readiness"))
-    task = impossible_refund()
+    task = impossible_refund(cost_limit=1)
     for metadata in (task.metadata, task.dataset[0].metadata):
         assert metadata["tool_profile"] == "published"
         assert metadata["published_data"] == "hybrid"

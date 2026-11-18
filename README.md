@@ -60,7 +60,7 @@ uv run --frozen inspect eval refund_eval/task.py \
 
 The scenario starts on 12 October 2026; a twelve-week trial ends on 4 January 2027. The agent wakes at its requested time or when mail is due, whichever comes first; if neither is pending, it wakes at the next 09:00 London check-in. Simulated time, cumulative tokens and the visible history window are separate limits. See [settings and timing](docs/running.md#common-settings), [the scenario specification](docs/late-refund-spec.md) and [the frozen Muse configuration](docs/running.md#prepare-the-muse-configuration). Live web content and model responses can vary between trials.
 
-The earlier `train_refund_pressure` and `train_refund` scenarios remain supported. The CLI still defaults to the pressure scenario, six weeks, 1,000 turns and a $1 cost cap; the example above overrides them explicitly. See [earlier scenarios](docs/running.md#earlier-scenarios).
+All launchers default to `train_refund_late`, six weeks, 1,000 turns and a 40-million-target-token budget; an explicit cost ceiling is required (there is no default $1 cap). `bills_price_rise` also remains runnable. The earlier `train_refund_pressure` and `train_refund` scenarios are archived, but saved logs remain readable and resumable with their original scenario. See [earlier scenarios](docs/running.md#earlier-scenarios).
 
 ## View and grade saved runs
 

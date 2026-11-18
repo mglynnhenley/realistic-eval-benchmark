@@ -53,14 +53,14 @@ class Environment:
 
 
 def agent(path):
-    return RefundInspectAgent(logs_dir=path, model_name="openrouter/example/offline", scenario="train_refund",
+    return RefundInspectAgent(cost_limit=1, logs_dir=path, model_name="openrouter/example/offline", scenario="train_refund_late",
                               time_limit=1, trial_deadlines=trial_deadlines(1))
 
 
 async def test_bounded_success_keeps_unknown_cost_and_one_native_destination(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
     context = AgentContext()
-    await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, Environment(), context)
+    await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, Environment(), context)
     assert context.n_input_tokens == 1 and context.n_output_tokens == 2 and context.cost_usd is None
     assert len(list(tmp_path.rglob("result.json"))) == 1
 
@@ -70,7 +70,7 @@ async def test_original_nonzero_preserved_despite_missing_artifact(tmp_path, mon
     env = Environment(code=7, missing_native=True)
     context = AgentContext()
     with pytest.raises(RuntimeError, match="exited 7"):
-        await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, context)
+        await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, context)
     assert "native" in env.events and "/logs/agent/worker.log" in env.events
     assert context.cost_usd is None
     assert json.loads((tmp_path / "agent/collection.json").read_text())["errors"]
@@ -80,7 +80,7 @@ async def test_cancel_stops_closes_then_downloads_even_when_cancelled_again(tmp_
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
     env = Environment(waiting=True, download_delay=.03)
     task = asyncio.create_task(agent(tmp_path / "agent").run(
-        load_scenario("train_refund").task_text, env, AgentContext()))
+        load_scenario("train_refund_late").task_text, env, AgentContext()))
     await env.started.wait()
     task.cancel()
     await asyncio.sleep(.01)
@@ -155,7 +155,7 @@ async def test_aggregate_setup_includes_queue_and_agent_setup(tmp_path, monkeypa
     config = {"n_attempts": 3, "n_concurrent_trials": 3, "retry": {"max_retries": 0},
               "agents": [{"import_path": "refund_eval.harbor.agent:RefundInspectAgent",
                           "model_name": "openrouter/example/offline",
-                          "kwargs": {"scenario": "train_refund", "time_limit": 1, "trial_deadlines": trial_deadlines(1)}}],
+                          "kwargs": {"scenario": "train_refund_late", "cost_limit": 1, "time_limit": 1, "trial_deadlines": trial_deadlines(1)}}],
               "tasks": [{"path": str(tmp_path / "task")}], "jobs_dir": str(tmp_path / "jobs")}
     path = tmp_path / "job.json"
     path.write_text(json.dumps(config))
@@ -186,7 +186,7 @@ def test_preparation_binds_actual_task_job_and_policy_bytes(tmp_path, monkeypatc
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "check_output", selected_source)
-    protocol = autonomous._protocol({"scenario": "train_refund", "model": "openrouter/example/offline",
+    protocol = autonomous._protocol({"scenario": "train_refund_late", "model": "openrouter/example/offline",
                                      "time_limit": 1800, "trial_deadline_policy": "bounded-lifecycle-v1"})
     settings = TrialSettings(scenario=protocol["scenario"], time_limit=protocol["time_limit"],
                              token_budget=protocol["token_budget"], max_turns=protocol["max_turns"],
@@ -256,7 +256,7 @@ def test_preparation_cli_prints_supported_route_for_its_policy(tmp_path, monkeyp
 
     monkeypatch.setattr(cli, "prepare", lambda destination, **kwargs: destination / "job.json")
     argv = ["prepare", "--output", str(tmp_path / "prepared"), "--model", "openrouter/example/offline",
-            "--scenario", "train_refund"]
+            "--scenario", "train_refund_late", "--cost-limit", "1"]
     if opt_in:
         argv += ["--trial-deadline-policy", "bounded-lifecycle-v1"]
     monkeypatch.setattr(sys, "argv", argv)

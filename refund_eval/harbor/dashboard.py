@@ -72,7 +72,7 @@ class BatchProgress:
             model = event.config.agent.model_name
             number = sum(row["model"] == model for row in self.rows.values()) + 1
             cap = resolve_cost_limits(self.config["cost_limit"], self.models,
-                                      scenario=self.config.get("scenario", "train_refund_pressure"))[model]
+                                      scenario=self.config.get("scenario", "train_refund_late"))[model]
             child_config = {**self.config, "model": model, "models": [model], "cost_limit": cap}
             record = {**self.record, "model": model, "config": child_config, "id": run_id, "parent_batch_id": self.directory.name,
                       "label": f"Trial {number} · {model.removeprefix('openrouter/')}",

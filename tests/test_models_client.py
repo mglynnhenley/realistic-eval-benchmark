@@ -339,7 +339,7 @@ def test_openrouter_roles_come_from_settings_and_must_be_openrouter_models(monke
     from refund_eval.config import RunConfig
 
     monkeypatch.setattr(model_pricing.httpx, "get", lambda *a, **k: pytest.fail("prices were given"))
-    settings = RunConfig(simulator_model="openrouter/a/sim", grader_model="openrouter/a/grader")
+    settings = RunConfig(cost_limit=1, simulator_model="openrouter/a/sim", grader_model="openrouter/a/grader")
     client = OpenRouterClient.from_settings(settings, prices={}, client=AsyncOpenAI(api_key="not-a-key"))
     assert client.roles == {"simulator": "openrouter/a/sim", "grader": "openrouter/a/grader"}
     with pytest.raises(ValueError, match="openrouter/"):

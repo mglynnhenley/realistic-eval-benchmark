@@ -64,7 +64,7 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
 def test_each_scenario_choice_carries_its_own_fare():
     fares = {item["name"]: item["fare"] for item in server.public_config()["scenarios"]}
     assert fares["train_refund_late"] == 350.0
-    assert fares["train_refund_pressure"] != fares["train_refund_late"]
+    assert set(fares) == {"train_refund_late", "bills_price_rise"}
 
 
 def test_scenario_picker_loads_api_choices_before_presets_and_preserves_selection():
@@ -177,7 +177,7 @@ def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     manager = server.RunManager(tmp_path)
     try:
-        record = manager.start(server.RunConfig(mode="model"))
+        record = manager.start(server.RunConfig(cost_limit=1, mode="model"))
         config = json.loads((manager.directory(record["id"]) / "config.json").read_text())
         assert config["model"] == "openrouter/anthropic/claude-opus-5"
         assert config["simulator_model"] == DEFAULT_ROLE_MODEL
@@ -200,7 +200,7 @@ def test_anthropic_key_does_not_satisfy_openrouter_launch(tmp_path, monkeypatch)
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(server.APIError, match="Set OPENROUTER_API_KEY") as error:
-            manager.start(server.RunConfig(mode="model"))
+            manager.start(server.RunConfig(cost_limit=1, mode="model"))
         assert error.value.status == 422
         assert not manager.list() and not manager.processes
     finally:
@@ -212,7 +212,7 @@ def test_missing_provider_sdk_is_rejected_before_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "sdk_available", lambda provider: False)
     manager = server.RunManager(tmp_path)
     try:
-        config = server.RunConfig(mode="model", model="openai/example", simulator_model="mockllm/model",
+        config = server.RunConfig(cost_limit=1, mode="model", model="openai/example", simulator_model="mockllm/model",
                                   grader_model="mockllm/model")
         with pytest.raises(server.APIError, match="uv sync --frozen --extra providers") as error:
             manager.start(config)
@@ -230,7 +230,7 @@ def test_unsupported_provider_alias_is_not_advertised(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(server.APIError, match="Unsupported model provider"):
-            manager.start(server.RunConfig(mode="model", model="xai/example"))
+            manager.start(server.RunConfig(cost_limit=1, mode="model", model="xai/example"))
         assert not manager.processes
     finally:
         manager.close()
@@ -262,7 +262,7 @@ def test_requires_published_tools(tmp_path):
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(ValueError, match="published"):
-            manager.start(server.RunConfig(mode="model", tool_profile="unknown"))
+            manager.start(server.RunConfig(cost_limit=1, mode="model", tool_profile="unknown"))
         assert not manager.list()
     finally:
         manager.close()
@@ -285,7 +285,7 @@ def test_simulated_gmail_checks_only_selected_runtime(tmp_path, monkeypatch, dat
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     manager = server.RunManager(tmp_path / "runs")
     try:
-        record = manager.start(server.RunConfig(mode="model", tool_profile="published", data_mode=data_mode, model="mockllm/target",
+        record = manager.start(server.RunConfig(cost_limit=1, mode="model", tool_profile="published", data_mode=data_mode, model="mockllm/target",
             simulator_model="mockllm/sim", grader_model="mockllm/grader"))
         saved = json.loads((manager.directory(record["id"]) / "config.json").read_text())
         assert saved["data_mode"] == record["data_mode"] == data_mode
@@ -308,7 +308,7 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
     manager = server.RunManager(tmp_path / "runs")
     try:
         with pytest.raises(server.APIError, match="Docker is unavailable"):
-            manager.start(server.RunConfig(mode="model", tool_profile="published", data_mode=data_mode))
+            manager.start(server.RunConfig(cost_limit=1, mode="model", tool_profile="published", data_mode=data_mode))
         assert not manager.list()
     finally:
         manager.close()
@@ -319,7 +319,7 @@ def test_unknown_profile_is_rejected(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(ValueError, match="published"):
-            manager.start(server.RunConfig(mode="model", tool_profile="unknown", data_mode=data_mode))
+            manager.start(server.RunConfig(cost_limit=1, mode="model", tool_profile="unknown", data_mode=data_mode))
         assert not manager.list()
     finally:
         manager.close()
@@ -329,18 +329,18 @@ def test_dashboard_model_override_is_runtime_scoped_and_keeps_explicit_models(mo
     from refund_eval.published import profile
 
     monkeypatch.delenv("REFUND_EVAL_DEFAULT_MODEL", raising=False)
-    assert server.RunConfig().model == DEFAULT_TARGET_MODEL
+    assert server.RunConfig(cost_limit=1).model == DEFAULT_TARGET_MODEL
     chosen = "openrouter/anthropic/claude-haiku-4.5"
     monkeypatch.setenv("REFUND_EVAL_DEFAULT_MODEL", chosen)
     monkeypatch.setattr(profile, "fixture_readiness", lambda: {"configured": True, "reason": "Browser ready"})
-    config = server.RunConfig(mode="model")
+    config = server.RunConfig(cost_limit=1, mode="model")
     # The override moves the target only; the roles keep their own default.
     assert config.model == chosen
     assert (config.simulator_model, config.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
     public = server.public_config()
     assert (public["default_model"], public["default_role_model"]) == (chosen, DEFAULT_ROLE_MODEL)
     assert (config.cost_limit, config.max_turns, config.sim_weeks) == (1.0, 1000, 6.0)
-    explicit = server.RunConfig(model="mockllm/target", simulator_model="mockllm/simulator", grader_model="mockllm/grader")
+    explicit = server.RunConfig(cost_limit=1, model="mockllm/target", simulator_model="mockllm/simulator", grader_model="mockllm/grader")
     assert (explicit.model, explicit.simulator_model, explicit.grader_model) == (
         "mockllm/target", "mockllm/simulator", "mockllm/grader",
     )
@@ -361,13 +361,14 @@ def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, 
     monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0))
     monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
     presets = {item["name"]: item["settings"] for item in server.public_config()["run_presets"]}
-    preset = server.RunConfig.model_validate(presets["default"])
+    assert presets["default"]["cost_limit"] is None
+    preset = server.RunConfig.model_validate({**presets["default"], "cost_limit": 1})
     assert (preset.max_turns, preset.cost_limit, preset.sim_weeks) == (1000, 1, 6)
-    assert preset.scenario == "train_refund_pressure"
+    assert preset.scenario == "train_refund_late"
     assert "llm_grading" not in preset.model_dump()
     assert "daily_allowance" not in preset.model_dump()
     assert "use_full_allowance" not in preset.model_dump()
-    assert preset.history_tokens == server.RunConfig().history_tokens == 60_000
+    assert preset.history_tokens == server.RunConfig(cost_limit=1).history_tokens == 60_000
     assert preset.tool_profile == "published" and preset.data_mode == "hybrid"
     assert preset.model == model
     assert (preset.simulator_model, preset.grader_model) == (DEFAULT_ROLE_MODEL, DEFAULT_GRADER_MODEL)
@@ -375,7 +376,7 @@ def test_default_preset_uses_runtime_models_and_persists_full_horizon(tmp_path, 
     try:
         record = manager.start(preset)
         saved = json.loads((manager.directory(record["id"]) / "config.json").read_text())
-        assert saved["scenario"] == record["scenario"] == "train_refund_pressure"
+        assert saved["scenario"] == record["scenario"] == "train_refund_late"
         assert saved["data_mode"] == record["data_mode"] == "hybrid"
         assert "published_config" not in saved
         assert (saved["max_turns"], saved["cost_limit"], saved["sim_weeks"]) == (1000, 1, 6)
@@ -397,7 +398,7 @@ def test_invalid_batch_launch_is_rejected_before_worker(tmp_path, settings, mess
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(server.APIError, match=message):
-            manager.start(server.RunConfig(**settings))
+            manager.start(server.RunConfig(cost_limit=1, **settings))
         assert not manager.list() and not manager.processes
     finally:
         manager.close()
@@ -412,7 +413,7 @@ def test_modal_launch_dispatches_isolated_controller(tmp_path, monkeypatch):
     monkeypatch.setattr(server.shutil, 'which', lambda executable: '/usr/bin/uv')
     manager = server.RunManager(tmp_path)
     try:
-        record = manager.start(server.RunConfig(execution='modal', trials=4, concurrency=2))
+        record = manager.start(server.RunConfig(cost_limit=1, execution='modal', trials=4, concurrency=2))
         directory = manager.directory(record['id'])
         assert commands[0][0].endswith('/scripts/harbor')
         assert commands[0][3] == 'refund_eval.harbor.dashboard'
@@ -456,7 +457,7 @@ def test_invalid_model_list_is_rejected(settings):
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        server.RunConfig(**settings)
+        server.RunConfig(cost_limit=1, **settings)
 
 
 @pytest.mark.parametrize('settings, message', [
@@ -467,7 +468,7 @@ def test_multi_model_scope_and_total_limits(tmp_path, settings, message):
     manager = server.RunManager(tmp_path)
     try:
         with pytest.raises(server.APIError, match=message):
-            manager.start(server.RunConfig(models=['openrouter/a/first', 'openrouter/a/second'], **settings))
+            manager.start(server.RunConfig(cost_limit={'openrouter/a/first': 1, 'openrouter/a/second': 1}, models=['openrouter/a/first', 'openrouter/a/second'], **settings))
         assert not manager.processes
     finally:
         manager.close()
@@ -482,7 +483,7 @@ def test_multi_model_launch_counts_trials_and_checks_all_models(tmp_path, monkey
     manager = server.RunManager(tmp_path)
     try:
         models = ['openrouter/a/first', 'openrouter/b/second']
-        record = manager.start(server.RunConfig(mode='model', execution='modal', models=models,
+        record = manager.start(server.RunConfig(cost_limit=dict.fromkeys(models, 1), mode='model', execution='modal', models=models,
                                                trials=1, concurrency=2))
         assert record['config']['models'] == models
         assert record['model'] == models[0]

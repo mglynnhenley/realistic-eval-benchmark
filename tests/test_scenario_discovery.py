@@ -24,7 +24,7 @@ from refund_eval.world_service.settings import WorldSettings
     ("bills_price_rise", {}, 12),
     ("bills_price_rise", {"sim_weeks": 4}, 4),
     ("bills_price_rise", {"sim_weeks": 6}, 6),
-    ("train_refund_pressure", {}, 6),
+    ("train_refund_late", {}, 6),
 ])
 def test_scenario_default_deadline(settings_class, name, overrides, weeks, monkeypatch, tmp_path):
     scenario = schema.load_scenario(name)
@@ -36,7 +36,7 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
         monkeypatch.setattr(profile, "fixture_readiness", lambda **_: {"configured": True})
         monkeypatch.setattr(task, "register_default_costs", lambda *_, **__: None)
         monkeypatch.setattr(task, "default_model_roles", lambda _: {})
-        resolved = task.impossible_refund(scenario=name, published_data="fixture", **overrides)
+        resolved = task.impossible_refund(scenario=name, cost_limit=1, published_data="fixture", **overrides)
         sim_weeks = resolved.metadata["sim_weeks"]
     elif settings_class in {"native_writer", "native_cli"}:
         from refund_eval.harbor import adapter
@@ -59,7 +59,7 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
     elif settings_class == "harbor_cli":
         prepared = {}
         monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path),
-                                        "--model", "openrouter/example/model", "--scenario", name, *flags])
+                                        "--model", "openrouter/example/model", "--scenario", name, "--cost-limit", "1", *flags])
         monkeypatch.setattr(harbor_cli, "prepare", lambda destination, **kw: prepared.update(kw) or destination / "job.json")
         harbor_cli.main()
         sim_weeks = prepared["settings"].sim_weeks
@@ -95,7 +95,8 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
         assert world_cli.main(argv) == 0
         sim_weeks = captured["settings"].sim_weeks
     else:
-        sim_weeks = settings_class(scenario=name, **overrides).sim_weeks
+        budget = {"cost_limit": 1} if settings_class in (RunConfig, TrialSettings) else {}
+        sim_weeks = settings_class(scenario=name, **budget, **overrides).sim_weeks
     world = World(start_time=scenario.start_time, now=scenario.start_time)
     deadline = sim_deadline(world, sim_weeks)
     assert sim_weeks == weeks
@@ -111,6 +112,7 @@ def scenario_dir(tmp_path, monkeypatch):
     directory.mkdir()
     for path in schema.SCENARIO_DIR.glob("*.yaml"):
         shutil.copyfile(path, directory / path.name)
+    shutil.copytree(schema.SCENARIO_DIR / "archive", directory / "archive")
     monkeypatch.setattr(schema, "SCENARIO_DIR", directory)
     return directory
 
@@ -129,6 +131,47 @@ def test_discovery_reads_current_yaml_files_in_name_order(scenario_dir):
     assert schema.scenario_names() == sorted([*before, "foo"])
     path.unlink()
     assert schema.scenario_names() == before
+
+
+@pytest.mark.parametrize("name", ["train_refund", "train_refund_pressure"])
+def test_archived_scenarios_are_loadable_but_not_launch_choices(name):
+    assert name not in schema.scenario_names()
+    assert schema.load_scenario(name).id == name
+    for settings_class in (RunConfig, TrialSettings):
+        with pytest.raises(ValueError, match="Unknown scenario"):
+            settings_class(scenario=name)
+    assert RunConfig(scenario=name, resume_log="old.eval").scenario == name
+    assert TrialSettings(scenario=name, resume_sha256="a" * 64).scenario == name
+
+
+@pytest.mark.parametrize("name", ["train_refund", "train_refund_pressure"])
+def test_archived_scenarios_load_from_old_absolute_paths(name):
+    path = schema.SCENARIO_DIR / f"{name}.yaml"
+    assert not path.exists()
+    assert schema.load_scenario(str(path)) == schema.load_scenario(name)
+
+
+def test_missing_unarchived_scenario_path_still_errors(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        schema.load_scenario(str(tmp_path / "unknown.yaml"))
+
+
+def test_existing_path_with_archived_name_takes_precedence(tmp_path):
+    path = tmp_path / "train_refund.yaml"
+    path.write_text((schema.SCENARIO_DIR / "bills_price_rise.yaml").read_text())
+    assert schema.load_scenario(str(path)).id == "bills_price_rise"
+
+
+def test_default_scenario_is_shared_and_dashboard_leaves_cap_blank():
+    from refund_eval.sim.common import DEFAULT_SCENARIO
+    from refund_eval.world_service.settings import WorldSettings
+
+    assert schema.load_scenario().id == DEFAULT_SCENARIO == WorldSettings().scenario == "train_refund_late"
+    defaults = server.run_defaults()
+    assert defaults["scenario"] == "train_refund_late"
+    assert defaults["cost_limit"] is None
+    with pytest.raises(ValueError):
+        RunConfig.model_validate(defaults)
 
 
 @pytest.mark.parametrize("settings_class", [RunConfig, TrialSettings])

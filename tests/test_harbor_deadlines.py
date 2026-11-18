@@ -15,9 +15,9 @@ from refund_eval.world.state import WORLD_KEY
 
 
 def request():
-    return TrialRequest(instruction=load_scenario("train_refund").task_text,
+    return TrialRequest(instruction=load_scenario("train_refund_late").task_text,
                         model="openrouter/example/offline", trial_id="offline-only",
-                        settings=TrialSettings(scenario="train_refund", time_limit=1,
+                        settings=TrialSettings(cost_limit=1, scenario="train_refund_late", time_limit=1,
                                                trial_deadlines=trial_deadlines(1)))
 
 
@@ -48,7 +48,7 @@ def test_noncanonical_bounds_rejected(key, value):
     bounds = trial_deadlines(1)
     bounds[key] = value
     with pytest.raises(ValueError):
-        TrialSettings(time_limit=1, trial_deadlines=bounds)
+        TrialSettings(cost_limit=1, time_limit=1, trial_deadlines=bounds)
 
 
 async def test_repeated_waiter_cancel_does_not_reset_cleanup_deadline():

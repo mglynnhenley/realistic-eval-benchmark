@@ -10,6 +10,7 @@ from refund_eval.scenario.schema import load_scenario
 
 
 def published_settings(**kwargs):
+    kwargs.setdefault("cost_limit", 1)
     return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
 
 
@@ -51,7 +52,7 @@ def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch, se
 
     monkeypatch.setattr(worker, "eval", evaluate)
     request = TrialRequest(
-        instruction=load_scenario("train_refund_pressure").task_text, model="openrouter/example/model",
+        instruction=load_scenario("train_refund_late").task_text, model="openrouter/example/model",
         settings=published_settings(history_tokens=12_000, budget_notice="daily", seed=seed),
         trial_id="code-scores",
     )

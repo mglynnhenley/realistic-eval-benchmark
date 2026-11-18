@@ -49,7 +49,7 @@ def test_modal_published_launch_preserves_mode_and_skips_host_browser(tmp_path, 
     monkeypatch.setattr(server.subprocess, "Popen", lambda *a, **k: SimpleNamespace(poll=lambda: 0, wait=lambda **k: 0))
     manager = server.RunManager(tmp_path)
     try:
-        run = manager.start(server.RunConfig(mode="model", execution="modal", tool_profile="published",
+        run = manager.start(server.RunConfig(cost_limit=1, mode="model", execution="modal", tool_profile="published",
                                             data_mode="hybrid", trials=2, concurrency=2))
         saved = json.loads((manager.directory(run["id"]) / "config.json").read_text())
         assert saved["tool_profile"] == "published" and saved["data_mode"] == "hybrid"
@@ -61,9 +61,9 @@ def test_modal_published_launch_preserves_mode_and_skips_host_browser(tmp_path, 
 def test_published_harbor_request_cannot_use_docker_or_live_gmail():
     for settings in ({"browser_runtime": "docker"}, {"browser_runtime": "subprocess", "data_mode": "live"}):
         with pytest.raises(ValueError):
-            TrialSettings(tool_profile="published", **settings)
+            TrialSettings(cost_limit=1, tool_profile="published", **settings)
     request = TrialRequest(instruction=load_scenario().task_text, model="openrouter/test/model",
-                           settings=TrialSettings(tool_profile="published", data_mode="hybrid",
+                           settings=TrialSettings(cost_limit=1, tool_profile="published", data_mode="hybrid",
                                                   browser_runtime="subprocess"), trial_id="test")
     restored = TrialRequest.model_validate_json(request.model_dump_json())
     assert restored.settings.tool_profile == "published"

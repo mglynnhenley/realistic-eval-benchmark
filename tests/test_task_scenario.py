@@ -32,7 +32,7 @@ def test_existing_refund_scenarios_round_trip_with_task_facts(name):
 
 
 def test_legacy_refund_copy_updates_the_task_facts():
-    original = load_scenario()
+    original = load_scenario("train_refund")
     journey = original.journey.model_copy(update={"fare": 123.0})
     copy = original.model_copy(update={"journey": journey, "true_circumstances": ["migraine"]})
     assert copy.journey is journey
