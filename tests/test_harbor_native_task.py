@@ -31,7 +31,7 @@ from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from refund_eval.agent.prompt import task_message
 from refund_eval.harbor import adapter, atif
-from refund_eval.harbor.installed_agent import RefundInstalledAgent
+from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario.schema import load_scenario
 
 
@@ -40,6 +40,13 @@ def generated(tmp_path_factory):
     out = tmp_path_factory.mktemp("harbor_tasks")
     assert adapter.main(["--scenario", "train_refund_late", "--out", str(out), "--sim-weeks", "12"]) == 0
     return out
+
+
+def test_cost_limit_schema_documents_target_only_scope():
+    field = RefundAgentOptions.model_json_schema()["properties"]["cost_limit"]
+    assert "target-only" in field["description"]
+    assert "excludes world-service model calls" in field["description"]
+    assert field["default"] is None
 
 
 def test_task_loads_with_harbors_task_model(generated):

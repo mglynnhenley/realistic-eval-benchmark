@@ -302,7 +302,8 @@ def main() -> None:
                         default=TrialSettings.model_fields["budget_notice"].default,
                         help="With a token budget, show the runtime notice every step, daily, or when low")
     parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
-                        help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
+                        help='Per-trial USD cap for target and world model calls in-process, or JSON mapping of '
+                             'target model IDs to these caps; required for late-refund')
     parser.add_argument("--trial-deadline-policy", choices=["bounded-lifecycle-v1"], default=None)
     parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT)
     parser.add_argument("--reasoning", action="store_true", help="Return the target's reasoning (OpenRouter models)")

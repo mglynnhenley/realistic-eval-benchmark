@@ -13,6 +13,14 @@ TARGETS = ["openrouter/provider/first", "openrouter/provider/second"]
 
 
 @pytest.mark.parametrize("config_type", [RunConfig, TrialSettings])
+def test_cost_limit_schema_documents_in_process_scope(config_type):
+    field = config_type.model_json_schema()["properties"]["cost_limit"]
+    assert "target and world model calls" in field["description"]
+    assert "in-process" in field["description"]
+    assert field["default"] == 1.0
+
+
+@pytest.mark.parametrize("config_type", [RunConfig, TrialSettings])
 def test_late_refund_requires_explicit_cap_and_defaults_to_frozen_40m(config_type):
     with pytest.raises(ValidationError, match="explicit cost_limit"):
         config_type(scenario="train_refund_late")
