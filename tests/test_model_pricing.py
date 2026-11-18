@@ -152,3 +152,22 @@ def test_invalid_prices_cannot_disable_the_budget(monkeypatch, field, value):
     # Validate every requested model before registering any of the new prices.
     info = get_model_info(FABLE)
     assert info is None or info.cost is None
+
+
+def test_world_catalog_includes_fixed_cache_and_reasoning_prices(monkeypatch):
+    entry = {"id": "example/new-model", "pricing": {
+        **FABLE_ENTRY["pricing"], "request": "0.025", "internal_reasoning": "0.00006", "web_search": "0"}}
+    catalog(monkeypatch, [entry])
+    prices = pricing.openrouter_prices([NEW])[NEW]
+    assert prices == {"input": 10, "output": 50, "input_cache_read": 1, "input_cache_write": 12.5,
+                      "request": 0.025, "internal_reasoning": 60}
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("request", None), ("request", "NaN"), ("request", "-1"), ("internal_reasoning", "invalid"),
+    ("web_search", "0.01"), ("unknown_fee", "0.01"),
+])
+def test_world_catalog_rejects_unpriceable_components(monkeypatch, field, value):
+    catalog(monkeypatch, [{"id": "example/new-model", "pricing": {**FABLE_ENTRY["pricing"], field: value}}])
+    with pytest.raises((TypeError, ValueError)):
+        pricing.openrouter_prices([NEW])

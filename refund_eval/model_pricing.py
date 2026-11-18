@@ -59,6 +59,21 @@ def _catalog_cost(entry: dict) -> ModelCost:
     return ModelCost(**catalog_prices(entry))
 
 
+def _world_catalog_prices(entry: dict) -> dict[str, float]:
+    prices = catalog_prices(entry)
+    for field in entry["pricing"]:
+        if field in {"prompt", "completion", "input_cache_read", "input_cache_write"}:
+            continue
+        price = _per_million(entry["pricing"], field)
+        if field == "request":
+            prices[field] = price / 1_000_000
+        elif field == "internal_reasoning":
+            prices[field] = price
+        elif price != 0:
+            raise ValueError(f"Cannot bound catalog pricing component {field}")
+    return prices
+
+
 def _load_catalog() -> dict[str, dict]:
     # Public metadata only: no API key, prompts, or user information sent.
     response = httpx.get(CATALOG_URL, timeout=15.0)
@@ -77,7 +92,7 @@ def openrouter_prices(models: Iterable[str]) -> dict[str, dict[str, float]]:
     if not names:
         return {}
     catalog = _load_catalog()
-    return {name: catalog_prices(catalog[name.removeprefix("openrouter/")])
+    return {name: _world_catalog_prices(catalog[name.removeprefix("openrouter/")])
             for name in names if name.removeprefix("openrouter/") in catalog}
 
 

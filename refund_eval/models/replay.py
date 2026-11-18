@@ -50,7 +50,8 @@ class ReplayMismatch(BaseException):
 
 def request_hash(role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                  tools: Sequence[Tool] = (), temperature: float | None = None,
-                 max_tokens: int | None = None, stop: Sequence[str] | None = None) -> str:
+                 max_tokens: int | None = None, stop: Sequence[str] | None = None,
+                 default_output_cap: bool = False) -> str:
     request = {
         "role": role,
         "messages": [{"role": m.role, "content": m.content, "tool_call_id": m.tool_call_id,
@@ -61,6 +62,8 @@ def request_hash(role: Role, messages: Sequence[Message], *, schema: OutputSchem
         "tools": [asdict(t) for t in tools],
         "temperature": temperature, "max_tokens": max_tokens, "stop": None if stop is None else list(stop),
     }
+    if default_output_cap:
+        request["default_output_cap"] = True
     text = json.dumps(request, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -75,6 +78,12 @@ def _dump(completion: Completion) -> dict[str, Any]:
         "usage": None if completion.usage is None else asdict(completion.usage),
         "model": completion.model,
         "cost_method": completion.cost_method,
+        "failed": completion.failed,
+        "error": completion.error,
+        "generation_id": completion.generation_id,
+        "raw_finish_reason": completion.raw_finish_reason,
+        "http_status": completion.http_status,
+        "worst_case_cost": completion.worst_case_cost,
     }
 
 
@@ -88,6 +97,12 @@ def _load(data: dict[str, Any]) -> Completion:
         usage=None if data.get("usage") is None else Usage(**data["usage"]),
         model=data.get("model", ""),
         cost_method=data.get("cost_method"),
+        failed=data.get("failed", False),
+        error=data.get("error"),
+        generation_id=data.get("generation_id"),
+        raw_finish_reason=data.get("raw_finish_reason"),
+        http_status=data.get("http_status"),
+        worst_case_cost=data.get("worst_case_cost"),
     )
 
 

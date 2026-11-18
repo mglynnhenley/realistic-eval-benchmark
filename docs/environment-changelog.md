@@ -26,6 +26,12 @@ this was not a second version or trial round.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
+- Fingerprint: 5aa0c05b46c4d64678aa01eeaa4f4eee492840ef26d300db8b03fa16e57639f7
+- Trial round: separately coordinated rerun, not yet run.
+- Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; record failed-reply evidence including HTTP status, settle failures with framed request-byte bounds at the highest token rate plus fixed request charges (failing closed on unpriceable components), and allow two individually budgeted retries before stopping (MAT-144).
+
+## 5.0 — 2026-11-18
+- Kind: behaviour round
 - Fingerprint: f77e72f8c15f89f41c075cc9b0a7c61631e6f74f25df771887e5250286c331a1
 - Trial round: pending; only offline validation in this change.
 - Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).

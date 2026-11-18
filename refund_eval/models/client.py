@@ -86,7 +86,13 @@ class Completion:
     stop_reason: StopReason = "unknown"
     usage: Usage | None = None
     model: str = ""
-    cost_method: Literal["actual", "generation_lookup", "estimate"] | None = None
+    cost_method: Literal["actual", "generation_lookup", "estimate", "worst_case"] | None = None
+    failed: bool = False
+    error: Any = None
+    generation_id: str | None = None
+    raw_finish_reason: str | None = None
+    http_status: int | None = None
+    worst_case_cost: float | None = None
 
     @property
     def tool_calls(self) -> list[ToolCall]:
@@ -111,6 +117,7 @@ class ModelClient(Protocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         stop: Sequence[str] | None = None,
+        default_output_cap: bool = False,
     ) -> Completion:
         """One completion. Raises ModelLimitExceeded when a limit stops the call."""
         ...

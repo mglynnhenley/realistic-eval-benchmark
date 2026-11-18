@@ -37,6 +37,7 @@ from refund_eval.models.client import (
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 API_KEY_ENV = "OPENROUTER_API_KEY"
 PREFIX = "openrouter/"
+PROMPT_FRAMING_TOKENS = 16_384
 # The JSON Schema keywords Inspect forwards for a response schema.
 _SCHEMA_KEYS = {"type", "format", "description", "default", "enum", "items", "properties", "additionalProperties",
                 "anyOf", "required", "pattern", "minLength", "maxLength", "minimum", "maximum", "examples"}
@@ -154,6 +155,22 @@ def _token_count(value: Any, *, minimum: int = 1) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
+def _worst_case(params: Mapping[str, Any], prices: Mapping[str, float] | None) -> float | None:
+    if not prices or not {"input", "output", "request"} <= prices.keys():
+        return None
+    if not all(_valid_cost(price) for price in prices.values()) or not _token_count(params.get("max_tokens")):
+        return None
+    prompt = {
+        "messages": params["messages"],
+        "tools": [tool["function"] for tool in params.get("tools", ())],
+        "schema": params.get("response_format", {}).get("json_schema", {}).get("schema"),
+        "stop": list(params.get("stop") or ()),
+    }
+    tokens = len(json.dumps(prompt, default=str).encode("utf-8")) + PROMPT_FRAMING_TOKENS + params["max_tokens"]
+    rate = max(price for key, price in prices.items() if key != "request")
+    return math.ceil((tokens * rate / 1_000_000 + prices["request"]) * 1_000_000_000) / 1_000_000_000
+
+
 def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
     if not prices or not {"input", "output"} <= prices.keys():
         return None
@@ -171,7 +188,7 @@ def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
             return None
     if sum(count or 0 for count in cached) > prompt:
         return None
-    return math.ceil(tokens * max(prices.values()) * 1000) / 1_000_000_000
+    return math.ceil(tokens * max(price for key, price in prices.items() if key != "request") * 1000) / 1_000_000_000
 
 
 class OpenRouterClient:
@@ -240,7 +257,8 @@ class OpenRouterClient:
 
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
-                       max_tokens: int | None = None, stop: Sequence[str] | None = None) -> Completion:
+                       max_tokens: int | None = None, stop: Sequence[str] | None = None,
+                       default_output_cap: bool = False) -> Completion:
         name = self.model_name(role)
         params: dict[str, Any] = {"model": name.removeprefix(PREFIX), "messages": [to_openai(m) for m in messages]}
         if max_tokens is not None:
@@ -258,7 +276,9 @@ class OpenRouterClient:
                 response["description"] = schema.description
             params["response_format"] = {"type": "json_schema", "json_schema": response}
         try:
-            result = await self.client.chat.completions.create(**params, extra_body={"usage": {"include": True}})
+            response = await self.client.chat.completions.with_raw_response.create(
+                **params, extra_body={"usage": {"include": True}})
+            result = response.parse()
         except APIStatusError as ex:
             if ex.status_code == 402:  # out of credit, or the key's spending limit reached
                 raise ModelLimitExceeded(f"OpenRouter refused the call: {ex.message}") from ex
@@ -268,6 +288,15 @@ class OpenRouterClient:
         text = (raw.content if raw is not None else None) or ""
         calls = [ToolCall(id=c.id, function=c.function.name, arguments=_arguments(c.function.arguments))
                  for c in (getattr(raw, "tool_calls", None) or []) if getattr(c, "function", None) is not None]
+        finish = choice.finish_reason if choice is not None else None
+        error = getattr(result, "error", None)
+        choice_error = getattr(choice, "error", None)
+        if choice_error is not None:
+            error = {"response": error, "choice": choice_error} if error is not None else choice_error
+        failed = (error is not None or finish == "error" or choice is None
+                  or (not text and _STOP.get(finish, "unknown") == "unknown")
+                  or (default_output_cap and finish == "length"))
+        worst_case = _worst_case(params, self.prices.get(name)) if self.require_reported_cost else None
         usage = _usage(result.usage, None)
         cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
         if self.require_reported_cost and usage is not None and usage.cost == 0:
@@ -278,6 +307,9 @@ class OpenRouterClient:
             cost, found = await self._generation_cost(result.id) if self.require_reported_cost else (None, False)
             if cost is not None:
                 cost_method = "generation_lookup"
+            elif failed and self.require_reported_cost:
+                cost = worst_case
+                cost_method = "worst_case" if cost is not None else None
             else:
                 cost = (None if found else _estimate(result.usage, self.prices.get(name))) if self.require_reported_cost else (
                         cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
@@ -292,4 +324,5 @@ class OpenRouterClient:
             text=text, message=Message("assistant", text, tool_calls=calls,
                                        native=raw.model_dump(exclude_none=True) if raw is not None else None),
             stop_reason=_STOP.get(choice.finish_reason, "unknown") if choice is not None else "unknown",
-            usage=usage, model=name, cost_method=cost_method)
+            usage=usage, model=name, cost_method=cost_method, failed=failed, error=error,
+            generation_id=result.id, raw_finish_reason=finish, http_status=response.status_code, worst_case_cost=worst_case)

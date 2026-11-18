@@ -496,6 +496,133 @@ async def test_world_charge_settlement(monkeypatch, mode):
         await client.client.close()
 
 
+@pytest.mark.parametrize("kind", ["body_error", "choice_error", "empty_choices", "error_finish", "unknown_empty",
+                                  "length", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
+                                  "explicit", "success", "request_price", "reasoning_price"])
+async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
+    import math
+
+    from refund_eval.models.budget import WORLD_MAX_OUTPUT_TOKENS, BudgetedWorldModels
+    from refund_eval.models.replay import (
+        RECORDINGS_KEY,
+        RecordingModelClient,
+        ReplayModelClient,
+    )
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    requests = []
+    error = {"code": 502, "message": "provider failed"}
+
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("refund_eval.models.openrouter.anyio.sleep", no_sleep)
+
+    def handler(request):
+        if request.method == "GET":
+            if kind == "lookup":
+                return httpx.Response(200, json={"data": {"total_cost": 0.01, "finish_reason": "error",
+                                                          "tokens_prompt": 10, "tokens_completion": 1}})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        body = json.loads(request.content)
+        requests.append(body)
+        if kind == "success" or (len(requests) > 1 and kind != "three"):
+            return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+                "prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.001}))
+        payload = reply({"role": "assistant", "content": ""}, finish="unknown")
+        payload["usage"] = None
+        if kind in {"body_error", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
+                    "request_price", "reasoning_price"}:
+            payload = {"id": "gen-1", "error": error}
+        if kind == "choice_error":
+            payload["choices"][0]["error"] = error
+        if kind == "empty_choices":
+            payload["choices"] = []
+        if kind == "error_finish":
+            payload["choices"][0]["finish_reason"] = "error"
+        if kind in {"length", "explicit"}:
+            payload["choices"][0]["finish_reason"] = "length"
+            payload["choices"][0]["message"]["content"] = "truncated"
+            payload["usage"] = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
+        if kind in {"reported", "allowance"}:
+            payload["usage"] = {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.01}
+        return httpx.Response(200, json=payload)
+
+    name = "openrouter/anthropic/claude-opus-5.5"
+    prices = {"input": 1, "output": 5, "input_cache_write": 6}
+    if kind != "no_request_price":
+        prices["request"] = 0.005 if kind == "request_price" else 0
+    if kind == "reasoning_price":
+        prices["internal_reasoning"] = 8
+    client = openrouter(handler, require_reported_cost=True,
+                        prices={} if kind == "no_price" else {name: prices})
+    budget = BudgetedWorldModels(RecordingModelClient(client), 0.02 if kind == "allowance" else 1, lambda: None)
+    messages = [Message("user", "hello £")]
+    settings = {"schema": OutputSchema("action", CompanyAction), "tools": research._tools()}
+    if kind == "explicit":
+        settings["max_tokens"] = 123
+    try:
+        if kind in {"three", "allowance", "no_price", "no_request_price"}:
+            with pytest.raises(ModelLimitExceeded):
+                await budget.complete("simulator", messages, **settings)
+        else:
+            result = await budget.complete("simulator", messages, **settings)
+            assert not result.failed
+            assert result.text == ("truncated" if kind == "explicit" else "ok")
+        recordings = store.world_store().get(RECORDINGS_KEY)
+        expected_count = 3 if kind == "three" else 1 if kind in {
+            "allowance", "no_price", "no_request_price", "explicit", "success"} else 2
+        assert len(requests) == len(recordings) == expected_count
+        assert all(body["max_tokens"] == (123 if kind == "explicit" else WORLD_MAX_OUTPUT_TOKENS) for body in requests)
+        first = recordings[0]["response"]
+        assert first["failed"] == (kind not in {"explicit", "success"})
+        assert first["generation_id"] == "gen-1"
+        assert first["http_status"] == 200
+        prompt = {"messages": requests[0]["messages"], "tools": [tool["function"] for tool in requests[0]["tools"]],
+                  "schema": requests[0]["response_format"]["json_schema"]["schema"], "stop": []}
+        rate = 8 if kind == "reasoning_price" else 6
+        fixed = 0.005 if kind == "request_price" else 0
+        bound = math.ceil(((len(json.dumps(prompt).encode()) + 16_384 + requests[0]["max_tokens"]) * rate / 1e6 + fixed) * 1e9) / 1e9
+        if kind in {"no_price", "no_request_price"}:
+            assert first["usage"] is None and budget.spent == 0
+        elif kind in {"reported", "allowance", "lookup", "explicit", "length"}:
+            assert first["usage"]["cost"] == 0.01
+            assert first["cost_method"] == ("generation_lookup" if kind == "lookup" else "actual")
+        elif kind != "success":
+            assert first["cost_method"] == "worst_case"
+            assert first["usage"]["cost"] == bound
+        if kind not in {"no_price", "no_request_price"}:
+            assert budget.spent == sum((Decimal(str(r["response"]["usage"]["cost"])) for r in recordings), Decimal(0))
+        if kind == "allowance":
+            assert budget.spent < budget.limit and Decimal(str(bound)) > budget.limit - budget.spent
+        if kind == "length":
+            assert first["raw_finish_reason"] == "length"
+        if kind in {"body_error", "choice_error"}:
+            assert first["error"] == error
+            replayed = await ReplayModelClient(recordings).complete(
+                "simulator", messages, **settings, max_tokens=WORLD_MAX_OUTPUT_TOKENS, default_output_cap=True)
+            assert replayed.failed and replayed.error == error and replayed.generation_id == "gen-1"
+            assert replayed.http_status == 200
+            assert replayed.raw_finish_reason == first["raw_finish_reason"]
+        if kind == "three":
+            assert budget.status == "failed"
+    finally:
+        store.install(previous)
+        await client.client.close()
+
+
+def test_old_completion_recordings_load_without_failure_evidence():
+    from refund_eval.models.replay import _load
+
+    completion = _load({"text": "ok", "message": {"role": "assistant", "content": "ok"}})
+    assert not completion.failed
+    assert completion.http_status is None
+    assert completion.error is completion.generation_id is completion.raw_finish_reason is completion.worst_case_cost is None
+
+
 async def test_unbudgeted_reported_zero_cost_is_unchanged():
     def handler(request):
         assert request.method == "POST"
