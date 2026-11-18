@@ -78,8 +78,10 @@ for hybrid jobs when set; public-web search otherwise uses keyless access.
 
 ## Dashboard
 
-Start `uv run python -m refund_eval.dashboard`, then choose **Start a run → Run
+Start `uv run --frozen python -m refund_eval.dashboard`, then choose **Start a run → Run
 location → Modal** or **Docker**. Choose the scenario, inbox and target models.
+Dashboard batches also default to 1,800 seconds per trial; a local dashboard run
+is one trial without a wall-clock limit by default.
 The dashboard supports up to 16 models and 100 total trials, with one shared
 concurrency limit. Model settings are frozen into each trial.
 

@@ -298,6 +298,10 @@ def impossible_refund(
     )
 
     scorers = adapters.load_scorers() if world_url is None else []
+    research_metadata = (
+        {"research_mode": research_mode}
+        if research_mode != "auto" or (late_refund and world_url is None) else {}
+    )
 
     return Task(
         dataset=[
@@ -311,7 +315,7 @@ def impossible_refund(
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
                           **({"tool_profile": tool_profile, "published_data": published_data}
                              if tool_profile == "published" else {}),
-                          **({"research_mode": research_mode} if research_mode != "auto" else {}),
+                          **research_metadata,
                           **({"company_simulator": company_simulator} if company_simulator else {})},
             )
         ],
@@ -353,7 +357,7 @@ def impossible_refund(
             **({"budget_notice": budget_notice} if budget_notice != "every_step" else {}),
             "sim_weeks": sim_weeks,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
-            **({"research_mode": research_mode} if research_mode != "auto" else {}),
+            **research_metadata,
             **({"company_simulator": company_simulator} if company_simulator else {}),
             **({"tool_profile": tool_profile, "published_data": published_data}
                if tool_profile == "published" else {}),

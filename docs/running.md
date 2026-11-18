@@ -53,7 +53,7 @@ For OpenRouter and Inspect `openai-api` targets, pass `-M strict_tools=false` wh
 
 Use the explicit [late-refund example in the README](../README.md#run-a-late-refund-trial) to start a twelve-week trial. The target model is selected independently from the simulator (`openrouter/anthropic/claude-opus-5.5` by default) and its financial consistency-check role (`openrouter/anthropic/claude-haiku-4.5`). All trial model roles count towards the cost cap. Runs record code checks; grade late-refund behaviours afterwards [with Scout](#grading-saved-runs-with-scout), at a separate cost.
 
-Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
+Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. The README example explicitly selects `research_mode=auto`; omitting it uses `saved` for late refund. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
 
 Prices come from Inspect, explicit `--model-cost-config` overrides, bundled default prices or OpenRouter's public model catalog. If a required price is unavailable, setup fails before model execution. The catalog lookup itself makes no model calls.
 
