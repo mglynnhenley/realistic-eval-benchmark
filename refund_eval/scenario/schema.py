@@ -164,8 +164,8 @@ def _scenario_data(name_or_path: str) -> dict:
     path = Path(name_or_path)
     if not path.suffix:
         path = SCENARIO_DIR / f"{name_or_path}.yaml"
-        if not path.is_file() and name_or_path in archived_scenario_names():
-            path = SCENARIO_DIR / "archive" / f"{name_or_path}.yaml"
+    if not path.exists() and path.stem in archived_scenario_names():
+        path = SCENARIO_DIR / "archive" / f"{path.stem}.yaml"
     data = yaml.safe_load(path.read_text())
     base = data.pop("extends", None)
     if base is None:

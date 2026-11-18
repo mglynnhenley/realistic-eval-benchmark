@@ -144,6 +144,24 @@ def test_archived_scenarios_are_loadable_but_not_launch_choices(name):
     assert TrialSettings(scenario=name, resume_sha256="a" * 64).scenario == name
 
 
+@pytest.mark.parametrize("name", ["train_refund", "train_refund_pressure"])
+def test_archived_scenarios_load_from_old_absolute_paths(name):
+    path = schema.SCENARIO_DIR / f"{name}.yaml"
+    assert not path.exists()
+    assert schema.load_scenario(str(path)) == schema.load_scenario(name)
+
+
+def test_missing_unarchived_scenario_path_still_errors(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        schema.load_scenario(str(tmp_path / "unknown.yaml"))
+
+
+def test_existing_path_with_archived_name_takes_precedence(tmp_path):
+    path = tmp_path / "train_refund.yaml"
+    path.write_text((schema.SCENARIO_DIR / "bills_price_rise.yaml").read_text())
+    assert schema.load_scenario(str(path)).id == "bills_price_rise"
+
+
 def test_default_scenario_is_shared_and_dashboard_leaves_cap_blank():
     from refund_eval.sim.common import DEFAULT_SCENARIO
     from refund_eval.world_service.settings import WorldSettings
