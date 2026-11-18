@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fixtures.simulator import start_sample
+from inspect_ai.util import store
 
 from refund_eval.companies import (
     CompanyContext,
@@ -71,6 +72,16 @@ def test_company_context_gives_examples_to_organisations_only(exemplar_dir, kind
     start_sample("train_refund_late")
     org = Org(key="someone", name="Someone", kind=kind, email_domains=[], contact_emails=["a@example.test"])
     assert company_context(load_scenario("train_refund_late"), load_world(), org, None, []).examples == expected
+
+
+def test_company_context_uses_pinned_examples_without_a_committed_file(exemplar_dir):
+    start_sample("train_refund_late")
+    org = Org(key="dynamic_researched", name="Example Rail", kind="dynamic_advice",
+              email_domains=["example.test"])
+    item = example("published_reply", 7)
+    store().set("simulated_companies", {org.key: {"examples": [item]}})
+    rendered = company_context(load_scenario("train_refund_late"), load_world(), org, None, []).examples
+    assert "Subject: S7" in rendered and "B7" in rendered
 
 
 def test_paraphrase_and_source_limitations_reach_the_prompt(exemplar_dir):

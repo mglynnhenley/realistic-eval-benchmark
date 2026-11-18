@@ -39,18 +39,29 @@ RULES = {
 
 
 class FakeSim:
-    """Plays the simulator role: answers `company_rules` calls with `reply`, or raises it."""
+    """Plays the simulator role for rules generation and the intent check."""
 
     def __init__(self) -> None:
         self.reply: dict | str | Exception = RULES
         self.prompts: list[str] = []
+        self.check_prompts: list[str] = []
+        self.check_fits = True
 
     def __call__(self, input, tools, tool_choice, config) -> ModelOutput:
-        assert config.response_schema.name == "company_rules"
-        self.prompts.append("\n".join(m.text for m in input))
-        if isinstance(self.reply, Exception):
-            raise self.reply
-        content = self.reply if isinstance(self.reply, str) else json.dumps(self.reply)
+        schema = config.response_schema.name
+        if schema == "company_rules_intent_check":
+            self.check_prompts.append("\n".join(m.text for m in input))
+            request = json.loads(input[-1].text)
+            content = json.dumps({"items": [
+                {"id": item["id"], "fits_intent": self.check_fits, "reason": "Test result."}
+                for item in request["items"]
+            ]})
+        else:
+            assert schema == "company_rules"
+            self.prompts.append("\n".join(m.text for m in input))
+            if isinstance(self.reply, Exception):
+                raise self.reply
+            content = self.reply if isinstance(self.reply, str) else json.dumps(self.reply)
         return ModelOutput.from_content(model="mockllm", content=content)
 
 
@@ -86,7 +97,9 @@ async def test_a_ground_without_a_verbatim_quote_is_dropped(sim):
     record = await generate_rules(LATE, TRAINLINE, DOSSIER)
     assert [g["key"] for g in record["rules"]["grounds"]] == ["within_deadline", "exceptional_circumstances"]
     assert len(record["errors"]) == 1 and record["errors"][0].startswith("dropped ground goodwill")
-    sim.reply = {**RULES, "grounds": [{**RULES["grounds"][0], "quote": "non-refundable after 28"}]}
+    sim.reply = {**RULES, "grounds": [
+        {**RULES["grounds"][0], "quote": "non-refundable after 28", "source": "scenario terms"},
+    ]}
     record = await generate_rules(LATE, TRAINLINE, None)  # authored terms count as a source
     assert [g["key"] for g in record["rules"]["grounds"]] == ["within_deadline"] and not record["errors"]
 
@@ -137,8 +150,9 @@ async def test_company_rules_never_generates_in_saved_mode_offline_or_without_in
 async def test_a_failed_generation_is_cached_and_returns_none(sim, no_saved):
     sim.reply = "I cannot help with that."
     assert await company_rules(LATE, TRAINLINE, DOSSIER) is None
-    assert await company_rules(LATE, TRAINLINE, DOSSIER) is None and len(sim.prompts) == 1
-    assert store().get(rules.RULES_KEY)["trainline"]["errors"][0].startswith("rules:")
+    assert await company_rules(LATE, TRAINLINE, DOSSIER) is None and len(sim.prompts) == 2
+    assert store().get(rules.RULES_KEY)["trainline"]["errors"][0].startswith("generation attempt 1:")
+    assert store().get("company_generation_failures")[-1]["org"] == "trainline"
 
 
 def test_cli_generates_from_saved_dossiers_and_saves(sim, no_saved, monkeypatch, capsys):

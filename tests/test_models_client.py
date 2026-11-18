@@ -129,10 +129,14 @@ async def test_consistency_check_uses_the_grader_role_and_never_swallows_limits(
 
 async def test_rules_are_generated_on_the_client_and_name_its_model(fake):
     rules = {"terms": "Refunds within 28 days.", "grounds": []}
-    client = fake(rules)
+    client = fake(rules, {"items": []})
     record = await generate_rules(LATE, LATE.org("trainline"), None)
     assert record["rules"] == CompanyRules.model_validate(rules).model_dump()
     assert record["model"] == "fake/simulator" and client.calls[0]["max_tokens"] == RULES_MAX_TOKENS
+    assert [call["schema"].name for call in client.calls] == [
+        "company_rules", "company_rules_intent_check",
+    ]
+    assert all(call["temperature"] == 0 for call in client.calls)
 
 
 @pytest.mark.parametrize("operation", ["dossier", "person", "rules"])

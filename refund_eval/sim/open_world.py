@@ -7,6 +7,7 @@ eligibility. This module applies actions and owns accounting, timing and retries
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -26,7 +27,7 @@ from refund_eval.companies import (
     CompanyProfile,
     get_company_simulator,
 )
-from refund_eval.companies.exemplars import exemplars_text
+from refund_eval.companies.exemplars import EXEMPLARS_DIR, exemplars_text
 from refund_eval.companies.models import CompanyModelRefusal
 from refund_eval.formatting import long_date, money
 from refund_eval.models.client import ModelLimitExceeded
@@ -39,6 +40,8 @@ from refund_eval.runtime.records import (
     InteractionRecord,
 )
 from refund_eval.scenario.schema import Org, Scenario
+from refund_eval.sim import company_store
+from refund_eval.sim import research as research_module
 from refund_eval.sim.common import (
     directive_from_text,
     make_case_ref,
@@ -49,7 +52,14 @@ from refund_eval.sim.common import (
 from refund_eval.sim.consistency import response_problem
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.sim.research import dossier_text, persona_text, research
-from refund_eval.sim.rules import SALE_GROUND, company_rules, rules_text, saved_rules
+from refund_eval.sim.rules import (
+    RULES_DIR,
+    RULES_KEY,
+    SALE_GROUND,
+    company_rules,
+    rules_text,
+    saved_rules,
+)
 from refund_eval.world.mail import sent_mail
 from refund_eval.world.orgs import parse_address
 from refund_eval.world.state import (
@@ -157,18 +167,32 @@ def inbox_excerpts(world: World, org: Org, limit: int = 6) -> list[str]:
             + e.body.strip()[:1500] for e in mails[-limit:]]
 
 
-async def researched(org: Org, world: World) -> dict | None:
+async def researched(org: Org, world: World, *, max_tool_calls: int | None = None) -> dict | None:
     """The research record the handler grounds itself in, made at first contact."""
     excerpts = inbox_excerpts(world, org) if org.kind == "dynamic_personal" else None
     from refund_eval.sim.common import current_scenario
 
-    return await research(org, inbox_excerpts=excerpts, subject=current_scenario().subject)
+    options = {"max_tool_calls": max_tool_calls} if max_tool_calls is not None else {}
+    return await research(org, inbox_excerpts=excerpts, subject=current_scenario().subject, **options)
 
 
 def _directive(record: dict | None, org: Org, name: str) -> str | None:
     """A persona directive, researched first and the scenario YAML second."""
     text = persona_text((record or {}).get("dossier"))
     return (directive_from_text(text, name) if text else None) or persona_directive(org, name)
+
+
+def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict]) -> None:
+    dossier = (record or {}).get("dossier")
+    if not dossier:
+        return
+    persona = dossier.get("persona")
+    if persona and persona.get("Reply-from"):
+        return
+    for example in examples:
+        if address := own_address(org, example.get("from")):
+            dossier.setdefault("persona", {})["Reply-from"] = f"{org.name} <{address}>"
+            return
 
 
 COMPANIES_KEY = "simulated_companies"
@@ -197,20 +221,114 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     if org.key in saved:
         record = saved[org.key]
         return Org.model_validate(record["org"]), record.get("research")
-    record = (world_store().get("late_refund_frozen_dossiers") or {}).get(org.key)
-    if record is None:
-        record = await researched(org, world)
     from refund_eval.sim.common import current_scenario
 
-    rules = None if org.kind == "dynamic_personal" else await company_rules(current_scenario(), org, record)
+    scenario = current_scenario()
+    dynamic_org = org.kind.startswith("dynamic_") and org.kind != "dynamic_personal"
+    shared = company_store.find_matching_entry(scenario, company_store.org_identity(org)) if (
+        dynamic_org and company_store.enabled()
+    ) else None
+    if shared:
+        org = Org.model_validate(shared["org"])
+        record = shared.get("research")
+        rules = shared.get("rules")
+        examples = shared.get("examples") or []
+        temperature_value = shared.get("temperament") or temperament(org, world)
+        rules_cache = dict(world_store().get(RULES_KEY) or {})
+        rules_cache[org.key] = rules
+        world_store().set(RULES_KEY, rules_cache)
+        entry_metadata = {
+            "source": "shared_entry", "fingerprint": shared["fingerprint"],
+            "path": company_store.relative_entry_path(scenario.id, shared["identity"], shared["fingerprint"]),
+            "pages_sha256": (shared.get("provenance") or {}).get("pages_sha256", ""),
+        }
+    else:
+        record = (world_store().get("late_refund_frozen_dossiers") or {}).get(org.key)
+        if record is None:
+            if dynamic_org and company_store.enabled():
+                from refund_eval.sim.research import DEEP_MAX_TOOL_CALLS
+
+                record = await researched(org, world, max_tool_calls=DEEP_MAX_TOOL_CALLS)
+            else:
+                record = await researched(org, world)
+        examples: list[dict] = []
+        if (dynamic_org and record and record.get("dossier")
+                and not (EXEMPLARS_DIR / f"{org.key}.json").is_file()
+                and research_module.live_web() and research_module.research_mode() != "saved"):
+            example_record = await research_module.research_examples(org, scenario)
+            examples = example_record.get("examples") or []
+            record = {**record, "pages": [*(record.get("pages") or []), *(example_record.get("pages") or [])]}
+        rules = None if org.kind == "dynamic_personal" else await company_rules(
+            scenario, org, record, examples=examples)
+        rules_record = (world_store().get(RULES_KEY) or {}).get(org.key)
+        if rules_record and "examples" in rules_record:
+            examples = rules_record["examples"]
+        temperature_value = temperament(org, world)
+        entry_metadata = {"source": "trial_only", "fingerprint": None, "path": None, "pages_sha256": ""}
+        rules_path = RULES_DIR / scenario.id / f"{org.key}.json"
+        if org in scenario.orgs and rules_path.is_file():
+            raw_rules = rules_path.read_bytes()
+            entry_metadata = {
+                "source": "committed", "rules_file": rules_path.relative_to(RULES_DIR.parents[2]).as_posix(),
+                "sha256": hashlib.sha256(raw_rules).hexdigest(),
+            }
+        generation_failed = bool(
+            rules_record and rules_record.get("rules") is None
+            and any(error.startswith("generation attempt ") for error in rules_record.get("errors", []))
+        )
+        _apply_example_reply_from(org, record, examples)
+        can_save = (dynamic_org and company_store.enabled() and record and record.get("dossier")
+                    and (not scenario.intent or rules is not None) and not generation_failed
+                    and entry_metadata["source"] == "trial_only")
+        if can_save:
+            from refund_eval.models.client import client
+            from refund_eval.sim import rules as rules_module
+
+            pages = record.get("pages") or []
+            page_refs = [{"url": page["url"], "sha256": page["sha256"], "retrieved_at": page["retrieved_at"]}
+                         for page in pages]
+            pages_digest = hashlib.sha256(json.dumps(
+                [{"url": page["url"], "sha256": page["sha256"]} for page in page_refs],
+                sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest()
+            fingerprint = company_store.entry_fingerprint(scenario, org)
+            entry = {
+                "schema": 1, "fingerprint": fingerprint, "identity": company_store.org_identity(org),
+                "scenario": scenario.id, "created_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+                "provenance": {
+                    "identity": company_store.org_identity(org), "scenario_id": scenario.id,
+                    "intent_sha256": hashlib.sha256((scenario.intent or "").encode()).hexdigest(),
+                    "terms_sha256": hashlib.sha256((org.terms or "").encode()).hexdigest(),
+                    "model": client().model_name("simulator"), "temperature": 0,
+                    "rules_prompt_version": rules_module.RULES_PROMPT_VERSION,
+                    "research_prompt_version": research_module.RESEARCH_PROMPT_VERSION,
+                    "exemplar_prompt_version": research_module.EXEMPLAR_PROMPT_VERSION,
+                    "checker_version": rules_module.CHECKER_VERSION, "pages": page_refs,
+                    "pages_sha256": pages_digest,
+                },
+                "org": org.model_dump(mode="json"), "research": record, "rules": rules,
+                "temperament": temperature_value, "examples": examples,
+            }
+            pinned = company_store.save_entry(scenario, org, entry)
+            source = "generated_and_saved" if pinned is entry else "shared_entry"
+            record, rules, temperature_value, examples = (
+                pinned["research"], pinned.get("rules"), pinned.get("temperament"), pinned.get("examples") or [])
+            entry_metadata = {
+                "source": source, "fingerprint": pinned["fingerprint"],
+                "path": company_store.relative_entry_path(scenario.id, pinned["identity"], pinned["fingerprint"]),
+                "pages_sha256": (pinned.get("provenance") or {}).get("pages_sha256", ""),
+            }
     kind = world_store().get(COMPANY_SIMULATOR_KEY)
     if kind and org.kind != "dynamic_personal":
         org = org.model_copy(update={"simulator_kind": kind})
     simulator = get_company_simulator(org.simulator_kind)
     saved[org.key] = {"org": org.model_dump(mode="json"), "research": record, "rules": rules,
                       "simulator_kind": org.simulator_kind, "version": simulator.version,
-                      "temperament": temperament(org, world)}
+                      "temperament": temperature_value, "examples": examples}
     world_store().set(COMPANIES_KEY, saved)
+    company_entries = dict(world_store().get("company_entries") or {})
+    company_entries[org.key] = entry_metadata
+    world_store().set("company_entries", company_entries)
     return org, record
 
 
@@ -363,7 +481,8 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         rules=rules_text(rules, scenario.task.grant_description) if scenario.intent else "",
         persona=persona_text((record or {}).get("dossier")) or org.persona,
         temperament=pinned.get("temperament") or temperament(org, world), realism=realism,
-        examples="" if org.kind == "dynamic_personal" else exemplars_text(org.key), case_ref=case_ref,
+        examples="" if org.kind == "dynamic_personal" else exemplars_text(
+            org.key, examples=pinned.get("examples")), case_ref=case_ref,
         history=history, case_summary=list(case.notes) if case else [],
         earlier_decisions=_earlier_decisions(case.history) if case else [],
         offers=offers, payments=payments, promises=promises,
@@ -554,6 +673,8 @@ def _sender(org: Org, action: OpenAction | None = None, record: dict | None = No
     if chosen:
         return f"{org.name} <{chosen}>"
     if org.kind.startswith("dynamic_"):
+        if researched_sender := _directive(record, org, "Reply-from"):
+            return researched_sender
         address = parse_address(inbound_target or "") or (org.contact_emails[0] if org.contact_emails else None)
         if not address and org.kind != "dynamic_personal" and org.web_domains:
             address = f"noreply@{org.web_domains[0]}"
