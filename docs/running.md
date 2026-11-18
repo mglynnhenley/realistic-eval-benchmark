@@ -4,7 +4,7 @@ The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a r
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation; Harbor trial images use Python 3.12. Then:
+Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. Then:
 
 ```bash
 uv sync --frozen

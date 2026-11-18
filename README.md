@@ -27,7 +27,7 @@ Actions and outcomes are logged for review. After a run, separate AI judges asse
 
 ## Quick start
 
-Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses Python 3.14 locally, as specified in `.python-version`; Harbor trial images use Python 3.12. From this repository:
+Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses Python 3.14 locally, as specified in `.python-version`. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. From this repository:
 
 ```bash
 uv sync --frozen

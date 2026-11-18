@@ -22,7 +22,7 @@ image, including Python dependencies, Node and Chromium.
 
 `scripts/harbor` uses the separate pinned environment in `integrations/harbor/`:
 Harbor and Inspect require different OpenAI SDK versions. Trial images use the
-benchmark's own lockfile and Python 3.12. The wrapper disables Harbor telemetry by default and
+benchmark's own lockfile and Python 3.12 for legacy trials. The wrapper disables Harbor telemetry by default and
 does not load the project's `.env`; export `OPENROUTER_API_KEY` in your shell.
 
 ## Prepare and run a batch
@@ -130,7 +130,7 @@ uv run pytest -q tests/test_harbor_worker.py
 
 ## Native Harbor task (new)
 
-A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. This path is not the default yet.
+A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
 
 Generate a task. This launches nothing. The output directory holds the source and per-task tokens, so keep it private:
 
