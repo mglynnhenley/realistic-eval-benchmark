@@ -5,6 +5,7 @@ Run with scripts/harbor python -m pytest tests/test_harbor_native_task.py.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -27,10 +28,11 @@ from harbor.models.job.config import JobConfig
 from harbor.models.task.config import MCPServerConfig
 from harbor.models.task.task import Task
 from harbor.models.trajectories import Trajectory
+from harbor.publisher.packager import Packager
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from refund_eval.agent.prompt import task_message
-from refund_eval.harbor import adapter, atif
+from refund_eval.harbor import adapter, atif, batch
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario.schema import load_scenario
 
@@ -154,6 +156,63 @@ def test_dataset_metric_and_job(generated):
 def test_adapter_refuses_to_overwrite(generated):
     with pytest.raises(FileExistsError):
         adapter.main(["--scenario", "train_refund_late", "--out", str(generated)])
+
+
+@pytest.mark.parametrize(("execution", "seed"), [("docker", None), ("modal", 0)])
+def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, monkeypatch, execution, seed):
+    monkeypatch.setenv("WORLD_SEED", "17")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-never-packaged")
+    config = tmp_path / "config.json"
+    out = tmp_path / "private run"
+    config.write_text(json.dumps({
+        "execution": execution, "scenario": "train_refund_late", "data_mode": "fixture",
+        "research_mode": "saved", "models": ["openrouter/a", "openrouter/b"],
+        "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0},
+        "max_turns": 50, "sim_weeks": 3, "time_limit": 120, "history_tokens": 0,
+        "budget_notice": "daily", "trials": 3, "concurrency": 2, "seed": seed,
+    }))
+    assert batch.main(["--config", str(config), "--out", str(out)]) == 0
+    assert f"scripts/harbor harbor run -c '{out / 'job.yaml'}'" in capsys.readouterr().out
+    job_bytes = (out / "job.yaml").read_bytes()
+    job = JobConfig.model_validate(yaml.safe_load(job_bytes))
+    task = out / "train_refund_late"
+    [job_task] = job.tasks
+    assert job_task.path == task
+    assert job.environment.type.value == execution and job.retry.max_retries == 0
+    assert (job.n_attempts, job.n_concurrent_trials) == (3, 2)
+    assert [(a.model_name, a.kwargs["cost_limit"]) for a in job.agents] == [
+        ("openrouter/a", 1.0), ("openrouter/b", 2.0),
+    ]
+    for agent in job.agents:
+        assert agent.kwargs == {"cost_limit": agent.kwargs["cost_limit"], "token_budget": 40_000_000,
+                                "time_limit": 120, "history_tokens": 0, "budget_notice": "daily"}
+    compose = (task / "environment" / "docker-compose.yaml").read_text()
+    world = yaml.safe_load(compose)["services"]["world"]["environment"]
+    assert world["WORLD_SEED"] == ("" if seed is None else "0")
+    assert world["WORLD_MAX_TURNS"] == "50" and world["WORLD_RESEARCH_MODE"] == "saved"
+    meta = Task(task).config.metadata
+    assert (meta["sim_weeks"], meta["data_mode"]) == (3.0, "fixture")
+    record_text = (out / "run.json").read_text()
+    record = json.loads(record_text)
+    assert record["total_trials"] == 6 and record["config"]["seed"] == seed
+    assert record["seed_policy"] == meta["seed_policy"]
+    assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task)[0]}"
+    assert record["task"]["rules_sha256"] == meta["rules_sha256"]
+    assert record["task"]["source_sha256"] == meta["source_sha256"]
+    assert record["job"]["sha256"] == hashlib.sha256(job_bytes).hexdigest()
+    assert all("test-key-never-packaged" not in artifact for artifact in (record_text, job_bytes.decode(), compose))
+    assert not (out / "jobs").exists()
+    with pytest.raises(FileExistsError, match="empty output directory"):
+        batch.prepare(out, batch.RunConfig.model_validate_json(config.read_bytes()))
+
+
+def test_batch_rejects_untrackable_inputs_before_writing(tmp_path):
+    with pytest.raises(ValueError, match="concurrency cannot exceed"):
+        batch.prepare(tmp_path / "private", batch.RunConfig(scenario="bills_price_rise", execution="docker", concurrency=2))
+    assert not (tmp_path / "private").exists()
+    with pytest.raises(ValueError, match="Git-ignored"):
+        batch.prepare(adapter.ROOT / "trackable-native-batch",
+                      batch.RunConfig(scenario="bills_price_rise", execution="docker"))
 
 
 # --------------------------------------------------------------------------- installed agent
