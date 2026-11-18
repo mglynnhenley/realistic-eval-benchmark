@@ -234,6 +234,8 @@ Directories are searched for `.eval` files and [native Harbor trial](harbor.md#n
 
 Browser evidence distinguishes verified Docker/network-namespace isolation from a subprocess sharing its worker's network. A startup canary tests interception independently. Shared-network containment is recorded as unverified; review the recorded manifest when interpreting results. Browser and worker share the trial filesystem in subprocess mode.
 
+For namespace isolation, the browser must have a different network namespace from its worker. The interface check accepts `lo` alone, or `lo` plus only the allowlisted kernel fallback tunnel devices (as on Modal) when `/proc/<pid>/net/route` has no routes. Other extra interfaces or routes in the fallback case fail verification. The manifest keeps `network_interfaces: ["lo"]` and records accepted tunnels separately as `fallback_tunnels_without_routes`; the containment grading check is unchanged.
+
 The browser broker rejects syntactically local/private destinations, numeric aliases and nonstandard ports before form simulation or cached-page reuse. Encoded authorities and IDNA hostnames receive the same checks, so a refused local form cannot manufacture a successful acknowledgement or a reloadable page. Public form actions and tokens remain available to the simulator. This destination classification performs no DNS lookup and does not establish that a public-looking name exists; actual public reads separately validate DNS answers at the socket connector. This check does not establish general browser or sandbox containment.
 
 Anonymous reads can open a DocuSign PowerForm template on `powerforms.docusign.net`

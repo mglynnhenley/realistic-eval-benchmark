@@ -1,6 +1,6 @@
 # Parallel trials with Harbor
 
-Harbor runs native Inspect in one Modal or Docker sandbox per trial. Each sandbox
+The legacy Harbor batch path runs Inspect in one Modal or Docker sandbox per trial. Each sandbox
 has its own inbox, simulator state and Chromium browser. All trials use the open
 world and OpenRouter models. The default `hybrid` mode combines simulated Gmail
 with public-web reads; `fixture` uses a simulated inbox and authored websites.
@@ -164,10 +164,10 @@ scripts/harbor python -m refund_eval.harbor.batch --config run-config.json --out
 
 Preparation launches nothing. It requires a new or empty private directory and
 writes the task, `job.yaml`, and a `run.json` recording the resolved settings,
-task/source/rules and job hashes, seed policy, and attempt counts. Use `models`
+task/source/rules and job hashes, environment version and fingerprint, seed policy, and attempt counts. Use `models`
 for multiple targets and a `cost_limit` object keyed by model ID for multiple
 late-refund targets. `trials` is per model; `concurrency` is shared and retries
-are disabled. Without `seed`, each trial derives its seed from the task version
+are disabled. A batch allows at most 100 total attempts, and concurrency cannot exceed that total. Without `seed`, each trial derives its seed from the task version
 and trial name. An explicit seed applies to all attempts; the host's
 `WORLD_SEED` does not override a prepared native batch. Saved inboxes and
 resuming prior logs are not supported by this command.
@@ -190,7 +190,7 @@ This writes `.context/harbor_tasks/train_refund_late/` with the following parts:
 
 - `task.toml`, using schema 1.4. Its `[metadata]` records the task version, seed policy, rules hash and source hash, plus `environment_version` and `environment_fingerprint` from the [environment changelog](environment-changelog.md).
 - `instruction.md`.
-- `environment/`, with the `main` and `world/` Dockerfiles and `docker-compose.yaml`.
+- `environment/`, with the `main` and `world/` Dockerfiles and `docker-compose.yaml`. The `main` build uses only the allowlisted `agent/` payload; `Dockerfile.dockerignore` excludes the full `source/` snapshot from that build context. The world uses the full snapshot.
 - `tests/`, holding the verifier image and `test.sh`, which runs `refund_eval.grading.verifier`.
 
 The adapter also writes these files next to the task:
@@ -212,7 +212,7 @@ Each trial collects the following:
 
 The admin port is reachable only inside the world container. The browser's network namespace needs user namespaces, which Docker's default seccomp profile blocks, so the `world` service runs with `seccomp=unconfined`. `main` keeps Docker's defaults.
 
-Each trial's seed is derived from the task version and the trial name. Set `WORLD_SEED` to replay a recorded seed.
+In the adapter's sample job, each trial's seed is derived from the task version and the trial name. Set `WORLD_SEED` to replay a recorded seed there; prepared native batches instead use the frozen seed policy described above.
 
 The agent's `.eval` holds no world. `refund_eval.runtime.trial_artifacts` reads a trial directory as one Inspect log: the agent's log, with the world's store from `final_snapshot.json` (or from `state.json` and `events.jsonl`) and the scores from `reward.json` and `details.json`. Pass trial or job directories wherever these tools take `.eval` logs: storage upload, Scout, awareness, claims, company reruns, measurements and the realism loop's `collect`. Tools that open `.eval` files themselves read a merged copy, which is written to `<trial>/merged/`. To print merged paths for other tools, such as `inspect view`, run `uv run python -m refund_eval.runtime.trial_artifacts <trial or job dir>`. The dashboard lists finished trials found under `--jobs-dir` (default `.context/harbor_tasks/jobs`). They are read-only. Each shows its transcript, world, rewards, the `.eval`, the trajectory and the verifier files.
 
@@ -229,7 +229,9 @@ uv run pytest -q tests/test_harbor_native_world.py
 The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. API keys are removed from every environment it launches, and it does not use Modal.
 
 ```bash
-uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--seed 7] [--skip-harbor]
+uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--seed 7] [--skip-harbor] [--harbor-concurrency N]
 ```
 
 Each path writes `OUT/<script>/<path>/`. The comparison goes to `OUT/REPORT.md` and `OUT/results.json`. `--skip-harbor` runs only the two in-process paths.
+
+The gate exits 1 if any path run fails, ends with a stop reason other than the script's expected one, or has an unexplained difference; otherwise it exits 0. `REPORT.md` states `Gate: PASS` or `Gate: FAIL`, and `results.json` includes `passed` and `failed_runs`. A zero-difference comparison alone is not a pass when a path failed. `--harbor-concurrency` limits concurrent Docker path runs (default 3).

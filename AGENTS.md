@@ -32,10 +32,13 @@ uv run python -m refund_eval.realism continuous status --run-dir DIR   # realism
 
 Native Harbor task images use Python 3.14; legacy Harbor trial images use Python 3.12.
 
+New launches default to `train_refund_late` and require an explicit cost cap. Earlier train scenarios are in `refund_eval/scenario/archive/` for historical tooling and resume. Native Harbor is opt-in: `scripts/harbor python -m refund_eval.harbor.batch --config FILE --out DIR` prepares a private batch without launching it; the dashboard and existing Harbor launcher still use the legacy batch path. See `docs/harbor.md` for the target-only native cost cap and the free parity gate (failed paths or unexplained differences fail the gate).
+
 ## Rules that always apply
 - **Paid work needs an explicit budget from the owner.** That covers trials, judges, Modal GPU and rule generation. Never retry a paid failure implicitly, and never resume a paused loop without the owner saying so.
 - **Privacy.** Logs, scans, inbox exports and `.secrets/` stay out of git. Never print inbox contents or credentials.
 - **Keep changes minimal.** Make the smallest change that does what was asked; no extra safeguards or redesigns unless requested.
+- **Environment versions.** Follow `docs/environment-changelog.md`: bump MINOR for a trivial environment-change batch without a trial round, or MAJOR (resetting MINOR) for a behaviour round with its own trials. Update `ENVIRONMENT_VERSION` and the changelog fingerprint together; `tests/test_environment_version.py` enforces them. Versioning started at 1.0; runs before that baseline are unversioned.
 - **Data** lives outside the repo in `~/refund-eval-data/`; see its `INDEX.md`. Archived branches are in `~/refund-eval-archive/`.
 
 More specific decisions are in `.cursor/rules/`.
