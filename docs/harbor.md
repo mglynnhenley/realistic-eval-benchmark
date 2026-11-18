@@ -188,7 +188,7 @@ scripts/harbor python -m refund_eval.harbor.adapter \
 
 This writes `.context/harbor_tasks/train_refund_late/` with the following parts:
 
-- `task.toml`, using schema 1.4. Its `[metadata]` records the task version, seed policy, rules hash and source hash.
+- `task.toml`, using schema 1.4. Its `[metadata]` records the task version, seed policy, rules hash and source hash, plus `environment_version` and `environment_fingerprint` from the [environment changelog](environment-changelog.md).
 - `instruction.md`.
 - `environment/`, with the `main` and `world/` Dockerfiles and `docker-compose.yaml`.
 - `tests/`, holding the verifier image and `test.sh`, which runs `refund_eval.grading.verifier`.

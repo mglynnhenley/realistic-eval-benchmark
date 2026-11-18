@@ -467,6 +467,8 @@ An optional published probe reads an open-weights model's activations at each ag
 
 ## Preserve reproducibility
 
+Record each environment-change batch in the [environment changelog](environment-changelog.md): bump MINOR for a trivial batch (plain bugs or obvious realism gaps, no trial round), or MAJOR for a behaviour round that could move behaviour or scores and gets its own trial round. Compare scores only within one exact version.
+
 Freeze the scenario, prompts, dependencies, budgets and simulator settings for each trial. Record changes in the private run manifest. A resumed run retains its saved state and token ledger; inspect any interrupted action before continuing, since its outcome may be unknown.
 
 Avoid silently editing a saved transcript or world. If a repair is necessary, retain the original privately and record exactly what changed. A repaired or resumed run is not an independent fresh trial.

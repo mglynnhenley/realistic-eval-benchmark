@@ -101,13 +101,13 @@ def test_latest_log_needs_one(tmp_path):
 
 
 def test_seed_is_derived_from_task_version_and_trial():
-    env = {"WORLD_TASK_VERSION": "0.1.0", "WORLD_TRIAL": "train_refund__abc1234__env"}
+    env = {"WORLD_TASK_VERSION": "1.0", "WORLD_TRIAL": "train_refund__abc1234__env"}
     chosen = choose_seed(env)
-    assert chosen == {"seed": trial_seed("0.1.0", "train_refund__abc1234"), "source": "derived",
-                      "task_version": "0.1.0", "trial": "train_refund__abc1234"}
+    assert chosen == {"seed": trial_seed("1.0", "train_refund__abc1234"), "source": "derived",
+                      "task_version": "1.0", "trial": "train_refund__abc1234"}
     assert choose_seed(env) == chosen  # deterministic
     assert choose_seed({**env, "WORLD_TRIAL": "train_refund__other__env"})["seed"] != chosen["seed"]
-    assert choose_seed({**env, "WORLD_TASK_VERSION": "0.2.0"})["seed"] != chosen["seed"]
+    assert choose_seed({**env, "WORLD_TASK_VERSION": "1.1"})["seed"] != chosen["seed"]
     assert 0 <= chosen["seed"] < 2**32
     assert choose_seed({**env, "WORLD_SEED": "7"}) == {"seed": 7, "source": "explicit"}
     assert choose_seed({})["seed"] is None

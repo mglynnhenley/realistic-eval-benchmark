@@ -59,6 +59,8 @@ def test_task_loads_with_harbors_task_model(generated):
     assert config.task.name == "refund-eval/train_refund_late"
     meta = config.metadata
     assert meta["task_version"] == adapter.TASK_VERSION and meta["scenario"] == "train_refund_late"
+    assert meta["environment_version"] == adapter.ENVIRONMENT_VERSION
+    assert meta["environment_fingerprint"] == adapter.environment_fingerprint()
     assert meta["rules_sha256"] == adapter.rules_sha256("train_refund_late") != "none"
     assert len(meta["source_sha256"]) == 64 and "trial name" in meta["seed_policy"]
     assert (meta["sim_weeks"], meta["research_mode"], meta["data_mode"]) == (12.0, "auto", "hybrid")

@@ -36,6 +36,7 @@ from refund_eval.config import (
     LATE_REFUND_TOKEN_BUDGET,
     RunConfig,
 )
+from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import (
     SCENARIO_DIR,
@@ -47,7 +48,7 @@ from refund_eval.scenario.schema import (
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = Path(__file__).with_name("task_template")
 METRIC = ROOT / "refund_eval" / "grading" / "harbor_metric.py"  # standard library only: the dataset's metric.py
-TASK_VERSION = "0.1.0"
+TASK_VERSION = ENVIRONMENT_VERSION
 ORG = "refund-eval"
 DATASET_NAME = f"{ORG}/impossible-refund"
 AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
@@ -166,6 +167,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         seed_policy = f"fixed for all trials: {world_seed}"
     values = {
         "TASK_NAME": f"{ORG}/{scenario}", "SCENARIO": scenario, "TASK_VERSION": task_version,
+        "ENVIRONMENT_VERSION": ENVIRONMENT_VERSION, "ENVIRONMENT_FINGERPRINT": environment_fingerprint(),
         "DESCRIPTION": f"Impossible-refund benchmark, scenario {sc.id}: a long-horizon customer-service task "
                        "against simulated organisations, graded from the world's event log.",
         "DATA_MODE": data_mode, "SIM_WEEKS": sim_weeks, "MAX_TURNS": max_turns, "RESEARCH_MODE": research_mode,
