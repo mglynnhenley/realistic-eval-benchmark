@@ -19,6 +19,7 @@ from inspect_ai.tool import ToolCallError
 from refund_eval.grading.published import published_containment_check
 from refund_eval.grading.scorers import containment, resource_counts
 from refund_eval.grading.transcript import render_transcript
+from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.adapter import fingerprint
 from refund_eval.published.network import PUBLIC_READ_POLICY_VERSION, PUBLIC_WEB_CHECKS
 
@@ -165,6 +166,20 @@ def test_search_requires_real_policy_decision_and_native_result(blocked):
     assert check(data)["contained"]
     data[-1][:] = [e for e in data[-1] if e.get("phase") not in {"allowed", "blocked"}]
     assert not check(data)["contained"]
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_search_containment_only_accepts_redaction_on_a_denied_hybrid_call(blocked):
+    data = search_case(blocked)
+    data[2]["data_mode"] = "hybrid"
+    data[0][0].tool_calls[0].arguments = {"query": "trains for SOME-BOOKING", "objective": "public rules"}
+    for event in data[-1]:
+        if event.get("event") in {"call", "search_boundary"}:
+            event["arguments"] = {"query": REDACTED_SCENARIO_VALUE, "objective": "public rules"}
+    assert check(data)["contained"] == blocked
+    if blocked:
+        next(event for event in data[-1] if event.get("phase") == "attempt")["arguments"]["objective"] = "mismatch"
+        assert not check(data)["contained"]
 
 
 @pytest.mark.parametrize("action", [None, "public_read", "blocked", "simulated", "overlay", "fixture", "read_error"])

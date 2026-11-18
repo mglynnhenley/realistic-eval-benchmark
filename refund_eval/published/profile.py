@@ -214,6 +214,7 @@ async def published_tools(
         else:
             search = ExaSearchService(
                 policy=partial(allow_search_request, scenario=scenario),
+                scenario=scenario,
                 audit=search_audit,
                 api_key=os.environ.get(HYBRID_EXA_KEY_ENV),
             )
@@ -228,6 +229,7 @@ async def published_tools(
             image=browser_image,
             runtime=browser_runtime,
             audit_path=network_audit,
+            audit_request=boundary.audit_request if data_mode == "hybrid" else None,
             audit=audit,
         )
         stack.push_async_callback(browser.aclose)

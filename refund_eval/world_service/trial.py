@@ -276,6 +276,7 @@ class WorldTrial:
             from refund_eval.published.search import ExaSearchService
 
             search = ExaSearchService(policy=partial(allow_search_request, scenario=scenario), audit=search_audit,
+                                      scenario=scenario,
                                       api_key=os.environ.get(HYBRID_EXA_KEY_ENV))
         self._stack.push_async_callback(search.aclose)
         await self._add_tools(search, "exa", live_web=data_mode != "fixture")
@@ -294,6 +295,7 @@ class WorldTrial:
         network_audit = artifacts / f"{uuid.uuid4().hex}.network.jsonl"
         browser = PublishedBrowserService(handle_request, spool_dir=spool, image=DEFAULT_IMAGE,
                                           runtime=browser_runtime, audit_path=network_audit, audit=audit,
+                                          audit_request=boundary.audit_request if data_mode == "hybrid" else None,
                                           output_dir=artifacts / "files")
         self._stack.push_async_callback(browser.aclose)
         # Starts the browser, runs the interception canary and records the isolation evidence.

@@ -200,12 +200,14 @@ async def test_live_search_blocks_scenario_details_before_transport(ctx, field, 
     def dispatch(request):
         pytest.fail("Private scenario details reached Exa transport")
 
-    async with ExaSearchService(policy=partial(allow_search_request, scenario=scenario),
+    async with ExaSearchService(policy=partial(allow_search_request, scenario=scenario), scenario=scenario,
                                 audit=events.append, transport=httpx.MockTransport(dispatch)) as service:
         with pytest.raises(ExaPolicyDenied):
             await service.call_tool("web_search_exa", args)
     assert [event["phase"] for event in events] == ["attempt", "blocked"]
     assert events[-1]["reason"] == "policy_denied"
+    expected = {**args, field: "[REDACTED SCENARIO VALUE]"}
+    assert all(event["arguments"] == expected for event in events)
 
 
 def test_name_parts_match_whole_words_in_live_search_and_navigation():
@@ -278,10 +280,14 @@ async def test_public_web_page_loads_carrying_the_users_details_are_blocked(ctx,
         pytest.fail("Private scenario details reached the public fetcher")
 
     boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
-    assert (await boundary(public_req(url)))["status"] == 403
+    request = public_req(url)
+    assert (await boundary(request))["status"] == 403
     decision = store().get(AUDIT_KEY)[-1]
     assert decision["action"] == "blocked"
     assert decision["policy_reason"] == "scenario_personal_data"
+    request_event = store().get(AUDIT_KEY)[-2]
+    assert request_event["request"] == {**request, "url": "[REDACTED SCENARIO VALUE]"}
+    assert decision["url"] == request_event["request"]["url"]
     world = load_world()
     assert world.disclosures == []
     assert world.interceptions == []

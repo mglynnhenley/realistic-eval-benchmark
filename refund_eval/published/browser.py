@@ -90,6 +90,7 @@ class PublishedBrowserService:
         timeout: float = 180,
         request_timeout: float = 120,
         audit: Callable[[dict[str, Any]], None] | None = None,
+        audit_request: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         runtime: str = "docker",
         audit_path: str | Path | None = None,
         output_dir: str | Path | None = None,
@@ -100,6 +101,7 @@ class PublishedBrowserService:
         self.timeout = timeout
         self.request_timeout = request_timeout
         self._audit_callback = audit
+        self._audit_request = audit_request
         if runtime not in {"docker", "subprocess"}:
             raise ValueError("Browser runtime must be 'docker' or 'subprocess'")
         self.runtime = runtime
@@ -185,6 +187,13 @@ class PublishedBrowserService:
                 raise BrowserBoundaryError(f"Pinned Playwright catalog changed: missing {sorted(BROWSER_TOOLS - names)}")
             self._catalog = {**result, "tools": selected}
         return self._catalog
+
+    def audit_arguments(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self._audit_request is None or name != "browser_navigate" or not isinstance(arguments.get("url"), str):
+            return arguments
+        request = self._audit_request({"url": arguments["url"], "method": "GET",
+                                       "is_navigation": True, "resource_type": "document"})
+        return {**arguments, "url": request["url"]}
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
@@ -393,7 +402,8 @@ class PublishedBrowserService:
             request["attribution"] = "active_tool_window" if active else "background_or_stale"
             if active:
                 self._active_request_ids.append(request_id)
-            self._audit({"event": "request", "request": request})
+            recorded = self._audit_request(request) if self._audit_request is not None else request
+            self._audit({"event": "request", "request": recorded})
             if active is None:
                 response = {"status": 503, "headers": {"content-type": "text/plain"},
                             "body_base64": base64.b64encode(b"Connection unavailable").decode()}
@@ -404,15 +414,15 @@ class PublishedBrowserService:
                 response = copy.deepcopy(validate_response(response))
             if active is None or request.get("rejected"):
                 self._audit({"event": "browser_request", "call_id": request.get("tool_call_id"),
-                             "request": request})
+                             "request": recorded})
                 self._audit({"event": "browser_decision", "call_id": request.get("tool_call_id"),
                              "request_id": request_id, "action": "blocked", "status": response.get("status", 0),
-                             "url": request.get("url"), "method": request.get("method"),
+                             "url": recorded.get("url"), "method": request.get("method"),
                              "aborted": bool(response.get("abort"))})
             self._audit({"event": "response", "request_id": request_id,
                          "status": response.get("status"), "aborted": bool(response.get("abort")),
                          "tool_call_id": request.get("tool_call_id"),
-                         **({"request_sha256": http_fingerprint(request),
+                         **({"request_sha256": http_fingerprint(recorded),
                              "response_sha256": http_fingerprint(response)}
                             if response.get("abort") is not True else {})})
         except asyncio.CancelledError:

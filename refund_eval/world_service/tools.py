@@ -27,6 +27,7 @@ from refund_eval.published.adapter import (
     MCPService,
     _strings,
     audit,
+    audit_arguments,
 )
 from refund_eval.published.mcp import MCPRPCError
 from refund_eval.published.search import ExaPolicyDenied
@@ -87,7 +88,8 @@ class NativeTool:
     async def call(self, arguments: dict[str, Any], call_id: str | None) -> list[dict[str, Any]]:
         name, source = self.name, self.source
         accepts_id = "tool_call_id" in inspect.signature(self.service.call_tool).parameters
-        audit({"event": "call", "source": source, "tool": name, "call_id": call_id, "arguments": arguments})
+        audit({"event": "call", "source": source, "tool": name, "call_id": call_id,
+               "arguments": audit_arguments(self.service, name, arguments)})
         try:
             self.validator.validate(arguments)
         except jsonschema.ValidationError as exc:

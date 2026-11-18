@@ -186,6 +186,11 @@ def _strings(value: Any) -> str:
     return text if isinstance(text, str) else ""
 
 
+def audit_arguments(service: MCPService, name: str, arguments: dict) -> dict:
+    redact = getattr(service, "audit_arguments", None)
+    return redact(name, arguments) if redact is not None else arguments
+
+
 def _tool(
     service: MCPService, descriptor: dict, params: ToolParams, source: str, *, live_web: bool = False
 ) -> ToolDef:
@@ -206,7 +211,7 @@ def _tool(
                 "source": source,
                 "tool": name,
                 "call_id": call_id,
-                "arguments": arguments,
+                "arguments": audit_arguments(service, name, arguments),
             }
         )
         try:

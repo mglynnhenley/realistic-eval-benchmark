@@ -264,9 +264,14 @@ async def test_hybrid_world_blocks_scenario_email_before_exa_dispatch(tmp_path, 
             "query": "Find public rules", "objective": scenario.user.email_addresses[0],
         })
         assert result.isError
-        events = [e for e in trial.data()["store"][AUDIT_KEY] if e["event"] == "search_boundary"]
+        audit = trial.data()["store"][AUDIT_KEY]
+        events = [e for e in audit if e["event"] == "search_boundary"]
     assert [e["phase"] for e in events] == ["catalog", "attempt", "blocked"]
     assert events[-1]["reason"] == "policy_denied"
+    [call] = [e for e in audit if e["event"] == "call" and e["source"] == "exa"]
+    assert call["arguments"] == events[-2]["arguments"] == events[-1]["arguments"] == {
+        "query": "Find public rules", "objective": "[REDACTED SCENARIO VALUE]",
+    }
 
 
 # --------------------------------------------------------------------------- end to end

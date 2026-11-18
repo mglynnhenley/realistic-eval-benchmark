@@ -246,7 +246,8 @@ async def test_live_web_researches_an_unrecognised_organisation(sim, monkeypatch
     sim.profile = {"name": "London TravelWatch", "role": "unknown", "reason": "Not sure."}
     researched = []
 
-    async def fake_research(org):
+    async def fake_research(org, *, scenario):
+        assert scenario.id == "train_refund"
         researched.append(org)
         dossier = {"summary": "London's transport watchdog.", "facts": [], "persona": None} if found else None
         return {"org": org.key, "name": org.name, "mode": "live", "dossier": dossier, "errors": [],

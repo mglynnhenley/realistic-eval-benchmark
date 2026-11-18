@@ -140,7 +140,7 @@ async def test_company_preparation_does_not_swallow_model_limits(fake, operation
     org = LATE.org("trainline")
     with pytest.raises(ModelLimitExceeded, match="allowance exhausted"):
         if operation == "dossier":
-            await research.research_live(org)
+            await research.research_live(org, scenario=LATE)
         elif operation == "person":
             await research.profile_person(org, ["Previous correspondence."])
         else:
@@ -153,7 +153,7 @@ async def test_research_tool_loop_sends_back_the_assistant_message_and_tool_resu
                                                 native="backend form"), stop_reason="tool_calls")
     dossier = {"summary": "A retailer.", "facts": []}
     client = fake(asked, dossier)
-    record = await research.research_live(LATE.org("trainline"), subject="a refund")
+    record = await research.research_live(LATE.org("trainline"), subject="a refund", scenario=LATE)
     assert record["dossier"]["summary"] == "A retailer."
     assert record["tool_calls"] == [{"tool": "nope", "arguments": {}, "error": "unknown tool nope"}]
     second = client.calls[1]["messages"]
@@ -192,10 +192,16 @@ async def test_inspect_backend_sends_what_direct_calls_sent():
 
 
 async def test_inspect_backend_tools_match_the_tool_defs_research_used():
-    old = [ToolDef(research._search, name="web_search_exa", description=research.SEARCH_DESCRIPTION, parameters={
+    async def search(query: str, objective: str) -> str:
+        return await research._search(query, objective, scenario=LATE)
+
+    async def read_page(url: str) -> str:
+        return await research._read_page(url, scenario=LATE)
+
+    old = [ToolDef(search, name="web_search_exa", description=research.SEARCH_DESCRIPTION, parameters={
         "query": "Natural-language description of the ideal page.",
         "objective": "Which pages should rank first and what facts to pull from them."}),
-        ToolDef(research._read_page, name="read_page", description=research.READ_DESCRIPTION,
+        ToolDef(read_page, name="read_page", description=research.READ_DESCRIPTION,
                 parameters={"url": "Absolute http(s) URL of a public page."})]
     recorder = Recorder(ModelOutput.for_tool_call(model="mockllm", tool_name="read_page",
                                                   tool_arguments={"url": "https://example.test"}))

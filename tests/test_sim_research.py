@@ -3,11 +3,13 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import get_model
 from inspect_ai.util import store
 
+from refund_eval.published import search as published_search
 from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim import research
 from refund_eval.sim.common import persona_directive
@@ -40,11 +42,11 @@ def sim(monkeypatch):
     store().set(research.MODE_KEY, "live")
     mock.calls = []
 
-    async def search(query, objective):
+    async def search(query, objective, *, scenario):
         mock.calls.append(("web_search_exa", query))
         return f"Title: Terms\nURL: {TERMS}\nRefunds must be claimed within 28 days."
 
-    async def read(url):
+    async def read(url, *, scenario):
         mock.calls.append(("read_page", url))
         return f"URL: {url}\n\nRefunds must be claimed within 28 days of the ticket's expiry."
 
@@ -69,7 +71,7 @@ async def test_live_research_runs_the_tool_loop_then_takes_the_dossier(sim):
 
 
 async def test_a_tool_error_is_shown_to_the_model_and_recorded(sim, monkeypatch):
-    async def broken(url):
+    async def broken(url, *, scenario):
         raise RuntimeError("HTTP 403")
 
     monkeypatch.setattr(research, "_read_page", broken)
@@ -78,6 +80,57 @@ async def test_a_tool_error_is_shown_to_the_model_and_recorded(sim, monkeypatch)
     assert record["tool_calls"][0]["error"] == "HTTP 403" and record["errors"] == ["read_page: HTTP 403"]
     assert "Error: HTTP 403" in sim.dossier_prompts[-1]
     assert record["dossier"]["summary"].startswith("Trainline")
+
+
+@pytest.mark.parametrize("mode", ["auto", "live"])
+@pytest.mark.parametrize("private_field", ["query", "objective", "url", "redirect"])
+async def test_hybrid_research_denies_private_requests_before_transport(monkeypatch, mode, private_field):
+    mock = MockSim()
+    install_mock_models(mock)
+    start_sample(SC.id)
+    store().set("published_tool_profile", {"data_mode": "hybrid"})
+    store().set(research.MODE_KEY, mode)
+    saved = research.saved_record(TRAINLINE, SC.subject)
+    stale = {**saved, "retrieved_at": "2000-01-01T00:00:00+00:00"}
+    monkeypatch.setattr(research, "saved_dossier", lambda org, subject: stale)
+
+    reference = SC.facts.journey.booking_ref
+    private_url = f"{TERMS}?booking={reference}"
+    tool, arguments = SEARCH
+    if private_field in {"url", "redirect"}:
+        tool, arguments = "read_page", {"url": private_url if private_field == "url" else TERMS}
+    else:
+        arguments = {**arguments, private_field: f"Find refund rules for {reference}"}
+    mock.research_script = [(tool, arguments), DOSSIER]
+
+    def no_exa(request):
+        pytest.fail("The private search reached Exa transport")
+
+    sent = []
+
+    async def read(request):
+        sent.append(request["url"])
+        assert private_field == "redirect" and request["url"] == TERMS
+        return {"status": 302, "headers": {"location": private_url}, "body_base64": ""}
+
+    exa = published_search.ExaSearchService
+    monkeypatch.setattr(published_search, "ExaSearchService",
+                        lambda **kwargs: exa(**kwargs, transport=httpx.MockTransport(no_exa)))
+    monkeypatch.setattr(research, "public_read", read)
+    record = await research.research(TRAINLINE, subject=SC.subject)
+
+    assert sent == ([TERMS] if private_field == "redirect" else [])
+    assert len(mock.dossier_prompts) == 1
+    assert record["mode"] == "saved" and record["dossier"] == saved["dossier"]
+    assert record["errors"] == [f"{tool}: policy_denied"]
+
+    mock.research_script = [(tool, arguments), DOSSIER]
+    direct = await research.research_live(TRAINLINE, scenario=SC)
+    recorded = direct["tool_calls"][0]
+    key = "url" if private_field in {"url", "redirect"} else private_field
+    expected = arguments if private_field == "redirect" else {**arguments, key: "[REDACTED SCENARIO VALUE]"}
+    assert recorded == {"tool": tool, "arguments": expected, "error": "policy_denied"}
+    assert direct["dossier"] is None
 
 
 async def test_the_lookup_budget_is_enforced(sim):

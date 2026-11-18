@@ -37,6 +37,7 @@ import aiohttp
 from aiohttp.abc import AbstractResolver
 
 from refund_eval.killswitch import kill_requested
+from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.adapter import audit
 from refund_eval.published.refund_form import late_refund_form
 from refund_eval.scenario.schema import Scenario
@@ -139,6 +140,11 @@ def contains_scenario_data(text: str, scenario: Scenario) -> bool:
         digits = re.sub(r"\D", "", scenario.user.phone)
         values.extend([digits.lstrip("0"), "44" + digits.lstrip("0")])
     return any(value and value in normal for value in values)
+
+
+def redact_scenario_fields(fields: dict, scenario: Scenario, *keys: str) -> dict:
+    return {key: REDACTED_SCENARIO_VALUE if key in keys and isinstance(value, str)
+            and contains_scenario_data(value, scenario) else value for key, value in fields.items()}
 
 
 def static_asset_path(request: dict, url: str) -> bool:
@@ -601,11 +607,19 @@ class BrowserBoundary:
         with world_tx() as world:
             world.disclosures.append(Disclosure(time=world.now, url=url, reason=reason, tool_call_id=call_id))
 
+    def audit_request(self, request: dict) -> dict:
+        if self.public_read_policy == "public_web" and public_web_read_reason(
+            request, self.ctx.scenario,
+        ) == "scenario_personal_data":
+            return {**request, "url": REDACTED_SCENARIO_VALUE}
+        return request
+
     async def __call__(self, request: dict) -> dict:
         url, method = request.get("url", ""), request.get("method", "").upper()
         call_id, navigation = request.get("tool_call_id"), request.get("is_navigation") is True
         payload = {**request, "tool_call_id": call_id}
-        audit({"event": "browser_request", "call_id": call_id, "request": payload})
+        recorded = self.audit_request(payload)
+        audit({"event": "browser_request", "call_id": call_id, "request": recorded})
 
         def done(action: str, result: dict, *, reason: str | None = None,
                  scenario_read: dict | None = None) -> dict:
@@ -614,7 +628,7 @@ class BrowserBoundary:
                     "event": "browser_decision",
                     "call_id": call_id,
                     "request_id": request.get("request_id"),
-                    "url": url,
+                    "url": recorded.get("url", ""),
                     "method": method,
                     "action": action,
                     "status": result["status"],
