@@ -281,13 +281,13 @@ def impossible_refund(
         if active_model() is not None:
             check_published_model(active_model())
         cache_conversation_prefix()
-        from refund_eval.published.profile import (
-            fixture_readiness,
-            hybrid_readiness,
-        )
-
-        runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
         if world_url is None:  # in world-service mode the tools run in the world's container
+            from refund_eval.published.profile import (
+                fixture_readiness,
+                hybrid_readiness,
+            )
+
+            runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
             status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
                       hybrid_readiness(**runtime_args))
             if not status["configured"]:

@@ -95,8 +95,6 @@ from refund_eval.runtime.turns import (  # noqa: F401 - initial_world and wake r
     wake_after_turn,
 )
 from refund_eval.scenario.schema import Scenario, load_scenario
-from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
-from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
 from refund_eval.world import event_log
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
@@ -613,6 +611,9 @@ def refund_agent(
                                       history_tokens=history_tokens, sim_weeks=sim_weeks,
                                       checkin_hours=checkin_hours, token_budget=token_budget,
                                       budget_notice=budget_notice)
+        from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
+        from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
+
         if resume_log:
             state.messages = (await restore_snapshot(resume_log, scenario) if resume_log.endswith(".json")
                               else await restore_trial(resume_log, scenario))

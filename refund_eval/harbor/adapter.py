@@ -4,7 +4,7 @@
 
 Writes, and launches nothing:
 - `OUT/<scenario>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
-  docker-compose.yaml, world/Dockerfile and a copy of the source both images build from) and
+  docker-compose.yaml, world/Dockerfile and separate agent and world build inputs) and
   tests/ (the verifier image and test.sh);
 - `OUT/dataset.toml`: the tasks in OUT, each pinned by Harbor's content digest, and `OUT/metric.py`
   (`grading.harbor_metric`: per-key means that skip missing keys);
@@ -37,7 +37,12 @@ from refund_eval.config import (
     RunConfig,
 )
 from refund_eval.output_paths import validate_private_output
-from refund_eval.scenario.schema import SCENARIO_DIR, load_scenario, scenario_names
+from refund_eval.scenario.schema import (
+    SCENARIO_DIR,
+    Scenario,
+    load_scenario,
+    scenario_names,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = Path(__file__).with_name("task_template")
@@ -47,6 +52,24 @@ ORG = "refund-eval"
 DATASET_NAME = f"{ORG}/impossible-refund"
 AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
 SOURCE_FILES = ["refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"]
+AGENT_MODULES = {
+    "": "__init__ config killswitch model_pricing output_paths task",
+    "agent": "__init__ adapters budget harness prompt schedule world_mode",
+    "companies": "__init__ models",
+    "harbor": "__init__ atif",
+    "models": "__init__ client replay",
+    "parity": "__init__ inspect_cli scripts",
+    "published": "__init__ adapter mail mcp provider search",
+    "realism": "__init__ notes track",
+    "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
+    "scenario": "__init__ schema",
+    "sim": "__init__ interface",
+    "storage": "__init__ hook rows supabase",
+    "tasks": "__init__ base",
+    "tasks/household_bills": "__init__ facts",
+    "tasks/train_refund": "__init__ facts",
+    "world": "__init__ clock event_log guards ids interception mail mailquery orgs snapshot_store state store timeutil trial_snapshot",
+}
 HOST_SEED = "${WORLD_SEED:-}"
 DERIVED_SEED = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>')"
 
@@ -92,6 +115,33 @@ def _fill(text: str, values: dict[str, object]) -> str:
     return text
 
 
+def stage_agent(source: Path, destination: Path, scenario: Scenario) -> None:
+    from refund_eval.realism.track import SOURCE_MANIFEST
+
+    files = [Path(name) for name in SOURCE_FILES if name != "refund_eval"]
+    files.append(Path("refund_eval/agent/system_prompt.md"))
+    files.extend(Path("refund_eval", package, f"{module}.py")
+                 for package, modules in AGENT_MODULES.items() for module in modules.split())
+    for relative in files:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, target)
+
+    view = scenario.model_dump(mode="json", include={
+        "id": True, "task_kind": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"}, "facts": True,
+        "orgs": {"__all__": {"key", "name", "kind", "email_domains", "contact_url"}},
+    }, exclude={"facts": {"true_circumstances"}})
+    (destination / "refund_eval" / "scenario" / f"{scenario.id}.yaml").write_text(
+        yaml.safe_dump(view), encoding="utf-8",
+    )
+    manifest = json.loads((source / SOURCE_MANIFEST).read_text(encoding="utf-8"))
+    memory = source / "refund_eval" / "scenario" / "realism" / f"{scenario.id}.json"
+    if memory.is_file():
+        manifest["realism_memory"] = {scenario.id: hashlib.sha256(memory.read_bytes()).hexdigest()[:8]}
+    (destination / SOURCE_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED) -> Path:
@@ -107,6 +157,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     shutil.copytree(TEMPLATE, task_dir)
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
+    stage_agent(source, task_dir / "environment" / "agent", sc)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
     seed_policy = DERIVED_SEED
     if world_seed == HOST_SEED:

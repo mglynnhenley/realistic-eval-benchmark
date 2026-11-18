@@ -19,7 +19,6 @@ from typing import Any, Protocol
 from bs4 import BeautifulSoup
 from jsonschema import Draft202012Validator, ValidationError
 
-from refund_eval.sim.mail import is_user_recipient, send_message
 from refund_eval.world.ids import new_hex
 from refund_eval.world.interception import ToolContext, new_message_id, remember_links
 from refund_eval.world.mailquery import MatchContext, parse_query
@@ -502,6 +501,8 @@ class GmailService:
         return self._result("search_threads", data, template)
 
     async def _write(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        from refund_eval.sim.mail import is_user_recipient, send_message
+
         if arguments.get("draftId"):
             return _error("Sending an existing draft is unavailable in this mailbox connection.")
         original_id = arguments.get("messageId") if name == "reply" else arguments.get("replyToMessageId")

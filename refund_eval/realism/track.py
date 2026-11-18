@@ -70,6 +70,8 @@ def realism_version(scenario_id: str) -> str:
         manifest_path = ROOT / SOURCE_MANIFEST
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if memory == "none":
+                memory = manifest.get("realism_memory", {}).get(scenario_id, memory)
             commit = (manifest["commit"] or "nogit")[:7]
             dirty = "+dirty" if manifest["dirty"] else ""
             return f"{commit}-{memory}+src-{manifest['source_sha256'][:12]}{dirty}"
