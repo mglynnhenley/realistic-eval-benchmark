@@ -118,6 +118,7 @@ async def resume_checkpoint(
     checkpoint: RunCheckpoint,
     *,
     source: Mapping[str, Any],
+    scenario_id: str | None = None,
     record_revision: Callable[..., None] | None = None,
     rebuild_memory: bool = False,
     memory_seed: Mapping[str, str] | None = None,
@@ -132,6 +133,9 @@ async def resume_checkpoint(
     """
     if checkpoint.world is None or not checkpoint.messages:
         raise ValueError("No trial to resume in checkpoint")
+    saved_scenario = (checkpoint.resume_state.get("task_grading_notes") or {}).get("scenario_id")
+    if scenario_id is not None and saved_scenario is not None and saved_scenario != scenario_id:
+        raise ValueError(f"Cannot resume scenario {saved_scenario!r} as {scenario_id!r}")
     restore_checkpoint(checkpoint)
     messages = deepcopy(checkpoint.messages)
     rebuild = rebuild_memory and "MemoryStore:files" not in checkpoint.resume_state
