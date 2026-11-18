@@ -306,6 +306,7 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
                 "provenance": {
                     "identity": company_store.org_identity(org), "scenario_id": scenario.id,
                     "intent_sha256": hashlib.sha256((scenario.intent or "").encode()).hexdigest(),
+                    "subject_sha256": hashlib.sha256((scenario.subject or "").encode()).hexdigest(),
                     "terms_sha256": hashlib.sha256((org.terms or "").encode()).hexdigest(),
                     "model": client().model_name("simulator"), "temperature": 0,
                     "rules_prompt_version": rules_module.RULES_PROMPT_VERSION,

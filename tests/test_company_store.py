@@ -71,6 +71,9 @@ def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypat
     _set_live(MockSim())
     fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
     assert fingerprint == company_store.entry_fingerprint(SCENARIO, ORG)
+    changed_subject = SCENARIO.model_copy(update={"subject": "A different task subject."})
+    assert changed_subject.id == SCENARIO.id and changed_subject.intent == SCENARIO.intent
+    assert company_store.entry_fingerprint(changed_subject, ORG) != fingerprint
     first = _company_entry(SCENARIO, ORG, fingerprint, temperament="first")
     assert company_store.save_entry(SCENARIO, ORG, first) == first
     path = company_store.entry_path(SCENARIO.id, company_store.org_identity(ORG), fingerprint)
@@ -215,6 +218,7 @@ async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(
     assert total_lookups == research.DEEP_RESEARCH_LOOKUPS + research.EXAMPLE_LOOKUPS <= 20
     entry = company_store.load_entry(SCENARIO, org)
     assert entry is not None
+    assert entry["provenance"]["subject_sha256"] == hashlib.sha256((SCENARIO.subject or "").encode()).hexdigest()
     entry_path = company_store.entry_path(SCENARIO.id, company_store.org_identity(org), entry["fingerprint"])
     raw_entry = entry_path.read_text()
     for private in (

@@ -34,7 +34,7 @@ _RULES_FIELDS = ("terms", "grounds")
 _GROUND_FIELDS = ("key", "conditions", "evidence_required", "quote", "source")
 _EXAMPLE_FIELDS = ("kind", "subject", "body", "source", "retrieved", "representation", "from")
 _PROVENANCE_FIELDS = (
-    "identity", "scenario_id", "intent_sha256", "terms_sha256", "model", "temperature",
+    "identity", "scenario_id", "intent_sha256", "subject_sha256", "terms_sha256", "model", "temperature",
     "rules_prompt_version", "research_prompt_version", "exemplar_prompt_version", "checker_version",
     "pages", "pages_sha256",
 )
@@ -194,6 +194,7 @@ def entry_fingerprint(scenario: Scenario, org: Org) -> str:
         "identity": org_identity(org),
         "scenario": scenario.id,
         "intent_sha256": _sha256(scenario.intent or ""),
+        "subject_sha256": _sha256(scenario.subject or ""),
         "terms_sha256": _sha256(org.terms or ""),
         "model": client().model_name("simulator"),
         "rules_prompt_version": rules.RULES_PROMPT_VERSION,
