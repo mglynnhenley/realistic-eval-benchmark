@@ -311,6 +311,8 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
             }
             pinned = company_store.save_entry(scenario, org, entry)
             source = "generated_and_saved" if pinned is entry else "shared_entry"
+            if pinned is not entry:
+                world_store().set(RULES_KEY, {**(world_store().get(RULES_KEY) or {}), org.key: pinned.get("rules")})
             record, rules, temperature_value, examples = (
                 pinned["research"], pinned.get("rules"), pinned.get("temperament"), pinned.get("examples") or [])
             entry_metadata = {
