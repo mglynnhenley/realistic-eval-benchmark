@@ -7,7 +7,15 @@ task phases are shown as vocabulary, not inferred labels in the free pass.
 The baseline `scout/run.py` is unchanged.
 
 Add `--judged` for one roll per default judge and a second review for severity
-2+ candidates. Each rubric reads a turn digest with the ledger prepended.
+2+ candidates. Each rubric reads chronological chunks of up to 40 turn digests
+with the ledger prepended once per chunk, so earlier recorded refusals remain
+available when reviewing later claims. The guard prints the actual chunk/model
+workload, ledger and digest prompt estimates, and a verifier upper bound for every
+rubric chunk, plus phase judging. With `--judged`, Transect also classifies the task
+phases using the same cohort, one roll per model, with its phase verifier off
+(cohort majority is the correction) and narration off. Rubric severity-2+
+verification remains on.
+Its phase answer adapter disables the pinned library's automatic answer retries.
 Only literal source-message quotes survive. The local report includes findings,
 source-message links, max severity, severity-2+ event counts, recorded first date
 (null when unavailable), ballots and disagreements of 2+. Counts deduplicate
