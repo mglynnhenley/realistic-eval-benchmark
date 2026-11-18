@@ -19,6 +19,7 @@ dependencies = [
     "inspect-scout>=0.5.3",
     "mcp>=1.25,<2",
     "uvicorn",
+    "filelock",
 ]
 
 [project.optional-dependencies]

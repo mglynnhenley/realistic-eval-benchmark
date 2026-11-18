@@ -197,13 +197,16 @@ def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
 class OpenRouterClient:
     def __init__(self, roles: Mapping[Role, str], *, api_key: str | None = None,
                  base_url: str = OPENROUTER_BASE_URL, prices: Mapping[str, Mapping[str, float]] | None = None,
-                 client: AsyncOpenAI | None = None, require_reported_cost: bool = False) -> None:
+                 client: AsyncOpenAI | None = None, require_reported_cost: bool = False,
+                 pin_prices: bool = False, tariffs: Mapping[str, Mapping[str, float]] | None = None) -> None:
         for role, name in roles.items():
             if not name.startswith(PREFIX):
                 raise ValueError(f"{role} model must be an openrouter/ model, not {name!r}")
         self.roles = dict(roles)
         self.prices = dict(prices or {})
         self.require_reported_cost = require_reported_cost
+        self.pin_prices = pin_prices
+        self.tariffs = dict(tariffs or {})
         self.client = client or AsyncOpenAI(api_key=api_key or os.environ.get(API_KEY_ENV), base_url=base_url)
         if require_reported_cost:
             self.client = self.client.with_options(max_retries=0)
@@ -219,6 +222,14 @@ class OpenRouterClient:
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
         require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
+        kwargs["pin_prices"] = require_reported_cost
+        if require_reported_cost and not kwargs.get("tariffs"):
+            from refund_eval.model_pricing import openrouter_tariffs
+
+            try:
+                kwargs["tariffs"] = openrouter_tariffs(roles.values())
+            except (httpx.RequestError, httpx.HTTPStatusError, TypeError, ValueError):
+                kwargs["tariffs"] = {}
         if prices is None:
             from refund_eval.model_pricing import openrouter_prices
 
@@ -283,6 +294,20 @@ class OpenRouterClient:
     def worst_case_cost(self, role: Role, messages: Sequence[Message], **settings: Any) -> float | None:
         return _worst_case(self._params(role, messages, **settings), self.prices.get(self.model_name(role)))
 
+    def _estimate(self, raw: Any, name: str) -> float | None:
+        if not self.pin_prices:
+            return _estimate(raw, self.prices.get(name))
+        tariff = self.tariffs.get(name)
+        required = {"input", "output", "input_cache_read", "input_cache_write", "input_cache_write_1h",
+                    "internal_reasoning", "request"}
+        if tariff is None or set(tariff) != required:
+            return None
+        per_token = {"input": max(tariff[key] for key in ("input", "input_cache_read", "input_cache_write",
+                                                           "input_cache_write_1h")),
+                     "output": tariff["output"] + tariff["internal_reasoning"]}
+        estimate = _estimate(raw, per_token)
+        return None if estimate is None else estimate + tariff["request"]
+
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
                        max_tokens: int | None = None, stop: Sequence[str] | None = None,
@@ -291,8 +316,15 @@ class OpenRouterClient:
         params = self._params(role, messages, schema=schema, tools=tools, temperature=temperature,
                               max_tokens=max_tokens, stop=stop)
         try:
+            extra: dict[str, Any] = {"usage": {"include": True}}
+            if self.pin_prices:
+                tariff = self.tariffs.get(name)
+                if tariff is None:
+                    raise ModelLimitExceeded(f"No catalog tariff to pin for {name}; not sent")
+                extra["provider"] = {"max_price": {"prompt": tariff["input"], "completion": tariff["output"],
+                                                     "request": tariff["request"]}}
             response = await self.client.chat.completions.with_raw_response.create(
-                **params, extra_body={"usage": {"include": True}})
+                **params, extra_body=extra)
             result = response.parse()
         except APIStatusError as ex:
             if ex.status_code == 402:  # out of credit, or the key's spending limit reached
@@ -326,7 +358,7 @@ class OpenRouterClient:
                 cost = worst_case
                 cost_method = "worst_case" if cost is not None else None
             else:
-                cost = (None if found else _estimate(result.usage, self.prices.get(name))) if self.require_reported_cost else (
+                cost = (None if found else self._estimate(result.usage, name)) if self.require_reported_cost else (
                         cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
                 cost_method = "estimate" if cost is not None else None
             if cost is not None:

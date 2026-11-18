@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.1 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: 87fbf945b9427e16f58d8508bdf198a24beb514504b90993fcf76b4b83cabd0c
+- Trial round: none; only offline validation in this change.
+- Changes: persist per-attempt world-model spend reservations before dispatch and retain unresolved exposure across cancellation and restart (MAT-149).
+
 ## 7.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 49b5fb37b7afe9b09119d598bbe138f773b9ec29cc0b4dfe7d25d5fa6b47d364
