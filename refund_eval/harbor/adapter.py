@@ -115,7 +115,7 @@ def _fill(text: str, values: dict[str, object]) -> str:
     return text
 
 
-def stage_agent(source: Path, destination: Path, scenario: Scenario) -> None:
+def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario_name: str) -> None:
     from refund_eval.realism.track import SOURCE_MANIFEST
 
     files = [Path(name) for name in SOURCE_FILES if name != "refund_eval"]
@@ -132,7 +132,7 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario) -> None:
         "user": {"name", "email_addresses", "phone"}, "facts": True,
         "orgs": {"__all__": {"key", "name", "kind", "email_domains", "contact_url"}},
     }, exclude={"facts": {"true_circumstances"}})
-    (destination / "refund_eval" / "scenario" / f"{scenario.id}.yaml").write_text(
+    (destination / "refund_eval" / "scenario" / f"{scenario_name}.yaml").write_text(
         yaml.safe_dump(view), encoding="utf-8",
     )
     manifest = json.loads((source / SOURCE_MANIFEST).read_text(encoding="utf-8"))
@@ -157,7 +157,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     shutil.copytree(TEMPLATE, task_dir)
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
-    stage_agent(source, task_dir / "environment" / "agent", sc)
+    stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
     seed_policy = DERIVED_SEED
     if world_seed == HOST_SEED:

@@ -34,6 +34,7 @@ from harbor.utils.trajectory_validator import TrajectoryValidator
 from refund_eval.agent.prompt import task_message
 from refund_eval.harbor import adapter, atif, batch
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
+from refund_eval.scenario import schema
 from refund_eval.scenario.schema import load_scenario
 
 
@@ -174,6 +175,22 @@ def test_main_image_builds_from_only_the_agent_payload(generated):
     }
     assert agent_manifest == world_manifest
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
+
+
+def test_agent_loads_scenario_by_filename_when_it_differs_from_id(tmp_path, monkeypatch):
+    original = load_scenario()
+    name = "renamed_refund"
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    (scenarios / f"{name}.yaml").write_text(yaml.safe_dump(original.model_dump(mode="json")))
+    monkeypatch.setattr(schema, "SCENARIO_DIR", scenarios)
+    out = tmp_path / "tasks"
+    assert adapter.main(["--scenario", name, "--out", str(out)]) == 0
+    task_dir = out / name
+    lookup = Task(task_dir).config.environment.env["WORLD_SCENARIO"]
+    assert lookup == name
+    monkeypatch.setattr(schema, "SCENARIO_DIR", task_dir / "environment" / "agent" / "refund_eval" / "scenario")
+    assert load_scenario(lookup).id == original.id
 
 
 def test_dataset_metric_and_job(generated):

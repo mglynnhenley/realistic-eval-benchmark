@@ -46,7 +46,7 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
             return "test-source"
 
         monkeypatch.setattr(adapter, "copy_source", copy_source)
-        monkeypatch.setattr(adapter, "stage_agent", lambda *args: None)
+        monkeypatch.setattr(adapter, "stage_agent", lambda *args, **kwargs: None)
         monkeypatch.setattr(adapter, "validate_and_index", lambda *args: None)
         if settings_class == "native_cli":
             assert adapter.main(["--scenario", name, "--out", str(tmp_path), *flags]) == 0
