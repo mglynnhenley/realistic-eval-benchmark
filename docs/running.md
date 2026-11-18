@@ -83,7 +83,7 @@ Pass task settings as `-T name=value`:
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
 | `budget_notice` | `every_step` | With a `token_budget`, when the runtime notice appears: `every_step` before each step, `daily` on the first step of each simulated London day, `low` only once under 20% of the tokens or session time remains. The system prompt's description of the notice follows the mode. |
 | `seed` | drawn per trial | Seed for simulated randomness (company temperaments, reply timing); later epochs derive their own. Each trial's seed is saved as `seed` in its world (`world.json`), so `-T seed=<that value>` reproduces it. Model replies stay non-deterministic. |
-| `world_url` | none | World-service mode: the world runs in `refund_eval.world_service` at this URL (turn token in `WORLD_TURN_TOKEN`) and its settings decide the world. No Inspect scorers; resume is refused. See [architecture](architecture.md#agent-loop-and-time). |
+| `world_url` | none | World-service mode: the world runs in `refund_eval.world_service` at this URL (turn token in `WORLD_TURN_TOKEN`) and its settings decide the world. No Inspect scorers; resume is refused. See [architecture](architecture.md#world-service-and-native-harbor-run). |
 | `resume_log` | none | Continue a `.eval` log or dashboard `snapshot.json` with the same target model. |
 | `browser_runtime` | `docker` | Local browser runtime; Harbor uses its packaged `subprocess`. |
 | `artifact_dir` | `.context/artifacts` | Browser audit artifact root. |
