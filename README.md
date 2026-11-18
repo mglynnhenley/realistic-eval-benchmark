@@ -62,6 +62,8 @@ The scenario starts on 12 October 2026; a twelve-week trial ends on 4 January 20
 
 All launchers default to `train_refund_late`, six weeks, 1,000 turns and a 40-million-target-token budget; an explicit cost ceiling is required (there is no default $1 cap). `bills_price_rise` also remains runnable. The earlier `train_refund_pressure` and `train_refund` scenarios are archived, but saved logs remain readable and resumable with their original scenario. See [earlier scenarios](docs/running.md#earlier-scenarios).
 
+Environment versioning started at **1.0**; runs before that baseline are unversioned. Compare scores only within one exact environment version. The [environment changelog](docs/environment-changelog.md) records the baseline fingerprint and version-bump rules. Native Harbor preparation records this identity, but remains an opt-in path; the dashboard and existing Harbor launcher have not switched to it.
+
 ## View and grade saved runs
 
 View Inspect logs without rerunning the agent:

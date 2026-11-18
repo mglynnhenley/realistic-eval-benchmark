@@ -16,6 +16,14 @@ Computing it requires Git and a checkout so private local data is never
 included by an unfiltered fallback. The changelog test checks the version,
 fingerprint and bump kind.
 
+Run the CI changelog check locally with
+`uv run --frozen pytest -q tests/test_environment_version.py`. Native task
+`task.toml` metadata and prepared batch `run.json` task records carry
+`environment_version` and `environment_fingerprint`; the adapter's default task
+version is also the environment version. The 1.0 baseline fingerprint below was
+[corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
+this was not a second version or trial round.
+
 ## 1.0 — 2026-11-18
 - Kind: baseline
 - Fingerprint: da7b22d16360fd9afee3caeb32e810e54b2453abf794dfdfb01a9faa00ae3964
