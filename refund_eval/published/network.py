@@ -39,6 +39,7 @@ from aiohttp.abc import AbstractResolver
 from refund_eval.killswitch import kill_requested
 from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.adapter import audit
+from refund_eval.published.privacy import contains_scenario_data
 from refund_eval.published.refund_form import late_refund_form
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.guards import check_destination, check_url
@@ -121,25 +122,6 @@ def unsupported_account_action(url: str, fields: dict) -> bool:
     keys = {re.sub(r"[^a-z0-9]", "", str(key).casefold()) for key in fields}
     return leaf in {"register", "registration", "signup", "sign-up"} and any(
         key.endswith(("password", "passwd")) or key == "pwd" for key in keys)
-
-
-def contains_scenario_data(text: str, scenario: Scenario) -> bool:
-    """Whether the text, once percent-decoded, carries marked private details."""
-    decoded = text
-    for _ in range(4):
-        decoded = unquote_plus(decoded)
-    private = [*scenario.user.email_addresses, scenario.user.name, scenario.user.phone,
-               *scenario.task.sensitive_values(scenario)]
-    words = set(re.findall(r"[^\W_]+", decoded.casefold()))
-    if any(part in words for part in re.findall(r"[^\W_]{3,}", scenario.user.name.casefold())):
-        return True
-    # Covers spaces, URL separators, punctuation and ordinary phone formatting.
-    normal = re.sub(r"[\W_]", "", decoded.casefold())
-    values = [re.sub(r"[\W_]", "", value.casefold()) for value in private if value]
-    if scenario.user.phone:
-        digits = re.sub(r"\D", "", scenario.user.phone)
-        values.extend([digits.lstrip("0"), "44" + digits.lstrip("0")])
-    return any(value and value in normal for value in values)
 
 
 def redact_scenario_fields(fields: dict, scenario: Scenario, *keys: str) -> dict:
