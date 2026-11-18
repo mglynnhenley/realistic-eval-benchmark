@@ -33,6 +33,7 @@ import anyio
 import httpx
 
 from refund_eval.published.mcp import MCPError, MCPHTTPClient, MCPRPCError
+from refund_eval.scenario.schema import Scenario
 
 EXA_SEARCH_ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_exa"
 EXA_SEARCH_TOOL = "web_search_exa"
@@ -94,6 +95,7 @@ class ExaSearchService:
         policy: SearchPolicy,
         audit: SearchAudit,
         api_key: str | None = None,
+        scenario: Scenario | None = None,
         endpoint: str = EXA_SEARCH_ENDPOINT,
         transport: httpx.AsyncBaseTransport | None = None,
         expected_catalog_sha256: str = PINNED_EXA_SEARCH_CATALOG_SHA256,
@@ -115,6 +117,7 @@ class ExaSearchService:
             transport=transport,
         )
         self._policy = policy
+        self._scenario = scenario
         self._audit = audit
         self._expected_hash = expected_catalog_sha256
         self._lock = asyncio.Lock()
@@ -150,6 +153,12 @@ class ExaSearchService:
         async with self._lock:
             return await self._discover()
 
+    def audit_arguments(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        from refund_eval.published.network import redact_scenario_fields
+
+        return (redact_scenario_fields(arguments, self._scenario, "query", "objective")
+                if self._scenario is not None and name == EXA_SEARCH_TOOL else arguments)
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Mediate then forward tools/call, retaining all upstream result fields."""
         if not isinstance(arguments, dict):
@@ -157,19 +166,20 @@ class ExaSearchService:
         request = copy.deepcopy({"name": name, "arguments": arguments})
         # Reject non-JSON values before policy, logging, or network access.
         json.dumps(request, allow_nan=False)
-        await self._record("attempt", **request)
+        recorded = {**request, "arguments": self.audit_arguments(name, request["arguments"])}
+        await self._record("attempt", **recorded)
         if name != EXA_SEARCH_TOOL:
-            await self._record("blocked", reason="tool_not_selected", **request)
+            await self._record("blocked", reason="tool_not_selected", **recorded)
             raise ExaPolicyDenied("Only web_search_exa is available")
         try:
             verdict = self._policy(copy.deepcopy(request))
             if inspect.isawaitable(verdict):
                 verdict = await verdict
         except Exception as exc:
-            await self._record("blocked", reason="policy_error", error=type(exc).__name__, **request)
+            await self._record("blocked", reason="policy_error", error=type(exc).__name__, **recorded)
             raise ExaPolicyFailure("Search policy failed; no request was sent") from exc
         if verdict is not True:
-            await self._record("blocked", reason="policy_denied", **request)
+            await self._record("blocked", reason="policy_denied", **recorded)
             raise ExaPolicyDenied("Search policy did not allow this request")
         await self._record("allowed", **request)
         operation = "tools/list"

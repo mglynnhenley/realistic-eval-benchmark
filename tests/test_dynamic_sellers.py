@@ -30,7 +30,7 @@ def sim():
 
 
 def live(monkeypatch, found=True):
-    async def fake_research(org):
+    async def fake_research(org, *, scenario):
         dossier = {"summary": "A UK mobile network.", "facts": [], "persona": None} if found else None
         return {"org": org.key, "name": org.name, "mode": "live", "dossier": dossier, "errors": [],
                 "retrieved_at": "2026-10-26T00:00:00+00:00"}

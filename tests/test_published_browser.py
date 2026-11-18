@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.browser import (
     BROWSER_TOOLS,
     BrowserBoundaryError,
@@ -20,6 +21,8 @@ from refund_eval.published.browser import (
     validate_response,
 )
 from refund_eval.published.mcp import MCPRPCError
+from refund_eval.published.network import BrowserBoundary
+from refund_eval.scenario.schema import load_scenario
 
 
 def response(text: str, *, status: int = 200) -> dict:
@@ -27,8 +30,8 @@ def response(text: str, *, status: int = 200) -> dict:
             "body_base64": base64.b64encode(text.encode()).decode()}
 
 
-def prepare_service(tmp_path, handler):
-    service = PublishedBrowserService(handler, spool_dir=tmp_path)
+def prepare_service(tmp_path, handler, **kwargs):
+    service = PublishedBrowserService(handler, spool_dir=tmp_path, **kwargs)
     (tmp_path / "requests").mkdir()
     (tmp_path / "responses").mkdir()
     return service
@@ -77,6 +80,28 @@ async def test_request_is_audited_before_handler_and_preserves_body(tmp_path):
     assert stored == response("Accepted")
     records = [json.loads(line) for line in service.audit_path.read_text().splitlines()]
     assert [entry["sequence"] for entry in records] == [1, 2]
+
+
+async def test_private_navigation_url_is_redacted_in_durable_audit(tmp_path):
+    from types import SimpleNamespace
+
+    scenario = load_scenario("train_refund_late")
+    private = f"https://example.com/policy?booking={scenario.facts.journey.booking_ref}"
+    boundary = BrowserBoundary(SimpleNamespace(scenario=scenario), public_read_urls=[], public_read_policy="public_web")
+
+    async def handler(request):
+        assert request["url"] == private
+        return response("Forbidden", status=403)
+
+    service = prepare_service(tmp_path, handler, audit_request=boundary.audit_request)
+    service._active_call = {"tool": "browser_navigate", "tool_call_id": "call-1"}
+    filename = write_request(service, url=private, method="GET", body_base64="")
+    original = json.loads(filename.read_text())
+    await service._handle_request(filename)
+    [request, result] = [json.loads(line) for line in service.audit_path.read_text().splitlines()]
+    assert request["request"] == {**original, "url": REDACTED_SCENARIO_VALUE,
+                                  "attribution": "active_tool_window", "tool": "browser_navigate"}
+    assert result["status"] == 403
 
 
 async def test_slow_validated_form_response_is_not_cancelled_by_public_fetch_deadline(tmp_path):

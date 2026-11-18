@@ -259,7 +259,7 @@ def live_web(sim, monkeypatch):
     store().set(research.MODE_KEY, "live")
     searches = []
 
-    async def search(query, objective):
+    async def search(query, objective, *, scenario):
         searches.append(query)
         return "Title: Refunds\nURL: https://www.thetrainline.com/terms\nRefunds must be claimed within 28 days."
 
@@ -319,7 +319,7 @@ async def test_failed_research_falls_back_to_the_committed_dossier(sim, live_web
 async def test_fixture_data_runs_use_the_committed_dossiers_offline(sim, monkeypatch):
     from refund_eval.sim import research
 
-    async def forbidden(query, objective):
+    async def forbidden(query, objective, *, scenario):
         pytest.fail("Fixture data contacted the live web")
 
     monkeypatch.setattr(research, "_search", forbidden)
@@ -1098,4 +1098,3 @@ async def test_a_script_sent_form_tells_the_organisation_its_page_text_is_not_sh
     sim.open_actions.append({"decision": "received", "reply": False, "page_body": "Thanks, we have your form."})
     await dispatch(form("https://www.moneyclaims.service.gov.uk/claim/new", CLAIM, iid="open-page"))
     assert SCRIPT_FORM_DELIVERY_NOTE not in sim.open_prompts[-1]
-

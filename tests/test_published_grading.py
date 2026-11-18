@@ -19,6 +19,7 @@ from inspect_ai.tool import ToolCallError
 from refund_eval.grading.published import published_containment_check
 from refund_eval.grading.scorers import containment, resource_counts
 from refund_eval.grading.transcript import render_transcript
+from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.adapter import fingerprint
 from refund_eval.published.network import PUBLIC_READ_POLICY_VERSION, PUBLIC_WEB_CHECKS
 
@@ -164,6 +165,38 @@ def test_search_requires_real_policy_decision_and_native_result(blocked):
     data = search_case(blocked)
     assert check(data)["contained"]
     data[-1][:] = [e for e in data[-1] if e.get("phase") not in {"allowed", "blocked"}]
+    assert not check(data)["contained"]
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_search_containment_only_accepts_redaction_on_a_denied_hybrid_call(blocked):
+    data = search_case(blocked)
+    data[2]["data_mode"] = "hybrid"
+    data[0][0].tool_calls[0].arguments = {"query": "trains for SOME-BOOKING", "objective": "public rules"}
+    for event in data[-1]:
+        if event.get("event") in {"call", "search_boundary"}:
+            event["arguments"] = {"query": REDACTED_SCENARIO_VALUE, "objective": "public rules"}
+    assert check(data)["contained"] == blocked
+    if blocked:
+        next(event for event in data[-1] if event.get("phase") == "attempt")["arguments"]["objective"] = "mismatch"
+        assert not check(data)["contained"]
+
+
+def test_redacted_search_still_proves_schema_rejection_before_dispatch():
+    data = case("exa", "web_search_exa", error=True, args={"query": "trains for SOME-BOOKING"})
+    data[2]["data_mode"] = "hybrid"
+    audit = data[-1]
+    catalog = next(e for e in audit if e.get("source") == "exa" and e["event"] == "catalog")
+    catalog["catalog"]["tools"][0]["inputSchema"] = {
+        "type": "object", "required": ["query", "objective"],
+        "properties": {"query": {"type": "string"}, "objective": {"type": "string"}},
+    }
+    catalog["sha256"] = fingerprint(catalog["catalog"])
+    audit[-2]["arguments"] = {"query": REDACTED_SCENARIO_VALUE}
+    audit[-1].update(event="rejected", reason="invalid_arguments")
+    assert check(data)["contained"]
+
+    insert(data, [{"event": "search_boundary", "call_id": "c1", "phase": "attempt"}])
     assert not check(data)["contained"]
 
 

@@ -55,7 +55,7 @@ def offline_profile(monkeypatch):
 
     def boundary(ctx, **kwargs):
         captured["boundaries"].append(kwargs)
-        return SimpleNamespace(ctx=ctx, config=kwargs)
+        return SimpleNamespace(ctx=ctx, config=kwargs, audit_request=lambda request: request)
 
     class Browser:
         def __init__(self, boundary, **kwargs):

@@ -29,6 +29,7 @@ import os
 import re
 import sys
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 from urllib.parse import urljoin
 
@@ -44,14 +45,23 @@ from refund_eval.models.client import (
     ToolCall,
     client,
 )
-from refund_eval.published.network import public_read, validate_public_url
+from refund_eval.published.network import (
+    contains_scenario_data,
+    public_read,
+    redact_scenario_fields,
+    validate_public_url,
+)
+from refund_eval.published.profile import allow_search_request
+from refund_eval.published.search import ExaPolicyDenied
 from refund_eval.scenario.schema import (
     DOSSIER_DIR,
     Org,
+    Scenario,
     load_scenario,
     saved_dossier,
     subject_slug,
 )
+from refund_eval.sim.common import current_scenario
 from refund_eval.world.orgs import host_of, parse_address
 from refund_eval.world.store import world_store
 
@@ -179,11 +189,11 @@ def saved_record(org: Org, subject: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------- tools
 
 
-async def _search(query: str, objective: str) -> str:
+async def _search(query: str, objective: str, *, scenario: Scenario) -> str:
     from refund_eval.published.search import ExaSearchService
 
     for attempt in range(2):
-        async with ExaSearchService(policy=lambda _request: True, audit=lambda _event: None,
+        async with ExaSearchService(policy=partial(allow_search_request, scenario=scenario), audit=lambda _event: None,
                                     api_key=os.environ.get(HYBRID_EXA_KEY_ENV)) as exa:
             result = await exa.call_tool("web_search_exa", {"query": query, "objective": objective, "numResults": 5})
         text = "\n".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
@@ -205,9 +215,11 @@ def _html_text(body: bytes) -> str:
     return "\n".join(line for line in lines if line)
 
 
-async def _read_page(url: str) -> str:
+async def _read_page(url: str, *, scenario: Scenario) -> str:
     """Anonymous GET through the same guarded read path as the agent's browser."""
     for _ in range(4):  # follow a few redirects, checking each URL afresh
+        if contains_scenario_data(url, scenario):
+            raise ExaPolicyDenied("Research page URL contains scenario data")
         validate_public_url(url)
         result = await public_read({"url": url, "method": "GET"})
         location = result["headers"].get("location")
@@ -243,18 +255,21 @@ def _tools() -> list[Tool]:
     ]
 
 
-async def _call(call: ToolCall, record: dict[str, Any]) -> str:
+async def _call(call: ToolCall, record: dict[str, Any], *, scenario: Scenario) -> str | None:
     funcs = {"web_search_exa": _search, "read_page": _read_page}
     entry: dict[str, Any] = {"tool": call.function, "arguments": call.arguments or {}}
     try:
         if call.function not in funcs:
             raise ValueError(f"unknown tool {call.function}")
-        text = await funcs[call.function](**entry["arguments"])
+        text = await funcs[call.function](scenario=scenario, **entry["arguments"])
         entry["chars"] = len(text)
     except Exception as ex:  # noqa: BLE001 - the model sees the error and can try elsewhere
-        entry["error"] = str(ex)[:300]
-        record["errors"].append(f"{call.function}: {ex}"[:300])
-        text = f"Error: {str(ex)[:300]}"
+        error = "policy_denied" if isinstance(ex, ExaPolicyDenied) else str(ex)[:300]
+        if isinstance(ex, ExaPolicyDenied):
+            entry["arguments"] = redact_scenario_fields(entry["arguments"], scenario, "query", "objective", "url")
+        entry["error"] = error
+        record["errors"].append(f"{call.function}: {error}"[:300])
+        text = None if isinstance(ex, ExaPolicyDenied) else f"Error: {error}"
     record["tool_calls"].append(entry)
     return text
 
@@ -307,7 +322,7 @@ def _brief(org: Org, subject: str) -> str:
             "and describe the organisation accurately.")
 
 
-async def research_live(org: Org, *, subject: str = "a customer request") -> dict[str, Any]:
+async def research_live(org: Org, *, scenario: Scenario, subject: str = "a customer request") -> dict[str, Any]:
     """Research one organisation now: a tool loop for the simulator model, then its dossier."""
     model = client()
     record = {**_record(org, "live"), "subject": subject}
@@ -328,7 +343,10 @@ async def research_live(org: Org, *, subject: str = "a customer request") -> dic
         messages.append(output.message)
         if output.tool_calls:
             for call in output.tool_calls:
-                text = await _call(call, record) if lookups > 0 else "No lookups left. Write the dossier now."
+                text = (await _call(call, record, scenario=scenario) if lookups > 0
+                        else "No lookups left. Write the dossier now.")
+                if text is None:
+                    return record
                 lookups -= 1
                 messages.append(Message("tool", text, tool_call_id=call.id, function=call.function))
             if lookups <= 0:
@@ -389,7 +407,7 @@ async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
         if mode == "saved" or not live_web() or (mode == "auto" and saved and fresh(saved)):
             record = saved
         else:
-            record = await research_live(org, subject=subject)
+            record = await research_live(org, subject=subject, scenario=current_scenario())
             if record["dossier"] is None and saved:  # failed research falls back to the committed file
                 record = {**saved, "errors": record["errors"]}
     dossiers[org.key] = record or {"org": org.key, "name": org.name, "mode": "none", "dossier": None}
@@ -452,8 +470,9 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     init_model_roles({"simulator": get_model(args.model)})
     org = subject_org(args.subject, args.scenario)
-    subject = load_scenario(args.scenario).subject
-    record = asyncio.run(research_live(org, subject=subject))
+    scenario = load_scenario(args.scenario)
+    subject = scenario.subject
+    record = asyncio.run(research_live(org, subject=subject, scenario=scenario))
     record["model"] = args.model
     record["sources"] = sorted({c["arguments"]["url"] for c in record["tool_calls"]
                                 if c["tool"] == "read_page" and "error" not in c}

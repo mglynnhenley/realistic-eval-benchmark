@@ -40,10 +40,11 @@ from refund_eval.models.client import (
     Usage,
 )
 from refund_eval.models.replay import RECORDINGS_KEY
-from refund_eval.published.adapter import _normalized
+from refund_eval.published.adapter import AUDIT_KEY, _normalized
 from refund_eval.published.mail import _visible_id
 from refund_eval.published.profile import PROFILE_KEY
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
+from refund_eval.scenario.schema import load_scenario
 from refund_eval.world import interception
 from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
@@ -251,6 +252,26 @@ async def test_mcp_tool_list_and_profile_match_the_inspect_path(tmp_path, monkey
     records = [json.loads(line) for line in (tmp_path / "world" / profile["browser_audit"]).read_text().splitlines()]
     assert [r["event"] for r in records if r["event"].startswith("browser_probe_")][-1] == "browser_probe_end"
     assert any(r["event"] == "browser_isolation_verified" for r in records)
+
+
+async def test_hybrid_world_blocks_scenario_email_before_exa_dispatch(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    scenario = load_scenario("train_refund_late")
+    async with (WorldTrial(settings(tmp_path, scenario=scenario.id, data_mode="hybrid"),
+                           model_client=FakeModels()) as trial,
+                session(trial) as (client, _, _)):
+        result = await client.call_tool("web_search_exa", {
+            "query": "Find public rules", "objective": scenario.user.email_addresses[0],
+        })
+        assert result.isError
+        audit = trial.data()["store"][AUDIT_KEY]
+        events = [e for e in audit if e["event"] == "search_boundary"]
+    assert [e["phase"] for e in events] == ["catalog", "attempt", "blocked"]
+    assert events[-1]["reason"] == "policy_denied"
+    [call] = [e for e in audit if e["event"] == "call" and e["source"] == "exa"]
+    assert call["arguments"] == events[-2]["arguments"] == events[-1]["arguments"] == {
+        "query": "Find public rules", "objective": "[REDACTED SCENARIO VALUE]",
+    }
 
 
 # --------------------------------------------------------------------------- end to end

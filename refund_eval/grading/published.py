@@ -28,6 +28,7 @@ from refund_eval.grading.toolcalls import (
     ToolCallRecord,
     tool_calls,
 )
+from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.world.state import World
 
 SOURCES = {"gmail", "exa", "playwright"}
@@ -291,8 +292,12 @@ def published_containment_check(
             continue
         call_index, entry = entries[0]
         source, descriptor = descriptors.get(call.function, (None, {}))
-        if (source is None or entry.get("source") != source or entry.get("tool") != call.function
-                or entry.get("arguments") != call.arguments):
+        audited_args = entry.get("arguments")
+        if source == "playwright" and call.function == "browser_navigate" and profile.get("data_mode") == "hybrid":
+            matching_args = _matches_redacted_arguments(audited_args, call.arguments, {"url"})
+        else:
+            matching_args = audited_args == call.arguments
+        if (source is None or entry.get("source") != source or entry.get("tool") != call.function):
             fail("native call does not match model tool and arguments", call.id)
         terminal = [(n, e) for n, e in enumerate(audit) if e.get("call_id") == call.id
                     and e.get("event") in {"result", "rejected", "failure", "rpc_error"}]
@@ -303,6 +308,12 @@ def published_containment_check(
         if outcome.get("tool") != call.function or outcome.get("source") != source:
             fail("terminal record differs from native call", call.id)
         per_call = audit[call_index + 1:terminal_index]
+        if (source == "exa" and profile.get("data_mode") == "hybrid"
+                and outcome.get("event") == "rejected"
+                and outcome.get("reason") in {"policy_denied", "invalid_arguments"}):
+            matching_args = _matches_redacted_arguments(audited_args, call.arguments, {"query", "objective"})
+        if not matching_args:
+            fail("native call does not match model tool and arguments", call.id)
         if any(not call_index < n < terminal_index for n, e in enumerate(audit)
                if e.get("call_id") == call.id and (
                    e.get("event") in {"mail_boundary", "browser_tool_start", "browser_tool_end", "browser_rpc_error"}
@@ -329,7 +340,7 @@ def published_containment_check(
             boundary = [e for e in per_call if e.get("event") == "search_boundary"
                         and e.get("call_id") == call.id and e.get("phase") != "catalog"]
             phases = [e.get("phase") for e in boundary]
-            if any(e.get("name") != call.function or e.get("arguments") != call.arguments for e in boundary):
+            if any(e.get("name") != call.function or e.get("arguments") != audited_args for e in boundary):
                 fail("search decision differs from dispatched arguments", call.id)
             blocked = (phases == ["attempt", "blocked"] and outcome["event"] == "rejected"
                        and outcome.get("reason") == "policy_denied"
@@ -402,6 +413,13 @@ def published_containment_check(
             if public_policy == "public_web" else "Public reads require exact reviewed URLs."
         ),
     }
+
+
+def _matches_redacted_arguments(recorded: Any, original: dict, fields: set[str]) -> bool:
+    return (isinstance(recorded, dict) and recorded.keys() == original.keys()
+            and all(value == original[key] or (key in fields and isinstance(original[key], str)
+                                               and value == REDACTED_SCENARIO_VALUE)
+                    for key, value in recorded.items()))
 
 
 def _same_rpc_error(boundary: dict, outcome: dict) -> bool:
