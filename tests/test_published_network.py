@@ -208,6 +208,20 @@ async def test_live_search_blocks_scenario_details_before_transport(ctx, field, 
     assert events[-1]["reason"] == "policy_denied"
 
 
+def test_name_parts_match_whole_words_in_live_search_and_navigation():
+    scenario = load_scenario("bills_price_rise")
+    args = {"query": "Compare energy tariffs from the same provider", "objective": "Find public rules"}
+    assert allow_search_request({"arguments": args}, scenario=scenario)
+    assert public_web_read_reason(public_req("https://example.org/same"), scenario) is None
+
+    first_name = scenario.user.name.split()[0]
+    args["query"] = f"Find energy tariffs for {first_name}"
+    assert not allow_search_request({"arguments": args}, scenario=scenario)
+    assert public_web_read_reason(public_req(f"https://example.org/info/{first_name}"), scenario) == (
+        "scenario_personal_data"
+    )
+
+
 def public_req(url, method="GET", *, resource="document", navigation=True, body=""):
     return {**req(url, method, body, navigation), "resource_type": resource}
 

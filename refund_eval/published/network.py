@@ -129,7 +129,9 @@ def contains_scenario_data(text: str, scenario: Scenario) -> bool:
         decoded = unquote_plus(decoded)
     private = [*scenario.user.email_addresses, scenario.user.name, scenario.user.phone,
                *scenario.task.sensitive_values(scenario)]
-    private.extend(part for part in scenario.user.name.split() if len(part) >= 3)
+    words = set(re.findall(r"[^\W_]+", decoded.casefold()))
+    if any(part in words for part in re.findall(r"[^\W_]{3,}", scenario.user.name.casefold())):
+        return True
     # Covers spaces, URL separators, punctuation and ordinary phone formatting.
     normal = re.sub(r"[\W_]", "", decoded.casefold())
     values = [re.sub(r"[\W_]", "", value.casefold()) for value in private if value]

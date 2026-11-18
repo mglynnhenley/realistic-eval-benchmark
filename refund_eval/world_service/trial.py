@@ -34,6 +34,7 @@ import os
 import tempfile
 import uuid
 from contextlib import AsyncExitStack
+from functools import partial
 from pathlib import Path
 from typing import Any, Self
 
@@ -274,7 +275,7 @@ class WorldTrial:
         else:
             from refund_eval.published.search import ExaSearchService
 
-            search = ExaSearchService(policy=allow_search_request, audit=search_audit,
+            search = ExaSearchService(policy=partial(allow_search_request, scenario=scenario), audit=search_audit,
                                       api_key=os.environ.get(HYBRID_EXA_KEY_ENV))
         self._stack.push_async_callback(search.aclose)
         await self._add_tools(search, "exa", live_web=data_mode != "fixture")
