@@ -25,6 +25,14 @@ Harbor and Inspect require different OpenAI SDK versions. Trial images use the
 benchmark's own lockfile. The wrapper disables Harbor telemetry by default and
 does not load the project's `.env`; export `OPENROUTER_API_KEY` in your shell.
 
+### Updating Harbor dependencies
+
+If your PR changes the Harbor version pin or another dependency in
+`integrations/harbor/pyproject.toml`, run `uv lock --project integrations/harbor`
+from the repository root and commit the updated `integrations/harbor/uv.lock`
+in the same PR. Changes to benchmark dependencies alone don't require updating
+the Harbor lockfile.
+
 ## Prepare and run a batch
 
 Preparing a job launches nothing. Choose a new ignored output directory for each job. This example freezes a late-refund configuration with one trial and an explicit $150 model-cost ceiling:
