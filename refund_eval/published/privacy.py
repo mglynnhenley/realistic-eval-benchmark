@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""Private scenario values excluded from public requests and provider diagnostics."""
 
 import re
 from urllib.parse import unquote_plus
@@ -16,6 +16,7 @@ def contains_scenario_data(text: str, scenario: Scenario) -> bool:
     words = set(re.findall(r"[^\W_]+", decoded.casefold()))
     if any(part in words for part in re.findall(r"[^\W_]{3,}", scenario.user.name.casefold())):
         return True
+    # Covers spaces, URL separators, punctuation and ordinary phone formatting.
     normal = re.sub(r"[\W_]", "", decoded.casefold())
     values = [re.sub(r"[\W_]", "", value.casefold()) for value in private if value]
     if scenario.user.phone:

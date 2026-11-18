@@ -39,8 +39,8 @@ from aiohttp.abc import AbstractResolver
 from refund_eval.killswitch import kill_requested
 from refund_eval.published import REDACTED_SCENARIO_VALUE
 from refund_eval.published.adapter import audit
+from refund_eval.published.privacy import contains_scenario_data
 from refund_eval.published.refund_form import late_refund_form
-from refund_eval.published.scenario_data import contains_scenario_data
 from refund_eval.scenario.schema import Scenario
 from refund_eval.world.guards import check_destination, check_url
 from refund_eval.world.interception import (

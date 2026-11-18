@@ -440,7 +440,7 @@ def _validated_public_entry(value: Any, scenario: Scenario) -> dict[str, Any]:
             or page_refs != pages):
         raise ValueError("Company-store page provenance mismatch")
 
-    from refund_eval.published.scenario_data import contains_scenario_data
+    from refund_eval.published.privacy import contains_scenario_data
 
     if any(contains_scenario_data(text, scenario) for text in _string_values(entry)):
         raise ValueError("Company-store entry contains scenario data")

@@ -416,6 +416,8 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
         try:
             output = await model.complete("simulator", messages, tools=tools, max_tokens=MAX_OUTPUT_TOKENS,
                                           schema=final if lookups <= 0 else None)
+            if output.failed:
+                raise ValueError("Research model reply failed")
         except ModelLimitExceeded:
             raise
         except Exception as ex:  # noqa: BLE001 - an unavailable model leaves the saved file, or nothing

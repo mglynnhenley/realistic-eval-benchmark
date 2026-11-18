@@ -170,14 +170,13 @@ Without `--save` it only prints. `--org KEY` limits it to named organisations. D
 
 Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
 
-Native Harbor task preparation snapshots only the selected scenario's sanitized store entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. Merge it back into the host store explicitly after review, without model calls:
+Native Harbor task preparation snapshots only the selected scenario's sanitized store entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. To merge artifacts back into the host store without model calls, pass the job directory containing trial directories (not the outer jobs root):
 
 ```bash
-scripts/harbor python -m refund_eval.sim.company_store harvest JOBS_DIR
+scripts/harbor python -m refund_eval.sim.company_store harvest JOB_DIR
 ```
 
 The command uses the same default or `REFUND_EVAL_COMPANY_STORE` root as trials; `REFUND_EVAL_COMPANY_STORE=off` disables both native seeding and harvesting.
-
 ## Inbox snapshots
 
 The bundled inbox at [`refund_eval/scenario/inbox.json`](../refund_eval/scenario/inbox.json) is fictional. You can hand-write another file in that format or export your own Gmail:

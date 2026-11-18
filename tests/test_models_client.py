@@ -112,6 +112,35 @@ async def test_content_filter_stop_is_a_refusal_even_with_valid_json(fake, conte
         await LLMCompanySimulator().respond(CompanyEvent(incoming="Hello"), context)
 
 
+async def test_failed_company_reply_is_not_parsed_even_with_valid_json(fake, context):
+    output = Completion(text=json.dumps(ACTION), message=Message("assistant", ""), failed=True)
+    fake(output)
+    with pytest.raises(ValueError, match="reply failed"):
+        await LLMCompanySimulator().respond(CompanyEvent(incoming="Hello"), context)
+    with pytest.raises(ValueError, match="reply failed"):
+        output.json()
+
+
+async def test_failed_structured_reply_is_retried_without_parsing(fake):
+    from refund_eval.model_io import generate_structured
+
+    failed = Completion(text=json.dumps(ACTION), message=Message("assistant", ""), failed=True)
+    client = fake(failed, ACTION)
+    parsed, _raw, error = await generate_structured(
+        client, shared="context", task="decide", schema=CompanyAction, name="action", system="system")
+    assert parsed == CompanyAction.model_validate(ACTION)
+    assert error is None and len(client.calls) == 2
+
+
+async def test_failed_research_reply_does_not_execute_tool_calls(fake):
+    failed = Completion(text="", message=Message("assistant", "", tool_calls=[ToolCall("c1", "nope", {})]), failed=True)
+    fake(failed)
+    record = await research.research_live(LATE.org("trainline"), scenario=LATE)
+    assert record["tool_calls"] == []
+    assert record["dossier"] is None
+    assert record["errors"] == ["model: Research model reply failed"]
+
+
 async def test_consistency_check_uses_the_grader_role_and_never_swallows_limits(fake):
     world = World(start_time="2026-01-05T09:00:00Z", now="2026-01-05T09:00:00Z")
     action, org = CompanyAction.model_validate(ACTION), LATE.org("trainline")
@@ -500,13 +529,252 @@ async def test_world_charge_settlement(monkeypatch, mode):
         await client.client.close()
 
 
-async def test_unbudgeted_reported_zero_cost_is_unchanged():
+@pytest.mark.parametrize("kind", ["body_error", "choice_error", "empty_choices", "error_finish", "unknown_empty",
+                                  "length", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
+                                  "explicit", "success", "request_price", "reasoning_price", "unknown_price",
+                                  "normal_empty", "private_error"])
+async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
+    import math
+
+    from refund_eval.models.budget import WORLD_MAX_OUTPUT_TOKENS, BudgetedWorldModels
+    from refund_eval.models.replay import (
+        RECORDINGS_KEY,
+        RecordingModelClient,
+        ReplayMismatch,
+        ReplayModelClient,
+    )
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    requests = []
+    error = {"code": 502, "message": "provider failed"}
+    if kind == "private_error":
+        from urllib.parse import quote_plus
+
+        error["message"] = quote_plus(quote_plus(LATE.user.email_addresses[0]))
+
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr("refund_eval.models.openrouter.anyio.sleep", no_sleep)
+
+    def handler(request):
+        if request.method == "GET":
+            if kind == "lookup":
+                return httpx.Response(200, json={"data": {"total_cost": 0.01, "finish_reason": "error",
+                                                          "tokens_prompt": 10, "tokens_completion": 1}})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        body = json.loads(request.content)
+        requests.append(body)
+        if kind == "success" or (len(requests) > 1 and kind != "three"):
+            return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+                "prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.001}))
+        payload = reply({"role": "assistant", "content": ""}, finish="unknown")
+        payload["usage"] = None
+        if kind in {"body_error", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
+                    "request_price", "reasoning_price", "private_error"}:
+            payload = {"id": "gen-1", "error": error}
+        if kind == "choice_error":
+            payload["choices"][0]["error"] = error
+        if kind == "empty_choices":
+            payload["choices"] = []
+        if kind == "error_finish":
+            payload["choices"][0]["finish_reason"] = "error"
+        if kind == "normal_empty":
+            payload["choices"][0]["finish_reason"] = "stop"
+        if kind in {"length", "explicit"}:
+            payload["choices"][0]["finish_reason"] = "length"
+            payload["choices"][0]["message"]["content"] = "truncated"
+            payload["usage"] = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
+        if kind in {"reported", "allowance"}:
+            payload["usage"] = {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.01}
+        return httpx.Response(200, json=payload)
+
+    name = "openrouter/anthropic/claude-opus-5.5"
+    prices = {"input": 1, "output": 5, "input_cache_write": 6}
+    if kind != "no_request_price":
+        prices["request"] = 0.005 if kind == "request_price" else 0
+    if kind == "reasoning_price":
+        prices["internal_reasoning"] = 8
+    if kind == "unknown_price":
+        prices["unpriced"] = 0
+    client = openrouter(handler, require_reported_cost=True,
+                        prices={} if kind == "no_price" else {name: prices})
+    budget = BudgetedWorldModels(RecordingModelClient(client), 0.02 if kind == "allowance" else 1, lambda: None)
+    messages = [Message("user", "hello £")]
+    settings = {"schema": OutputSchema("action", CompanyAction), "tools": research._tools()}
+    if kind == "explicit":
+        settings["max_tokens"] = 123
+    try:
+        if kind in {"three", "allowance", "no_price", "unknown_price"}:
+            with pytest.raises(ModelLimitExceeded):
+                await budget.complete("simulator", messages, **settings)
+        else:
+            result = await budget.complete("simulator", messages, **settings)
+            assert not result.failed
+            assert result.text == "ok"
+        recordings = store.world_store().get(RECORDINGS_KEY)
+        expected_count = 3 if kind == "three" else 1 if kind in {
+            "allowance", "no_price", "unknown_price", "success"} else 2
+        assert len(requests) == len(recordings) == expected_count
+        assert all(body["max_tokens"] == (123 if kind == "explicit" else WORLD_MAX_OUTPUT_TOKENS) for body in requests)
+        first = recordings[0]["response"]
+        assert first["failed"] == (kind != "success")
+        assert first["generation_id"] == "gen-1"
+        assert first["http_status"] == 200
+        prompt = {"messages": requests[0]["messages"], "tools": [tool["function"] for tool in requests[0]["tools"]],
+                  "schema": requests[0]["response_format"]["json_schema"]["schema"], "stop": []}
+        rate = 8 if kind == "reasoning_price" else 6
+        fixed = 0.005 if kind == "request_price" else 0
+        bound = math.ceil(((len(json.dumps(prompt).encode()) + 16_384 + requests[0]["max_tokens"]) * rate / 1e6 + fixed) * 1e9) / 1e9
+        if kind in {"no_price", "unknown_price"}:
+            assert first["usage"] is None and budget.spent == 0
+        elif kind in {"reported", "allowance", "lookup", "explicit", "length"}:
+            assert first["usage"]["cost"] == 0.01
+            assert first["cost_method"] == ("generation_lookup" if kind == "lookup" else "actual")
+        elif kind != "success":
+            assert first["cost_method"] == "worst_case"
+            assert first["usage"]["cost"] == bound
+        if kind not in {"no_price", "unknown_price"}:
+            assert budget.spent == sum((Decimal(str(r["response"]["usage"]["cost"])) for r in recordings), Decimal(0))
+        if kind == "allowance":
+            assert budget.spent < budget.limit and Decimal(str(bound)) > budget.limit - budget.spent
+        if kind == "length":
+            assert first["raw_finish_reason"] == "length"
+        if kind == "private_error":
+            from refund_eval.published import REDACTED_SCENARIO_VALUE
+
+            assert first["error"] == REDACTED_SCENARIO_VALUE
+        if kind in {"body_error", "choice_error"}:
+            assert first["error"] == error
+            replayed = await ReplayModelClient(recordings).complete(
+                "simulator", messages, **settings, max_tokens=WORLD_MAX_OUTPUT_TOKENS, default_output_cap=True)
+            assert replayed.failed and replayed.error == error and replayed.generation_id == "gen-1"
+            assert replayed.http_status == 200
+            assert replayed.raw_finish_reason == first["raw_finish_reason"]
+        if kind == "three":
+            assert budget.status == "failed"
+        if kind == "success":
+            direct = ReplayModelClient(recordings)
+            replayed = await direct.complete("simulator", messages, **settings)
+            assert replayed.text == result.text
+            assert replayed.usage == result.usage
+            assert direct.position == len(recordings)
+            with pytest.raises(ReplayMismatch):
+                await ReplayModelClient(recordings).complete("simulator", messages, **settings, max_tokens=123)
+        replay = ReplayModelClient(recordings)
+        replay_budget = BudgetedWorldModels(replay, float(budget.limit), lambda: None)
+        if kind in {"three", "allowance", "no_price", "unknown_price"}:
+            with pytest.raises(ModelLimitExceeded):
+                await replay_budget.complete("simulator", messages, **settings)
+        else:
+            replayed = await replay_budget.complete("simulator", messages, **settings)
+            assert replayed.text == result.text
+            assert replayed.usage == result.usage
+            assert replayed.cost_method == result.cost_method
+            assert not replayed.failed
+        assert replay.position == len(recordings)
+        assert replay_budget.spent == budget.spent
+        assert replay_budget.status == budget.status
+        if kind in {"success", "body_error"}:
+            mismatch = BudgetedWorldModels(ReplayModelClient(recordings), float(budget.limit), lambda: None)
+            with pytest.raises(ReplayMismatch, match="differs from its recording"):
+                await mismatch.complete("simulator", [Message("user", "different request")], **settings)
+    finally:
+        store.install(previous)
+        await client.client.close()
+
+
+@pytest.mark.parametrize("kind", ["timeout", "http", "plain", "three", "allowance", "no_price", "402"])
+async def test_world_request_exceptions_are_screened_charged_and_replayed(monkeypatch, kind):
+    from urllib.parse import quote_plus
+
+    from refund_eval.models.budget import BudgetedWorldModels
+    from refund_eval.models.replay import (
+        RECORDINGS_KEY,
+        RecordingModelClient,
+        ReplayModelClient,
+    )
+    from refund_eval.published import REDACTED_SCENARIO_VALUE
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    private = quote_plus(quote_plus(LATE.user.email_addresses[0]))
+    requests = []
+
+    def handler(request):
+        assert request.method == "POST"
+        requests.append(json.loads(request.content))
+        if len(requests) > 1 and kind != "three":
+            return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+                "prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11, "cost": 0.001}))
+        if kind in {"http", "402"}:
+            return httpx.Response(402 if kind == "402" else 500, json={"error": {"message": private}})
+        if kind == "plain":
+            raise RuntimeError(private)
+        raise httpx.ReadTimeout(private, request=request)
+
+    name = "openrouter/anthropic/claude-opus-5.5"
+    client = openrouter(handler, require_reported_cost=True,
+                        prices={} if kind == "no_price" else {name: {"input": 1, "output": 6}})
+    budget = BudgetedWorldModels(RecordingModelClient(client), 0.2 if kind == "allowance" else 1, lambda: None)
+    messages = [Message("user", "hello")]
+    stopped = kind in {"three", "allowance", "no_price", "402"}
+    try:
+        if stopped:
+            with pytest.raises(ModelLimitExceeded):
+                await budget.complete("simulator", messages)
+        else:
+            assert (await budget.complete("simulator", messages)).text == "ok"
+        recordings = store.world_store().get(RECORDINGS_KEY)
+        assert len(requests) == len(recordings) == (3 if kind == "three" else 1 if stopped else 2)
+        evidence = recordings[0]["error"]
+        assert private not in json.dumps(recordings)
+        if kind in {"http", "plain", "402"}:
+            assert REDACTED_SCENARIO_VALUE in evidence["message"]
+        assert evidence["limit"] == (kind == "402")
+        if kind in {"no_price", "402"}:
+            assert budget.spent == 0
+        else:
+            charged = Decimal(str(evidence["worst_case_cost"]))
+            assert charged > 0
+            assert budget.spent == charged * (3 if kind == "three" else 1) + (Decimal(0) if stopped else Decimal("0.001"))
+        replay = ReplayModelClient(recordings)
+        replay_budget = BudgetedWorldModels(replay, float(budget.limit), lambda: None)
+        if stopped:
+            with pytest.raises(ModelLimitExceeded):
+                await replay_budget.complete("simulator", messages)
+        else:
+            assert (await replay_budget.complete("simulator", messages)).text == "ok"
+        assert replay.position == len(recordings)
+        assert replay_budget.spent == budget.spent
+    finally:
+        store.install(previous)
+        await client.client.close()
+
+
+def test_old_completion_recordings_load_without_failure_evidence():
+    from refund_eval.models.replay import _load
+
+    completion = _load({"text": "ok", "message": {"role": "assistant", "content": "ok"}})
+    assert not completion.failed
+    assert completion.http_status is None
+    assert completion.error is completion.generation_id is completion.raw_finish_reason is completion.worst_case_cost is None
+
+
+@pytest.mark.parametrize("unpriced", [False, True])
+async def test_unbudgeted_reported_zero_cost_is_unchanged(unpriced):
     def handler(request):
         assert request.method == "POST"
         return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
             "prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300, "cost": 0}))
 
-    client = openrouter(handler)
+    prices = {"input": 1, "output": 5, "unpriced": 0} if unpriced else {}
+    client = openrouter(handler, prices={"openrouter/anthropic/claude-opus-5.5": prices})
     try:
         result = await client.complete("simulator", [])
         assert result.cost_method == "actual" and result.usage.cost == 0
@@ -536,4 +804,4 @@ def test_openrouter_prices_come_from_the_public_catalog(monkeypatch):
 
     monkeypatch.setattr(model_pricing.httpx, "get", get)
     assert model_pricing.openrouter_prices(["openrouter/a/sim", "openrouter/a/missing", "mockllm/model"]) == {
-        "openrouter/a/sim": {"input": 1.0, "output": 5.0, "input_cache_read": 1.0, "input_cache_write": 1.0}}
+        "openrouter/a/sim": {"input": 1.0, "output": 5.0, "input_cache_read": 1.0, "input_cache_write": 1.0, "request": 0}}

@@ -26,22 +26,26 @@ this was not a second version or trial round.
 
 ## 7.1 — 2026-11-18
 - Kind: trivial batch
-- Fingerprint: 4d1096662cbd7de8599dc19d547fe6c2015c877ccf1b2f31643d757b4fe7f69f
-- Changes: stage sanitized shared company-store entries in native world images and provide explicit offline artifact harvesting (MAT-146).
+- Fingerprint: 9ba41421f068c793f1dea23cab535a59e0dd6d3a39aa806bb93f9fc8beef48cc
+- Changes: stage sanitized shared company-store entries in native world images and provide explicit artifact harvesting (MAT-146).
 
 ## 7.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: 45bcf1b87ad2207adb1784a68a522c0ffc7ab1bb3ad767783d4393796663ff44
+- Fingerprint: 49b5fb37b7afe9b09119d598bbe138f773b9ec29cc0b4dfe7d25d5fa6b47d364
 - Trial round: pending; to be run by the Repro Auditor after review.
 - Changes: share deep first-contact company research, rules, temperament, grounded public correspondence and reply addresses across trials (MAT-139).
 
+## 6.1 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: 964be78b0f072ae4531d1566c5009e62f17874fe79f5287f4bdda8f3a7adc57c
+- Trial round: none
+- Changes: drop Avanti goodwill-offer example letter (MAT-137).
+
 ## 6.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: e6c08d5875dc00db967075e83bde5237d3e6017318ae63a79260edcdaa2a3100
-- Note: current PR #57 branch fingerprint; refresh after its 6.0 rebase.
+- Fingerprint: 2d998455d8fe2dedb58b2add490077ce78aca9e43e20b2f36be36081d0ea2835
 - Trial round: separately coordinated rerun, not yet run.
-- Changes: cap otherwise uncapped world requests, record failed-reply evidence, settle failures with conservative request bounds and allow individually budgeted retries (MAT-144, PR #57).
-
+- Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; reject empty, truncated and provider-failed replies before parsing, screen recorded diagnostics with the private-value guard, and charge failed replies and request exceptions at a framed request-byte bound when actual charges are unavailable. Include the highest token rate, fixed request and five-result web-search charges; fail closed per model on nonzero modality or unpriceable components. Allow two individually budgeted retries before stopping; provider 402 limits still stop immediately (MAT-144).
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: f77e72f8c15f89f41c075cc9b0a7c61631e6f74f25df771887e5250286c331a1
