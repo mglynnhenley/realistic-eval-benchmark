@@ -26,8 +26,8 @@ this was not a second version or trial round.
 
 ## 7.1 — 2026-11-18
 - Kind: trivial batch
-- Fingerprint: 9ba41421f068c793f1dea23cab535a59e0dd6d3a39aa806bb93f9fc8beef48cc
-- Changes: stage sanitized shared company-store entries in native world images and provide explicit artifact harvesting (MAT-146).
+- Fingerprint: 56ef6a7669c591fa41107f7db4f3a8404edff645bb7118f2c88c1f8dc6fcf26f
+- Changes: stage sanitized shared company-store entries in native world images and automatically harvest registered local job artifacts at preparation (MAT-146).
 
 ## 7.0 — 2026-11-18
 - Kind: behaviour round

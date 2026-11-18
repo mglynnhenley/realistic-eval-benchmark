@@ -170,13 +170,15 @@ Without `--save` it only prints. `--org KEY` limits it to named organisations. D
 
 Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
 
-Native Harbor task preparation snapshots only the selected scenario's sanitized store entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. To merge artifacts back into the host store without model calls, pass the job directory containing trial directories (not the outer jobs root):
+Native Harbor task preparation first harvests available artifacts from previously registered local job roots for the selected scenario, then snapshots its sanitized entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. A host-only `.native-jobs/` registry tracks prepared jobs roots; it is not copied into task, agent or world inputs. Sequentially prepared native tasks therefore reuse prior companies without a manual harvest or model calls.
+
+The explicit command is optional recovery for artifacts from an unregistered or older output. It accepts either the outer jobs root or a named job directory and recursively finds `artifacts/world/company-store`:
 
 ```bash
-scripts/harbor python -m refund_eval.sim.company_store harvest JOB_DIR
+scripts/harbor python -m refund_eval.sim.company_store harvest JOBS_DIR
 ```
 
-The command uses the same default or `REFUND_EVAL_COMPANY_STORE` root as trials; `REFUND_EVAL_COMPANY_STORE=off` disables both native seeding and harvesting.
+The command uses the same default or `REFUND_EVAL_COMPANY_STORE` root as trials; `REFUND_EVAL_COMPANY_STORE=off` disables native registration, automatic harvesting and seeding.
 ## Inbox snapshots
 
 The bundled inbox at [`refund_eval/scenario/inbox.json`](../refund_eval/scenario/inbox.json) is fictional. You can hand-write another file in that format or export your own Gmail:

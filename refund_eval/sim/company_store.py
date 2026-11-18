@@ -16,6 +16,7 @@ from refund_eval.scenario.schema import Org, Scenario, load_scenario
 from refund_eval.world.orgs import parse_address
 
 DEFAULT_ROOT = Path.home() / "refund-eval-data" / "company-store"
+_NATIVE_JOBS_DIR = ".native-jobs"
 _ENTRY_FIELDS = (
     "schema", "fingerprint", "identity", "scenario", "created_at", "provenance",
     "org", "research", "rules", "temperament", "examples",
@@ -241,6 +242,113 @@ def _has_symlink(path: Path, root: Path) -> bool:
         if current.is_symlink():
             return True
     return False
+
+
+def _absolute_path(path: Path | str) -> Path:
+    return Path(os.path.abspath(Path(path).expanduser()))
+
+
+def _path_has_symlink(path: Path | str) -> bool:
+    absolute = _absolute_path(path)
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _canonical_jobs_root(path: Path | str) -> Path:
+    absolute = _absolute_path(path)
+    if _path_has_symlink(absolute):
+        raise ValueError("Native Harbor jobs paths must not contain symlinks")
+    return absolute.resolve()
+
+
+def _native_jobs_registry_dir(root: Path | str | None, *, create: bool = False) -> Path | None:
+    selected = _root_path(root)
+    if selected is None:
+        return None
+    directory = selected / _NATIVE_JOBS_DIR
+    if _has_symlink(directory, selected) or directory.is_symlink():
+        raise ValueError("Native Harbor job registry paths must not contain symlinks")
+    if directory.exists() and not directory.is_dir():
+        raise ValueError("Invalid native Harbor job registry path")
+    if create:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if _has_symlink(directory, selected) or not directory.is_dir():
+            raise ValueError("Invalid native Harbor job registry path")
+        os.chmod(directory, 0o700)
+    return directory
+
+
+def _read_native_jobs_registration(path: Path, store_root: Path) -> Path:
+    if _has_symlink(path, store_root) or path.is_symlink() or not path.is_file():
+        raise ValueError("Native Harbor job registry entries must be regular files without symlinks")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Malformed native Harbor job registry entry") from exc
+    if not isinstance(value, dict) or type(value.get("schema")) is not int or value["schema"] != 1:
+        raise ValueError("Malformed native Harbor job registry entry")
+    jobs_root = value.get("jobs_root")
+    if not isinstance(jobs_root, str):
+        raise TypeError("Malformed native Harbor job registry entry")
+    canonical = _canonical_jobs_root(jobs_root)
+    if str(canonical) != jobs_root or path.name != f"{_sha256(jobs_root)}.json":
+        raise ValueError("Native Harbor job registry entry does not match its path")
+    return canonical
+
+
+def registered_native_jobs_roots(root: Path | str | None = None) -> list[Path]:
+    """Return canonical jobs roots registered during native task preparation."""
+    selected = _root_path(root)
+    directory = _native_jobs_registry_dir(selected)
+    if directory is None or not directory.exists():
+        return []
+    roots = []
+    for path in sorted(directory.iterdir()):
+        if path.is_symlink() or _has_symlink(path, selected):
+            raise ValueError("Native Harbor job registry paths must not contain symlinks")
+        if not path.is_file():
+            raise ValueError("Invalid native Harbor job registry entry path")
+        if path.suffix != ".json":
+            continue
+        roots.append(_read_native_jobs_registration(path, selected))
+    return roots
+
+
+def register_native_jobs_root(jobs_root: Path | str, *, root: Path | str | None = None) -> Path | None:
+    """Atomically register one prepared output's jobs root for later harvesting."""
+    selected = _root_path(root)
+    if selected is None:
+        return None
+    canonical = _canonical_jobs_root(jobs_root)
+    directory = _native_jobs_registry_dir(selected, create=True)
+    registration = directory / f"{_sha256(str(canonical))}.json"
+    if registration.exists() or registration.is_symlink():
+        if _read_native_jobs_registration(registration, selected) != canonical:
+            raise ValueError("Native Harbor job registry hash collision")
+        return registration
+
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=directory, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump({"schema": 1, "jobs_root": str(canonical)}, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, registration)
+        except FileExistsError:
+            if _read_native_jobs_registration(registration, selected) != canonical:
+                raise ValueError("Native Harbor job registry hash collision")
+        return registration
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def load_entry(scenario: Scenario, org: Org) -> dict[str, Any] | None:
@@ -533,21 +641,25 @@ def _scenario_store_ids(root: Path) -> list[str]:
     return scenario_ids
 
 
-def harvest_jobs(jobs_dir: Path | str, *, destination_root: Path | str | None = None) -> int:
-    """Merge native Harbor ``*/artifacts/world/company-store`` outputs into the host store."""
-    destination = _root_path(destination_root)
-    if destination is None:
-        raise ValueError("REFUND_EVAL_COMPANY_STORE=off disables harvesting")
-    jobs_path = Path(jobs_dir).expanduser()
-    if jobs_path.is_symlink() or not jobs_path.is_dir():
-        raise ValueError("JOBS_DIR must be an existing directory and must not be a symlink")
-    jobs_path = jobs_path.resolve()
-    artifacts = sorted(jobs_path.glob("*/artifacts/world/company-store"))
-    count = 0
-    for artifact in artifacts:
-        if any(part.is_symlink() for part in [artifact, *artifact.parents[:3]]):
+def _job_store_artifacts(jobs_root: Path) -> list[Path]:
+    artifacts = []
+    for artifact in sorted(jobs_root.rglob("company-store")):
+        if artifact.parent.name != "world" or artifact.parent.parent.name != "artifacts":
+            continue
+        if _has_symlink(artifact, jobs_root):
             raise ValueError("Company-store artifact paths must not contain symlinks")
-        artifact = artifact.resolve()
+        if not artifact.is_dir():
+            raise ValueError("Company-store artifact path is not a directory")
+        artifacts.append(artifact.resolve())
+    return artifacts
+
+
+def _harvest_jobs_root(jobs_root: Path, destination: Path, scenario: Scenario | None = None) -> int:
+    count = 0
+    for artifact in _job_store_artifacts(jobs_root):
+        if scenario is not None:
+            count += sync_scenario_entries(scenario, source_root=artifact, destination_root=destination)
+            continue
         for scenario_id in _scenario_store_ids(artifact):
             try:
                 scenario = load_scenario(scenario_id)
@@ -557,13 +669,39 @@ def harvest_jobs(jobs_dir: Path | str, *, destination_root: Path | str | None = 
     return count
 
 
+def harvest_registered_jobs(scenario: Scenario, *, destination_root: Path | str | None = None) -> int:
+    """Harvest this scenario from previously registered native Harbor jobs roots."""
+    destination = _root_path(destination_root)
+    if destination is None:
+        return 0
+    count = 0
+    for jobs_root in registered_native_jobs_roots(destination):
+        if not jobs_root.exists():
+            continue
+        if _path_has_symlink(jobs_root) or not jobs_root.is_dir():
+            raise ValueError("Registered native Harbor jobs roots must be directories without symlinks")
+        count += _harvest_jobs_root(jobs_root.resolve(), destination, scenario)
+    return count
+
+
+def harvest_jobs(jobs_dir: Path | str, *, destination_root: Path | str | None = None) -> int:
+    """Merge artifacts under an outer jobs root or one named Harbor job directory."""
+    destination = _root_path(destination_root)
+    if destination is None:
+        raise ValueError("REFUND_EVAL_COMPANY_STORE=off disables harvesting")
+    jobs_path = _canonical_jobs_root(jobs_dir)
+    if not jobs_path.is_dir():
+        raise ValueError("JOBS_DIR must be an existing directory and must not be a symlink")
+    return _harvest_jobs_root(jobs_path, destination)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m refund_eval.sim.company_store")
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list", help="list companies first contacted in the selected window")
     listing.add_argument("--days", type=int, default=7)
     harvest = commands.add_parser("harvest", help="merge native Harbor company-store artifacts into the host store")
-    harvest.add_argument("jobs_dir", type=Path)
+    harvest.add_argument("jobs_dir", type=Path, help="outer jobs root or named Harbor job directory")
     args = parser.parse_args(argv)
     if args.command == "harvest":
         if store_root() is None:

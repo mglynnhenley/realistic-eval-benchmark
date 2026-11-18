@@ -139,7 +139,69 @@ def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, mo
     assert len(list((next_prepared / scenario.id / "environment" / "company-store").rglob("*.json"))) == 2
 
 
+def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkeypatch, capsys):
+    scenario = load_scenario("train_refund_late")
+    org = Org(key="automatic_dynamic", name="Automatic Example", kind="dynamic_advice",
+              email_domains=["automatic-store.example.test"], web_domains=["automatic-store.example.test"],
+              terms="The published company terms.")
+    host_store = tmp_path / "host-store"
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
+
+    first = tmp_path / "prepared-one"
+    assert adapter.main(["--scenario", scenario.id, "--out", str(first)]) == 0
+    capsys.readouterr()
+    first_task = first / scenario.id
+    first_seed = first_task / "environment" / "company-store"
+    assert not list(first_seed.rglob("*.json"))
+
+    jobs_root = first / "jobs"
+    artifact_store = jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store"
+    entry = _native_store_entry(scenario, org)
+    company_store.save_entry(scenario, org, entry, root=artifact_store)
+
+    unregistered_artifact = (
+        tmp_path / "unregistered-jobs" / "job" / "trial" / "artifacts" / "world" / "company-store"
+    )
+    unregistered_org = Org(
+        key="unregistered_dynamic", name="Unregistered Example", kind="dynamic_advice",
+        email_domains=["unregistered-store.example.test"], web_domains=["unregistered-store.example.test"],
+        terms="The published company terms.",
+    )
+    unregistered_entry = _native_store_entry(scenario, unregistered_org)
+    company_store.save_entry(scenario, unregistered_org, unregistered_entry, root=unregistered_artifact)
+
+    second = tmp_path / "prepared-two"
+    assert adapter.main(["--scenario", scenario.id, "--out", str(second)]) == 0
+    capsys.readouterr()
+    second_task = second / scenario.id
+    second_seed = second_task / "environment" / "company-store"
+    assert len(list(second_seed.rglob("*.json"))) == 1
+    assert company_store._entry_path(
+        scenario.id, company_store.org_identity(org), entry["fingerprint"], host_store,
+    ).is_file()
+    assert not company_store._entry_path(
+        scenario.id, company_store.org_identity(unregistered_org), unregistered_entry["fingerprint"], host_store,
+    ).exists()
+    assert not any(path.name == ".native-jobs" for path in first_task.rglob(".native-jobs"))
+    assert not any(path.name == ".native-jobs" for path in second_task.rglob(".native-jobs"))
+    assert set(company_store.registered_native_jobs_roots(host_store)) == {
+        (first / "jobs").resolve(), (second / "jobs").resolve(),
+    }
+
+
 def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypatch):
+    off_store = tmp_path / "off-store"
+    scenario = load_scenario("train_refund_late")
+    org = Org(key="off_dynamic", name="Off Example", kind="dynamic_advice",
+              email_domains=["off-store.example.test"], web_domains=["off-store.example.test"],
+              terms="The published company terms.")
+    jobs_root = tmp_path / "prior-jobs"
+    entry = _native_store_entry(scenario, org)
+    company_store.register_native_jobs_root(jobs_root, root=off_store)
+    company_store.save_entry(
+        scenario, org, entry,
+        root=jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store",
+    )
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
     out = tmp_path / "prepared-off"
     assert adapter.main(["--scenario", "train_refund_late", "--out", str(out)]) == 0
@@ -151,6 +213,10 @@ def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypa
         "REFUND_EVAL_COMPANY_STORE": "off", "WORLD_SCENARIO": "train_refund_late",
     }) == 0
     assert company_store.store_root() is None
+    assert company_store.registered_native_jobs_roots(off_store) == [jobs_root.resolve()]
+    assert not company_store._entry_path(
+        scenario.id, company_store.org_identity(org), entry["fingerprint"], off_store,
+    ).exists()
 
 
 def test_cost_limit_schema_documents_target_only_scope():

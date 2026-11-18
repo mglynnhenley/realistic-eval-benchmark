@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
@@ -208,6 +209,88 @@ def test_company_store_root_default_custom_and_off(tmp_path, monkeypatch):
     assert company_store.store_root() == custom.resolve()
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
     assert company_store.store_root() is None
+
+
+def test_native_jobs_registry_is_private_atomic_and_ignores_temporary_files(tmp_path):
+    host_store = tmp_path / "host-store"
+    jobs_root = tmp_path / "prepared" / "jobs"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        registrations = list(pool.map(
+            lambda _: company_store.register_native_jobs_root(jobs_root, root=host_store), range(8),
+        ))
+
+    registry = host_store / ".native-jobs"
+    files = list(registry.glob("*.json"))
+    assert len(set(registrations)) == 1
+    assert len(files) == 1
+    assert files[0].name == f"{hashlib.sha256(str(jobs_root.resolve()).encode()).hexdigest()}.json"
+    assert stat.S_IMODE(registry.stat().st_mode) == 0o700
+    assert stat.S_IMODE(files[0].stat().st_mode) == 0o600
+    assert company_store.registered_native_jobs_roots(host_store) == [jobs_root.resolve()]
+
+    (registry / "registration-in-progress.tmp").write_text("partial", encoding="utf-8")
+    assert company_store.registered_native_jobs_roots(host_store) == [jobs_root.resolve()]
+
+
+def test_registered_harvest_is_scenario_scoped_and_ignores_unregistered_and_missing_roots(tmp_path):
+    host_store = tmp_path / "host-store"
+    jobs_root = tmp_path / "registered-jobs"
+    deleted_jobs_root = tmp_path / "deleted-jobs"
+    unregistered_jobs_root = tmp_path / "unregistered-jobs"
+    company_store.register_native_jobs_root(jobs_root, root=host_store)
+    company_store.register_native_jobs_root(deleted_jobs_root, root=host_store)
+
+    artifact_store = jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store"
+    other_scenario = load_scenario("bills_price_rise")
+    company_store.save_entry(SCENARIO, ORG, _sync_entry(), root=artifact_store)
+    company_store.save_entry(other_scenario, ORG, _sync_entry(other_scenario, ORG), root=artifact_store)
+
+    unregistered_org = Org(
+        key="unregistered_company", name="Unregistered Advice", kind="dynamic_advice",
+        email_domains=["unregistered.example"], web_domains=["unregistered.example"],
+        terms="Published terms for the unregistered company.",
+    )
+    unregistered_artifact = (
+        unregistered_jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store"
+    )
+    company_store.save_entry(
+        SCENARIO, unregistered_org, _sync_entry(SCENARIO, unregistered_org), root=unregistered_artifact,
+    )
+
+    assert company_store.harvest_registered_jobs(SCENARIO, destination_root=host_store) == 1
+    assert company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), _sync_entry()["fingerprint"], host_store,
+    ).is_file()
+    other_entry = _sync_entry(other_scenario, ORG)
+    other_path = company_store._entry_path(
+        other_scenario.id, company_store.org_identity(ORG), other_entry["fingerprint"], host_store,
+    )
+    assert not other_path.exists()
+    unregistered_entry = _sync_entry(SCENARIO, unregistered_org)
+    assert not company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(unregistered_org), unregistered_entry["fingerprint"], host_store,
+    ).exists()
+
+    assert company_store.harvest_registered_jobs(other_scenario, destination_root=host_store) == 1
+    assert other_path.is_file()
+
+
+def test_harvest_jobs_accepts_outer_and_named_roots_and_rejects_symlinks(tmp_path):
+    jobs_root = tmp_path / "outer-jobs"
+    named_job_root = jobs_root / "native-job"
+    artifact_store = named_job_root / "trial" / "artifacts" / "world" / "company-store"
+    entry = _sync_entry()
+    company_store.save_entry(SCENARIO, ORG, entry, root=artifact_store)
+
+    outer_destination = tmp_path / "outer-destination"
+    assert company_store.harvest_jobs(jobs_root, destination_root=outer_destination) == 1
+    named_destination = tmp_path / "named-destination"
+    assert company_store.harvest_jobs(named_job_root, destination_root=named_destination) == 1
+
+    linked_root = tmp_path / "linked-jobs"
+    linked_root.symlink_to(jobs_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        company_store.harvest_jobs(linked_root, destination_root=tmp_path / "linked-destination")
 
 
 def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypatch):

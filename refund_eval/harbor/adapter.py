@@ -167,6 +167,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     seed_store = task_dir / "environment" / "company-store"
     seed_store.mkdir()
     if store_root is not None:
+        company_store.harvest_registered_jobs(sc, destination_root=store_root)
         company_store.sync_scenario_entries(sc, source_root=store_root, destination_root=seed_store)
     seed_policy = DERIVED_SEED
     if world_seed == HOST_SEED:
@@ -192,6 +193,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         path.write_text(_fill(path.read_text(), values), encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
     (task_dir / "instruction.md").write_text(task_message(sc, sim_weeks) + "\n", encoding="utf-8")
+    if store_root is not None:
+        company_store.register_native_jobs_root(out / "jobs", root=store_root)
     return task_dir
 
 
