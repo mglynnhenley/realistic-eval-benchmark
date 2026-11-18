@@ -26,7 +26,8 @@ def test_worker_rejects_changed_instructions(tmp_path):
         run_trial(request, tmp_path)
 
 
-def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch):
+@pytest.mark.parametrize("seed", [None, 0])
+def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch, seed):
     from types import SimpleNamespace
 
     from inspect_ai.scorer import Score
@@ -51,12 +52,17 @@ def test_worker_writes_code_scores_and_passes_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "eval", evaluate)
     request = TrialRequest(
         instruction=load_scenario("train_refund_pressure").task_text, model="openrouter/example/model",
-        settings=published_settings(history_tokens=12_000, budget_notice="daily"), trial_id="code-scores",
+        settings=published_settings(history_tokens=12_000, budget_notice="daily", seed=seed),
+        trial_id="code-scores",
     )
     result = run_trial(request, tmp_path / "artifacts")
     assert result["passed"]
     assert calls[0]["task_args"]["history_tokens"] == 12_000
     assert calls[0]["task_args"]["budget_notice"] == "daily"
+    if seed is None:
+        assert "seed" not in calls[0]["task_args"]
+    else:
+        assert calls[0]["task_args"]["seed"] == seed
     assert "grader" in calls[0]["model_roles"]
     assert json.loads((tmp_path / "artifacts/scores.json").read_text())["containment"]["value"] is None
     lines = (tmp_path / "artifacts/events.jsonl").read_text().splitlines()

@@ -77,6 +77,7 @@ def _initialize(request: TrialRequest, output: Path) -> dict:
             "tool_profile": settings.tool_profile, "published_data": settings.data_mode,
             "browser_runtime": settings.browser_runtime, "artifact_dir": str(output),
             "scenario": settings.scenario,
+            **({"seed": settings.seed} if settings.seed is not None else {}),
             **_resume_args(settings),
         },
         "model": request.model,

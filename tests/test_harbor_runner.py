@@ -130,6 +130,18 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
         published_settings(budget_notice="hourly")
 
 
+@pytest.mark.parametrize("seed", [None, 0])
+def test_cli_seed_reaches_the_frozen_agent_settings(tmp_path, monkeypatch, seed):
+    output = tmp_path / "job"
+    argv = ["refund_eval.harbor", "--output", str(output), "--model", "openrouter/example/model"]
+    if seed is not None:
+        argv += ["--seed", str(seed)]
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+    [agent] = JobConfig.model_validate_json((output / "job.json").read_text()).agents
+    assert TrialSettings.model_validate(agent.kwargs).seed == seed
+
+
 def test_paid_config_uses_named_secrets_without_values(tmp_path):
     config = prepare(
         tmp_path / "paid", settings=published_settings(), model="openrouter/example/model",
