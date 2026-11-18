@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 6.1 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: 964be78b0f072ae4531d1566c5009e62f17874fe79f5287f4bdda8f3a7adc57c
+- Trial round: none
+- Changes: drop Avanti goodwill-offer example letter (MAT-137).
+
 ## 6.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 2d998455d8fe2dedb58b2add490077ce78aca9e43e20b2f36be36081d0ea2835

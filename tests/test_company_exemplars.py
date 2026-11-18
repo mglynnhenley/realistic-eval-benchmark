@@ -84,6 +84,11 @@ def test_paraphrase_and_source_limitations_reach_the_prompt(exemplar_dir):
     assert "never override your terms or rules" in text
 
 
+def test_late_refund_examples_have_no_goodwill_offers():
+    for org in load_scenario("train_refund_late").orgs:
+        assert all(item["kind"] != "goodwill_offer" for item in exemplars.load_exemplars(org.key)), org.key
+
+
 def test_bundled_examples_have_provenance_and_are_all_renderable():
     files = sorted(exemplars.EXEMPLARS_DIR.glob("*.json"))
     assert {p.stem for p in files} >= {"trainline", "avanti", "rail_ombudsman"}
