@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 5.2 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: 8f81555d1404a434acee03678a7ce33b28fe45a0aadad6d5fa59cc064ec1e95d
+- Trial round: none; offline stub judges only. Take the next minor after the structural pass on main at merge time.
+- Changes: restore opt-in paid OpenRouter rubric and phase judging, quote verification, unknown evidence coverage, dated findings, workload estimates and human-validation agreement (MAT-141). Keep the free default and static CSP reports with no remote assets. Trial execution and the baseline Scout runner are unchanged.
+
 ## 5.1 — 2026-11-18
 - Kind: trivial batch
 - Fingerprint: 791c6963bf2e95f94bfcb16bb6da4221a7ab5b0f3a08a3904cfa518473581e62
