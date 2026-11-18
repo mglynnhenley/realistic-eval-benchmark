@@ -37,6 +37,7 @@ FLAGS = {
     "WORLD_SCENARIO": "--scenario", "WORLD_SIM_WEEKS": "--sim-weeks", "WORLD_MAX_TURNS": "--max-turns",
     "WORLD_DATA_MODE": "--data-mode", "WORLD_RESEARCH_MODE": "--research-mode",
     "WORLD_SIMULATOR_MODEL": "--simulator-model", "WORLD_GRADER_MODEL": "--grader-model",
+    "WORLD_COST_LIMIT": "--world-cost-limit",
     "WORLD_COMPANY_SIMULATOR": "--company-simulator",
 }
 FAKE_ACTION = {
@@ -95,14 +96,15 @@ class FakeWorldModels:
         return f"fake/{role}"
 
     async def complete(self, role, messages, *, schema=None, **kwargs):
-        from refund_eval.models.client import Completion, Message
+        from refund_eval.models.client import Completion, Message, Usage
 
         replies = {"open_world_action": self.action, "response_consistency": {"consistent": True, "reason": "ok"}}
         name = schema.name if schema else None
         if name not in replies:
             raise RuntimeError(f"Fake world models have no reply for {role} schema {name!r}")
         text = json.dumps(replies[name])
-        return Completion(text=text, message=Message("assistant", text), stop_reason="stop", model=f"fake/{role}")
+        return Completion(text=text, message=Message("assistant", text), stop_reason="stop",
+                          usage=Usage(cost=0.0), model=f"fake/{role}")
 
 
 def main() -> int:
@@ -115,6 +117,9 @@ def main() -> int:
                   f"{', '.join(found)}", file=sys.stderr)
             return 2
         model_client = FakeWorldModels(FAKE_MODES[env[FAKE_MODELS_ENV]])
+    elif not env.get("WORLD_COST_LIMIT", "").strip():
+        print("Set a per-trial WORLD_COST_LIMIT for a paid native world.", file=sys.stderr)
+        return 2
     seed = choose_seed(env)
     output = Path(env.get("WORLD_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR)
     output.mkdir(parents=True, exist_ok=True)

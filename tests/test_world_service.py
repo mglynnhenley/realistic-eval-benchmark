@@ -31,7 +31,14 @@ from mcp.client.streamable_http import streamable_http_client
 
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.models import client as models
-from refund_eval.models.client import Completion, Message, ModelLimitExceeded
+from refund_eval.models.budget import WORLD_BUDGET_KEY
+from refund_eval.models.client import (
+    Completion,
+    Message,
+    ModelLimitExceeded,
+    OutputSchema,
+    Usage,
+)
 from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published.adapter import _normalized
 from refund_eval.published.mail import _visible_id
@@ -466,6 +473,34 @@ async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path, monkey
         world = trial.data()["world"]
     assert world["stop_reason"] == "model_limit"
     assert "SENT" not in sent.content[0].text
+
+
+@pytest.mark.parametrize(("charge", "status", "spent"), [(0.75, "exhausted", 1.5), (None, "unknown", 0.75)])
+async def test_world_model_allowance_is_shared_and_fails_closed(tmp_path, monkeypatch, charge, status, spent):
+    stub_browser(monkeypatch)
+
+    class BilledModels(FakeModels):
+        async def complete(self, role, messages, **kwargs):
+            result = await super().complete(role, messages, **kwargs)
+            result.usage = Usage(cost=0.75 if role == "simulator" else charge)
+            return result
+
+    fake = BilledModels()
+    async with WorldTrial(settings(tmp_path, world_cost_limit=1), model_client=fake) as trial:
+        from refund_eval.companies.models import CompanyAction
+        from refund_eval.sim.consistency import ResponseConsistency
+
+        client = models.client()
+        await client.complete("simulator", [], schema=OutputSchema("open_world_action", CompanyAction))
+        with pytest.raises(ModelLimitExceeded):
+            await client.complete("grader", [], schema=OutputSchema("response_consistency", ResponseConsistency))
+        with pytest.raises(ModelLimitExceeded, match=status):
+            await client.complete("simulator", [])
+        trial.persist()
+        state = json.loads((tmp_path / "world" / "state.json").read_text())
+    assert state["store"][WORLD_BUDGET_KEY] == {"limit_usd": 1, "spent_usd": spent, "status": status}
+    assert [c["response"]["usage"]["cost"] for c in state["store"][RECORDINGS_KEY]] == [0.75, charge]
+    assert [role for role, _ in fake.calls] == ["simulator", "grader"]
 
 
 # --------------------------------------------------------------------------- the agent in world-service mode

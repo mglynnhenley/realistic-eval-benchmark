@@ -10,13 +10,19 @@ import tomllib
 from pathlib import Path
 
 import yaml
+from pydantic import Field
 
-from refund_eval.config import RunConfig, resolve_cost_limits
+from refund_eval.config import CostCap, RunConfig, resolve_cost_limits
 from refund_eval.harbor.adapter import AGENT_IMPORT_PATH, validate_and_index, write_task
 from refund_eval.output_paths import validate_private_output
 
 
-def prepare(out: Path, config: RunConfig) -> Path:
+class NativeBatchConfig(RunConfig):
+    world_cost_limit: CostCap
+    time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
+
+
+def prepare(out: Path, config: NativeBatchConfig) -> Path:
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
         raise ValueError("Native batches require execution='docker' or execution='modal'")
@@ -34,7 +40,7 @@ def prepare(out: Path, config: RunConfig) -> Path:
     task = write_task(
         out, scenario=config.scenario, data_mode=config.data_mode, sim_weeks=config.sim_weeks,
         max_turns=config.max_turns, research_mode=config.research_mode, simulator_model=config.simulator_model,
-        grader_model=config.grader_model, agent_timeout=1.1 * (config.time_limit or 36_000),
+        grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=1.1 * config.time_limit,
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
     )
     options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice", "time_limit"},
@@ -69,6 +75,7 @@ def prepare(out: Path, config: RunConfig) -> Path:
         "seed_policy": metadata["seed_policy"],
         "total_trials": total,
         "target_cost_limits_usd": caps,
+        "world_cost_limit_usd_per_trial": config.world_cost_limit,
     }, indent=2) + "\n", encoding="utf-8")
     return record
 
@@ -79,13 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="Empty, Git-ignored or external output directory")
     args = parser.parse_args(argv)
     try:
-        config = RunConfig.model_validate_json(args.config.read_bytes())
+        config = NativeBatchConfig.model_validate_json(args.config.read_bytes())
         record = prepare(args.out, config)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Prepared {record}")
     command = ["scripts/harbor", "harbor", "run", "-c", str(record.with_name("job.yaml"))]
-    print(f"Paid launch (target caps only; world models and compute cost extra): {shlex.join(command)}")
+    print(f"Paid launch (separate target and world model budgets; compute costs extra): {shlex.join(command)}")
     return 0
 
 
