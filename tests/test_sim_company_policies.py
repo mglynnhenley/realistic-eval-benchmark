@@ -35,7 +35,7 @@ def sim(monkeypatch):
     install_mock_models(mock)
     start_sample(SC.id)
 
-    async def company_rules(scenario, org, dossier_record):  # every company may pay on one scripted ground
+    async def company_rules(scenario, org, dossier_record, examples=None):  # every company may pay on one scripted ground
         return {"rules": {"terms": org.terms, "grounds": [{"key": "eligible", "conditions": "The terms are met."}]}}
 
     monkeypatch.setattr("refund_eval.sim.open_world.company_rules", company_rules)

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from refund_eval.models.client import Message, ModelLimitExceeded, OutputSchema, client
 from refund_eval.scenario.schema import Org, Scenario
+from refund_eval.sim import company_store
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.rules import SELLER_POLICY
 from refund_eval.world.orgs import host_of, parse_address
@@ -64,6 +65,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
     """
     address = parse_address(inbound.target) if inbound.channel == "email" else None
     host = address.split("@", 1)[1] if address else host_of(inbound.target)
+    host = host.removeprefix("www.") if host else host
     if inbound.channel not in {"email", "form", "chat"}:
         return None
     if inbound.channel == "email" and not address:
@@ -72,7 +74,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         return None
     if not host and (inbound.channel != "chat" or not inbound.target.strip()):
         return None
-    identity = "host:" + host if host else "name:" + inbound.target.strip().casefold()
+    identity = "host:" + host if host else "name:" + " ".join(inbound.target.split()).casefold()
     rejected_identity = "recipient:" + inbound.channel + ":" + (address or inbound.target.strip().casefold())
     registry = dict(world_store().get(REGISTRY_KEY, {}))
     person_identity = "address:" + address if address else None
@@ -83,6 +85,17 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         return Org.model_validate(data) if data else None
     if rejected_identity in registry:
         return None
+    if host and (entry := company_store.find_matching_entry(scenario, identity)):
+        org = Org.model_validate(entry["org"]).model_copy(
+            update={"contact_emails": [address] if address else []})
+        registry[identity] = {
+            "org": org.model_dump(mode="json"), "profile": {"name": org.name, "role": "advice",
+                                                             "reason": "Loaded from the shared company store."},
+            "identity_verified": False, "source": "shared_entry", "target": inbound.target,
+            "interception_id": inbound.interception_id,
+        }
+        world_store().set(REGISTRY_KEY, registry)
+        return org
 
     messages = [
         Message("system", (
@@ -145,7 +158,13 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         if research.live_web() and research.research_mode() != "saved":
             found = Org(key=key, name=profile.name.strip(), kind="dynamic_advice",
                         email_domains=[host], web_domains=[host])
-            record = await research.research_live(found, scenario=scenario)
+            request_budget = research.request_budget_for(found)
+            options = {"max_tool_calls": research.DEEP_RESEARCH_LOOKUPS} if company_store.enabled() else {}
+            try:
+                record = await research.research_live(
+                    found, scenario=scenario, request_budget=request_budget, **options)
+            finally:
+                research.save_request_budget_for(found, request_budget)
             if record.get("dossier"):
                 world_store().set(research.DOSSIERS_KEY, {**world_store().get(research.DOSSIERS_KEY, {}), key: record})
                 role = "advice" if role == "unknown" else role

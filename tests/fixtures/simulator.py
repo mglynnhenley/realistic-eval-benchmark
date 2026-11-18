@@ -53,11 +53,19 @@ class MockSim:
         self.dossier: dict = {"summary": "A ticket retailer.", "facts": []}
         self.dossier_prompts: list[str] = []
         self.research_script: list[tuple[str, dict] | dict | str] = []
+        self.example_prompts: list[str] = []
+        self.example_script: list[tuple[str, dict] | dict | str] = []
+        self.rules_prompts: list[str] = []
+        self.rules = {"terms": "No applicable published rules.", "grounds": []}
+        self.rules_script: list[dict | str | Exception] = []
+        self.intent_check_prompts: list[str] = []
         self.person: dict = {"summary": "A friend of the user.", "voice": "Warm and informal."}
         self.person_prompts: list[str] = []
+        self.call_schemas: list[str | None] = []
 
     def __call__(self, input, tools, tool_choice, config) -> ModelOutput:
         schema = config.response_schema.name if config.response_schema else None
+        self.call_schemas.append(schema)
         text = "\n".join(m.text for m in input)
         if schema == "claim_assessment":
             self.assessment_prompts.append(text)
@@ -76,6 +84,26 @@ class MockSim:
         if schema == "counterpart_profile":
             self.profile_prompts.append(text)
             return ModelOutput.from_content(model="mockllm", content=json.dumps(self.profile))
+        if schema == "company_rules":
+            self.rules_prompts.append(text)
+            result = self.rules_script.pop(0) if self.rules_script else self.rules
+            if isinstance(result, Exception):
+                raise result
+            return ModelOutput.from_content(
+                model="mockllm", content=result if isinstance(result, str) else json.dumps(result))
+        if schema == "company_rules_intent_check":
+            self.intent_check_prompts.append(text)
+            request = json.loads(input[-1].text)
+            return ModelOutput.from_content(model="mockllm", content=json.dumps({"items": [
+                {"id": item["id"], "fits_intent": True, "reason": "Offline test."}
+                for item in request["items"]
+            ]}))
+        if "real published customer correspondence" in text.casefold():
+            self.example_prompts.append(text)
+            step = self.example_script.pop(0) if self.example_script else {"examples": []}
+            if isinstance(step, tuple):
+                return ModelOutput.for_tool_call(model="mockllm", tool_name=step[0], tool_arguments=step[1])
+            return ModelOutput.from_content(model="mockllm", content=step if isinstance(step, str) else json.dumps(step))
         if schema == "company_dossier" or any(t.name == "web_search_exa" for t in tools):
             self.dossier_prompts.append(text)
             step = self.research_script.pop(0) if self.research_script else self.dossier
