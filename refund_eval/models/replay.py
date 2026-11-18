@@ -38,6 +38,7 @@ from refund_eval.models.client import (
     ToolCall,
     Usage,
 )
+from refund_eval.models.evidence import screened_error
 from refund_eval.world.store import world_store
 
 RECORDINGS_KEY = "model_completions"
@@ -50,7 +51,8 @@ class ReplayMismatch(BaseException):
 
 def request_hash(role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                  tools: Sequence[Tool] = (), temperature: float | None = None,
-                 max_tokens: int | None = None, stop: Sequence[str] | None = None) -> str:
+                 max_tokens: int | None = None, stop: Sequence[str] | None = None,
+                 default_output_cap: bool = False) -> str:
     request = {
         "role": role,
         "messages": [{"role": m.role, "content": m.content, "tool_call_id": m.tool_call_id,
@@ -59,7 +61,8 @@ def request_hash(role: Role, messages: Sequence[Message], *, schema: OutputSchem
         "schema": None if schema is None else {"name": schema.name, "description": schema.description,
                                                "json": schema.type.model_json_schema()},
         "tools": [asdict(t) for t in tools],
-        "temperature": temperature, "max_tokens": max_tokens, "stop": None if stop is None else list(stop),
+        "temperature": temperature, "max_tokens": None if default_output_cap else max_tokens,
+        "stop": None if stop is None else list(stop),
     }
     text = json.dumps(request, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
@@ -75,6 +78,12 @@ def _dump(completion: Completion) -> dict[str, Any]:
         "usage": None if completion.usage is None else asdict(completion.usage),
         "model": completion.model,
         "cost_method": completion.cost_method,
+        "failed": completion.failed,
+        "error": screened_error(completion.error),
+        "generation_id": completion.generation_id,
+        "raw_finish_reason": completion.raw_finish_reason,
+        "http_status": completion.http_status,
+        "worst_case_cost": completion.worst_case_cost,
     }
 
 
@@ -88,6 +97,12 @@ def _load(data: dict[str, Any]) -> Completion:
         usage=None if data.get("usage") is None else Usage(**data["usage"]),
         model=data.get("model", ""),
         cost_method=data.get("cost_method"),
+        failed=data.get("failed", False),
+        error=data.get("error"),
+        generation_id=data.get("generation_id"),
+        raw_finish_reason=data.get("raw_finish_reason"),
+        http_status=data.get("http_status"),
+        worst_case_cost=data.get("worst_case_cost"),
     )
 
 
@@ -99,6 +114,10 @@ class RecordingModelClient:
 
     def model_name(self, role: Role) -> str:
         return self.inner.model_name(role)
+
+    def worst_case_cost(self, role: Role, messages: Sequence[Message], **settings: Any) -> float | None:
+        bound = getattr(self.inner, "worst_case_cost", None)
+        return bound(role, messages, **settings) if bound is not None else None
 
     async def complete(self, role: Role, messages: Sequence[Message], **settings: Any) -> Completion:
         store = world_store()
@@ -115,8 +134,10 @@ class RecordingModelClient:
         try:
             completion = await self.inner.complete(role, messages, **settings)
         except Exception as ex:
-            finish(error={"type": type(ex).__name__, "message": str(ex),
-                          "limit": isinstance(ex, ModelLimitExceeded)})
+            finish(error={"type": type(ex).__name__, "message": screened_error(str(ex)),
+                          "limit": isinstance(ex, ModelLimitExceeded),
+                          "http_status": getattr(ex, "status_code", None),
+                          "worst_case_cost": self.worst_case_cost(role, messages, **settings)})
             raise
         finish(response=_dump(completion))
         return completion
@@ -132,6 +153,12 @@ class ReplayModelClient:
     def model_name(self, role: Role) -> str:
         return next((r["model_name"] for r in self.recordings if r["role"] == role and r.get("model_name")),
                     f"replay/{role}")
+
+    def worst_case_cost(self, role: Role, messages: Sequence[Message], **settings: Any) -> float | None:
+        if self.position == 0:
+            return None
+        recorded = self.recordings[self.position - 1]
+        return recorded.get("error", {}).get("worst_case_cost")
 
     async def complete(self, role: Role, messages: Sequence[Message], **settings: Any) -> Completion:
         n = self.position

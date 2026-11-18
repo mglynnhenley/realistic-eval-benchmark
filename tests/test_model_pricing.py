@@ -152,3 +152,58 @@ def test_invalid_prices_cannot_disable_the_budget(monkeypatch, field, value):
     # Validate every requested model before registering any of the new prices.
     info = get_model_info(FABLE)
     assert info is None or info.cost is None
+
+
+def test_world_catalog_includes_fixed_cache_and_reasoning_prices(monkeypatch):
+    entry = {"id": "example/new-model", "pricing": {
+        **FABLE_ENTRY["pricing"], "request": "0.025", "internal_reasoning": "0.00006", "web_search": "0"}}
+    catalog(monkeypatch, [entry])
+    prices = pricing.openrouter_prices([NEW])[NEW]
+    assert prices == {"input": 10, "output": 50, "input_cache_read": 1, "input_cache_write": 12.5,
+                      "request": 0.025, "internal_reasoning": 60, "web_search": 0}
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("request", None), ("request", "NaN"), ("request", "-1"), ("internal_reasoning", "invalid"),
+    ("unknown_fee", "0.01"),
+])
+def test_world_catalog_isolates_unpriceable_components(monkeypatch, field, value):
+    from types import SimpleNamespace
+
+    from refund_eval.models.openrouter import _estimate, _worst_case
+
+    catalog(monkeypatch, [FABLE_ENTRY, {"id": "example/new-model", "pricing": {**FABLE_ENTRY["pricing"], field: value}}])
+    prices = pricing.openrouter_prices([NEW, FABLE])
+    params = {"messages": [], "max_tokens": 100}
+    assert _worst_case(params, prices[NEW]) is None
+    assert _worst_case(params, prices[FABLE]) is not None
+    assert _estimate(SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12), prices[NEW]) is not None
+
+
+def test_real_opus_catalog_prices_bound_web_search_and_cache(monkeypatch):
+    from refund_eval.models.openrouter import _worst_case
+
+    entry = {"id": "anthropic/claude-opus-5.5", "pricing": {
+        "prompt": "0.000004", "completion": "0.00002", "web_search": "0.01",
+        "input_cache_read": "0.0000002", "input_cache_write": "0.000005", "input_cache_write_1h": "0.000008"}}
+    name = "openrouter/" + entry["id"]
+    catalog(monkeypatch, [entry])
+    prices = pricing.openrouter_prices([name])[name]
+    assert prices == {"input": 4, "output": 20, "input_cache_read": 0.2, "input_cache_write": 5,
+                      "input_cache_write_1h": 8, "request": 0, "web_search": 0.05}
+    params = {"messages": [], "max_tokens": 9000}
+    bound = _worst_case(params, prices)
+    assert bound is not None
+    assert bound == pytest.approx(_worst_case(params, {**prices, "web_search": 0}) + 0.05)
+    assert _worst_case(params, {**prices, "input_cache_write_1h": 40}) > bound
+
+
+@pytest.mark.parametrize("field", ["image", "audio", "input_audio", "output_audio"])
+def test_modality_prices_disable_only_the_models_worst_case(monkeypatch, field):
+    from refund_eval.models.openrouter import _worst_case
+
+    catalog(monkeypatch, [FABLE_ENTRY, {"id": "example/new-model", "pricing": {**FABLE_ENTRY["pricing"], field: "1"}}])
+    prices = pricing.openrouter_prices([FABLE, NEW])
+    params = {"messages": [], "max_tokens": 9000}
+    assert _worst_case(params, prices[FABLE]) is not None
+    assert _worst_case(params, prices[NEW]) is None

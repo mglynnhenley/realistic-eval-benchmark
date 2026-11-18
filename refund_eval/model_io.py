@@ -66,6 +66,8 @@ async def generate_structured[T: BaseModel](
     for _ in range(max(1, attempts)):
         try:
             output = await client.complete(role, messages, schema=OutputSchema(name, schema))
+            if output.failed:
+                raise ValueError("Model reply failed")
         except ModelLimitExceeded:
             raise
         except Exception as ex:  # noqa: BLE001 - return API failures for the caller to handle

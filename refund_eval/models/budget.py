@@ -12,10 +12,13 @@ from refund_eval.models.client import (
     ModelClient,
     ModelLimitExceeded,
     Role,
+    Usage,
 )
+from refund_eval.models.evidence import screened_error
 from refund_eval.world.store import world_store
 
 WORLD_BUDGET_KEY = "world_model_budget"
+WORLD_MAX_OUTPUT_TOKENS = 9000
 
 
 class BudgetedWorldModels:
@@ -39,21 +42,43 @@ class BudgetedWorldModels:
         async with self.lock:
             if self.status != "available":
                 raise ModelLimitExceeded(f"World model allowance is {self.status}; no further requests")
-            self._mark("unsettled")
-            self.persist()
-            try:
-                completion = await self.recorded.complete(role, messages, **settings)
-            except Exception as error:
-                self._mark("unknown")
-                raise ModelLimitExceeded("World model request failed without a reconciled charge") from error
-            reported = completion.usage.cost if completion.usage else None
-            cost = Decimal(str(reported)) if reported is not None else None
-            if cost is None or not cost.is_finite() or cost < 0:
-                self._mark("unknown")
-                raise ModelLimitExceeded("World model request did not report a valid charge")
-            self.spent += cost
-            if self.spent >= self.limit:
-                self._mark("exhausted")
-                raise ModelLimitExceeded(f"World model allowance reached: USD {self.spent} / {self.limit}")
-            self._mark("available")
-            return completion
+            if settings.get("max_tokens") is None:
+                settings = {**settings, "max_tokens": WORLD_MAX_OUTPUT_TOKENS, "default_output_cap": True}
+            for attempt in range(3):
+                self._mark("unsettled")
+                self.persist()
+                try:
+                    completion = await self.recorded.complete(role, messages, **settings)
+                except ModelLimitExceeded:
+                    self._mark("unknown")
+                    raise
+                except Exception as error:  # noqa: BLE001 - charge every failed request before retrying
+                    estimate = getattr(self.recorded, "worst_case_cost", None)
+                    bound = estimate(role, messages, **settings) if estimate is not None else None
+                    completion = Completion(
+                        text="", message=Message("assistant", ""), usage=Usage(cost=bound), failed=True,
+                        cost_method="worst_case" if bound is not None else None, worst_case_cost=bound,
+                        error={"type": type(error).__name__, "message": screened_error(str(error))})
+                reported = completion.usage.cost if completion.usage else None
+                cost = Decimal(str(reported)) if reported is not None else None
+                if cost is None or not cost.is_finite() or cost < 0:
+                    self._mark("unknown")
+                    raise ModelLimitExceeded("World model request did not report a valid charge")
+                self.spent += cost
+                if self.spent >= self.limit:
+                    self._mark("exhausted")
+                    raise ModelLimitExceeded(f"World model allowance reached: USD {self.spent} / {self.limit}")
+                if not completion.failed:
+                    self._mark("available")
+                    return completion
+                if attempt == 2:
+                    self._mark("failed")
+                    raise ModelLimitExceeded("World model request failed after three attempts")
+                bound = completion.worst_case_cost
+                worst_case = Decimal(str(bound)) if bound is not None else None
+                if worst_case is None or not worst_case.is_finite() or worst_case < 0:
+                    self._mark("unknown")
+                    raise ModelLimitExceeded("World model retry has no valid worst-case charge")
+                if worst_case > self.limit - self.spent:
+                    self._mark("exhausted")
+                    raise ModelLimitExceeded("World model allowance cannot cover a worst-case retry")

@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 5.1 — 2026-11-18
+## 6.1 — 2026-11-18
 - Kind: trivial batch
-- Fingerprint: e219985f548407d88648dd41facf1926081c1f021b272492bc54ce0c0a7e70b7
+- Fingerprint: 964be78b0f072ae4531d1566c5009e62f17874fe79f5287f4bdda8f3a7adc57c
 - Trial round: none
 - Changes: drop Avanti goodwill-offer example letter (MAT-137).
+
+## 6.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: 2d998455d8fe2dedb58b2add490077ce78aca9e43e20b2f36be36081d0ea2835
+- Trial round: separately coordinated rerun, not yet run.
+- Changes: cap otherwise uncapped budgeted world requests at 9,000 output tokens; reject empty, truncated and provider-failed replies before parsing, screen recorded diagnostics with the private-value guard, and charge failed replies and request exceptions at a framed request-byte bound when actual charges are unavailable. Include the highest token rate, fixed request and five-result web-search charges; fail closed per model on nonzero modality or unpriceable components. Allow two individually budgeted retries before stopping; provider 402 limits still stop immediately (MAT-144).
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round

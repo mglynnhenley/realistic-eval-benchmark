@@ -107,7 +107,8 @@ class InspectModelClient:
 
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
-                       max_tokens: int | None = None, stop: Sequence[str] | None = None) -> Completion:
+                       max_tokens: int | None = None, stop: Sequence[str] | None = None,
+                       default_output_cap: bool = False) -> Completion:
         model = self._model(role)
         settings: dict[str, Any] = {}
         if max_tokens is not None:
