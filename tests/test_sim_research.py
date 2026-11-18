@@ -73,6 +73,52 @@ async def test_live_research_runs_the_tool_loop_then_takes_the_dossier(sim):
     assert store().get(research.DOSSIERS_KEY)["trainline"]["dossier"] == record["dossier"]
 
 
+async def test_page_redirects_consume_the_shared_request_budget(monkeypatch):
+    requests = []
+
+    async def redirect(request):
+        requests.append(request["url"])
+        return {"status": 302, "headers": {"location": "/redirected"}, "body_base64": ""}
+
+    monkeypatch.setattr(research, "validate_public_url", lambda _url: None)
+    monkeypatch.setattr(research, "public_read", redirect)
+    budget = research.ResearchRequestBudget(used=19)
+    with pytest.raises(RuntimeError, match="request limit"):
+        await research._read_page(TERMS, scenario=SC, request_budget=budget)
+    assert requests == [TERMS]
+    assert budget.used == research.MAX_RESEARCH_REQUESTS == 20
+
+
+async def test_search_retry_consumes_the_shared_request_budget(monkeypatch):
+    responses = iter(["rate limit", "Search results"])
+    calls = []
+
+    class FakeExa:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def call_tool(self, *_args):
+            calls.append(True)
+            return {"content": [{"text": next(responses)}]}
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(published_search, "ExaSearchService", FakeExa)
+    monkeypatch.setattr(research.asyncio, "sleep", no_wait)
+    budget = research.ResearchRequestBudget()
+    result = await research._search(
+        "Trainline refund policy", "Find the refund time limit.", scenario=SC, request_budget=budget)
+    assert result == "Search results"
+    assert len(calls) == budget.used == 2
+
+
 async def test_a_tool_error_is_shown_to_the_model_and_recorded(sim, monkeypatch):
     async def broken(url, *, scenario):
         raise RuntimeError("HTTP 403")

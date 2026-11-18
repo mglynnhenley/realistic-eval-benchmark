@@ -167,12 +167,15 @@ def inbox_excerpts(world: World, org: Org, limit: int = 6) -> list[str]:
             + e.body.strip()[:1500] for e in mails[-limit:]]
 
 
-async def researched(org: Org, world: World, *, max_tool_calls: int | None = None) -> dict | None:
+async def researched(org: Org, world: World, *, max_tool_calls: int | None = None,
+                    request_budget: research_module.ResearchRequestBudget | None = None) -> dict | None:
     """The research record the handler grounds itself in, made at first contact."""
     excerpts = inbox_excerpts(world, org) if org.kind == "dynamic_personal" else None
     from refund_eval.sim.common import current_scenario
 
     options = {"max_tool_calls": max_tool_calls} if max_tool_calls is not None else {}
+    if request_budget is not None:
+        options["request_budget"] = request_budget
     return await research(org, inbox_excerpts=excerpts, subject=current_scenario().subject, **options)
 
 
@@ -190,8 +193,6 @@ def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict
     if not isinstance(persona, dict):
         persona = {}
     dossier["persona"] = persona
-    if persona.get("Reply-from"):
-        return
     pages = {
         research_module._normal_url(page.get("url", "")): page.get("text", "")
         for page in (record or {}).get("pages", [])
@@ -225,6 +226,38 @@ def record_revision(world: World, *, resumed: bool = False) -> None:
         world_store().set(REVISION_KEY, SIMULATOR_REVISION)
 
 
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for nested in value.values():
+            yield from _strings(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from _strings(nested)
+
+
+def _entry_contains_scenario_data(record: dict | None, rules: dict | None, scenario: Scenario) -> bool:
+    from refund_eval.published.network import contains_scenario_data
+
+    dossier = (record or {}).get("dossier") or {}
+    pages = (record or {}).get("pages") or []
+    if isinstance(rules, dict) and "rules" in rules:
+        rule_data = rules.get("rules") or {}
+    else:
+        rule_data = rules or {}
+    if not isinstance(rule_data, dict):
+        rule_data = {}
+    content = [
+        dossier,
+        [page.get("text") for page in pages if isinstance(page, dict)],
+        rule_data.get("terms"),
+        rule_data.get("grounds"),
+    ]
+    return any(contains_scenario_data(text, scenario)
+               for value in content for text in _strings(value))
+
+
 async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
     """Pin company configuration and research once, also across resumed runs."""
     saved = dict(world_store().get(COMPANIES_KEY) or {})
@@ -251,19 +284,30 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
             "pages_sha256": (shared.get("provenance") or {}).get("pages_sha256", ""),
         }
     else:
+        request_budget = research_module.request_budget_for(org) if dynamic_org else None
         record = (world_store().get("late_refund_frozen_dossiers") or {}).get(org.key)
-        if record is None:
-            if dynamic_org and company_store.enabled():
-                from refund_eval.sim.research import DEEP_RESEARCH_LOOKUPS
+        try:
+            if record is None:
+                if dynamic_org and company_store.enabled():
+                    from refund_eval.sim.research import DEEP_RESEARCH_LOOKUPS
 
-                record = await researched(org, world, max_tool_calls=DEEP_RESEARCH_LOOKUPS)
-            else:
-                record = await researched(org, world)
+                    record = await researched(
+                        org, world, max_tool_calls=DEEP_RESEARCH_LOOKUPS, request_budget=request_budget)
+                else:
+                    record = await researched(org, world, request_budget=request_budget)
+        finally:
+            if request_budget is not None:
+                research_module.save_request_budget_for(org, request_budget)
         examples: list[dict] = []
         if (dynamic_org and record and record.get("dossier")
                 and not (EXEMPLARS_DIR / f"{org.key}.json").is_file()
                 and research_module.live_web() and research_module.research_mode() != "saved"):
-            example_record = await research_module.research_examples(org, scenario)
+            try:
+                example_record = await research_module.research_examples(
+                    org, scenario, request_budget=request_budget)
+            finally:
+                if request_budget is not None:
+                    research_module.save_request_budget_for(org, request_budget)
             examples = example_record.get("examples") or []
             record = {**record, "pages": [*(record.get("pages") or []), *(example_record.get("pages") or [])]}
         rules = None if org.kind == "dynamic_personal" else await company_rules(
@@ -288,6 +332,15 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
         can_save = (dynamic_org and company_store.enabled() and record and record.get("dossier")
                     and (not scenario.intent or rules is not None) and not generation_failed
                     and entry_metadata["source"] == "trial_only")
+        if can_save and _entry_contains_scenario_data(record, rules, scenario):
+            failures = list(world_store().get("company_generation_failures") or [])
+            failures.append({
+                "org": org.key, "scenario": scenario.id,
+                "errors": ["private value in research; not shared"],
+                "at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+            })
+            world_store().set("company_generation_failures", failures)
+            can_save = False
         if can_save:
             from refund_eval.models.client import client
             from refund_eval.sim import rules as rules_module

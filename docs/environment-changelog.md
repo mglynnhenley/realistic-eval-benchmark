@@ -24,17 +24,24 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: 45bcf1b87ad2207adb1784a68a522c0ffc7ab1bb3ad767783d4393796663ff44
+- Trial round: pending; to be run by the Repro Auditor after review.
+- Changes: share deep first-contact company research, rules, temperament, grounded public correspondence and reply addresses across trials (MAT-139).
+
+## 6.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: e6c08d5875dc00db967075e83bde5237d3e6017318ae63a79260edcdaa2a3100
+- Note: current PR #57 branch fingerprint; refresh after its 6.0 rebase.
+- Trial round: separately coordinated rerun, not yet run.
+- Changes: cap otherwise uncapped world requests, record failed-reply evidence, settle failures with conservative request bounds and allow individually budgeted retries (MAT-144, PR #57).
+
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: f77e72f8c15f89f41c075cc9b0a7c61631e6f74f25df771887e5250286c331a1
 - Trial round: pending; only offline validation in this change.
 - Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).
-
-## 5.0 — 2026-11-18
-- Kind: behaviour round
-- Fingerprint: 7498ac1bdc9dd2543fee9b50fcad8f9237e04ceba6f617379d5d54f05067622f
-- Trial round: pending; to be run by the Repro Auditor after review.
-- Changes: share deep first-contact company research, rules, temperament, grounded public correspondence and reply addresses across trials (MAT-139).
 
 ## 4.0 — 2026-11-18
 - Kind: behaviour round
