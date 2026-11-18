@@ -336,7 +336,7 @@ def test_late_cli_freezes_each_models_own_cap_and_common_token_budget(tmp_path, 
     job = JobConfig.model_validate_json((tmp_path / "late/job.json").read_text())
     assert {agent.model_name: agent.kwargs["cost_limit"] for agent in job.agents} == caps
     assert all(agent.kwargs["token_budget"] == 300_000 for agent in job.agents)
-    assert all(agent.kwargs["research_mode"] == "saved" for agent in job.agents)
+    assert all(agent.kwargs["research_mode"] == "auto" for agent in job.agents)
 
 
 def test_late_batch_rejects_scalar_before_creating_output(tmp_path):
