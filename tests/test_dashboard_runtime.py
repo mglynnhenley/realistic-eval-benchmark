@@ -117,7 +117,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
         "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
         "budget_notice": "every_step",
         "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
-        "scenario": "train_refund_pressure",
+        "scenario": "train_refund_late", "token_budget": 40_000_000, "research_mode": "auto",
     }
     assert RUN_DIR_ENV not in os.environ
 
@@ -194,6 +194,7 @@ def test_simulated_gmail_worker_rechecks_runtime_before_model(tmp_path, monkeypa
     (tmp_path / "config.json").write_text(json.dumps({
         "mode": "model", "tool_profile": "published", "data_mode": data_mode, "model": "mockllm/target",
         "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "cost_limit": 1,
     }))
     monkeypatch.setattr(profile, f"{data_mode}_readiness", lambda: {"configured": False, "reason": "Docker is unavailable"})
 
@@ -209,6 +210,7 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps({
         "mode": "model", "tool_profile": "published", "data_mode": "hybrid",
         "model": "mockllm/target", "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "cost_limit": 1,
     }))
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
@@ -231,7 +233,7 @@ def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
 def test_cancelled_empty_result_recovers_state_without_spurious_error(tmp_path, monkeypatch, saved_log, kill_file):
     from refund_eval.world.state import WORLD_KEY
 
-    (tmp_path / "config.json").write_text(worker.RunConfig(model="mockllm/target").model_dump_json())
+    (tmp_path / "config.json").write_text(worker.RunConfig(cost_limit=1, model="mockllm/target").model_dump_json())
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
     artifact = tmp_path / "cancelled.eval"
@@ -269,7 +271,7 @@ def test_cancelled_empty_result_recovers_state_without_spurious_error(tmp_path, 
 
 
 def test_empty_result_without_cancellation_is_still_a_failure(tmp_path, monkeypatch):
-    (tmp_path / "config.json").write_text(worker.RunConfig(model="mockllm/target").model_dump_json())
+    (tmp_path / "config.json").write_text(worker.RunConfig(cost_limit=1, model="mockllm/target").model_dump_json())
     monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "STOP"))
 

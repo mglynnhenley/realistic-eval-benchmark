@@ -24,7 +24,7 @@ For direct Anthropic, Google or xAI routes, run `uv sync --frozen --extra provid
 uv run --frozen python -m refund_eval.dashboard
 ```
 
-Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the scenario's bundled fictional mailbox and your saved snapshots. **Scenario** lists the bundled YAML scenarios, including `bills_price_rise` as well as the train-refund variants. The pressure variant adds increasingly insistent self-addressed user emails. The late variant uses a £350 cancelled journey and company decisions under their terms, described in [the late-refund specification](late-refund-spec.md).
+Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the scenario's bundled fictional mailbox and your saved snapshots. **Scenario** defaults to `train_refund_late`; `bills_price_rise` is also runnable. The late-refund scenario requires an explicit cost ceiling and uses a £350 cancelled journey and company decisions under their terms, described in [the late-refund specification](late-refund-spec.md).
 
 The dashboard launches paid model trials only when you start a run. The default data mode is hybrid. For batches, choose **Modal** or **Docker** under **Run location**; [Harbor setup](harbor.md#setup) covers their separate runtime requirements. Harbor packages Node, Chromium and the pinned browser alongside Inspect in each trial sandbox, using `browser_runtime=subprocess` without nested Docker.
 
@@ -59,9 +59,9 @@ Prices come from Inspect, explicit `--model-cost-config` overrides, bundled defa
 
 ### Earlier scenarios
 
-`train_refund` is the original refund request. `train_refund_pressure` adds increasingly insistent self-addressed user emails and authored policies for late claims and evidence requirements. Both remain supported; their authored facts and policies live in [the scenario YAML files](../refund_eval/scenario/).
+`train_refund` is the original refund request. `train_refund_pressure` adds increasingly insistent self-addressed user emails and authored policies for late claims and evidence requirements. Both are archived and unavailable for new launches; their authored facts and policies live in [the scenario archive](../refund_eval/scenario/archive/). Loading them by name still works for historical logs and tooling. To resume an old log, supply its original scenario and `resume_log`; the saved scenario identity is checked before restoration.
 
-For compatibility, new runs still default to `train_refund_pressure`, six simulated weeks, 1,000 target generations and a **$1** total model-cost cap. Override these explicitly for a longer trial. The late-refund Scout rubrics do not apply to these earlier scenarios.
+New runs default to `train_refund_late`, six simulated weeks, 1,000 target generations and a 40-million-target-token budget. An explicit total model-cost cap is required; launching without one fails. `bills_price_rise` remains runnable with its $1 default cap. The late-refund Scout rubrics do not apply to these earlier scenarios.
 
 ## Common settings
 
@@ -70,14 +70,14 @@ Pass task settings as `-T name=value`:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `trials` | `1` | Inspect epochs of the scenario sample. |
-| `scenario` | `train_refund_pressure` | Bundled scenario name, or a YAML file path. |
+| `scenario` | `train_refund_late` | Bundled scenario name, or a YAML file path. |
 | `published_data` | `hybrid` | Hybrid web or fixture web data. |
 | `fixture_path` | scenario inbox, or the shared bundled inbox | An explicit local inbox JSON file. |
 | `company_simulator` | none | Override the simulator implementation for every company, for example `concordia`. Personal contacts are unchanged. |
 | `research_mode` | `auto` | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial where supported. |
 | `max_turns` | `1000` | Maximum target model generations. |
 | `sim_weeks` | `6` | Maximum simulated duration. |
-| `cost_limit` | `1`; explicit for late refund | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
+| `cost_limit` | required for default late refund; `1` for bills | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
 | `token_budget` | none; `40000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
 | `budget_notice` | `every_step` | With a `token_budget`, when the runtime notice appears: `every_step` before each step, `daily` on the first step of each simulated London day, `low` only once under 20% of the tokens or session time remains. The system prompt's description of the notice follows the mode. |

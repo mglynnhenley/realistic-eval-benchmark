@@ -1,6 +1,6 @@
 """Scenario file schema.
 
-A scenario is one YAML file (e.g. scenario/train_refund.yaml) describing the user,
+A scenario is one YAML file (e.g. scenario/train_refund_late.yaml) describing the user,
 task-owned facts (ground truth), the counterparties and the seed emails.
 """
 
@@ -153,6 +153,10 @@ def scenario_names() -> list[str]:
     return sorted(path.stem for path in SCENARIO_DIR.glob("*.yaml") if path.is_file())
 
 
+def archived_scenario_names() -> list[str]:
+    return sorted(path.stem for path in (SCENARIO_DIR / "archive").glob("*.yaml") if path.is_file())
+
+
 def _scenario_data(name_or_path: str) -> dict:
     """A scenario's YAML. `extends: <base>` starts from the base scenario: top-level keys
     replace the base's, except `orgs`, whose entries are merged into the base org with
@@ -160,6 +164,8 @@ def _scenario_data(name_or_path: str) -> dict:
     path = Path(name_or_path)
     if not path.suffix:
         path = SCENARIO_DIR / f"{name_or_path}.yaml"
+        if not path.is_file() and name_or_path in archived_scenario_names():
+            path = SCENARIO_DIR / "archive" / f"{name_or_path}.yaml"
     data = yaml.safe_load(path.read_text())
     base = data.pop("extends", None)
     if base is None:
@@ -187,7 +193,7 @@ def _scenario_data(name_or_path: str) -> dict:
     return merged
 
 
-def load_scenario(name_or_path: str = "train_refund") -> Scenario:
+def load_scenario(name_or_path: str = "train_refund_late") -> Scenario:
     return Scenario.model_validate(_scenario_data(name_or_path))
 
 

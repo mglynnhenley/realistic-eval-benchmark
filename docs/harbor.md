@@ -60,8 +60,7 @@ targets. `--trials` counts attempts per model (default 4); `--concurrency` limit
 across the whole batch (default 2). The default per-trial wall-clock limit is 1,800 seconds.
 Automatic retries are disabled.
 
-The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
-request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
+The default scenario is `train_refund_late`, with six simulated weeks, 1,000 turns and a 40-million-target-token budget. An explicit `--cost-limit` is required. `bills_price_rise` also remains runnable; `train_refund` and `train_refund_pressure` are archived for historical log loading and resume, not new CLI launches. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
 grader role, which checks company replies for financial consistency, defaults to
 `openrouter/anthropic/claude-haiku-4.5`. Override these with `--simulator-model`
 and `--grader-model`.
@@ -71,7 +70,7 @@ and [Scout behaviour grading](running.md#grading-saved-runs-with-scout) separate
 `--history-tokens 60000` limits the target's visible history while preserving the
 full log; use `0` for untrimmed history.
 
-The default whole-trial model-cost cap is $1 for the earlier scenarios. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Each frozen trial receives only its selected target's dollar cap. For a complete single-model Muse example, use [the preparation script](running.md#prepare-the-muse-configuration).
+The default whole-trial model-cost cap is $1 for `bills_price_rise`; there is no implicit cap for the default late-refund scenario. `train_refund_late` requires explicit caps; a batch with several targets supplies a JSON object keyed by full target model ID to `--cost-limit`. Each frozen trial receives only its selected target's dollar cap. For a complete single-model Muse example, use [the preparation script](running.md#prepare-the-muse-configuration).
 
 A cap is a ceiling, not an estimated bill. The first budget, turn, time or other stop condition ends a trial; twelve weeks is a ceiling. Multiply the cap by the number of attempts to budget a batch, and account separately for Scout grading and sandbox compute. In-flight calls can overshoot a cap. Tool results remain uncapped.
 

@@ -117,15 +117,15 @@ def test_invalid_modes_rejected(mode):
     with pytest.raises(ValueError, match="budget_notice"):
         harness.refund_agent(budget_notice=mode)
     with pytest.raises(ValidationError):
-        RunConfig(budget_notice=mode)
+        RunConfig(cost_limit=1, budget_notice=mode)
 
 
 def test_run_config_defaults_and_dashboard_worker_threads_the_mode(tmp_path):
-    assert RunConfig().budget_notice == "every_step"
-    (tmp_path / "config.json").write_text(RunConfig(budget_notice="low").model_dump_json())
+    assert RunConfig(cost_limit=1).budget_notice == "every_step"
+    (tmp_path / "config.json").write_text(RunConfig(cost_limit=1, budget_notice="low").model_dump_json())
     assert load_config(tmp_path)["budget_notice"] == "low"
     # Configs saved before the setting existed keep today's behaviour.
-    legacy = RunConfig().model_dump(mode="json")
+    legacy = RunConfig(cost_limit=1).model_dump(mode="json")
     del legacy["budget_notice"]
     (tmp_path / "config.json").write_text(json.dumps(legacy))
     assert load_config(tmp_path)["budget_notice"] == "every_step"

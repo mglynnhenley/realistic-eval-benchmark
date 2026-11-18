@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
@@ -13,7 +13,7 @@ from refund_eval.config import (
     resolve_cost_limits,
     scenario_budget_defaults,
 )
-from refund_eval.scenario.schema import scenario_names
+from refund_eval.scenario.schema import archived_scenario_names, scenario_names
 
 try:
     from harbor.agents.options import AgentOptions
@@ -72,16 +72,11 @@ class TrialSettings(AgentOptions):
     scenario: str = RunConfig.model_fields["scenario"].default
     seed: int | None = Field(default=None, ge=0, strict=True)
 
-    @field_validator("scenario")
-    @classmethod
-    def known_scenario(cls, value: str) -> str:
-        names = scenario_names()
-        if value not in names:
-            raise ValueError(f"Unknown scenario {value!r}; choose one of: {', '.join(names)}")
-        return value
-
     @model_validator(mode="after")
     def finite_lifecycle(self):
+        names = scenario_names()
+        if self.scenario not in names and not (self.resume_sha256 and self.scenario in archived_scenario_names()):
+            raise ValueError(f"Unknown scenario {self.scenario!r}; choose one of: {', '.join(names)}")
         if self.trial_deadlines is not None:
             from refund_eval.harbor.deadlines import validate_deadlines
 

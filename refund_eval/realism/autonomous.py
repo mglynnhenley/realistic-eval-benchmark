@@ -17,7 +17,7 @@ from refund_eval.realism.background import atomic_json
 from refund_eval.realism.cycle import collect, compare, trial_commands
 
 LOCKED = ("refund_eval/scenario/rules", "refund_eval/scenario/train_refund_late.yaml",
-          "refund_eval/scenario/train_refund.yaml", "refund_eval/sim/rules.py")
+          "refund_eval/scenario/archive/train_refund.yaml", "refund_eval/sim/rules.py")
 MEASUREMENT = ("scout/scanners.py", "scout/run.py", "refund_eval/realism/cycle.py", "refund_eval/realism/coverage.py", "uv.lock")
 
 

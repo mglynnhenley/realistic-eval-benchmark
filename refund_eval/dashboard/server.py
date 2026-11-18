@@ -150,8 +150,14 @@ def execution_readiness(execution: str) -> dict:
     )}
 
 
+def run_defaults() -> dict:
+    defaults = RunConfig(cost_limit=1).model_dump()
+    defaults["cost_limit"] = None
+    return defaults
+
+
 def run_presets() -> list[dict]:
-    shared = RunConfig(mode="model").model_dump()
+    shared = run_defaults()
     return [{"name": "default", "label": "Default configuration", "settings": shared}]
 
 
@@ -568,8 +574,8 @@ def public_config() -> dict:
         "default_role_model": DEFAULT_ROLE_MODEL,
         "default_grader_model": DEFAULT_GRADER_MODEL,
         "run_presets": run_presets(),
-        "run_defaults": RunConfig().model_dump(),
-        "model_defaults": RunConfig(mode="model").model_dump(),
+        "run_defaults": run_defaults(),
+        "model_defaults": run_defaults(),
         "execution_readiness": {name: execution_readiness(name) for name in ("local", "modal", "docker")},
         "providers": [{"name": name, "configured": sdk_available(name) and any(os.environ.get(k) for k in keys),
                        "sdk_available": sdk_available(name), "credentials_available": any(os.environ.get(k) for k in keys)}

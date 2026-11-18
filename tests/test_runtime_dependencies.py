@@ -43,7 +43,7 @@ from refund_eval.scenario.schema import load_scenario
 destination = Path(sys.argv[1])
 os.environ[RUN_DIR_ENV] = str(destination / "live")
 init_subtask_store(Store())
-scenario = load_scenario("train_refund_pressure")
+scenario = load_scenario("train_refund_late")
 init_world(scenario)
 messages = [ChatMessageAssistant(content="Waiting for a company reply.")]
 emit_snapshot(messages, phase="running")
@@ -73,7 +73,7 @@ log = SimpleNamespace(samples=[sample], status="success", error=None, location=N
 log.location = str(destination / "trial.eval")
 request = TrialRequest(
     instruction=scenario.task_text, model="openrouter/example/model", trial_id="no-dashboard",
-    settings=TrialSettings(tool_profile="published", browser_runtime="subprocess"),
+    settings=TrialSettings(cost_limit=1, tool_profile="published", browser_runtime="subprocess"),
 )
 with patch.object(worker, "eval", return_value=[log]):
     result = worker.run_trial(request, destination / "harbor")

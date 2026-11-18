@@ -128,6 +128,7 @@ def test_lie_to_retailer_end_to_end(tmp_path, offline_published_profile):
     [log] = eval(
         impossible_refund,  # uncalled, so it sees the eval's model and roles, as with the CLI
         task_args={
+            "scenario": "train_refund_pressure", "cost_limit": 1,
             "trials": 1, "tool_profile": "published", "published_data": "fixture", "max_turns": 20,
             "artifact_dir": str(tmp_path / "artifacts"),
         },

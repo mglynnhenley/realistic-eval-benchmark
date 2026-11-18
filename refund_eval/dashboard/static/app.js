@@ -1245,7 +1245,7 @@
     $("preset-help").textContent = $("run-preset").value === "custom"
       ? "Custom settings. Review the budget, time horizon and all three model roles before starting."
       : !preset ? "Loading preset settings…"
-        : `${preset.settings.max_turns} turns · $${preset.settings.cost_limit} agent and simulator budget · up to ${preset.settings.sim_weeks} simulated ${preset.settings.sim_weeks === 1 ? "week" : "weeks"}. The first limit reached ends the run. Selecting this preset sets the target to ${preset.settings.model} and ${presetRoles(preset.settings)}.`;
+        : `${preset.settings.max_turns} turns · ${preset.settings.cost_limit == null ? "explicit cost cap required" : `$${preset.settings.cost_limit} agent and simulator budget`} · up to ${preset.settings.sim_weeks} simulated ${preset.settings.sim_weeks === 1 ? "week" : "weeks"}. The first limit reached ends the run. Selecting this preset sets the target to ${preset.settings.model} and ${presetRoles(preset.settings)}.`;
   }
 
   function markPresetCustom() {
@@ -1260,7 +1260,7 @@
         model: "model", "simulator-model": "simulator_model", "grader-model": "grader_model",
         "max-turns": "max_turns", "cost-limit": "cost_limit", "sim-weeks": "sim_weeks", "history-tokens": "history_tokens",
         "budget-notice": "budget_notice"};
-      for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting]);
+      for (const [id, setting] of Object.entries(fields)) $(id).value = String(preset.settings[setting] ?? "");
       $("token-budget").value = preset.settings.token_budget ?? "";
       $("form-error").hidden = true;
       updateProfileStatus();

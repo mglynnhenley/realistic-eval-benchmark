@@ -7,7 +7,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from refund_eval.scenario.schema import load_scenario, scenario_names
+from refund_eval.scenario.schema import archived_scenario_names, load_scenario, scenario_names
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
 # Role defaults; the target is chosen per run. The grader role checks the simulator's
@@ -50,9 +50,11 @@ def resolve_cost_limits(cost_limit: CostLimit, models: list[str], *, scenario: s
 
 def scenario_budget_defaults(values):
     """No implicit late-refund dollar cap; freeze its dossiers, set its target budget and restrict research modes."""
-    if isinstance(values, dict) and "sim_weeks" not in values and values.get("scenario") in scenario_names():
-        values = {**values, "sim_weeks": load_scenario(values["scenario"]).sim_weeks}
-    if isinstance(values, dict) and values.get("scenario") == LATE_REFUND_SCENARIO:
+    if isinstance(values, dict):
+        scenario = values.get("scenario", LATE_REFUND_SCENARIO)
+        if "sim_weeks" not in values and scenario in scenario_names():
+            values = {**values, "sim_weeks": load_scenario(scenario).sim_weeks}
+    if isinstance(values, dict) and values.get("scenario", LATE_REFUND_SCENARIO) == LATE_REFUND_SCENARIO:
         values = dict(values)
         if "cost_limit" not in values:
             raise ValueError("train_refund_late requires an explicit cost_limit for each target model")
@@ -119,18 +121,10 @@ class RunConfig(BaseModel):
     concurrency: int = Field(default=1, ge=1, le=16, strict=True)
     time_limit: int | None = Field(default=None, ge=1, le=72000, strict=True)
     # Scenario YAML bundled with the source, discovered when the run is configured.
-    scenario: str = "train_refund_pressure"
+    scenario: str = LATE_REFUND_SCENARIO
     # Seed for simulated randomness (temperaments, reply timing); None draws one per trial.
     # Local runs only. Every trial records its seed in its world.
     seed: int | None = Field(default=None, ge=0, strict=True)
-
-    @field_validator("scenario")
-    @classmethod
-    def known_scenario(cls, value: str) -> str:
-        names = scenario_names()
-        if value not in names:
-            raise ValueError(f"Unknown scenario {value!r}; choose one of: {', '.join(names)}")
-        return value
 
     # Continue an earlier trial from its .eval log (one model, one trial, the same target model).
     resume_log: str | None = Field(default=None, max_length=1000, pattern=r"\.eval$|snapshot\.json$")
@@ -144,5 +138,8 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_cost_limits(self):
+        names = scenario_names()
+        if self.scenario not in names and not (self.resume_log and self.scenario in archived_scenario_names()):
+            raise ValueError(f"Unknown scenario {self.scenario!r}; choose one of: {', '.join(names)}")
         resolve_cost_limits(self.cost_limit, self.models or [self.model], scenario=self.scenario)
         return self

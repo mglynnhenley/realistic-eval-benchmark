@@ -413,7 +413,7 @@ def persona_text(dossier: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------- CLI
 
 
-def subject_org(subject: str, scenario_id: str = "train_refund") -> Org:
+def subject_org(subject: str, scenario_id: str = "train_refund_late") -> Org:
     """A scenario organisation by key, or an ad-hoc one for a bare web domain."""
     scenario = load_scenario(scenario_id)
     for org in scenario.orgs:
@@ -435,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                                      description="Research an organisation live and print its dossier.")
     parser.add_argument("subject", help="scenario organisation key (e.g. trainline) or a web domain")
     parser.add_argument("--save", action="store_true", help="write refund_eval/scenario/dossiers/<subject slug>/<key>.json")
-    parser.add_argument("--scenario", default="train_refund", help="scenario supplying the organisation and task subject")
+    parser.add_argument("--scenario", default="train_refund_late", help="scenario supplying the organisation and task subject")
     parser.add_argument("--model", default=DEFAULT_ROLE_MODEL, help="Inspect model for the simulator role")
     args = parser.parse_args(argv)
     load_dotenv()

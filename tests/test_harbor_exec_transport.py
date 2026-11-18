@@ -109,7 +109,7 @@ class InstalledEnvironment:
 
 
 def agent(path, bounded=True):
-    return RefundInspectAgent(logs_dir=path, model_name="openrouter/example/offline", scenario="train_refund",
+    return RefundInspectAgent(cost_limit=1, logs_dir=path, model_name="openrouter/example/offline", scenario="train_refund_late",
                               time_limit=1, trial_deadlines=trial_deadlines(1) if bounded else None)
 
 
@@ -124,7 +124,7 @@ async def test_real_installed_exec_path_rejects_original_float_without_transport
 async def test_real_installed_worker_exec_accepts_int_and_keeps_fractional_duration(tmp_path):
     env = InstalledEnvironment()
     context = AgentContext()
-    await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, context)
+    await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, context)
     [(command, kwargs)] = env.calls
     duration = re.search(r"--worker-seconds (\d+\.\d{6})", command)
     assert duration and type(kwargs["timeout_sec"]) is int
@@ -137,7 +137,7 @@ async def test_real_installed_nonzero_error_stays_primary_and_usage_unknown(tmp_
     env = InstalledEnvironment(code=7, missing_native=True)
     context = AgentContext()
     with pytest.raises(RuntimeError, match="exited 7"):
-        await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, context)
+        await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, context)
     assert "/logs/agent/worker.log" in env.downloads
     assert context.cost_usd is None
     assert json.loads((tmp_path / "agent/collection.json").read_text())["errors"]
@@ -146,7 +146,7 @@ async def test_real_installed_nonzero_error_stays_primary_and_usage_unknown(tmp_
 async def test_real_installed_cancel_uses_integer_term_and_preserves_cancel(tmp_path):
     env = InstalledEnvironment(waiting=True)
     obj = agent(tmp_path / "agent")
-    task = asyncio.create_task(obj.run(load_scenario("train_refund").task_text, env, AgentContext()))
+    task = asyncio.create_task(obj.run(load_scenario("train_refund_late").task_text, env, AgentContext()))
     await env.started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -159,7 +159,7 @@ async def test_real_installed_cancel_uses_integer_term_and_preserves_cancel(tmp_
 async def test_real_installed_kill_switch_touch_is_integer(tmp_path, monkeypatch):
     env = InstalledEnvironment(waiting=True)
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: "offline stop")
-    await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, AgentContext())
+    await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, AgentContext())
     [(_command, kwargs)] = [(command, kwargs) for command, kwargs in env.calls if "touch /app/.context/KILL" in command]
     assert type(kwargs["timeout_sec"]) is int and 1 <= kwargs["timeout_sec"] <= 10
 
@@ -206,7 +206,7 @@ async def test_subsecond_stop_and_kill_never_construct_exec_but_download_indepen
 
 async def test_actual_installed_legacy_exec_timeout_is_unchanged(tmp_path):
     env = InstalledEnvironment()
-    await agent(tmp_path / "agent", bounded=False).run(load_scenario("train_refund").task_text, env, AgentContext())
+    await agent(tmp_path / "agent", bounded=False).run(load_scenario("train_refund_late").task_text, env, AgentContext())
     [(command, kwargs)] = env.calls
     assert "--worker-seconds" not in command and kwargs["timeout_sec"] == 601
 
@@ -225,7 +225,7 @@ async def test_worker_deadline_crossing_rejects_before_exec_coroutine(tmp_path, 
     env = InstalledEnvironment()
     context = AgentContext()
     with pytest.raises(TimeoutError, match="one whole second"):
-        await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, context)
+        await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, context)
     assert not env.calls and not env.requests and env.downloads
     assert reads[0] == reads[1] == reads[2]  # Same fixed worker deadline, not a new grace.
     assert context.cost_usd is None
@@ -246,7 +246,7 @@ async def test_touch_deadline_crossing_skips_exec_and_preserves_error(tmp_path, 
     env = InstalledEnvironment(waiting=True)
     context = AgentContext()
     with pytest.raises(TimeoutError, match="one whole second"):
-        await agent(tmp_path / "agent").run(load_scenario("train_refund").task_text, env, context)
+        await agent(tmp_path / "agent").run(load_scenario("train_refund_late").task_text, env, context)
     assert not any("touch /app/.context/KILL" in command for command, _ in env.calls)
     assert any(command.endswith("TERM") for command, _ in env.calls)
     assert reads[0] == reads[5]

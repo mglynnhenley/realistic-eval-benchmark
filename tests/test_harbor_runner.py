@@ -30,6 +30,7 @@ from refund_eval.scenario.schema import load_scenario
 
 
 def published_settings(**kwargs):
+    kwargs.setdefault("cost_limit", 1)
     return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
 
 
@@ -69,7 +70,7 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert job.environment.type == "modal" and job.environment.delete
     assert job.retry.max_retries == 0
     assert task.config.environment.network_mode == "public"
-    assert task.instruction.strip() == load_scenario("train_refund_pressure").task_text.strip()
+    assert task.instruction.strip() == load_scenario("train_refund_late").task_text.strip()
     assert job.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
     source = task.paths.environment_dir / "source"
     assert (source / "refund_eval/agent/harness.py").is_file()
@@ -138,14 +139,14 @@ def test_cli_history_window_reaches_the_frozen_agent_settings(tmp_path, monkeypa
     monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"), "--environment", "docker",
                                       "--model", "openrouter/example/model", "--history-tokens", "0",
                                       "--budget-notice", "low",
-                                      "--scenario", "train_refund"])
+                                      "--scenario", "train_refund_late", "--cost-limit", "1"])
     main()
     job = JobConfig.model_validate_json((tmp_path / "job/job.json").read_text())
     assert job.agents[0].kwargs["history_tokens"] == 0
     assert job.agents[0].kwargs["budget_notice"] == "low"
-    assert job.agents[0].kwargs["scenario"] == "train_refund"
+    assert job.agents[0].kwargs["scenario"] == "train_refund_late"
     assert "daily_allowance" not in job.agents[0].kwargs
-    assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund").task_text.strip()
+    assert Task(job.tasks[0].path).instruction.strip() == load_scenario("train_refund_late").task_text.strip()
     with pytest.raises(ValueError):
         published_settings(history_tokens=-1)
     with pytest.raises(ValueError):
@@ -232,23 +233,23 @@ class FakeEnvironment:
 
 async def test_agent_propagates_host_kill_and_collects_usage(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: "test stop")
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
+    agent = RefundInspectAgent(cost_limit=1, logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
     environment = FakeEnvironment()
     context = AgentContext()
-    await agent.run(load_scenario("train_refund_pressure").task_text, environment, context)
+    await agent.run(load_scenario("train_refund_late").task_text, environment, context)
     assert any("touch /app/.context/KILL" in c for c in environment.commands)
-    assert environment.request["settings"]["scenario"] == "train_refund_pressure"
+    assert environment.request["settings"]["scenario"] == "train_refund_late"
     assert context.n_input_tokens == 12 and context.n_output_tokens == 5
     assert context.cost_usd is None  # unknown usage is not silently reported as zero
 
 
 async def test_cancellation_releases_pending_exec(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
+    agent = RefundInspectAgent(cost_limit=1, logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
     environment = FakeEnvironment(wait=True)
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(
-            agent.run(load_scenario("train_refund_pressure").task_text, environment, AgentContext()),
+            agent.run(load_scenario("train_refund_late").task_text, environment, AgentContext()),
             timeout=0.03,
         )
     assert environment.cancelled
@@ -256,10 +257,10 @@ async def test_cancellation_releases_pending_exec(tmp_path, monkeypatch):
 
 async def test_worker_failure_is_reported_to_harbor(tmp_path, monkeypatch):
     monkeypatch.setattr("refund_eval.harbor.agent.kill_reason", lambda: None)
-    agent = RefundInspectAgent(logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
+    agent = RefundInspectAgent(cost_limit=1, logs_dir=tmp_path, model_name="openrouter/example/model", tool_profile="published", browser_runtime="subprocess")
     with pytest.raises(RuntimeError, match="exited 7"):
         await agent.run(
-            load_scenario("train_refund_pressure").task_text, FakeEnvironment(return_code=7), AgentContext(),
+            load_scenario("train_refund_late").task_text, FakeEnvironment(return_code=7), AgentContext(),
         )
 
 
@@ -321,7 +322,7 @@ def test_cli_freezes_default_role_models(tmp_path, monkeypatch, capsys):
     assert agent.model_name == "openrouter/provider/target"
     assert agent.kwargs["simulator_model"] == DEFAULT_ROLE_MODEL
     assert agent.kwargs["grader_model"] == DEFAULT_GRADER_MODEL
-    assert agent.kwargs["scenario"] == "train_refund_pressure"
+    assert agent.kwargs["scenario"] == "train_refund_late"
     assert agent.kwargs["sim_weeks"] == 6
     assert agent.kwargs["max_turns"] >= 100
 

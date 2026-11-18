@@ -8,7 +8,13 @@ from datetime import timedelta
 import pytest
 from fixtures.simulator import start_sample
 from inspect_ai import eval
-from inspect_ai.model import ModelOutput, get_model
+from inspect_ai.model import (
+    ModelCost,
+    ModelInfo,
+    ModelOutput,
+    get_model,
+    set_model_info,
+)
 from inspect_ai.solver import generate
 from inspect_ai.util import store
 
@@ -49,7 +55,7 @@ def test_task_resolves_fixture_path_and_records_it_without_changing_the_file(tmp
     captured = {}
     stub_task_dependencies(monkeypatch, captured)
     monkeypatch.chdir(tmp_path)
-    task = impossible_refund(trials=1, tool_profile="published", published_data="fixture", fixture_path="inbox.json")
+    task = impossible_refund(cost_limit=1, trials=1, tool_profile="published", published_data="fixture", fixture_path="inbox.json")
     assert task.metadata["fixture_path"] == str(path)
     assert task.dataset[0].metadata["fixture_path"] == str(path)
     assert captured["fixture_path"] == str(path)
@@ -58,14 +64,14 @@ def test_task_resolves_fixture_path_and_records_it_without_changing_the_file(tmp
 
 def test_task_rejects_fixture_override_outside_published_fixture_mode():
     with pytest.raises(ValueError, match="published_data must be"):
-        impossible_refund(tool_profile="published", published_data="live", fixture_path="unused.json")
+        impossible_refund(cost_limit=1, tool_profile="published", published_data="live", fixture_path="unused.json")
 
 
 def test_fixture_task_still_derives_fixture_path_from_the_alias(tmp_path, monkeypatch):
     path = inbox(tmp_path / "inbox.json")
     captured = {}
     stub_task_dependencies(monkeypatch, captured)
-    task = impossible_refund(trials=1, tool_profile="published", published_data="fixture", mail_source=f"fixture:{path}")
+    task = impossible_refund(cost_limit=1, trials=1, tool_profile="published", published_data="fixture", mail_source=f"fixture:{path}")
     assert task.metadata["fixture_path"] == str(path)
     assert task.dataset[0].metadata["fixture_path"] == str(path)
     assert captured["fixture_path"] == str(path)
@@ -79,13 +85,13 @@ def test_override_validation_precedes_runtime_or_model_setup(tmp_path, monkeypat
     monkeypatch.setattr(profile, "fixture_readiness", lambda: pytest.fail("Validated runtime before fixture"))
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: pytest.fail("Set up models before fixture"))
     with pytest.raises(ValueError, match="[Ff]ixture inbox"):
-        impossible_refund(tool_profile="published", published_data="fixture", fixture_path=str(path))
+        impossible_refund(cost_limit=1, tool_profile="published", published_data="fixture", fixture_path=str(path))
 
 
 def test_default_task_does_not_add_override_metadata_or_solver_argument(monkeypatch):
     captured = {}
     stub_task_dependencies(monkeypatch, captured)
-    task = impossible_refund(trials=1, tool_profile="published", published_data="fixture")
+    task = impossible_refund(cost_limit=1, trials=1, tool_profile="published", published_data="fixture")
     assert "fixture_path" not in task.metadata
     assert "fixture_path" not in task.dataset[0].metadata
     assert "fixture_path" not in captured
@@ -173,7 +179,9 @@ def test_task_agent_and_adapter_forward_override_in_an_offline_inspect_run(tmp_p
     monkeypatch.setattr(task_module.adapters, "load_scorers", lambda *a, **kw: [])
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     model = get_model("mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", "Waiting.")])
-    [log] = eval(impossible_refund, model=model, task_args={"trials": 1, "max_turns": 1, "cost_limit": None,
+    set_model_info("mockllm/model", ModelInfo(model="mockllm/model", cost=ModelCost(
+        input=0, output=0, input_cache_write=0, input_cache_read=0)))
+    [log] = eval(impossible_refund, model=model, task_args={"trials": 1, "max_turns": 1, "cost_limit": 1,
                      "tool_profile": "published", "published_data": "fixture", "fixture_path": str(path)},
                  log_dir=str(tmp_path / "logs"), display="none")
     assert log.status == "success", log.error
