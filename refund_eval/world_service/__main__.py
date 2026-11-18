@@ -24,7 +24,7 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--scenario", default=defaults.scenario, help="Scenario name or YAML path (default: %(default)s)")
     p.add_argument("--seed", type=int, default=None, help="Seed for simulated randomness (default: drawn, recorded)")
-    p.add_argument("--sim-weeks", type=float, default=defaults.sim_weeks, help="Simulated session length (default: %(default)s)")
+    p.add_argument("--sim-weeks", type=float, default=argparse.SUPPRESS, help="Simulated session length (default: scenario's)")
     p.add_argument("--max-turns", type=int, default=defaults.max_turns, help="Turn cap (default: %(default)s)")
     p.add_argument("--checkin-hours", type=int, nargs="+", default=list(defaults.checkin_hours),
                    help="London hours of the daily check-ins (default: %(default)s)")
@@ -52,7 +52,8 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
         print(f"Set {ADMIN_TOKEN_ENV} and {TURN_TOKEN_ENV}.", file=sys.stderr)
         return 2
     settings = WorldSettings(
-        scenario=args.scenario, seed=args.seed, sim_weeks=args.sim_weeks, max_turns=args.max_turns,
+        scenario=args.scenario, seed=args.seed, max_turns=args.max_turns,
+        **({"sim_weeks": args.sim_weeks} if hasattr(args, "sim_weeks") else {}),
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
         company_simulator=args.company_simulator, browser_runtime=args.browser_runtime, output_dir=args.output_dir,

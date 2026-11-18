@@ -2,6 +2,7 @@
 
 import shutil
 import sys
+import tomllib
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,17 +15,20 @@ from refund_eval.harbor import __main__ as harbor_cli
 from refund_eval.harbor.config import TrialSettings
 from refund_eval.scenario import schema
 from refund_eval.world.state import World
+from refund_eval.world_service.settings import WorldSettings
 
 
-@pytest.mark.parametrize("settings_class", [RunConfig, TrialSettings, "task"])
+@pytest.mark.parametrize("settings_class", [RunConfig, TrialSettings, WorldSettings, "task", "native_writer",
+                                           "native_cli", "harbor_cli", "world_cli", "world_env"])
 @pytest.mark.parametrize(("name", "overrides", "weeks"), [
     ("bills_price_rise", {}, 12),
     ("bills_price_rise", {"sim_weeks": 4}, 4),
     ("bills_price_rise", {"sim_weeks": 6}, 6),
     ("train_refund_pressure", {}, 6),
 ])
-def test_scenario_default_deadline(settings_class, name, overrides, weeks, monkeypatch):
+def test_scenario_default_deadline(settings_class, name, overrides, weeks, monkeypatch, tmp_path):
     scenario = schema.load_scenario(name)
+    flags = ["--sim-weeks", str(overrides["sim_weeks"])] if overrides else []
     if settings_class == "task":
         from refund_eval import task
         from refund_eval.published import profile
@@ -34,6 +38,62 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
         monkeypatch.setattr(task, "default_model_roles", lambda _: {})
         resolved = task.impossible_refund(scenario=name, published_data="fixture", **overrides)
         sim_weeks = resolved.metadata["sim_weeks"]
+    elif settings_class in {"native_writer", "native_cli"}:
+        from refund_eval.harbor import adapter
+
+        def copy_source(destination):
+            destination.mkdir()
+            return "test-source"
+
+        monkeypatch.setattr(adapter, "copy_source", copy_source)
+        monkeypatch.setattr(adapter, "validate_and_index", lambda *args: None)
+        if settings_class == "native_cli":
+            assert adapter.main(["--scenario", name, "--out", str(tmp_path), *flags]) == 0
+        else:
+            adapter.write_task(tmp_path, scenario=name, data_mode="fixture", max_turns=1000,
+                               research_mode="auto", simulator_model="mockllm/model", grader_model="mockllm/model",
+                               agent_timeout=3600, verifier_timeout=600, cpus=2, memory_mb=4096, **overrides)
+        config = tomllib.loads((tmp_path / name / "task.toml").read_text())
+        sim_weeks = config["metadata"]["sim_weeks"]
+        assert float(config["environment"]["env"]["WORLD_SIM_WEEKS"]) == sim_weeks
+    elif settings_class == "harbor_cli":
+        prepared = {}
+        monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path),
+                                        "--model", "openrouter/example/model", "--scenario", name, *flags])
+        monkeypatch.setattr(harbor_cli, "prepare", lambda destination, **kw: prepared.update(kw) or destination / "job.json")
+        harbor_cli.main()
+        sim_weeks = prepared["settings"].sim_weeks
+    elif settings_class in {"world_cli", "world_env"}:
+        from refund_eval.harbor.world_entrypoint import world_argv
+        from refund_eval.world_service import __main__ as world_cli
+        from refund_eval.world_service import server as world_server
+        from refund_eval.world_service import trial
+
+        captured = {}
+
+        class Trial:
+            def __init__(self, settings, **kwargs):
+                captured["settings"] = settings
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+        async def serve(*args, **kwargs):
+            pass
+
+        monkeypatch.setattr(trial, "WorldTrial", Trial)
+        monkeypatch.setattr(world_server, "serve_until_stopped", serve)
+        monkeypatch.setenv("WORLD_ADMIN_TOKEN", "test-admin")
+        monkeypatch.setenv("WORLD_TURN_TOKEN", "test-turn")
+        argv = ["--scenario", name, *flags]
+        if settings_class == "world_env":
+            argv = world_argv({"WORLD_SCENARIO": name,
+                               **({"WORLD_SIM_WEEKS": str(overrides["sim_weeks"])} if overrides else {})}, None)
+        assert world_cli.main(argv) == 0
+        sim_weeks = captured["settings"].sim_weeks
     else:
         sim_weeks = settings_class(scenario=name, **overrides).sim_weeks
     world = World(start_time=scenario.start_time, now=scenario.start_time)
