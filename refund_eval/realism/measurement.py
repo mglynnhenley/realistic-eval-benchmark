@@ -294,7 +294,10 @@ def run_measurement(*, repo: Path, run_dir: Path, baseline: str, candidate: str,
                                                   trial_reserve=trial_reserve, scan_reserve=scan_reserve)
                     evaluated["evidence"] = _export(evaluated, hashes)
                     result = {"status": "complete", "baseline": reference, "candidate": evaluated,
-                              "comparison": autonomous.compare(reference["score"]["per_trial"], evaluated["score"]["per_trial"]),
+                              "comparison": autonomous.compare(
+                                  reference["score"]["per_trial"], evaluated["score"]["per_trial"],
+                                  versions_a=[reference["score"].get("environment_version", "unversioned")],
+                                  versions_b=[evaluated["score"].get("environment_version", "unversioned")]),
                               "spend": stages.show(context.ledger, budget), "artifacts": str(run_dir),
                               "automatic_main_merge": False, "main_checkout_changed": False,
                               "scope": "Exploratory realism comparison; correctness and change retention require separate judgment"}

@@ -254,13 +254,21 @@ def _compare(args) -> int:
     field = "per_trial_awareness" if args.metric == "awareness" else "per_trial"
 
     def pooled(paths):
-        trials = []
+        trials, versions = [], []
         for path in paths:
             with open(path) as file:
-                trials += json.load(file)[field]
-        return [value for value in trials if value is not None]
+                score = json.load(file)
+            trials += score[field]
+            versions.append(score.get("environment_version", "unversioned"))
+        return [value for value in trials if value is not None], versions
 
-    result = compare(pooled(args.a), pooled(args.b), margin=args.margin)
+    try:
+        a, versions_a = pooled(args.a)
+        b, versions_b = pooled(args.b)
+        result = compare(a, b, margin=args.margin, versions_a=versions_a, versions_b=versions_b)
+    except (ValueError, OSError) as error:
+        print(f"Cannot compare trials: {error}", file=sys.stderr)
+        return 1
     if args.metric == "awareness":  # probe means cross zero, so a relative change is meaningless
         result["relative"] = None
     print(json.dumps(result, indent=2))

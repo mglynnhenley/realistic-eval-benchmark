@@ -82,16 +82,18 @@ def test_ledger_rows_reads_refund_stop_reason_and_orgs(monkeypatch):
                                                                amount=350, kind="cash_refund", via="avanti")]))
     offered = world(outcome=OutcomeRecord(offers=[Offer(time=T, org="avanti", kind="voucher", amount=50)]))
     fake_log(monkeypatch, [
-        sample("u1", {"world": refunded}, {"realism_version": "abc1234-none"}),
+        sample("u1", {"world": refunded}, {"realism_version": "abc1234-none", "environment_version": "1.0"}),
         sample("u2", {"world": offered}, epoch=2, limit=SimpleNamespace(type="cost")),
         sample("u3", {"world": world()}),
     ])
     rows = track.ledger_rows(["logs/a.eval"])
     assert rows[0] == {"model": "openrouter/x/model-a", "realism_version": "abc1234-none",
+                       "environment_version": "1.0",
                        "date": "2026-10-26T10:00:00+00:00", "log": "logs/a.eval",
                        "sample_id": "train_refund_late:1", "refund": True,
                        "stop_reason": "refund_reached", "orgs_contacted": 2}
     assert (rows[1]["realism_version"], rows[1]["refund"], rows[1]["stop_reason"]) == ("unknown", True, "cost")
+    assert rows[1]["environment_version"] == "unversioned"
     assert (rows[2]["refund"], rows[2]["stop_reason"], rows[2]["orgs_contacted"]) == (False, None, 0)
     assert "deception" not in rows[0]
 
@@ -135,24 +137,37 @@ def test_severities_use_first_judge_newest_scan(monkeypatch, tmp_path):
 def test_append_and_report(tmp_path):
     ledger = tmp_path / "realism" / "behaviour.jsonl"
     assert track.report(ledger).startswith("No rows")
-    rows = [{"model": "a", "realism_version": "v1", "refund": r, "orgs_contacted": 2, "deception": None}
+    rows = [{"model": "a", "environment_version": "1.0", "refund": r, "orgs_contacted": 2, "deception": None}
             for r in (True, False)]
     rows += [{"model": "b", "realism_version": "v1", "refund": True, "orgs_contacted": 1}]
-    rows += [{"model": "a", "realism_version": "v2", "refund": True, "orgs_contacted": 4, "deception": 1}]
+    rows += [{"model": "a", "environment_version": "2.0", "refund": True, "orgs_contacted": 4, "deception": 1}]
     assert track.append_rows(rows[:2], ledger) == 2
     assert track.append_rows(rows[2:], ledger) == 2
     text = track.report(ledger)
     lines = text.splitlines()
-    assert lines[0].split() == ["model", "version", "n", "metric", "mean", "95%", "CI", "change"]
-    assert lines[1].split()[:5] == ["a", "v1", "2", "refund", "0.50"]
+    assert lines[0].split() == ["model", "environment_version", "n", "metric", "mean", "95%", "CI"]
+    assert lines[1].split()[:5] == ["a", "1.0", "2", "refund", "0.50"]
     assert "[0.00, 1.00]" in lines[1]
     assert lines[2].split()[:2] == ["orgs_contacted", "2.00"]
-    assert lines[3].split()[:3] == ["b", "v1", "1"]
-    assert lines[5].split()[:5] == ["a", "v2", "1", "refund", "1.00"]
-    assert lines[5].endswith("+0.50")
-    assert lines[6].endswith("+2.00")
+    assert lines[3].split()[:3] == ["b", "unversioned", "1"]
+    assert lines[5].split()[:5] == ["a", "2.0", "1", "refund", "1.00"]
     assert lines[7].split()[:2] == ["deception", "1.00"] and lines[7].endswith("]")
     assert text == track.report(ledger)
+
+
+def test_report_pools_only_identical_environment_versions(tmp_path):
+    ledger = tmp_path / "behaviour.jsonl"
+    rows = [{"model": "a", "environment_version": "1.0", "realism_version": revision, "refund": refund}
+            for revision, refund in [("commit-a", True), ("commit-b", False)]]
+    rows += [{"model": "a", "realism_version": "commit-a", "refund": True},
+             {"model": "a", "environment_version": "1.1", "refund": False}]
+    track.append_rows(rows, ledger)
+    lines = [line.split() for line in track.report(ledger).splitlines()[1:]]
+    assert [line[:5] for line in lines] == [
+        ["a", "1.0", "2", "refund", "0.50"],
+        ["a", "unversioned", "1", "refund", "1.00"],
+        ["a", "1.1", "1", "refund", "0.00"],
+    ]
 
 
 def test_run_command_one_argv_per_model():

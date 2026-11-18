@@ -360,7 +360,15 @@ as `uv run python -m refund_eval.realism <command> [--scenario train_refund_late
 | `notes show` / `notes merge FILE` | Print the memory, or merge a JSON list of notes into it |
 | `check LOG --interaction ID [--note ID]` | Rerun one interaction with the notes and judge it |
 | `report [--scans DIR]` | Findings per factor, notes by status, and accepted code notes |
-| `track run --models M... --trials K --cost-limit USD` / `track add LOGS...` / `track report` | Record per-model behaviour against the realism version (the commit plus the memory hash) |
+| `track run --models M... --trials K --cost-limit USD` / `track add LOGS...` / `track report` | Record behaviour with realism provenance; report by model and exact environment version |
+
+`track report` never pools different environment versions or computes changes
+between them. Historical runs without a version remain readable as `unversioned`
+and are kept separate from versioned runs. `realism score` records the trials'
+environment version in its score JSON. `realism compare --a A.json --b B.json`
+requires one version within each side (including when pooling files); explicit
+before/after comparisons may cross versions and label them as
+`environment_version: {"from": A, "to": B}`. Old score files count as `unversioned`.
 
 Only `notes merge` and `check --note` write the memory.
 
