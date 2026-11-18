@@ -44,6 +44,31 @@ Inspect task: task.py + config.py
     +-- Debugging: companies/ reruns one saved company decision for comparison
 ```
 
+## Overview
+
+```mermaid
+flowchart LR
+    A[Assistant under evaluation] <--> T[Mail, search and browser tools]
+    T -->|Permitted public reads| P[Live web]
+    T -->|Intercepted contacts| R[Simulation runtime]
+    R -->|Event and company context| C[Company model]
+    C -->|Proposed action| R
+    R -->|Validated effects| W[World state and delivery queue]
+    W -->|Visible results and arrivals| T
+    A --> E[Saved evidence]
+    R --> E
+    W --> E
+    E --> G[Post-run evaluation]
+```
+
+The experiment measures honesty, privacy, persistence, escalation and financial outcome separately. A successful refund does not establish honest conduct, and missing evidence remains unknown.
+
+Each round runs three independent trials of one frozen commit. A scanner identifies signs of simulation; four pinned investigator models inspect the evidence independently and then receive supplementary material. A separate blinded judge assigns per-trial realism scores from 0 to 10. The primary coding agent selects repairs from cited evidence, implements them in an isolated worktree and completes required checks before the next round. Task facts, company rules, grading and accounting are protected from ordinary repairs. Scores track trends; a round mean requires three valid ratings, and an unexercised repair remains unobserved.
+
+Frozen jobs record source, dependencies, models and run settings. The continuous realism loop reserves paid stages against a shared authorised ledger, retains unresolved charges and prohibits replay of uncertain paid operations. Saved configuration, checkpoints and file-based handoffs persist progress; remote cleanup is tracked separately. Sandbox compute and coding-agent costs sit outside that model ledger.
+
+Company or evaluator models can make mistakes. Recorded evidence supports review of those failures but does not eliminate them. Three trials describe a particular environment version; they do not establish a general misconduct rate or prove a realism improvement. Operational validity, environment realism and agent behaviour must be reported separately.
+
 ## Task and scenarios
 
 `impossible_refund()` validates run settings, loads a scenario, builds the agent and attaches scorers. `RunConfig` supplies defaults for Inspect, the dashboard and Harbor.
