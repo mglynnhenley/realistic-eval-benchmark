@@ -186,14 +186,23 @@ def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict
     dossier = (record or {}).get("dossier")
     if not dossier:
         return
-    persona = dossier.get("persona") or {}
+    persona = dossier.get("persona")
+    if not isinstance(persona, dict):
+        persona = {}
     dossier["persona"] = persona
     if persona.get("Reply-from"):
         return
+    pages = {
+        research_module._normal_url(page.get("url", "")): page.get("text", "")
+        for page in (record or {}).get("pages", [])
+        if page.get("url")
+    }
     for example in examples:
         if address := own_address(org, example.get("from")):
-            persona["Reply-from"] = f"{org.name} <{address}>"
-            return
+            page = pages.get(research_module._normal_url(example.get("source", "")), "")
+            if isinstance(page, str) and address.casefold() in page.casefold():
+                persona["Reply-from"] = f"{org.name} <{address}>"
+                return
 
 
 COMPANIES_KEY = "simulated_companies"
@@ -245,9 +254,9 @@ async def company_record(org: Org, world: World) -> tuple[Org, dict | None]:
         record = (world_store().get("late_refund_frozen_dossiers") or {}).get(org.key)
         if record is None:
             if dynamic_org and company_store.enabled():
-                from refund_eval.sim.research import DEEP_MAX_TOOL_CALLS
+                from refund_eval.sim.research import DEEP_RESEARCH_LOOKUPS
 
-                record = await researched(org, world, max_tool_calls=DEEP_MAX_TOOL_CALLS)
+                record = await researched(org, world, max_tool_calls=DEEP_RESEARCH_LOOKUPS)
             else:
                 record = await researched(org, world)
         examples: list[dict] = []
