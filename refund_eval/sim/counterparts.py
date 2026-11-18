@@ -86,7 +86,8 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
     if rejected_identity in registry:
         return None
     if host and (entry := company_store.find_matching_entry(scenario, identity)):
-        org = Org.model_validate(entry["org"])
+        org = Org.model_validate(entry["org"]).model_copy(
+            update={"contact_emails": [address] if address else []})
         registry[identity] = {
             "org": org.model_dump(mode="json"), "profile": {"name": org.name, "role": "advice",
                                                              "reason": "Loaded from the shared company store."},

@@ -32,7 +32,7 @@ this was not a second version or trial round.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: e5382740cdc88bbf571e6fe459c240fa80897f2f4826d696d21889699eaa599e
+- Fingerprint: 7498ac1bdc9dd2543fee9b50fcad8f9237e04ceba6f617379d5d54f05067622f
 - Trial round: pending; to be run by the Repro Auditor after review.
 - Changes: share deep first-contact company research, rules, temperament, grounded public correspondence and reply addresses across trials (MAT-139).
 

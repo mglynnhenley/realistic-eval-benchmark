@@ -160,7 +160,8 @@ async def test_shared_first_contact_is_reused_without_model_calls(monkeypatch, t
                       body="Please advise.", interception_id="second-trial")
     reused_org = await create_counterpart(SCENARIO, inbound)
     second_org, second_research = await company_record(reused_org, load_world())
-    assert reused_org == pinned_org == second_org
+    assert reused_org.key == pinned_org.key == second_org.key
+    assert reused_org.contact_emails == second_org.contact_emails == [inbound.target]
     assert second_research == first_entry["research"]
     assert store().get(COMPANIES_KEY)[ORG.key]["examples"] == first_entry["examples"]
     assert store().get("company_entries")[ORG.key]["source"] == "shared_entry"
@@ -234,7 +235,7 @@ async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(
     _set_live(sim)
     reused_org = await create_counterpart(SCENARIO, inbound)
     await company_record(reused_org, load_world())
-    assert reused_org.contact_emails == []
+    assert reused_org.contact_emails == [inbound.target]
     assert store().get("company_entries")[org.key]["source"] == "shared_entry"
     assert store().get("company_entries")[org.key]["fingerprint"] == entry["fingerprint"]
     assert store().get(REGISTRY_KEY)[company_store.org_identity(org)]["target"] == inbound.target
@@ -242,11 +243,43 @@ async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(
     assert len(dossier_records) == len(example_records) == len(rules_calls) == 1
 
 
+async def test_shared_entry_uses_current_trial_recipient_as_reply_sender(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    first_org = ORG.model_copy(update={"contact_emails": ["help@example.test"]})
+    _seed_dossier(first_org)
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    await company_record(first_org, load_world())
+
+    entry = company_store.load_entry(SCENARIO, first_org)
+    assert entry is not None
+    path = company_store.entry_path(SCENARIO.id, company_store.org_identity(first_org), entry["fingerprint"])
+    stored = path.read_text()
+    assert "contact_emails" not in stored and "help@example.test" not in stored
+
+    start_sample(SCENARIO.id)
+    inbound = Inbound(
+        channel="email", tool="send_email", target="help@example.test", org=None,
+        body="Following up.", interception_id="shared-entry-follow-up",
+    )
+    reused_org = await create_counterpart(SCENARIO, inbound)
+    reused_org, reused_research = await company_record(reused_org, load_world())
+
+    assert reused_org.contact_emails == [inbound.target]
+    assert _sender(reused_org, record=reused_research) == f"{reused_org.name} <help@example.test>"
+    assert "contact_emails" not in path.read_text()
+
+
 async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch, tmp_path):
     sim = MockSim()
     _set_live(sim)
-    concurrent_org = ORG.model_copy(update={"key": "dynamic_concurrent_test"})
-    other_org = concurrent_org.model_copy(update={"name": "Another Advice"})
+    concurrent_org = ORG.model_copy(update={
+        "key": "dynamic_concurrent_test", "contact_emails": ["first@example.test"],
+    })
+    other_org = concurrent_org.model_copy(update={
+        "name": "Another Advice", "contact_emails": ["second@example.test"],
+    })
     _seed_dossier(concurrent_org)
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
     identity = company_store.org_identity(concurrent_org)
@@ -267,6 +300,8 @@ async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch,
     entry = company_store.load_entry(SCENARIO, concurrent_org)
     assert entry is not None
     assert [result[0].name for result in results] == [entry["org"]["name"], entry["org"]["name"]]
+    assert [result[0].contact_emails for result in results] == [
+        concurrent_org.contact_emails, other_org.contact_emails]
     assert [result[1] for result in results] == [entry["research"], entry["research"]]
     assert store().get(COMPANIES_KEY)[concurrent_org.key]["rules"] == entry["rules"]
     assert store().get(COMPANIES_KEY)[concurrent_org.key]["org"]["name"] == entry["org"]["name"]
