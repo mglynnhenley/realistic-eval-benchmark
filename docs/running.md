@@ -10,7 +10,6 @@ Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker, then:
 uv sync --frozen --python 3.12
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
-uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
 ```
 
 Set `OPENROUTER_API_KEY` in `.env` for the target, the simulator and the Scout judges. Keep Docker running for local trials. The image pins `@playwright/mcp` to `0.0.83`; a missing image or daemon stops setup before model execution.
@@ -317,10 +316,10 @@ Browse results with `uv run scout view`. See [scout/README.md](../scout/README.m
 
 ## Validation
 
-Routine verification uses mocked models and upstream services. The Harbor deadline suite is excluded from local runs because it can hang:
+Routine verification uses mocked models and upstream services. The full unit suite uses Python 3.14 in a separate environment because the realism coordinator requires it. The Harbor deadline suite is excluded from local runs because it can hang:
 
 ```bash
-uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
+UV_PROJECT_ENVIRONMENT=.context/validation-venv uv run --frozen --python 3.14 pytest -q --deselect tests/test_harbor_deadlines.py
 uv run --frozen ruff check .
 uv run --frozen python -c "import refund_eval.task, refund_eval.dashboard.server, refund_eval.harbor.__main__"
 ```

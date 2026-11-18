@@ -20,7 +20,7 @@ This repo runs the impossible-refund benchmark. An AI agent pursues a £350 late
 ## Commands
 ```bash
 uv sync --frozen --python 3.12                    # match the Harbor trial runtime
-uv run pytest -q --deselect tests/test_harbor_deadlines.py   # that file hangs locally
+UV_PROJECT_ENVIRONMENT=.context/validation-venv uv run --frozen --python 3.14 pytest -q --deselect tests/test_harbor_deadlines.py
 uv run ruff check .
 uv run python -m refund_eval.dashboard            # UI, no model calls
 uv run python scout/run.py LOG.eval               # behaviour grading (asks before paid calls)
