@@ -14,7 +14,12 @@ from typing import Any
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 
-from refund_eval.config import BUDGET_NOTICES, RunConfig, resolve_cost_limits
+from refund_eval.config import (
+    BUDGET_NOTICES,
+    LATE_REFUND_SCENARIO,
+    RunConfig,
+    resolve_cost_limits,
+)
 from refund_eval.killswitch import KILL_FILE_ENV, kill_requested
 from refund_eval.published.provider import published_model_args
 from refund_eval.runtime.checkpoint import RunCheckpoint
@@ -133,7 +138,7 @@ def run_worker(run_dir: str | Path) -> int:
                 if not inbox.is_file() or file_sha256(inbox) != config.get("inbox_sha256"):
                     raise ValueError("The Gmail snapshot changed or was removed after this run was configured.")
                 profile_args["fixture_path"] = str(inbox)
-            if config["research_mode"] != "auto":
+            if config["research_mode"] != "auto" or config["scenario"] == LATE_REFUND_SCENARIO:
                 profile_args["research_mode"] = config["research_mode"]
             from refund_eval.published.profile import (
                 fixture_readiness,

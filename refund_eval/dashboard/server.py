@@ -369,7 +369,7 @@ class RunManager:
                 if not any(os.environ.get(key) for key in keys):
                     raise APIError(422, f"Set {' or '.join(keys)} in the server environment before running {model}.")
                 if not sdk_available(provider):
-                    raise APIError(422, f"The {provider} SDK is not installed. Run uv sync --extra providers, then restart the dashboard.")
+                    raise APIError(422, f"The {provider} SDK is not installed. Run uv sync --frozen --extra providers, then restart the dashboard.")
         with self.lock:
             active_settings = [read_json(self.root / run_id / "config.json", {})
                                for run_id, process in self.processes.items() if process.poll() is None]

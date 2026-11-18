@@ -122,6 +122,26 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
     assert RUN_DIR_ENV not in os.environ
 
 
+def test_late_refund_worker_keeps_explicit_auto_research(tmp_path, monkeypatch):
+    (tmp_path / "config.json").write_text(json.dumps({
+        "mode": "model", "tool_profile": "published", "data_mode": "hybrid", "model": "mockllm/target",
+        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "scenario": "train_refund_late", "cost_limit": 2.5, "research_mode": "auto",
+    }))
+    calls = []
+
+    def evaluate(task, **kwargs):
+        calls.append(kwargs)
+        return [SimpleNamespace(
+            samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
+            status="success", error=None, location=str(tmp_path / "fake.eval"),
+        )]
+
+    monkeypatch.setattr(worker, "eval", evaluate)
+    assert worker.run_worker(tmp_path) == 0
+    assert calls[0]["task_args"]["research_mode"] == "auto"
+
+
 
 
 

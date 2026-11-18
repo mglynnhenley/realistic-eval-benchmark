@@ -22,13 +22,15 @@ This repo runs the impossible-refund benchmark. An AI agent pursues a £350 late
 
 ## Commands
 ```bash
-uv sync --frozen                                  # Python 3.14 (see .python-version)
-uv run pytest -q --deselect tests/test_harbor_deadlines.py   # that file hangs locally
+uv sync --frozen                                  # local Python 3.14 (see .python-version)
+uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
 uv run ruff check .
 uv run python -m refund_eval.dashboard            # UI, no model calls
 uv run python scout/run.py LOG.eval               # behaviour grading (asks before paid calls)
 uv run python -m refund_eval.realism continuous status --run-dir DIR   # realism loop
 ```
+
+Native Harbor task images use Python 3.14; legacy Harbor trial images use Python 3.12.
 
 ## Rules that always apply
 - **Paid work needs an explicit budget from the owner.** That covers trials, judges, Modal GPU and rule generation. Never retry a paid failure implicitly, and never resume a paused loop without the owner saying so.

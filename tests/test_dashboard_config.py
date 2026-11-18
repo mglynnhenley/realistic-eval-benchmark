@@ -184,7 +184,7 @@ def test_missing_provider_sdk_is_rejected_before_launch(tmp_path, monkeypatch):
     try:
         config = server.RunConfig(mode="model", model="openai/example", simulator_model="mockllm/model",
                                   grader_model="mockllm/model")
-        with pytest.raises(server.APIError, match="uv sync --extra providers") as error:
+        with pytest.raises(server.APIError, match="uv sync --frozen --extra providers") as error:
             manager.start(config)
         assert error.value.status == 422
         assert not manager.list() and not manager.processes
