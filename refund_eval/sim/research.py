@@ -470,8 +470,7 @@ async def research_examples(org: Org, scenario: Scenario) -> dict[str, Any]:
                 record["errors"].append(f"dropped example: source page not read: {candidate.source}"[:300])
                 continue
             body = _normal(candidate.body)
-            check = body[:200] if len(body) > 200 else body
-            if not check or check not in _normal(cited["text"]):
+            if not body or body not in _normal(cited["text"]):
                 record["errors"].append(
                     f"dropped example: body not found on source page: {candidate.subject}"[:300])
                 continue
