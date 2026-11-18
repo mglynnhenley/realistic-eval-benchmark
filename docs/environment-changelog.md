@@ -24,10 +24,10 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 4.1 — 2026-11-18
+## 5.1 — 2026-11-18
 - Kind: trivial batch
-- Fingerprint: a31df9153d329705ef62e1ff3c6a5057d698c10b33fbd6ef4f5edf4fe3f07e5e
-- Trial round: none.
+- Fingerprint: 791c6963bf2e95f94bfcb16bb6da4221a7ab5b0f3a08a3904cfa518473581e62
+- Trial round: none. This free pass makes no model calls and does not change trials or scores. Take the next minor on main at merge time if #57 or #55 lands first.
 - Changes: add a free local long-horizon structural review with a dated ledger, phase vocabulary, version-isolated summaries and a static report with no remote resources (MAT-141). Upgrade Scout to 0.6.3 and pin Transect 0.7.0. No judged mode, trial changes or score changes; preserve the baseline Scout runner.
 
 ## 5.0 — 2026-11-18
