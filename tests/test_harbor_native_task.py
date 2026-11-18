@@ -255,6 +255,7 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     record = json.loads(record_text)
     assert record["total_trials"] == 6 and record["config"]["seed"] == seed
     assert record["world_cost_limit_usd_per_trial"] == record["config"]["world_cost_limit"] == 0.75
+    assert "limits" not in record
     assert record["seed_policy"] == meta["seed_policy"]
     assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task)[0]}"
     assert record["task"]["rules_sha256"] == meta["rules_sha256"]
@@ -279,6 +280,41 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path):
     with pytest.raises(ValueError, match="Git-ignored"):
         batch.prepare(adapter.ROOT / "trackable-native-batch",
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
+
+
+SPEND_CAPPED = {"execution": "docker", "scenario": "train_refund_late", "models": ["openrouter/a", "openrouter/b"],
+                "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0}, "world_cost_limit": 0.5,
+                "max_turns": 40, "time_limit": 600, "trials": 2, "concurrency": 2,
+                "trial_spend_cap_usd": 2.5, "key_spend_cap_usd": 10}
+
+
+def test_batch_freezes_spend_caps_and_horizons(tmp_path):
+    record = json.loads(batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**SPEND_CAPPED)).read_text())
+    assert record["limits"] == {"max_turns": 40, "time_limit_seconds": 600,
+                                "trial_spend_cap_usd": 2.5, "key_spend_cap_usd": 10}
+    compose = (tmp_path / "run" / "train_refund_late" / "environment" / "docker-compose.yaml").read_text()
+    world = yaml.safe_load(compose)["services"]["world"]["environment"]
+    assert world["WORLD_MAX_TURNS"] == "40"
+
+
+def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path):
+    config = {**SPEND_CAPPED, "models": ["openrouter/a"], "cost_limit": 0.1, "world_cost_limit": 0.2,
+              "trials": 3, "concurrency": 1, "trial_spend_cap_usd": 0.3, "key_spend_cap_usd": 0.9}
+    batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**config))
+
+
+@pytest.mark.parametrize(("change", "error"), [
+    ({"key_spend_cap_usd": None}, "together"),
+    ({"max_turns": None}, "explicit max_turns"),
+    ({"time_limit": None}, "explicit time_limit"),
+    ({"trial_spend_cap_usd": 2.4}, "exceeds trial_spend_cap_usd for: openrouter/b"),
+    ({"key_spend_cap_usd": 9.99}, "4 attempts"),
+])
+def test_batch_rejects_spend_caps_that_do_not_fit(tmp_path, change, error):
+    config = {key: value for key, value in {**SPEND_CAPPED, **change}.items() if value is not None}
+    with pytest.raises(ValueError, match=error):
+        batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**config))
+    assert not (tmp_path / "run").exists()
 
 
 # --------------------------------------------------------------------------- installed agent

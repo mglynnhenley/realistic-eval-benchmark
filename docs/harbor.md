@@ -184,6 +184,16 @@ is not a hard invoice ceiling. Check `store.world_model_budget` in world
 external tools are not covered. Get approval for the full costs before
 launching. Use `"execution": "modal"` to prepare a Modal job.
 
+#### Optional batch spend planning
+
+Set `trial_spend_cap_usd` and `key_spend_cap_usd` together, and explicitly set
+`max_turns` and `time_limit`. Each target's `cost_limit` plus the per-trial
+`world_cost_limit` must fit the trial cap; the total attempts (trials times
+targets) at that cap must fit the key cap. These limits and horizons are
+recorded in `run.json`. Both caps default to unset. The key cap checks this
+batch's plan only; it is not a shared invoice limit or an enforcement of the
+provider key's spending limit.
+
 ### Generate a task and sample job
 
 Generate a task. This launches nothing. The output directory holds the source and per-task tokens, so keep it private:
