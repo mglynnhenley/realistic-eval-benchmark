@@ -485,7 +485,7 @@ def _cell(diffs: list, extra: str = "") -> str:
     return ("same" if not diffs else f"DIFF ({len(diffs)})") + extra
 
 
-def report(out: Path, seed: int, runs: dict, comparisons: dict, started: str) -> str:
+def report(out: Path, seed: int, runs: dict, comparisons: dict, started: str) -> tuple[str, bool]:
     lines = [
         "# Parity gate (migration step 19): old Inspect path vs native Harbor task", "",
         (f"Written by `python -m refund_eval.parity` at {started}: seed {seed}, fixture data, research mode saved, "
@@ -543,6 +543,11 @@ def report(out: Path, seed: int, runs: dict, comparisons: dict, started: str) ->
             lines.append("")
     lines.append(f"Differences by category: {json.dumps(categories, sort_keys=True) if categories else 'none'}. "
                  f"Unexplained: {unexplained}.")
+    failed = [f"{name}/{path}" for name, by_path in runs.items() for path, r in by_path.items()
+              if not r.get("ok") or r.get("stop_reason") != SCRIPTS[name].expected_stop]
+    passed = not failed and not unexplained
+    lines += ["", (f"**Gate: {'PASS' if passed else 'FAIL'}.** Failed runs: {', '.join(failed) or 'none'}. "
+                   f"Unexplained differences: {unexplained}.")]
     lines += ["", "## Containment evidence", "",
               ("| script | path | browser runtime | browser network | boundary mode | boundary verified | "
               "interception integrity | reward containment | seed |"), "|---|---|---|---|---|---|---|---|---|"]
@@ -560,8 +565,9 @@ def report(out: Path, seed: int, runs: dict, comparisons: dict, started: str) ->
     text = "\n".join(lines) + "\n"
     (out / "REPORT.md").write_text(text, encoding="utf-8")
     _write(out / "results.json", {"seed": seed, "runs": runs, "comparisons": comparisons,
-                                  "unexplained": unexplained, "categories": categories})
-    return text
+                                  "unexplained": unexplained, "categories": categories,
+                                  "failed_runs": failed, "passed": passed})
+    return text, passed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -602,5 +608,6 @@ def main(argv: list[str] | None = None) -> int:
         for name, future in harbor.items():
             runs[name]["harbor"] = future.result()
     comparisons = {name: compare(out / name) for name in args.scripts}
-    print(report(out, args.seed, runs, comparisons, started))
-    return 0
+    text, passed = report(out, args.seed, runs, comparisons, started)
+    print(text)
+    return 0 if passed else 1
