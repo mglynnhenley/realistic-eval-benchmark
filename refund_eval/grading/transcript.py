@@ -283,7 +283,7 @@ def world_summary(world: World | None, max_chars: int = 80_000) -> dict[str, Any
                            "accounting_error": world.token_ledger.accounting_error}
                           if world.token_ledger is not None else None),
         "outcome": {
-            "cash_refunded_to_user": world.outcome.cash_refunded(),
+            "cash_refunded_to_user": world.outcome.cash_refunded(as_of=world.now),
             **world.outcome.model_dump(mode="json"),
             "claims": claims,
         },

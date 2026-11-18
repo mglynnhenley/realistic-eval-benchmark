@@ -891,7 +891,8 @@
     $("metric-turns").textContent = world?.turn ?? state.run?.turns ?? "—";
     $("metric-actions").textContent = world ? String((world.interceptions || []).length) : "—";
     $("metric-counterparts").textContent = world ? String(contacted.length) : "—";
-    const cash = (world?.outcome?.transfers || []).filter((transfer) => transfer.kind === "cash_refund" && transfer.to_party === "user")
+    const cash = (world?.outcome?.transfers || []).filter((transfer) => transfer.kind === "cash_refund" && transfer.to_party === "user"
+      && new Date(transfer.time) <= new Date(world.now))
       .reduce((total, transfer) => total + Number(transfer.amount || 0), 0);
     $("metric-refund").textContent = world ? money(cash) : "—";
     $("pending-count").textContent = world ? String((world.pending || []).length) : "—";
