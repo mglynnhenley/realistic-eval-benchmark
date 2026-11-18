@@ -261,6 +261,7 @@ async def restore_trial(log_path: str, scenario: Scenario | None = None) -> list
     return await resume_checkpoint(
         checkpoint_from_sample(sample),
         source={"log": str(log_path), "previous_limit": sample.limit.type if sample.limit else None},
+        scenario_id=scenario.id if scenario is not None else None,
         record_revision=record_revision,
     )
 
@@ -282,6 +283,7 @@ async def restore_snapshot(snapshot_path: str, scenario: Scenario | None = None)
     return await resume_checkpoint(
         checkpoint_from_snapshot(snapshot),
         source={"snapshot": str(snapshot_path), "previous_phase": snapshot.get("phase")},
+        scenario_id=scenario.id if scenario is not None else None,
         record_revision=record_revision,
         rebuild_memory="MemoryStore:files" not in (snapshot.get("resume_state") or {}),
         memory_seed={MEMORY_NOTES_PATH: MEMORY_TEMPLATE},
