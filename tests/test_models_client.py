@@ -134,6 +134,20 @@ async def test_rules_are_generated_on_the_client_and_name_its_model(fake):
     assert record["model"] == "fake/simulator" and client.calls[0]["max_tokens"] == RULES_MAX_TOKENS
 
 
+@pytest.mark.parametrize("operation", ["dossier", "person", "rules"])
+async def test_company_preparation_does_not_swallow_model_limits(fake, operation):
+    client = fake(ModelLimitExceeded("allowance exhausted"))
+    org = LATE.org("trainline")
+    with pytest.raises(ModelLimitExceeded, match="allowance exhausted"):
+        if operation == "dossier":
+            await research.research_live(org)
+        elif operation == "person":
+            await research.profile_person(org, ["Previous correspondence."])
+        else:
+            await generate_rules(LATE, org, None)
+    assert len(client.calls) == 1
+
+
 async def test_research_tool_loop_sends_back_the_assistant_message_and_tool_results(fake):
     asked = Completion(text="", message=Message("assistant", "", tool_calls=[ToolCall("c1", "nope", {})],
                                                 native="backend form"), stop_reason="tool_calls")

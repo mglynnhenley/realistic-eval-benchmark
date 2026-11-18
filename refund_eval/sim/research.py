@@ -36,7 +36,14 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
-from refund_eval.models.client import Message, OutputSchema, Tool, ToolCall, client
+from refund_eval.models.client import (
+    Message,
+    ModelLimitExceeded,
+    OutputSchema,
+    Tool,
+    ToolCall,
+    client,
+)
 from refund_eval.published.network import public_read, validate_public_url
 from refund_eval.scenario.schema import (
     DOSSIER_DIR,
@@ -312,6 +319,8 @@ async def research_live(org: Org, *, subject: str = "a customer request") -> dic
         try:
             output = await model.complete("simulator", messages, tools=tools, max_tokens=MAX_OUTPUT_TOKENS,
                                           schema=final if lookups <= 0 else None)
+        except ModelLimitExceeded:
+            raise
         except Exception as ex:  # noqa: BLE001 - an unavailable model leaves the saved file, or nothing
             logger.warning("research model failed for %s: %s", org.key, ex)
             record["errors"].append(f"model: {ex}"[:300])
@@ -358,6 +367,8 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
         profile = PersonProfile.model_validate(output.json())
         record["dossier"] = Dossier(summary=profile.summary, facts=[],
                                     persona=Persona(voice=profile.voice)).model_dump(by_alias=True)
+    except ModelLimitExceeded:
+        raise
     except Exception as ex:  # noqa: BLE001 - the person keeps the counterpart persona
         logger.warning("person profile failed for %s: %s", org.key, ex)
         record["errors"].append(f"profile: {ex}"[:300])
