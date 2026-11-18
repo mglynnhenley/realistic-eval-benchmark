@@ -270,6 +270,8 @@ class OpenRouterClient:
                  for c in (getattr(raw, "tool_calls", None) or []) if getattr(c, "function", None) is not None]
         usage = _usage(result.usage, None)
         cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
+        if self.require_reported_cost and usage is not None and usage.cost == 0:
+            cost_method = None
         if cost_method is None:
             if self.require_reported_cost and usage is not None:
                 usage.cost = None
