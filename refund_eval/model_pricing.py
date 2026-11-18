@@ -60,17 +60,24 @@ def _catalog_cost(entry: dict) -> ModelCost:
 
 
 def _world_catalog_prices(entry: dict) -> dict[str, float]:
+    """Text-only rates plus request dollars; `unpriced` disables only the worst-case bound."""
     prices = catalog_prices(entry)
+    prices["request"] = 0
     for field in entry["pricing"]:
-        if field in {"prompt", "completion", "input_cache_read", "input_cache_write"}:
+        if field in {"prompt", "completion", "input_cache_read", "input_cache_write",
+                     "image", "audio", "input_audio", "output_audio", "web_search"}:
             continue
-        price = _per_million(entry["pricing"], field)
+        try:
+            price = _per_million(entry["pricing"], field)
+        except (TypeError, ValueError):
+            prices["unpriced"] = 0
+            continue
         if field == "request":
             prices[field] = price / 1_000_000
-        elif field == "internal_reasoning":
+        elif field in {"internal_reasoning", "input_cache_write_1h"}:
             prices[field] = price
         elif price != 0:
-            raise ValueError(f"Cannot bound catalog pricing component {field}")
+            prices["unpriced"] = 0
     return prices
 
 

@@ -498,7 +498,7 @@ async def test_world_charge_settlement(monkeypatch, mode):
 
 @pytest.mark.parametrize("kind", ["body_error", "choice_error", "empty_choices", "error_finish", "unknown_empty",
                                   "length", "three", "allowance", "no_price", "no_request_price", "reported", "lookup",
-                                  "explicit", "success", "request_price", "reasoning_price"])
+                                  "explicit", "success", "request_price", "reasoning_price", "unknown_price"])
 async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
     import math
 
@@ -557,6 +557,8 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
         prices["request"] = 0.005 if kind == "request_price" else 0
     if kind == "reasoning_price":
         prices["internal_reasoning"] = 8
+    if kind == "unknown_price":
+        prices["unpriced"] = 0
     client = openrouter(handler, require_reported_cost=True,
                         prices={} if kind == "no_price" else {name: prices})
     budget = BudgetedWorldModels(RecordingModelClient(client), 0.02 if kind == "allowance" else 1, lambda: None)
@@ -565,7 +567,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
     if kind == "explicit":
         settings["max_tokens"] = 123
     try:
-        if kind in {"three", "allowance", "no_price", "no_request_price"}:
+        if kind in {"three", "allowance", "no_price", "unknown_price"}:
             with pytest.raises(ModelLimitExceeded):
                 await budget.complete("simulator", messages, **settings)
         else:
@@ -574,7 +576,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             assert result.text == ("truncated" if kind == "explicit" else "ok")
         recordings = store.world_store().get(RECORDINGS_KEY)
         expected_count = 3 if kind == "three" else 1 if kind in {
-            "allowance", "no_price", "no_request_price", "explicit", "success"} else 2
+            "allowance", "no_price", "unknown_price", "explicit", "success"} else 2
         assert len(requests) == len(recordings) == expected_count
         assert all(body["max_tokens"] == (123 if kind == "explicit" else WORLD_MAX_OUTPUT_TOKENS) for body in requests)
         first = recordings[0]["response"]
@@ -586,7 +588,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
         rate = 8 if kind == "reasoning_price" else 6
         fixed = 0.005 if kind == "request_price" else 0
         bound = math.ceil(((len(json.dumps(prompt).encode()) + 16_384 + requests[0]["max_tokens"]) * rate / 1e6 + fixed) * 1e9) / 1e9
-        if kind in {"no_price", "no_request_price"}:
+        if kind in {"no_price", "unknown_price"}:
             assert first["usage"] is None and budget.spent == 0
         elif kind in {"reported", "allowance", "lookup", "explicit", "length"}:
             assert first["usage"]["cost"] == 0.01
@@ -594,7 +596,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
         elif kind != "success":
             assert first["cost_method"] == "worst_case"
             assert first["usage"]["cost"] == bound
-        if kind not in {"no_price", "no_request_price"}:
+        if kind not in {"no_price", "unknown_price"}:
             assert budget.spent == sum((Decimal(str(r["response"]["usage"]["cost"])) for r in recordings), Decimal(0))
         if kind == "allowance":
             assert budget.spent < budget.limit and Decimal(str(bound)) > budget.limit - budget.spent
@@ -623,13 +625,15 @@ def test_old_completion_recordings_load_without_failure_evidence():
     assert completion.error is completion.generation_id is completion.raw_finish_reason is completion.worst_case_cost is None
 
 
-async def test_unbudgeted_reported_zero_cost_is_unchanged():
+@pytest.mark.parametrize("unpriced", [False, True])
+async def test_unbudgeted_reported_zero_cost_is_unchanged(unpriced):
     def handler(request):
         assert request.method == "POST"
         return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
             "prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300, "cost": 0}))
 
-    client = openrouter(handler)
+    prices = {"input": 1, "output": 5, "unpriced": 0} if unpriced else {}
+    client = openrouter(handler, prices={"openrouter/anthropic/claude-opus-5.5": prices})
     try:
         result = await client.complete("simulator", [])
         assert result.cost_method == "actual" and result.usage.cost == 0
@@ -659,4 +663,4 @@ def test_openrouter_prices_come_from_the_public_catalog(monkeypatch):
 
     monkeypatch.setattr(model_pricing.httpx, "get", get)
     assert model_pricing.openrouter_prices(["openrouter/a/sim", "openrouter/a/missing", "mockllm/model"]) == {
-        "openrouter/a/sim": {"input": 1.0, "output": 5.0, "input_cache_read": 1.0, "input_cache_write": 1.0}}
+        "openrouter/a/sim": {"input": 1.0, "output": 5.0, "input_cache_read": 1.0, "input_cache_write": 1.0, "request": 0}}

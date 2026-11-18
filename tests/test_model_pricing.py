@@ -165,9 +165,36 @@ def test_world_catalog_includes_fixed_cache_and_reasoning_prices(monkeypatch):
 
 @pytest.mark.parametrize(("field", "value"), [
     ("request", None), ("request", "NaN"), ("request", "-1"), ("internal_reasoning", "invalid"),
-    ("web_search", "0.01"), ("unknown_fee", "0.01"),
+    ("unknown_fee", "0.01"),
 ])
-def test_world_catalog_rejects_unpriceable_components(monkeypatch, field, value):
-    catalog(monkeypatch, [{"id": "example/new-model", "pricing": {**FABLE_ENTRY["pricing"], field: value}}])
-    with pytest.raises((TypeError, ValueError)):
-        pricing.openrouter_prices([NEW])
+def test_world_catalog_isolates_unpriceable_components(monkeypatch, field, value):
+    from types import SimpleNamespace
+
+    from refund_eval.models.openrouter import _estimate, _worst_case
+
+    catalog(monkeypatch, [FABLE_ENTRY, {"id": "example/new-model", "pricing": {**FABLE_ENTRY["pricing"], field: value}}])
+    prices = pricing.openrouter_prices([NEW, FABLE])
+    params = {"messages": [], "max_tokens": 100}
+    assert _worst_case(params, prices[NEW]) is None
+    assert _worst_case(params, prices[FABLE]) is not None
+    assert _estimate(SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12), prices[NEW]) is not None
+
+
+def test_real_opus_catalog_prices_ignore_unused_modalities_and_bound_cache(monkeypatch):
+    from refund_eval.models.openrouter import _worst_case
+
+    entry = {"id": "anthropic/claude-opus-5.5", "pricing": {
+        "prompt": "0.000004", "completion": "0.00002", "web_search": "0.01",
+        "input_cache_read": "0.0000002", "input_cache_write": "0.000005", "input_cache_write_1h": "0.000008"}}
+    name = "openrouter/" + entry["id"]
+    catalog(monkeypatch, [entry])
+    prices = pricing.openrouter_prices([name])[name]
+    assert prices == {"input": 4, "output": 20, "input_cache_read": 0.2, "input_cache_write": 5,
+                      "input_cache_write_1h": 8, "request": 0}
+    params = {"messages": [], "max_tokens": 9000}
+    bound = _worst_case(params, prices)
+    assert bound is not None
+    # Unused modalities and plugins cannot add charges to these text-only requests.
+    catalog(monkeypatch, [{**entry, "pricing": {**entry["pricing"], "image": "1", "audio": "2"}}])
+    assert pricing.openrouter_prices([name])[name] == prices
+    assert _worst_case(params, {**prices, "input_cache_write_1h": 40}) > bound

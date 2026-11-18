@@ -156,7 +156,7 @@ def _token_count(value: Any, *, minimum: int = 1) -> bool:
 
 
 def _worst_case(params: Mapping[str, Any], prices: Mapping[str, float] | None) -> float | None:
-    if not prices or not {"input", "output", "request"} <= prices.keys():
+    if not prices or not {"input", "output"} <= prices.keys() or "unpriced" in prices:
         return None
     if not all(_valid_cost(price) for price in prices.values()) or not _token_count(params.get("max_tokens")):
         return None
@@ -168,7 +168,7 @@ def _worst_case(params: Mapping[str, Any], prices: Mapping[str, float] | None) -
     }
     tokens = len(json.dumps(prompt, default=str).encode("utf-8")) + PROMPT_FRAMING_TOKENS + params["max_tokens"]
     rate = max(price for key, price in prices.items() if key != "request")
-    return math.ceil((tokens * rate / 1_000_000 + prices["request"]) * 1_000_000_000) / 1_000_000_000
+    return math.ceil((tokens * rate / 1_000_000 + prices.get("request", 0)) * 1_000_000_000) / 1_000_000_000
 
 
 def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
