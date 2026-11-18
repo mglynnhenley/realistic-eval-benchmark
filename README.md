@@ -102,7 +102,9 @@ Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and
 | `refund_eval/claims/` | Saved claim checklists, frozen evidence and offline factual assessment |
 | `refund_eval/grading/`, `scout/` | Code checks and post-run behaviour grading |
 | `refund_eval/awareness/` | Optional [eval-awareness probe](docs/awareness.md) over saved transcripts |
-| `refund_eval/dashboard/`, `harbor/` | Local UI and isolated batch execution |
+| `refund_eval/dashboard/`, `harbor/` | Local UI and isolated batch execution, including the [native Harbor task](docs/harbor.md#native-harbor-task-new) |
+| `refund_eval/world_service/`, `models/` | The trial's world served over MCP for world-service mode, and the world-side model client |
+| `refund_eval/parity/` | Free parity gate comparing the Inspect and native Harbor paths |
 | `scripts/`, `integrations/harbor/` | Preparation helpers and separate Harbor environment |
 | `tests/`, `docs/` | Tests, [architecture](docs/architecture.md) and run guides |
 

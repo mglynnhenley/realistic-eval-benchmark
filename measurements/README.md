@@ -4,11 +4,13 @@ This folder is a self-contained analysis tool for saved Inspect `.eval` logs. It
 extracts timestamped organization contacts, assigns every organization a
 task-specific `route` and within-route escalation `stage`, measures pairwise path
 differences, and writes an auditable JSON summary plus PNG figures. It does not
-import or modify `refund_eval`.
+modify `refund_eval`; it imports it only to merge a native Harbor trial
+directory into one `.eval` (`refund_eval.runtime.trial_artifacts`).
 
 ## Run it
 
 Pass individual `.eval` files, directories (searched recursively), or a mixture.
+A [native Harbor trial](../docs/harbor.md#native-harbor-task-new) directory counts once, as its merged log.
 On the first run, name the Inspect model that should classify organizations not
 already present in the taxonomy:
 
