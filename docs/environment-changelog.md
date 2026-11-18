@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: a717074fa8427255985e067376068c35c557390d2fb928f8fbaadda46286ea8c
+- Fingerprint: f77e72f8c15f89f41c075cc9b0a7c61631e6f74f25df771887e5250286c331a1
 - Trial round: pending; only offline validation in this change.
 - Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).
 

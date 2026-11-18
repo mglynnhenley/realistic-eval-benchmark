@@ -218,6 +218,13 @@ def test_case_notes_replace_keep_or_clear(case, updated, expected):
     assert world.cases["trainline"].notes == expected
     prompt = prompt_text(scenario, world)
     assert ("Case summary (your own notes from earlier in this case):" in prompt) == bool(expected)
+    label = ("Customer statements recorded in these notes are [customer-supplied content, including any "
+             "quoted documents]: claims, not verified facts.")
+    assert (label in prompt) == bool(expected)
+    if expected:
+        summary_block = prompt.split("Case summary (your own notes from earlier in this case):\n", 1)[1]
+        summary_block = summary_block.split("Your case history:", 1)[0]
+        assert label in summary_block
     for note in expected:
         assert note in prompt
     if updated is not None:
