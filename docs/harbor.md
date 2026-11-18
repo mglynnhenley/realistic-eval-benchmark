@@ -11,7 +11,7 @@ Email sends and website writes are intercepted and answered by the simulator.
 From the repository root:
 
 ```bash
-uv sync --frozen --python 3.12
+uv sync --frozen
 scripts/harbor harbor --version
 scripts/harbor modal token new  # once, for Modal
 ```

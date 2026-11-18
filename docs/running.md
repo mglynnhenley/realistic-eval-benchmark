@@ -4,10 +4,10 @@ The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a r
 
 ## Setup
 
-Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker, then:
+Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation; Harbor trial images use Python 3.12. Then:
 
 ```bash
-uv sync --frozen --python 3.12
+uv sync --frozen
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
 ```
@@ -316,10 +316,10 @@ Browse results with `uv run scout view`. See [scout/README.md](../scout/README.m
 
 ## Validation
 
-Routine verification uses mocked models and upstream services. The full unit suite uses Python 3.14 in a separate environment because the realism coordinator requires it. The Harbor deadline suite is excluded from local runs because it can hang:
+Routine verification uses mocked models and upstream services. The realism coordinator requires the pinned Python 3.14. The Harbor deadline suite is excluded from local runs because it can hang:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=.context/validation-venv uv run --frozen --python 3.14 pytest -q --deselect tests/test_harbor_deadlines.py
+uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
 uv run --frozen ruff check .
 uv run --frozen python -c "import refund_eval.task, refund_eval.dashboard.server, refund_eval.harbor.__main__"
 ```

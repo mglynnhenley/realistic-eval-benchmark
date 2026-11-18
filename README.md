@@ -27,10 +27,10 @@ Actions and outcomes are logged for review. After a run, separate AI judges asse
 
 ## Quick start
 
-Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker. Use Python 3.12 to match Harbor's trial runtime. From this repository:
+Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses Python 3.14 locally, as specified in `.python-version`; Harbor trial images use Python 3.12. From this repository:
 
 ```bash
-uv sync --frozen --python 3.12
+uv sync --frozen
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
 uv run --frozen python -m refund_eval.dashboard
