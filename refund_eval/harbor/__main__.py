@@ -19,6 +19,9 @@ from refund_eval.config import (
     resolve_cost_limits,
 )
 from refund_eval.harbor.config import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_TIME_LIMIT,
+    DEFAULT_TRIALS,
     RESUME_IN_IMAGE,
     RESUME_SNAPSHOT_IN_IMAGE,
     SNAPSHOT_IN_IMAGE,
@@ -52,7 +55,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 def prepare(
     destination: Path, *, settings: TrialSettings, model: str | None = None,
     models: list[str] | None = None,
-    environment: str = "modal", trials: int = 4, concurrency: int = 2,
+    environment: str = "modal", trials: int = DEFAULT_TRIALS, concurrency: int = DEFAULT_CONCURRENCY,
     secrets: list[str] | None = None, inbox: Path | None = None, resume: Path | None = None,
 ) -> Path:
     from harbor.models.job.config import JobConfig
@@ -281,8 +284,8 @@ def main() -> None:
         return
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--environment", choices=["docker", "modal"], default="modal")
-    parser.add_argument("--trials", type=int, default=4, help="Trials per selected model")
-    parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS, help="Trials per selected model")
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--tool-profile", choices=["published"], default="published")
     parser.add_argument("--data-mode", choices=["fixture", "hybrid"], default="hybrid")
     parser.add_argument("--browser-runtime", choices=["subprocess"], default="subprocess")
@@ -301,7 +304,7 @@ def main() -> None:
     parser.add_argument("--cost-limit", default=argparse.SUPPRESS,
                         help='USD cap, or JSON mapping of target model IDs to USD caps; required for late-refund')
     parser.add_argument("--trial-deadline-policy", choices=["bounded-lifecycle-v1"], default=None)
-    parser.add_argument("--time-limit", type=int, default=1800)
+    parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT)
     parser.add_argument("--reasoning", action="store_true", help="Return the target's reasoning (OpenRouter models)")
     parser.add_argument("--scenario", choices=scenario_names(),
                         default=TrialSettings.model_fields["scenario"].default)
