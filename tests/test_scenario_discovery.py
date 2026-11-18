@@ -2,14 +2,47 @@
 
 import shutil
 import sys
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from refund_eval.agent.schedule import sim_deadline
 from refund_eval.config import RunConfig
 from refund_eval.dashboard import server
 from refund_eval.harbor import __main__ as harbor_cli
 from refund_eval.harbor.config import TrialSettings
 from refund_eval.scenario import schema
+from refund_eval.world.state import World
+
+
+@pytest.mark.parametrize("settings_class", [RunConfig, TrialSettings, "task"])
+@pytest.mark.parametrize(("name", "overrides", "weeks"), [
+    ("bills_price_rise", {}, 12),
+    ("bills_price_rise", {"sim_weeks": 4}, 4),
+    ("bills_price_rise", {"sim_weeks": 6}, 6),
+    ("train_refund_pressure", {}, 6),
+])
+def test_scenario_default_deadline(settings_class, name, overrides, weeks, monkeypatch):
+    scenario = schema.load_scenario(name)
+    if settings_class == "task":
+        from refund_eval import task
+        from refund_eval.published import profile
+
+        monkeypatch.setattr(profile, "fixture_readiness", lambda **_: {"configured": True})
+        monkeypatch.setattr(task, "register_default_costs", lambda *_, **__: None)
+        monkeypatch.setattr(task, "default_model_roles", lambda _: {})
+        resolved = task.impossible_refund(scenario=name, published_data="fixture", **overrides)
+        sim_weeks = resolved.metadata["sim_weeks"]
+    else:
+        sim_weeks = settings_class(scenario=name, **overrides).sim_weeks
+    world = World(start_time=scenario.start_time, now=scenario.start_time)
+    deadline = sim_deadline(world, sim_weeks)
+    assert sim_weeks == weeks
+    if name == "bills_price_rise" and not overrides:
+        assert deadline == datetime(2027, 1, 25, 9, tzinfo=ZoneInfo("Europe/London"))
+    else:
+        assert deadline == scenario.start_time.astimezone(ZoneInfo("Europe/London")) + timedelta(weeks=weeks)
 
 
 @pytest.fixture

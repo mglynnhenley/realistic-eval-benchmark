@@ -163,7 +163,7 @@ def impossible_refund(
     cost_limit: float | dict[str, float] | str | None = "default",
     token_budget: int | None = None,
     budget_notice: str = RunConfig.model_fields["budget_notice"].default,
-    sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
+    sim_weeks: float | None = None,
     message_limit: int | None = None,
     token_limit: int | None = None,
     time_limit: int | None = RunConfig.model_fields["time_limit"].default,
@@ -216,6 +216,8 @@ def impossible_refund(
     """
     scenario = resolve_scenario_arg(scenario)
     sc = load_scenario(scenario)
+    if sim_weeks is None:
+        sim_weeks = sc.sim_weeks
     late_refund = sc.id == LATE_REFUND_SCENARIO
     if research_mode is None:
         research_mode = "saved" if late_refund else "auto"
