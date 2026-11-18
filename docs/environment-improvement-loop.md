@@ -347,8 +347,7 @@ steps do not gate the continuous primary's repairs.
 Transcripts show what the agent saw. Each Harbor trial also saves `probe.json`,
 recording browser/sandbox observations and live request details such as
 `navigator.webdriver`, the user agent, time zone and fetch headers. Pass probes to
-`open --probe` or the legacy workflow's `probes` argument for `sandbox` and
-`internet` findings. Keep these original artifacts private.
+`open --probe` for `sandbox` and `internet` findings. Keep these original artifacts private.
 
 The note-memory and interactive workflows remain available for diagnosis and
 compatibility. They do not orchestrate continuous rounds. Their commands are run

@@ -368,9 +368,10 @@ of a coding agent is insufficient. Cloud workspace sleep/lifetime limits may sto
 processes; this is bounded execution with durable handoffs and manual recovery,
 not a permanent scheduler. Coding and compute bills remain separately identified.
 
-The legacy JavaScript workflows, MCP/API repair worker and reviewed A/B `measure`
-mode remain available for compatibility. They are not prerequisites for the
-continuous workflow; their implementation and historical results are unchanged.
+The reviewed A/B `measure` mode remains available for compatibility. It is not a
+prerequisite for the continuous workflow; its implementation and historical
+results are unchanged. The legacy JavaScript workflows, MCP server and durable
+worker have been removed; their saved results are unchanged.
 
 ### Bounded recovery policy
 
