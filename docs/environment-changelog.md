@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 4.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: 14644752b9dd6c36ce6b87442ec3920a3135f331a72c15945112aaabbc50c05c
+- Fingerprint: 92b7db6e787e9e0cb092a75c0486ae1d4fadd094d950abd9da2ad2ccd65fe9f8
 - Trial round: one paid rerun of train_refund_late from this commit, coordinated separately (not yet run).
-- Changes: settle missing world-model charges from OpenRouter generation records, then conservative local pricing estimates, preserving the world allowance and recording settlement provenance (MAT-134).
+- Changes: settle missing world-model charges only from finished, positive-cost OpenRouter generation records or conservative local pricing estimates of complete reported usage when records are unavailable; otherwise stop, preserving the world allowance and recording settlement provenance (MAT-134).
 
 ## 3.0 — 2026-11-18
 - Kind: behaviour round

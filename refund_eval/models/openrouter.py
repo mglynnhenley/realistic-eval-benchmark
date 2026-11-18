@@ -134,8 +134,8 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
     write = getattr(details, "cache_write_tokens", None) if details is not None else None
     output_details = getattr(raw, "completion_tokens_details", None)
     usage = Usage(
-        input_tokens=raw.prompt_tokens - (read or 0) - (write or 0), output_tokens=raw.completion_tokens,
-        total_tokens=raw.total_tokens, input_tokens_cache_read=read, input_tokens_cache_write=write,
+        input_tokens=(raw.prompt_tokens or 0) - (read or 0) - (write or 0), output_tokens=raw.completion_tokens or 0,
+        total_tokens=raw.total_tokens or 0, input_tokens_cache_read=read, input_tokens_cache_write=write,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", None) if output_details is not None else None,
     )
     reported = getattr(raw, "cost", None)  # OpenRouter's own charge for the call
@@ -150,22 +150,27 @@ def _valid_cost(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
 
-def _estimate(usage: Usage | None, params: dict[str, Any], prices: Mapping[str, float] | None) -> float | None:
+def _token_count(value: Any, *, minimum: int = 1) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def _estimate(raw: Any, prices: Mapping[str, float] | None) -> float | None:
     if not prices or not {"input", "output"} <= prices.keys():
         return None
     if not all(_valid_cost(price) for price in prices.values()):
         return None
-    if usage is not None:
-        tokens = max(usage.total_tokens, usage.input_tokens + usage.output_tokens
-                     + (usage.input_tokens_cache_read or 0) + (usage.input_tokens_cache_write or 0))
-        if tokens < 0:
+    if raw is None:
+        return None
+    prompt, completion, tokens = raw.prompt_tokens, raw.completion_tokens, raw.total_tokens
+    if not all(_token_count(count) for count in (prompt, completion, tokens)) or tokens < prompt + completion:
+        return None
+    details = getattr(raw, "prompt_tokens_details", None)
+    cached = [getattr(details, field, None) for field in ("cached_tokens", "cache_write_tokens")]
+    for count in cached:
+        if count is not None and not _token_count(count, minimum=0):
             return None
-    else:
-        maximum = params.get("max_tokens")
-        if not isinstance(maximum, int) or maximum <= 0:
-            return None
-        # UTF-8 bytes bound text tokens; include tools, schema and message framing.
-        tokens = len(json.dumps(params, ensure_ascii=False).encode()) + 256 * (len(params["messages"]) + 1) + maximum
+    if sum(count or 0 for count in cached) > prompt:
+        return None
     return math.ceil(tokens * max(prices.values()) * 1000) / 1_000_000_000
 
 
@@ -210,21 +215,28 @@ class OpenRouterClient:
             raise ValueError(f"No model for the {role} role")
         return self.roles[role]
 
-    async def _generation_cost(self, generation_id: str | None) -> float | None:
+    async def _generation_cost(self, generation_id: str | None) -> tuple[float | None, bool]:
         if not generation_id:
-            return None
+            return None, False
+        found = False
         for attempt in range(3):
             if attempt:
                 await anyio.sleep(1)
             try:
                 record = await self.client.with_options(max_retries=0, timeout=5).get(
                     "/generation", cast_to=dict, options={"params": {"id": generation_id}})
-                cost = record.get("data", {}).get("total_cost")
-                if _valid_cost(cost):
-                    return float(cost)
+                found = True
+                data = record.get("data", {})
+                cost = data.get("total_cost")
+                finished = data.get("finish_reason") or data.get("native_finish_reason")
+                prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
+                completion = data.get("tokens_completion") or data.get("native_tokens_completion")
+                if (_valid_cost(cost) and cost > 0 and data.get("cancelled") is not True
+                        and finished and _token_count(prompt) and _token_count(completion)):
+                    return float(cost), True
             except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):
                 continue
-        return None
+        return None, found
 
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
@@ -259,11 +271,13 @@ class OpenRouterClient:
         usage = _usage(result.usage, None)
         cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
         if cost_method is None:
-            cost = await self._generation_cost(result.id) if self.require_reported_cost else None
+            if self.require_reported_cost and usage is not None:
+                usage.cost = None
+            cost, found = await self._generation_cost(result.id) if self.require_reported_cost else (None, False)
             if cost is not None:
                 cost_method = "generation_lookup"
             else:
-                cost = (_estimate(usage, params, self.prices.get(name)) if self.require_reported_cost else
+                cost = (None if found else _estimate(result.usage, self.prices.get(name))) if self.require_reported_cost else (
                         cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
                 cost_method = "estimate" if cost is not None else None
             if cost is not None:
