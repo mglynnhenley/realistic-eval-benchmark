@@ -147,6 +147,9 @@ def test_main_image_builds_from_only_the_agent_payload(generated):
     task_dir = generated / "train_refund_late"
     environment = task_dir / "environment"
     payload = environment / "agent"
+    version_module = payload / "refund_eval" / "environment_version.py"
+    source_version_module = environment / "source" / "refund_eval" / "environment_version.py"
+    assert version_module.read_bytes() == source_version_module.read_bytes()
     copy_inputs = [line.split()[1:-1] for line in (environment / "Dockerfile").read_text().splitlines()
                    if line.startswith("COPY ") and not line.startswith("COPY --from=")]
     assert copy_inputs == [["agent/pyproject.toml", "agent/uv.lock"], ["agent/"]]

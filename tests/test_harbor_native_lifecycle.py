@@ -22,7 +22,7 @@ def docker(*args):
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=False, timeout=15)
 
 
-@pytest.mark.parametrize("stop", ["timeout", "kill"])
+@pytest.mark.parametrize("stop", ["timeout", "kill", "cancel", "cancel_collect_failure"])
 def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, stop):
     tasks = tmp_path / "tasks"
     kill_file = tmp_path / "KILL"
@@ -37,8 +37,35 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
     text = scripts.read_text()
     start = "class TurnCap(Script):\n    def step(self, n, messages):\n"
     assert text.count(start) == 1
-    scripts.write_text(text.replace(start, start + "        if n == 2:\n            import time\n            time.sleep(25)\n"))
+    if stop in {"cancel", "cancel_collect_failure"}:
+        injected = ("        if n == 1:\n"
+                    "            from pathlib import Path\n"
+                    "            import time\n"
+                    "            marker = Path('/logs/agent/inspect/model-active')\n"
+                    "            marker.touch()\n"
+                    "            time.sleep(25)\n"
+                    "            marker.with_name('model-completed').touch()\n")
+    else:
+        injected = "        if n == 2:\n            import time\n            time.sleep(25)\n"
+    scripts.write_text(text.replace(start, start + injected))
     job_path = tasks / "job.yaml"
+    if stop in {"cancel", "cancel_collect_failure"}:
+        task_path = tasks / "train_refund_late" / "task.toml"
+        task_text = task_path.read_text()
+        agent_artifact = '    { source = "/logs/agent/inspect", destination = "agent-eval" },\n'
+        assert task_text.count(agent_artifact) == 1
+        task_text = task_text.replace(
+            agent_artifact,
+            agent_artifact
+            + '    { source = "/missing/cancel-main", destination = "cancel-main" },\n'
+            + '    { source = "/missing/cancel-world", service = "world", destination = "cancel-world" },\n',
+        )
+        if stop == "cancel_collect_failure":
+            collect_start = task_text.index("[[verifier.collect]]")
+            command_start = task_text.index('command = "', collect_start)
+            command_end = task_text.index("\n", command_start)
+            task_text = task_text[:command_start] + 'command = "exit 42"' + task_text[command_end:]
+        task_path.write_text(task_text)
     job = yaml.safe_load(job_path.read_text())
     job["n_attempts"] = job["n_concurrent_trials"] = 1
     job["agents"] = [{"import_path": AGENT_IMPORT, "model_name": "mockllm/model",
@@ -46,22 +73,34 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
     job_path.write_text(yaml.safe_dump(job))
     job_dir = tasks / "jobs" / job["job_name"]
     log_path = tmp_path / "harbor.log"
+    cancellation_sent = False
     with log_path.open("w") as log, subprocess.Popen(
         [str(HARBOR), "harbor", "run", "-y", "-c", str(job_path)], env=env, stdout=log, stderr=subprocess.STDOUT,
     ) as process:
         try:
-            if stop == "kill":
+            if stop in {"kill", "cancel", "cancel_collect_failure"}:
                 deadline = time.monotonic() + 160
                 while process.poll() is None and time.monotonic() < deadline:
                     trial = next(job_dir.glob("train_refund_late__*"), None)
                     if trial is not None:
-                        sidecar = f"{trial.name.lower()}__env-world-1"
-                        turn = docker("exec", sidecar, "grep", "-qE", r'"kind": *"turn"', "/var/log/world/events.jsonl")
-                        if turn.returncode == 0:
-                            kill_file.touch()
-                            break
+                        if stop == "kill":
+                            sidecar = f"{trial.name.lower()}__env-world-1"
+                            turn = docker("exec", sidecar, "grep", "-qE", r'"kind": *"turn"', "/var/log/world/events.jsonl")
+                            if turn.returncode == 0:
+                                kill_file.touch()
+                                break
+                        else:
+                            main = f"{trial.name.lower()}__env-main-1"
+                            active = docker("exec", main, "test", "-f", "/logs/agent/inspect/model-active")
+                            if active.returncode == 0:
+                                process.send_signal(signal.SIGINT)
+                                cancellation_sent = True
+                                break
                     time.sleep(0.25)
-                assert kill_file.exists(), log_path.read_text()
+                if stop == "kill":
+                    assert kill_file.exists(), log_path.read_text()
+                else:
+                    assert cancellation_sent, log_path.read_text()
             process.wait(timeout=240)
         finally:
             if process.poll() is None:
@@ -73,13 +112,36 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
     world = trial / "artifacts" / "world"
     state = json.loads((world / "state.json").read_text())
     assert (world / "events.jsonl").stat().st_size > 0
-    assert (world / "final_snapshot.json").is_file()
     assert (trial / "agent" / "inspect.log").is_file()
-    assert (trial / "verifier" / "reward.json").is_file()
     assert state["store"]["world_model_budget"]["spent_usd"] == 0
+    if stop in {"cancel", "cancel_collect_failure"}:
+        assert result["exception_info"]["exception_type"] == "CancelledError"
+        assert not (trial / "verifier" / "reward.json").exists()
+        agent_eval = trial / "artifacts" / "agent-eval"
+        assert (agent_eval / "model-active").is_file()
+        assert not (agent_eval / "model-completed").exists()
+        if stop == "cancel_collect_failure":
+            assert not (world / "final_snapshot.json").exists()
+            assert "Collect hook in service 'world' exited with code 42" in (
+                trial / "trial.log"
+            ).read_text()
+        else:
+            assert (world / "final_snapshot.json").is_file()
+        entries = {entry["source"]: entry for entry in json.loads(
+            (trial / "artifacts" / "manifest.json").read_text()
+        )}
+        assert entries["/var/log/world"]["status"] == "ok"
+        assert entries["/logs/agent/inspect"]["status"] == "ok"
+        assert entries["/missing/cancel-main"]["status"] == "failed"
+        assert entries["/missing/cancel-world"]["status"] == "failed"
+        assert entries["/missing/cancel-main"]["service"] is None
+        assert entries["/missing/cancel-world"]["service"] == "world"
+    else:
+        assert (world / "final_snapshot.json").is_file()
+        assert (trial / "verifier" / "reward.json").is_file()
     if stop == "timeout":
         assert result["exception_info"]["exception_type"] == "AgentTimeoutError"
-    else:
+    elif stop == "kill":
         assert state["stop_reason"] == "kill_switch"
 
     for project in (f"{trial.name.lower()}__env", f"{trial.name.lower()}__verifier__trial"):
