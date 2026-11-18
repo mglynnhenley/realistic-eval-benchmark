@@ -24,10 +24,10 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 3.1 — 2026-11-18
-- Kind: trivial batch
+## 4.0 — 2026-11-18
+- Kind: behaviour round
 - Fingerprint: 14644752b9dd6c36ce6b87442ec3920a3135f331a72c15945112aaabbc50c05c
-- Trial round: none; offline validation only.
+- Trial round: one paid rerun of train_refund_late from this commit, coordinated separately (not yet run).
 - Changes: settle missing world-model charges from OpenRouter generation records, then conservative local pricing estimates, preserving the world allowance and recording settlement provenance (MAT-134).
 
 ## 3.0 — 2026-11-18
