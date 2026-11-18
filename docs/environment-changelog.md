@@ -27,7 +27,7 @@ this was not a second version or trial round.
 ## 2.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 9a5bdd5f5300336d31a91fb4f66120ea46d7e66fed7f02752b65f8823403d9e2
-- Trial round: not run; no paid run was authorized for MAT-106
+- Trial round: pending the separately run $10-cap Modal native trial (Repro Auditor)
 - Changes: fingerprint model clients; enforce native world-model spending and stop instead of silently continuing after a world-model limit
 
 ## 1.0 — 2026-11-18
