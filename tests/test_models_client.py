@@ -506,6 +506,7 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
     from refund_eval.models.replay import (
         RECORDINGS_KEY,
         RecordingModelClient,
+        ReplayMismatch,
         ReplayModelClient,
     )
     from refund_eval.world import store
@@ -611,6 +612,24 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             assert replayed.raw_finish_reason == first["raw_finish_reason"]
         if kind == "three":
             assert budget.status == "failed"
+        replay = ReplayModelClient(recordings)
+        replay_budget = BudgetedWorldModels(replay, float(budget.limit), lambda: None)
+        if kind in {"three", "allowance", "no_price", "unknown_price"}:
+            with pytest.raises(ModelLimitExceeded):
+                await replay_budget.complete("simulator", messages, **settings)
+        else:
+            replayed = await replay_budget.complete("simulator", messages, **settings)
+            assert replayed.text == result.text
+            assert replayed.usage == result.usage
+            assert replayed.cost_method == result.cost_method
+            assert not replayed.failed
+        assert replay.position == len(recordings)
+        assert replay_budget.spent == budget.spent
+        assert replay_budget.status == budget.status
+        if kind in {"success", "body_error"}:
+            mismatch = BudgetedWorldModels(ReplayModelClient(recordings), float(budget.limit), lambda: None)
+            with pytest.raises(ReplayMismatch, match="differs from its recording"):
+                await mismatch.complete("simulator", [Message("user", "different request")], **settings)
     finally:
         store.install(previous)
         await client.client.close()
