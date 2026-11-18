@@ -19,13 +19,35 @@ from harbor.models.task.task import Task
 from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
 from refund_eval.harbor.__main__ import main, prepare
 from refund_eval.harbor.agent import RefundInspectAgent
-from refund_eval.harbor.config import TrialSettings
+from refund_eval.harbor.config import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_TIME_LIMIT,
+    DEFAULT_TRIALS,
+    TrialSettings,
+)
 from refund_eval.realism import track
 from refund_eval.scenario.schema import load_scenario
 
 
 def published_settings(**kwargs):
     return TrialSettings(tool_profile="published", browser_runtime="subprocess", **kwargs)
+
+
+def test_cli_batch_defaults(tmp_path, monkeypatch, capsys):
+    captured = {}
+
+    def capture(destination, **kwargs):
+        captured.update(kwargs)
+        return destination / "job.json"
+
+    monkeypatch.setattr("refund_eval.harbor.__main__.prepare", capture)
+    monkeypatch.setattr(sys, "argv", ["refund_eval.harbor", "--output", str(tmp_path / "job"),
+                                      "--model", "openrouter/example/model"])
+    main()
+    capsys.readouterr()
+    assert captured["trials"] == DEFAULT_TRIALS == 4
+    assert captured["concurrency"] == DEFAULT_CONCURRENCY == 2
+    assert captured["settings"].time_limit == TrialSettings().time_limit == DEFAULT_TIME_LIMIT == 1800
 
 
 def test_cli_rejects_unknown_tool_profile(tmp_path, monkeypatch, capsys):

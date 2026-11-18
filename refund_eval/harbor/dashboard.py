@@ -18,7 +18,12 @@ from harbor.trial.hooks import TrialEvent
 
 from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor.__main__ import prepare
-from refund_eval.harbor.config import TrialSettings, batch_models, batch_total
+from refund_eval.harbor.config import (
+    DEFAULT_TIME_LIMIT,
+    TrialSettings,
+    batch_models,
+    batch_total,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +180,7 @@ async def run_batch(directory: Path) -> int:
             data_mode=config.get("data_mode", "fixture"),
             browser_runtime=config.get("browser_runtime", "subprocess"),
             cost_limit=config["cost_limit"], sim_weeks=config["sim_weeks"],
-            time_limit=config.get("time_limit") or 1800,
+            time_limit=config.get("time_limit") or DEFAULT_TIME_LIMIT,
             **({"research_mode": config["research_mode"]} if "research_mode" in config else {}),
             simulator_model=config["simulator_model"],
             grader_model=config["grader_model"],

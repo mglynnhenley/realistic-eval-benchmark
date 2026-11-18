@@ -41,6 +41,13 @@ def batch_total(config: dict) -> int:
     return config["trials"] * len(batch_models(config))
 
 
+# Batch trials run in parallel to measure variance; Harbor needs a finite timeout,
+# unlike RunConfig's None (no local cap).
+DEFAULT_TRIALS = 4
+DEFAULT_CONCURRENCY = 2
+DEFAULT_TIME_LIMIT = 1800
+
+
 class TrialSettings(AgentOptions):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -53,7 +60,7 @@ class TrialSettings(AgentOptions):
     token_budget: int | None = Field(default=None, gt=0, strict=True)
     budget_notice: BudgetNotice = RunConfig.model_fields["budget_notice"].default
     cost_limit: CostLimit = 1.0
-    time_limit: int = Field(default=1800, ge=1, le=72000)
+    time_limit: int = Field(default=DEFAULT_TIME_LIMIT, ge=1, le=72000)
     trial_deadlines: dict | None = None
     research_mode: Literal["auto", "live", "saved"] = "auto"
     simulator_model: str | None = None
