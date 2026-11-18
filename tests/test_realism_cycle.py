@@ -215,6 +215,7 @@ def logs(monkeypatch):
 
 def test_score_counts_tells_per_sample(logs):
     result = cycle.score(logs, "scans")
+    assert result["environment_version"] == "unversioned"
     assert result["per_trial"] == [2, 0, 1] and result["trials"] == 3
     assert result["tells_per_trial"] == 1.0 and result["yes_per_trial"] == pytest.approx(1 / 3)
     assert result["by_factor"] == {"sandbox": 0.0, "internet": pytest.approx(2 / 3),
@@ -264,7 +265,61 @@ def test_compare_cli_pools_files(monkeypatch, capsys, tmp_path):
         paths[-1].write_text(json.dumps({"per_trial": trials}))
     assert main(["compare", "--a", str(paths[0]), str(paths[1]), "--b", str(paths[2])]) == 0
     result = json.loads(capsys.readouterr().out)
+    assert result["environment_version"] == {"from": "unversioned", "to": "unversioned"}
     assert result["delta"] == pytest.approx(1 - 5) and result["decision"] == "better"
+
+
+def test_score_records_trial_environment_version_and_rejects_mixed_versions(logs):
+    from inspect_ai.log import read_eval_log
+
+    samples = [sample for log in logs for sample in read_eval_log(log).samples]
+    for sample in samples:
+        sample.metadata = {"environment_version": "1.0"}
+    assert cycle.score(logs, "scans")["environment_version"] == "1.0"
+    samples[-1].metadata = {}
+    with pytest.raises(ValueError, match="Scored trials must contain exactly one environment version"):
+        cycle.score(logs, "scans")
+
+
+@pytest.mark.parametrize("side", ["a", "b"])
+@pytest.mark.parametrize("other", ["1.1", None])
+def test_compare_cli_refuses_mixed_versions(tmp_path, capsys, side, other):
+    paths = []
+    for index, version in enumerate(["1.0", other, "2.0"]):
+        path = tmp_path / f"{index}.json"
+        score = {"per_trial": [1, 2]}
+        if version is not None:
+            score["environment_version"] = version
+        path.write_text(json.dumps(score))
+        paths.append(str(path))
+    mixed, single = paths[:2], paths[2:]
+    a, b = (mixed, single) if side == "a" else (single, mixed)
+    assert main(["compare", "--a", *a, "--b", *b]) == 1
+    output = capsys.readouterr()
+    assert not output.out
+    assert f"Side {side.upper()} must contain exactly one environment version" in output.err
+
+
+@pytest.mark.parametrize("a,b", [("1.0", "1.0"), ("1.0", "2.0"), (None, "1.0")])
+def test_compare_cli_labels_versions(tmp_path, capsys, a, b):
+    paths = []
+    for name, version in [("a", a), ("b", b)]:
+        path = tmp_path / f"{name}.json"
+        score = {"per_trial": [1, 2]}
+        if version is not None:
+            score["environment_version"] = version
+        path.write_text(json.dumps(score))
+        paths.append(str(path))
+    assert main(["compare", "--a", paths[0], "--b", paths[1]]) == 0
+    assert json.loads(capsys.readouterr().out)["environment_version"] == {
+        "from": a or "unversioned", "to": b or "unversioned"}
+
+
+def test_compare_rejects_mixed_versions_and_empty_scores():
+    with pytest.raises(ValueError, match="Side A must contain exactly one environment version"):
+        cycle.compare([1], [2], versions_a=["1.0", "unversioned"])
+    with pytest.raises(ValueError, match="Both comparison sides require trial scores"):
+        cycle.compare([], [2])
 
 
 def test_score_adds_aligned_awareness(logs, tmp_path):

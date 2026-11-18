@@ -131,7 +131,7 @@ def test_complete_plan_is_blocked_before_any_payment(context, adapters):
 
 
 def test_inconclusive_score_keeps_verified_fix_without_rerun(context, adapters, monkeypatch):
-    monkeypatch.setattr(loop, "compare", lambda *args: {"decision": "unclear", "delta": 0, "ci": [-1, 1]})
+    monkeypatch.setattr(loop, "compare", lambda *args, **kwargs: {"decision": "unclear", "delta": 0, "ci": [-1, 1]})
     result = loop.run_job(context)
     row = result["rounds"][0]
     assert not row["realism_accepted"] and row["correctness_retained"]
@@ -146,7 +146,7 @@ def test_style_change_needs_realism_evidence(context, adapters, monkeypatch):
         return {**repair(*args), "classification": "realism", "verified": False}
 
     monkeypatch.setattr(loop, "_repair", style)
-    monkeypatch.setattr(loop, "compare", lambda *args: {"decision": "unclear"})
+    monkeypatch.setattr(loop, "compare", lambda *args, **kwargs: {"decision": "unclear"})
     result = loop.run_job(context)
     assert result["retained_commit"] == context.settings["source_commit"]
     assert not result["rounds"][0]["correctness_retained"]

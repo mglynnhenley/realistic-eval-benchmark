@@ -330,7 +330,10 @@ def run_candidate(*, repo, run_dir, candidate, baseline=None, review=None, runne
                     result.update(status="complete", candidate=batch, native_attribution=attribution)
                     require(attribution["status"] == "verified", "Native evidence requires reconciliation")
                     if reference:
-                        result["comparison"] = autonomous.compare(reference["score"]["per_trial"], batch["score"]["per_trial"])
+                        result["comparison"] = autonomous.compare(
+                            reference["score"]["per_trial"], batch["score"]["per_trial"],
+                            versions_a=[reference["score"].get("environment_version", "unversioned")],
+                            versions_b=[batch["score"].get("environment_version", "unversioned")])
             except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- retain paid failure without replay
                 result.update(status="reconciliation_required", error_type=type(error).__name__)
             finally:

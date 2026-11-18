@@ -530,7 +530,9 @@ def run_job(context):
                                trial_reserve=trial_reserve, scan_reserve=scan_reserve)
             changed = _batch(context, protocol, candidate, hashes, f"{prefix}-candidate", cwd=context.worktree,
                              trial_reserve=trial_reserve, scan_reserve=scan_reserve)
-            comparison = compare(reference["score"]["per_trial"], changed["score"]["per_trial"])
+            comparison = compare(reference["score"]["per_trial"], changed["score"]["per_trial"],
+                                 versions_a=[reference["score"].get("environment_version", "unversioned")],
+                                 versions_b=[changed["score"].get("environment_version", "unversioned")])
             accepted = comparison["decision"] == "better"
             retained = accepted or correctness
             row = {"round": number, "source": source, "candidate": candidate, "repair": repair,

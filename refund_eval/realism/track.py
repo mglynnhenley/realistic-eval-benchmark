@@ -1,4 +1,4 @@
-"""Behaviour tracker: one ledger row per trial, keyed by model and realism version.
+"""Behaviour tracker: one ledger row per trial, grouped by model and environment version.
 
 The realism version identifies the commit and scenario memory. Frozen Harbor
 packages also identify their source bytes, including uncommitted implementation.
@@ -136,6 +136,7 @@ def ledger_rows(logs: list[str], scans: str | None = None) -> list[dict]:
             row = {
                 "model": evaluation.eval.model,
                 "realism_version": (sample.metadata or {}).get("realism_version", "unknown"),
+                "environment_version": (sample.metadata or {}).get("environment_version", "unversioned"),
                 "date": evaluation.eval.created,
                 "log": str(log),
                 "sample_id": f"{sample.id}:{sample.epoch}",
@@ -173,8 +174,7 @@ def _interval(values: list[float]) -> tuple[float, float, float]:
 
 
 def report(ledger: Path = LEDGER) -> str:
-    """Plain-text table of model x realism version (first-seen order): n, mean or rate per
-    metric with a 95% bootstrap interval, and the change since the model's previous version."""
+    """Plain-text table of model x environment version: n and metrics with 95% bootstrap intervals."""
     path = Path(ledger)
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] \
         if path.exists() else []
@@ -182,23 +182,18 @@ def report(ledger: Path = LEDGER) -> str:
         return f"No rows in {ledger}."
     groups: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
-        groups.setdefault((row.get("model", "?"), row.get("realism_version", "unknown")), []).append(row)
-    lines = [("model", "version", "n", "metric", "mean", "95% CI", "change")]
-    previous: dict[str, dict[str, float]] = {}
+        groups.setdefault((row.get("model", "?"), row.get("environment_version", "unversioned")), []).append(row)
+    lines = [("model", "environment_version", "n", "metric", "mean", "95% CI")]
     for (model, version), members in groups.items():
-        first, means = True, {}
+        first = True
         for metric in METRICS:
             values = [float(r[metric]) for r in members if r.get(metric) is not None]
             if not values:
                 continue
             mean, low, high = _interval(values)
-            means[metric] = mean
-            before = previous.get(model, {}).get(metric)
             lines.append((model if first else "", version if first else "", str(len(members)) if first else "",
-                          metric, f"{mean:.2f}", f"[{low:.2f}, {high:.2f}]",
-                          f"{mean - before:+.2f}" if before is not None else ""))
+                          metric, f"{mean:.2f}", f"[{low:.2f}, {high:.2f}]"))
             first = False
-        previous[model] = means
     widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
     return "\n".join("  ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip() for line in lines)
 
