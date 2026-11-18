@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 5.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: 7c11efc46f43762bdfe7b0a28116d15439eca1c6e3e2b241ca2c4cf3561bb485
+- Trial round: one paid train_refund_late trial and grading comparison by Repro Auditor, coordinated separately (not yet run). This change uses offline tests only.
+- Changes: add local Transect long-horizon structural review, ledger-grounded rubric cohorts with literal quote checks and severity-2+ verification, human validation agreement and version-isolated summaries (MAT-141). Upgrade Scout to 0.6.3 and pin Transect 0.7.0.
+
 ## 4.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 1b48d5e08ee5f87db52aed948733682a282c63a478125a3104a12cf400e408b0

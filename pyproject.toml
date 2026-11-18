@@ -16,7 +16,8 @@ dependencies = [
     "pyyaml",
     "google-api-python-client",
     "google-auth-oauthlib",
-    "inspect-scout>=0.5.3",
+    "inspect-scout>=0.6.3,<0.7",
+    "transect",
     "mcp>=1.25,<2",
     "uvicorn",
 ]
@@ -25,6 +26,9 @@ dependencies = [
 providers = ["anthropic", "google-genai", "xai-sdk"]
 concordia = ["gdm-concordia==2.4.0"]
 awareness = ["torch", "transformers", "accelerate", "modal"]
+
+[tool.uv.sources]
+transect = { git = "https://github.com/AI-Safety-Institute/transect.git", rev = "2655747e88a53141b769755f1cbe564cd58070b9" }
 
 [dependency-groups]
 dev = ["matplotlib", "pytest", "pytest-asyncio", "ruff"]
