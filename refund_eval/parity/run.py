@@ -65,7 +65,7 @@ def free_env(**extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in set(credentials_set(dict(os.environ)))}
     env = {k: v for k, v in env.items() if k not in {"OPENROUTER_API_KEY", "OPEN_ROUTER_KEY",
                                                       "REFUND_EVAL_EXA_API_KEY", "REFUND_EVAL_KILL"}}
-    return {**env, **extra}
+    return {**env, **extra, "PYTHON_DOTENV_DISABLED": "1"}
 
 
 def _write(path: Path, value: Any) -> None:

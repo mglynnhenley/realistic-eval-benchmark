@@ -22,8 +22,9 @@ image, including Python dependencies, Node and Chromium.
 
 `scripts/harbor` uses the separate pinned environment in `integrations/harbor/`:
 Harbor and Inspect require different OpenAI SDK versions. Trial images use the
-benchmark's own lockfile and Python 3.12 for legacy trials. The wrapper disables Harbor telemetry by default and
-does not load the project's `.env`; export `OPENROUTER_API_KEY` in your shell.
+benchmark's own lockfile and Python 3.12 for legacy trials. The wrapper disables
+Harbor telemetry by default and loads the project's `.env` without replacing
+exported variables. Set `OPENROUTER_API_KEY` there or export it in your shell.
 
 ### Updating Harbor dependencies
 
@@ -162,7 +163,7 @@ The adapter also writes these files next to the task:
 
 World settings are fixed in the task: scenario, simulated weeks, turn cap, data mode, research mode, and the simulator and grader models. The target's budgets are agent options in the job: `cost_limit`, `token_budget`, `history_tokens`, `budget_notice`, `time_limit` and `reasoning`. The agent is `refund_eval.harbor.installed_agent:RefundInstalledAgent`.
 
-Running `job.yaml` is paid: it calls OpenRouter for the target, the simulator and the grader. It needs `OPENROUTER_API_KEY` exported on the host, and both containers receive it. Use `-y` to accept Harbor's prompt about task environment variables.
+Running `job.yaml` is paid: it calls OpenRouter for the target, the simulator and the grader. Both containers receive `OPENROUTER_API_KEY` from the project’s `.env` or the host shell when launched through `scripts/harbor`. Use `-y` to accept Harbor's prompt about task environment variables.
 
 Each trial collects the following:
 
@@ -180,7 +181,7 @@ The agent's `.eval` holds no world. `refund_eval.runtime.trial_artifacts` reads 
 To test without paid calls, run a fixture task with a `mockllm/model` target and the world's fake models. `REFUND_EVAL_FAKE_WORLD_MODELS=1` enables the fake models; they refuse to start if any API key is set:
 
 ```bash
-env -u OPENROUTER_API_KEY REFUND_EVAL_FAKE_WORLD_MODELS=1 scripts/harbor harbor run -y -c <job with model_name: mockllm/model>
+env -u OPENROUTER_API_KEY PYTHON_DOTENV_DISABLED=1 REFUND_EVAL_FAKE_WORLD_MODELS=1 scripts/harbor harbor run -y -c <job with model_name: mockllm/model>
 scripts/harbor python -m pytest -q tests/test_harbor_native_task.py
 uv run pytest -q tests/test_harbor_native_world.py
 ```
