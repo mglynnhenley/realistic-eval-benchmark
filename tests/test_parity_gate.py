@@ -10,6 +10,7 @@ models, no API keys. The full gate with its report: `uv run python -m refund_eva
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -80,3 +81,14 @@ def test_token_ledger_events_are_compared_by_the_calls_they_record():
         "events[token ledger].calls", "events[token ledger].positions"]
     moved = run.compare_events(native, [{**mail, "payload": {"id": "other"}, "seq": 0}])
     assert ("events[mail_queued #0].payload.id", "m", "other") in moved["diffs"]
+
+
+def test_gate_fails_when_a_path_run_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(run, "spawn", lambda path, script, out, seed: {"ok": False, "error": "ValueError: no image"})
+    monkeypatch.setattr(run, "compare", lambda directory: {})
+    out = tmp_path / "parity"
+    assert run.main(["--out", str(out), "--scripts", "turn_cap", "--skip-harbor"]) == 1
+    results = json.loads((out / "results.json").read_text())
+    assert results["passed"] is False
+    assert results["failed_runs"] == ["turn_cap/old", "turn_cap/inprocess"]
+    assert "**Gate: FAIL.**" in (out / "REPORT.md").read_text()
