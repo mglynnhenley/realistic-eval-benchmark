@@ -7,7 +7,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from refund_eval.scenario.schema import scenario_names
+from refund_eval.scenario.schema import load_scenario, scenario_names
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
 # Role defaults; the target is chosen per run. The grader role checks the simulator's
@@ -50,6 +50,8 @@ def resolve_cost_limits(cost_limit: CostLimit, models: list[str], *, scenario: s
 
 def scenario_budget_defaults(values):
     """No implicit late-refund dollar cap; freeze its dossiers and target budget."""
+    if isinstance(values, dict) and "sim_weeks" not in values and values.get("scenario") in scenario_names():
+        values = {**values, "sim_weeks": load_scenario(values["scenario"]).sim_weeks}
     if isinstance(values, dict) and values.get("scenario") == LATE_REFUND_SCENARIO:
         values = dict(values)
         if "cost_limit" not in values:

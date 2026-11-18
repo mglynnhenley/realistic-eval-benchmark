@@ -292,7 +292,7 @@ def main() -> None:
     parser.add_argument("--max-turns", type=int, default=TrialSettings.model_fields["max_turns"].default)
     parser.add_argument("--history-tokens", type=int, default=TrialSettings.model_fields["history_tokens"].default,
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
-    parser.add_argument("--sim-weeks", type=float, default=TrialSettings.model_fields["sim_weeks"].default)
+    parser.add_argument("--sim-weeks", type=float, default=argparse.SUPPRESS)
     parser.add_argument("--token-budget", type=int, default=argparse.SUPPRESS,
                         help="Target tokens including cached input; late-refund defaults to 40000000")
     parser.add_argument("--budget-notice", choices=list(BUDGET_NOTICES),

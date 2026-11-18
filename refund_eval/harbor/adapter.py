@@ -90,13 +90,15 @@ def _fill(text: str, values: dict[str, object]) -> str:
     return text
 
 
-def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float, max_turns: int, research_mode: str,
+def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION) -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
     sc = load_scenario(scenario)
+    if sim_weeks is None:
+        sim_weeks = sc.sim_weeks
     task_dir = out / scenario
     if task_dir.exists():
         raise FileExistsError(f"Refusing to overwrite a generated task: {task_dir}")
@@ -181,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--scenario", required=True, choices=scenario_names())
     p.add_argument("--out", type=Path, required=True, help="Output directory (ignored or outside Git)")
     p.add_argument("--data-mode", choices=["fixture", "hybrid"], default=defaults["data_mode"].default)
-    p.add_argument("--sim-weeks", type=float, default=defaults["sim_weeks"].default)
+    p.add_argument("--sim-weeks", type=float, default=None)
     p.add_argument("--max-turns", type=int, default=defaults["max_turns"].default)
     p.add_argument("--research-mode", choices=["auto", "live", "saved"], default=None,
                    help="Default: saved for train_refund_late, else auto")

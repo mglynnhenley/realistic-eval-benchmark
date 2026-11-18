@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL, RunConfig
 from refund_eval.runtime.events import CHECKIN_HOURS
+from refund_eval.scenario.schema import load_scenario
 
 DEFAULT_OUTPUT_DIR = "/var/log/world"
 
@@ -17,7 +18,8 @@ class WorldSettings(BaseModel):
 
     scenario: str = RunConfig.model_fields["scenario"].default  # name or YAML path
     seed: int | None = Field(default=None, ge=0)  # None draws one; either way it is recorded in the world
-    sim_weeks: float = Field(default=RunConfig.model_fields["sim_weeks"].default, gt=0, le=12)
+    sim_weeks: float = Field(default_factory=lambda data: load_scenario(data["scenario"]).sim_weeks,
+                             gt=0, le=12)
     max_turns: int = Field(default=RunConfig.model_fields["max_turns"].default, ge=1)
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS
     research_mode: Literal["auto", "live", "saved"] = RunConfig.model_fields["research_mode"].default
