@@ -7,25 +7,25 @@ The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a r
 Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker, then:
 
 ```bash
-uv sync --frozen
+uv sync --frozen --python 3.12
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
-uv run pytest -q
+uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
 ```
 
 Set `OPENROUTER_API_KEY` in `.env` for the target, the simulator and the Scout judges. Keep Docker running for local trials. The image pins `@playwright/mcp` to `0.0.83`; a missing image or daemon stops setup before model execution.
 
-Hybrid search uses keyless Exa unless `REFUND_EVAL_EXA_API_KEY` is set. An account key is useful for batches because shared cloud IPs can reach keyless rate limits quickly. Search errors remain visible tool errors. The optional `REFUND_EVAL_DEFAULT_MODEL` changes the dashboard's target default.
+Hybrid search uses keyless Exa unless `REFUND_EVAL_EXA_API_KEY` is set. An account key is useful for batches because shared cloud IPs can reach keyless rate limits quickly. Search errors remain visible tool errors. The dashboard's built-in target is `openrouter/anthropic/claude-opus-5`. The copied `.env.example` sets `REFUND_EVAL_DEFAULT_MODEL` to `openrouter/anthropic/claude-haiku-4.5` as an example override; leave it blank in `.env` and unset in the shell to use the built-in default. It only changes the dashboard target, not the simulator, grader or CLI.
 
-For direct Anthropic, Google or xAI routes, install `uv sync --extra providers` and set the selected provider's key. OpenRouter routes use `OPENROUTER_API_KEY` regardless of the model publisher.
+For direct Anthropic, Google or xAI routes, run `uv sync --frozen --extra providers` and set the selected provider's key. OpenRouter routes use `OPENROUTER_API_KEY` regardless of the model publisher.
 
 ## Dashboard
 
 ```bash
-uv run python -m refund_eval.dashboard
+uv run --frozen python -m refund_eval.dashboard
 ```
 
-Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the bundled fictional mailbox and your saved snapshots. **Scenario** offers `train_refund`, `train_refund_pressure` and `train_refund_late`. The pressure variant adds increasingly insistent self-addressed user emails. The late variant uses a £350 cancelled journey and company decisions under their terms, described in [the late-refund specification](late-refund-spec.md).
+Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the scenario's bundled fictional mailbox and your saved snapshots. **Scenario** lists the bundled YAML scenarios, including `bills_price_rise` as well as the train-refund variants. The pressure variant adds increasingly insistent self-addressed user emails. The late variant uses a £350 cancelled journey and company decisions under their terms, described in [the late-refund specification](late-refund-spec.md).
 
 The dashboard launches paid model trials only when you start a run. The default data mode is hybrid. For batches, choose **Modal** or **Docker** under **Run location**; [Harbor setup](harbor.md#setup) covers their separate runtime requirements. Harbor packages Node, Chromium and the pinned browser alongside Inspect in each trial sandbox, using `browser_runtime=subprocess` without nested Docker.
 
@@ -73,7 +73,7 @@ Pass task settings as `-T name=value`:
 | `trials` | `1` | Inspect epochs of the scenario sample. |
 | `scenario` | `train_refund_pressure` | Bundled scenario name, or a YAML file path. |
 | `published_data` | `hybrid` | Hybrid web or fixture web data. |
-| `fixture_path` | bundled inbox | An explicit local inbox JSON file. |
+| `fixture_path` | scenario inbox, or the shared bundled inbox | An explicit local inbox JSON file. |
 | `company_simulator` | none | Override the simulator implementation for every company, for example `concordia`. Personal contacts are unchanged. |
 | `research_mode` | `auto`; `saved` for late refund | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial. |
 | `max_turns` | `1000` | Maximum target model generations. |
@@ -102,7 +102,7 @@ When visible history fills, the harness first replaces the output of tool calls 
 Companies can instead be simulated with Google DeepMind's [Concordia](https://github.com/google-deepmind/concordia) (`gdm-concordia` 2.4.0, Apache-2.0). Install the optional extra:
 
 ```bash
-uv sync --extra concordia
+uv sync --frozen --extra concordia
 ```
 
 Then select it with `-T company_simulator=concordia`. This applies to companies, not personal contacts. Each company decision runs Concordia's basic entity: what situation is this, who am I, what would someone like me do, then act. That is about four simulator-model calls per decision instead of one, all counted in `cost_limit`. Concordia sees the same inputs and rules as the default simulator. Reply timing still comes from each company's `reply_after_hours` and the runtime's limits, because Concordia has no response-delay model.
@@ -110,10 +110,14 @@ Then select it with `-T company_simulator=concordia`. This applies to companies,
 **The following command starts paid model execution**, capped at $5:
 
 ```bash
-uv run inspect eval refund_eval/task.py \
+uv run --frozen inspect eval refund_eval/task.py \
   -T scenario=train_refund_late -T company_simulator=concordia -T cost_limit=5 \
   -T published_data=fixture --model openrouter/anthropic/claude-opus-5.5 -M strict_tools=false
 ```
+
+### Comparing runs
+
+Use the same source revision, Python version, lockfile, scenario and inbox snapshot. Pass the target, simulator and grader model IDs and run limits explicitly. Rebuild the local browser image from that revision: the tag identifies the Playwright MCP package version, not the image contents. Use fixture web and saved research to avoid live web input; hybrid web and auto research can change as sites and saved-dossier freshness change. Matching the inputs does not make model responses deterministic.
 
 ## Late-refund runs
 
@@ -313,12 +317,12 @@ Browse results with `uv run scout view`. See [scout/README.md](../scout/README.m
 
 ## Validation
 
-Routine verification uses mocked models and upstream services:
+Routine verification uses mocked models and upstream services. The Harbor deadline suite is excluded from local runs because it can hang:
 
 ```bash
-uv run pytest -q
-uv run ruff check .
-uv run python -c "import refund_eval.task, refund_eval.dashboard.server, refund_eval.harbor.__main__"
+uv run --frozen pytest -q --deselect tests/test_harbor_deadlines.py
+uv run --frozen ruff check .
+uv run --frozen python -c "import refund_eval.task, refund_eval.dashboard.server, refund_eval.harbor.__main__"
 ```
 
 For browser integration checks with the pinned Docker image:

@@ -11,7 +11,7 @@ Email sends and website writes are intercepted and answered by the simulator.
 From the repository root:
 
 ```bash
-uv sync --frozen
+uv sync --frozen --python 3.12
 scripts/harbor harbor --version
 scripts/harbor modal token new  # once, for Modal
 ```
@@ -22,7 +22,7 @@ image, including Python dependencies, Node and Chromium.
 
 `scripts/harbor` uses the separate pinned environment in `integrations/harbor/`:
 Harbor and Inspect require different OpenAI SDK versions. Trial images use the
-benchmark's own lockfile. The wrapper disables Harbor telemetry by default and
+benchmark's own lockfile and Python 3.12. The wrapper disables Harbor telemetry by default and
 does not load the project's `.env`; export `OPENROUTER_API_KEY` in your shell.
 
 ## Prepare and run a batch
@@ -47,8 +47,9 @@ scripts/harbor harbor run -c .context/refund-batch/job.json
 ```
 
 Use `--environment docker` for local sandboxes. Repeat `--model` for multiple
-targets. `--trials` counts attempts per model; `--concurrency` limits active trials
-across the whole batch. Automatic retries are disabled.
+targets. `--trials` counts attempts per model (default 4); `--concurrency` limits active trials
+across the whole batch (default 2). The default per-trial wall-clock limit is 1,800 seconds.
+Automatic retries are disabled.
 
 The default scenario is `train_refund_pressure`, with six simulated weeks and 1,000 turns. Choose `--scenario train_refund` for the original
 request. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its

@@ -27,13 +27,13 @@ Actions and outcomes are logged for review. After a run, separate AI judges asse
 
 ## Quick start
 
-Install Python 3.12+, [uv](https://docs.astral.sh/uv/) and Docker. From this repository:
+Install Python 3.12, [uv](https://docs.astral.sh/uv/) and Docker. Use Python 3.12 to match Harbor's trial runtime. From this repository:
 
 ```bash
-uv sync --frozen
+uv sync --frozen --python 3.12
 cp .env.example .env
 docker build -t refund-eval-playwright:0.0.83 refund_eval/published/browser_runtime
-uv run python -m refund_eval.dashboard
+uv run --frozen python -m refund_eval.dashboard
 ```
 
 Open <http://127.0.0.1:8765>. Starting the dashboard makes no model calls. To launch a trial, set `OPENROUTER_API_KEY` in `.env`, choose **train_refund_late**, select a target model and set explicit budgets. Keep Docker running for local trials. [Setup and controls](docs/running.md) cover provider keys, fixture mode and the dashboard; [Harbor](docs/harbor.md) covers Modal or Docker batches.
@@ -43,7 +43,7 @@ Open <http://127.0.0.1:8765>. Starting the dashboard makes no model calls. To la
 **The following command starts paid model execution.** It sets a twelve-week simulated horizon, a 40-million-target-token budget, a 60,000-token history window, 10,000 target generations and a $150 total model-cost ceiling:
 
 ```bash
-uv run inspect eval refund_eval/task.py \
+uv run --frozen inspect eval refund_eval/task.py \
   --model openrouter/anthropic/claude-opus-5.5 \
   --model-role simulator=openrouter/anthropic/claude-opus-5.5 \
   --model-role grader=openrouter/anthropic/claude-haiku-4.5 \
@@ -58,7 +58,7 @@ uv run inspect eval refund_eval/task.py \
 
 `--model` selects the agent being evaluated; `simulator` handles counterparties and `grader` checks their replies for financial consistency. The cost ceiling covers these trial model calls, not later claim evaluation, Scout grading or sandbox compute, and is not an estimated bill. The first applicable stopping condition ends the trial. Late-refund launches require an explicit cost cap; tool results are uncapped.
 
-The scenario starts on 12 October 2026; a twelve-week trial ends on 4 January 2027. The agent can request a wake-up; incoming mail or the 09:00 and 17:00 London check-ins can wake it earlier. Simulated time, cumulative tokens and the visible history window are separate limits. See [settings and timing](docs/running.md#common-settings), [the scenario specification](docs/late-refund-spec.md) and [the reproducible Muse configuration](docs/running.md#prepare-the-muse-configuration). Live web content and model responses can vary between trials.
+The scenario starts on 12 October 2026; a twelve-week trial ends on 4 January 2027. The agent wakes at its requested time or when mail is due, whichever comes first; if neither is pending, it wakes at the next 09:00 London check-in. Simulated time, cumulative tokens and the visible history window are separate limits. See [settings and timing](docs/running.md#common-settings), [the scenario specification](docs/late-refund-spec.md) and [the frozen Muse configuration](docs/running.md#prepare-the-muse-configuration). Live web content and model responses can vary between trials.
 
 The earlier `train_refund_pressure` and `train_refund` scenarios remain supported. The CLI still defaults to the pressure scenario, six weeks, 1,000 turns and a $1 cost cap; the example above overrides them explicitly. See [earlier scenarios](docs/running.md#earlier-scenarios).
 
@@ -106,4 +106,4 @@ Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and
 | `scripts/`, `integrations/harbor/` | Preparation helpers and separate Harbor environment |
 | `tests/`, `docs/` | Tests, [architecture](docs/architecture.md) and run guides |
 
-Run `uv run pytest -q` and `uv run ruff check .` for local verification; browser and Harbor checks are described in [the run guide](docs/running.md#validation). Released under the [MIT licence](LICENSE).
+See [local verification](docs/running.md#validation) for the unit suite, lint and browser checks. Released under the [MIT licence](LICENSE).
