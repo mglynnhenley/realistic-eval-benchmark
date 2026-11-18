@@ -199,7 +199,9 @@ class OpenRouterClient:
 
             try:
                 prices = openrouter_prices(roles.values())
-            except (httpx.HTTPError, TypeError, ValueError):
+            except (httpx.RequestError, httpx.HTTPStatusError, TypeError, ValueError):
+                if not require_reported_cost:
+                    raise
                 prices = {}
         return cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
 

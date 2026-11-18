@@ -369,6 +369,25 @@ async def test_budgeted_openrouter_loads_fallback_prices_and_disables_sdk_retrie
     assert (await client.complete("simulator", [])).usage.cost == 0.1
 
 
+@pytest.mark.parametrize("budgeted", [False, True])
+@pytest.mark.parametrize("error", [httpx.ConnectError("offline"), TypeError("invalid model catalog"),
+                                   ValueError("invalid prompt price"), RuntimeError("unexpected")])
+def test_openrouter_catalog_failure_only_falls_back_when_budgeted(monkeypatch, budgeted, error):
+    from refund_eval.world_service.settings import WorldSettings
+
+    def unavailable(models):
+        raise error
+
+    monkeypatch.setattr(model_pricing, "openrouter_prices", unavailable)
+    settings = WorldSettings(world_cost_limit=1 if budgeted else None)
+    sdk = AsyncOpenAI(api_key="not-a-key")
+    if not budgeted or isinstance(error, RuntimeError):
+        with pytest.raises(type(error), match=str(error)):
+            OpenRouterClient.from_settings(settings, client=sdk)
+    else:
+        assert OpenRouterClient.from_settings(settings, client=sdk).prices == {}
+
+
 @pytest.mark.parametrize("mode", ["lookup", "estimate", "tokens", "exceeds", "unknown", "multiple", "actual"])
 async def test_world_charge_settlement(monkeypatch, mode):
     from refund_eval.models.budget import WORLD_BUDGET_KEY, BudgetedWorldModels
