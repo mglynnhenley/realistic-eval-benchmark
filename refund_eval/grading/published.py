@@ -309,7 +309,8 @@ def published_containment_check(
             fail("terminal record differs from native call", call.id)
         per_call = audit[call_index + 1:terminal_index]
         if (source == "exa" and profile.get("data_mode") == "hybrid"
-                and outcome.get("event") == "rejected" and outcome.get("reason") == "policy_denied"):
+                and outcome.get("event") == "rejected"
+                and outcome.get("reason") in {"policy_denied", "invalid_arguments"}):
             matching_args = _matches_redacted_arguments(audited_args, call.arguments, {"query", "objective"})
         if not matching_args:
             fail("native call does not match model tool and arguments", call.id)

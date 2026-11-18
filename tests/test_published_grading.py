@@ -182,6 +182,24 @@ def test_search_containment_only_accepts_redaction_on_a_denied_hybrid_call(block
         assert not check(data)["contained"]
 
 
+def test_redacted_search_still_proves_schema_rejection_before_dispatch():
+    data = case("exa", "web_search_exa", error=True, args={"query": "trains for SOME-BOOKING"})
+    data[2]["data_mode"] = "hybrid"
+    audit = data[-1]
+    catalog = next(e for e in audit if e.get("source") == "exa" and e["event"] == "catalog")
+    catalog["catalog"]["tools"][0]["inputSchema"] = {
+        "type": "object", "required": ["query", "objective"],
+        "properties": {"query": {"type": "string"}, "objective": {"type": "string"}},
+    }
+    catalog["sha256"] = fingerprint(catalog["catalog"])
+    audit[-2]["arguments"] = {"query": REDACTED_SCENARIO_VALUE}
+    audit[-1].update(event="rejected", reason="invalid_arguments")
+    assert check(data)["contained"]
+
+    insert(data, [{"event": "search_boundary", "call_id": "c1", "phase": "attempt"}])
+    assert not check(data)["contained"]
+
+
 @pytest.mark.parametrize("action", [None, "public_read", "blocked", "simulated", "overlay", "fixture", "read_error"])
 def test_browser_has_verified_boundary_even_when_no_network_was_needed(action):
     assert check(browser_case(action=action))["contained"]
