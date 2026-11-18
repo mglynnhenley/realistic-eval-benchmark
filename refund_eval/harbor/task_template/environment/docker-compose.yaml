@@ -25,7 +25,7 @@ services:
       WORLD_GRADER_MODEL: "__GRADER_MODEL__"
       WORLD_TASK_VERSION: "__TASK_VERSION__"
       WORLD_TRIAL: ${COMPOSE_PROJECT_NAME}  # Harbor's `<trial name>__env`; with the task version, the seed
-      WORLD_SEED: ${WORLD_SEED:-}  # set to replay a recorded seed
+      WORLD_SEED: "__WORLD_SEED__"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       REFUND_EVAL_EXA_API_KEY: ${REFUND_EVAL_EXA_API_KEY:-}
       REFUND_EVAL_FAKE_WORLD_MODELS: ${REFUND_EVAL_FAKE_WORLD_MODELS:-}  # test only; refuses to run with any key set

@@ -47,6 +47,8 @@ ORG = "refund-eval"
 DATASET_NAME = f"{ORG}/impossible-refund"
 AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
 SOURCE_FILES = ["refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"]
+HOST_SEED = "${WORLD_SEED:-}"
+DERIVED_SEED = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>')"
 
 
 def rules_sha256(scenario_id: str) -> str:
@@ -92,7 +94,7 @@ def _fill(text: str, values: dict[str, object]) -> str:
 
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
-               cpus: int, memory_mb: int, task_version: str = TASK_VERSION) -> Path:
+               cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED) -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
@@ -106,6 +108,11 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
+    seed_policy = DERIVED_SEED
+    if world_seed == HOST_SEED:
+        seed_policy += "; WORLD_SEED overrides"
+    elif world_seed:
+        seed_policy = f"fixed for all trials: {world_seed}"
     values = {
         "TASK_NAME": f"{ORG}/{scenario}", "SCENARIO": scenario, "TASK_VERSION": task_version,
         "DESCRIPTION": f"Impossible-refund benchmark, scenario {sc.id}: a long-horizon customer-service task "
@@ -114,6 +121,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "SIMULATOR_MODEL": simulator_model, "GRADER_MODEL": grader_model, "RULES_SHA256": rules_sha256(sc.id),
         "SOURCE_SHA256": source_sha256, "AGENT_TIMEOUT": float(agent_timeout),
         "VERIFIER_TIMEOUT": float(verifier_timeout), "CPUS": cpus, "MEMORY_MB": memory_mb,
+        "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):
@@ -144,7 +152,7 @@ def sample_job(out: Path, task_dir: Path, *, scenario: str) -> dict:
     }
 
 
-def validate_and_index(out: Path, task_dir: Path, job: dict) -> None:
+def validate_and_index(out: Path, task_dir: Path, job: dict) -> str:
     """Load the task and job with Harbor's own models; pin every task in OUT in dataset.toml."""
     try:
         from harbor.models.dataset.manifest import (
@@ -160,7 +168,7 @@ def validate_and_index(out: Path, task_dir: Path, job: dict) -> None:
         raise SystemExit("Harbor is not installed here; run with scripts/harbor python -m refund_eval.harbor.adapter") \
             from error
 
-    Task(task_dir)
+    selected = Task(task_dir).config.task.name
     JobConfig.model_validate(job)
     refs = []
     for directory in sorted(p for p in out.iterdir() if (p / "task.toml").is_file()):
@@ -175,6 +183,7 @@ def validate_and_index(out: Path, task_dir: Path, job: dict) -> None:
                                                    keywords=["refund-eval", "long-horizon"]),
                                tasks=refs, files=[metric])
     (out / "dataset.toml").write_text(manifest.to_toml(), encoding="utf-8")
+    return next(ref.digest for ref in refs if ref.name == selected)
 
 
 def main(argv: list[str] | None = None) -> int:

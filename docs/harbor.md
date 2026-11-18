@@ -140,6 +140,45 @@ uv run pytest -q tests/test_harbor_worker.py
 
 A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
 
+### Prepare a native batch
+
+Save a RunConfig JSON file. For example, this config prepares one Docker trial:
+
+```json
+{
+  "execution": "docker",
+  "scenario": "train_refund_late",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "data_mode": "fixture",
+  "research_mode": "saved",
+  "trials": 1,
+  "concurrency": 1,
+  "time_limit": 180,
+  "cost_limit": 1
+}
+```
+
+```bash
+scripts/harbor python -m refund_eval.harbor.batch --config run-config.json --out .context/native-batch
+```
+
+Preparation launches nothing. It requires a new or empty private directory and
+writes the task, `job.yaml`, and a `run.json` recording the resolved settings,
+task/source/rules and job hashes, seed policy, and attempt counts. Use `models`
+for multiple targets and a `cost_limit` object keyed by model ID for multiple
+late-refund targets. `trials` is per model; `concurrency` is shared and retries
+are disabled. Without `seed`, each trial derives its seed from the task version
+and trial name. An explicit seed applies to all attempts; the host's
+`WORLD_SEED` does not override a prepared native batch. Saved inboxes and
+resuming prior logs are not supported by this command.
+
+Review the record before running the separately printed paid launch command.
+**The dollar limit caps only the target**, not the world models or sandbox
+compute; get approval for those costs before launching. Use `"execution":
+"modal"` to prepare a Modal job.
+
+### Generate a task and sample job
+
 Generate a task. This launches nothing. The output directory holds the source and per-task tokens, so keep it private:
 
 ```bash
