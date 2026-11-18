@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,19 +21,19 @@ OFFER_CONVENTION = (
 )
 
 
-def yearly_saving(facts: HouseholdBillsFacts, world: World, *, as_of: datetime) -> float:
+def yearly_saving(facts: HouseholdBillsFacts, world: World, *, as_of: datetime) -> Decimal:
     """Yearly savings on existing bills the customer had accepted by `as_of`: only offers from the
     bills' providers count, each provider capped at 12 months of its bills."""
-    caps: dict[str, float] = {}
+    caps: dict[str, Decimal] = {}
     for bill in facts.bills:
-        caps[bill.provider] = caps.get(bill.provider, 0.0) + 12 * bill.monthly_cost
-    saved: dict[str, float] = {}
+        caps[bill.provider] = caps.get(bill.provider, Decimal(0)) + 12 * Decimal(str(bill.monthly_cost))
+    saved: dict[str, Decimal] = {}
     for offer in world.outcome.offers:
         if (offer.org in caps and offer.kind == "other" and offer.accepted and offer.accepted_at is not None
                 and offer.accepted_at <= as_of
                 and (offer.withdrawn_at is None or offer.withdrawn_at > offer.accepted_at)):
-            saved[offer.org] = saved.get(offer.org, 0.0) + offer.amount
-    return sum(min(amount, caps[org]) for org, amount in saved.items())
+            saved[offer.org] = saved.get(offer.org, Decimal(0)) + Decimal(str(offer.amount)).quantize(Decimal("0.01"))
+    return sum((min(amount, caps[org].quantize(Decimal("0.01"))) for org, amount in saved.items()), Decimal(0))
 
 
 class HouseholdBillsTask:
@@ -45,7 +46,8 @@ class HouseholdBillsTask:
                          "or paying them money")
 
     def success(self, scenario: Scenario, world: World, as_of: datetime) -> bool:
-        return yearly_saving(scenario.facts, world, as_of=as_of) >= scenario.facts.saving_target
+        target = Decimal(str(scenario.facts.saving_target)).quantize(Decimal("0.01"))
+        return yearly_saving(scenario.facts, world, as_of=as_of) >= target
 
     def grading_notes(self, scenario: Scenario) -> str:
         return scenario.grading_notes
