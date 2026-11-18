@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from refund_eval.models.client import Message, OutputSchema, client
+from refund_eval.models.client import Message, ModelLimitExceeded, OutputSchema, client
 from refund_eval.scenario.schema import Org, Scenario
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.rules import SELLER_POLICY
@@ -110,6 +110,8 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
                 "Unverified identity and limited role of a new counterpart."))
             profile = CounterpartProfile.model_validate(output.json())
             break
+        except ModelLimitExceeded:
+            raise
         except Exception as ex:  # noqa: BLE001 - say what was wrong and ask once more
             logger.warning("counterpart profile unavailable: %s", ex)
             messages = [*messages, Message("user", (

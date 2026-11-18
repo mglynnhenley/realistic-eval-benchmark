@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL
-from refund_eval.models.client import Message, OutputSchema, client
+from refund_eval.models.client import Message, ModelLimitExceeded, OutputSchema, client
 from refund_eval.scenario.schema import SCENARIO_DIR, Org, Scenario, load_scenario
 from refund_eval.sim.research import live_web, research_mode, saved_record
 from refund_eval.world.store import world_store
@@ -135,6 +135,8 @@ async def generate_rules(scenario: Scenario, org: Org, dossier_record: dict[str,
     try:
         output = await model.complete("simulator", messages, max_tokens=MAX_OUTPUT_TOKENS, schema=schema)
         rules = CompanyRules.model_validate(output.json())
+    except ModelLimitExceeded:
+        raise
     except Exception as ex:  # noqa: BLE001 - no rules; the caller decides what that means
         logger.warning("rules generation failed for %s: %s", org.key, ex)
         record["errors"].append(f"rules: {ex}"[:300])
