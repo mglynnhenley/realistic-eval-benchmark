@@ -18,6 +18,6 @@ fingerprint and bump kind.
 
 ## 1.0 — 2026-11-18
 - Kind: baseline
-- Fingerprint: 5fac7ea66dd71803ce49db8c778136a01180fce1065bc25fd6730b012fb78270
+- Fingerprint: da7b22d16360fd9afee3caeb32e810e54b2453abf794dfdfb01a9faa00ae3964
 - Trial round: none
-- Changes: baseline for main @ ce407c0 (MAT-119)
+- Changes: baseline for main @ 9d1478e (MAT-119)
