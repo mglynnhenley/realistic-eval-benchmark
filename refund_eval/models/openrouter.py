@@ -11,12 +11,15 @@ or key limit reached) is raised as ModelLimitExceeded.
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-from openai import APIStatusError, AsyncOpenAI
+import anyio
+import httpx
+from openai import APIError, APIStatusError, AsyncOpenAI
 from pydantic import BaseModel
 
 from refund_eval.models.client import (
@@ -143,6 +146,29 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
     return usage
 
 
+def _valid_cost(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
+def _estimate(usage: Usage | None, params: dict[str, Any], prices: Mapping[str, float] | None) -> float | None:
+    if not prices or not {"input", "output"} <= prices.keys():
+        return None
+    if not all(_valid_cost(price) for price in prices.values()):
+        return None
+    if usage is not None:
+        tokens = max(usage.total_tokens, usage.input_tokens + usage.output_tokens
+                     + (usage.input_tokens_cache_read or 0) + (usage.input_tokens_cache_write or 0))
+        if tokens < 0:
+            return None
+    else:
+        maximum = params.get("max_tokens")
+        if not isinstance(maximum, int) or maximum <= 0:
+            return None
+        # UTF-8 bytes bound text tokens; include tools, schema and message framing.
+        tokens = len(json.dumps(params, ensure_ascii=False).encode()) + 256 * (len(params["messages"]) + 1) + maximum
+    return math.ceil(tokens * max(prices.values()) * 1000) / 1_000_000_000
+
+
 class OpenRouterClient:
     def __init__(self, roles: Mapping[Role, str], *, api_key: str | None = None,
                  base_url: str = OPENROUTER_BASE_URL, prices: Mapping[str, Mapping[str, float]] | None = None,
@@ -152,10 +178,10 @@ class OpenRouterClient:
                 raise ValueError(f"{role} model must be an openrouter/ model, not {name!r}")
         self.roles = dict(roles)
         self.prices = dict(prices or {})
+        self.require_reported_cost = require_reported_cost
         self.client = client or AsyncOpenAI(api_key=api_key or os.environ.get(API_KEY_ENV), base_url=base_url)
         if require_reported_cost:
             self.client = self.client.with_options(max_retries=0)
-            self.prices = {}
         self.usage_by_model: dict[str, Usage] = {}
         self.usage_by_role: dict[str, Usage] = {}
 
@@ -168,16 +194,35 @@ class OpenRouterClient:
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
         require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
-        if prices is None and not require_reported_cost:
+        if prices is None:
             from refund_eval.model_pricing import openrouter_prices
 
-            prices = openrouter_prices(roles.values())
+            try:
+                prices = openrouter_prices(roles.values())
+            except (httpx.HTTPError, TypeError, ValueError):
+                prices = {}
         return cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
 
     def model_name(self, role: Role) -> str:
         if role not in self.roles:
             raise ValueError(f"No model for the {role} role")
         return self.roles[role]
+
+    async def _generation_cost(self, generation_id: str | None) -> float | None:
+        if not generation_id:
+            return None
+        for attempt in range(3):
+            if attempt:
+                await anyio.sleep(1)
+            try:
+                record = await self.client.with_options(max_retries=0, timeout=5).get(
+                    "/generation", cast_to=dict, options={"params": {"id": generation_id}})
+                cost = record.get("data", {}).get("total_cost")
+                if _valid_cost(cost):
+                    return float(cost)
+            except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):
+                continue
+        return None
 
     async def complete(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                        tools: Sequence[Tool] = (), temperature: float | None = None,
@@ -209,7 +254,19 @@ class OpenRouterClient:
         text = (raw.content if raw is not None else None) or ""
         calls = [ToolCall(id=c.id, function=c.function.name, arguments=_arguments(c.function.arguments))
                  for c in (getattr(raw, "tool_calls", None) or []) if getattr(c, "function", None) is not None]
-        usage = _usage(result.usage, self.prices.get(name))
+        usage = _usage(result.usage, None)
+        cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
+        if cost_method is None:
+            cost = await self._generation_cost(result.id) if self.require_reported_cost else None
+            if cost is not None:
+                cost_method = "generation_lookup"
+            else:
+                cost = (_estimate(usage, params, self.prices.get(name)) if self.require_reported_cost else
+                        cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
+                cost_method = "estimate" if cost is not None else None
+            if cost is not None:
+                usage = usage or Usage()
+                usage.cost = cost
         if usage is not None:
             self.usage_by_model[name] = self.usage_by_model.get(name, Usage()) + usage
             self.usage_by_role[role] = self.usage_by_role.get(role, Usage()) + usage
@@ -217,4 +274,4 @@ class OpenRouterClient:
             text=text, message=Message("assistant", text, tool_calls=calls,
                                        native=raw.model_dump(exclude_none=True) if raw is not None else None),
             stop_reason=_STOP.get(choice.finish_reason, "unknown") if choice is not None else "unknown",
-            usage=usage, model=name)
+            usage=usage, model=name, cost_method=cost_method)

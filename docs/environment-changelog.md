@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 3.1 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: b440ef0a691917ab52076eda6a29fd7ddeed3ba35a63619712ad37d57121179e
+- Trial round: none; offline validation only.
+- Changes: settle missing world-model charges from OpenRouter generation records, then conservative local pricing estimates, preserving the world allowance and recording settlement provenance (MAT-134).
+
 ## 3.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: ab352f834478cd2d8637806f32d5b756b2ca69961afa4364dd392bbc2e7d38a1

@@ -74,6 +74,7 @@ def _dump(completion: Completion) -> dict[str, Any]:
         "stop_reason": completion.stop_reason,
         "usage": None if completion.usage is None else asdict(completion.usage),
         "model": completion.model,
+        "cost_method": completion.cost_method,
     }
 
 
@@ -86,6 +87,7 @@ def _load(data: dict[str, Any]) -> Completion:
         stop_reason=data.get("stop_reason", "unknown"),
         usage=None if data.get("usage") is None else Usage(**data["usage"]),
         model=data.get("model", ""),
+        cost_method=data.get("cost_method"),
     )
 
 
