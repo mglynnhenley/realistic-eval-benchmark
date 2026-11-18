@@ -110,7 +110,10 @@ class RunConfig(BaseModel):
     # Runtime notice before every step, on the first step of each simulated day, or only
     # when under 20% of the tokens or time remains.
     budget_notice: BudgetNotice = "every_step"
-    cost_limit: CostLimit = 1.0
+    cost_limit: CostLimit = Field(default=1.0, description=(
+        "Per-trial USD cap for target and world model calls in-process (Inspect cost_limit). "
+        "A mapping selects the cap for each target model."
+    ))
     sim_weeks: float = Field(default=6.0, gt=0, le=12)
     execution: Literal["local", "modal", "docker"] = "local"
     trials: int = Field(default=1, ge=1, le=100, strict=True)

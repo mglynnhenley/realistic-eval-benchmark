@@ -52,7 +52,8 @@ class RefundAgentOptions(InstalledAgentOptions):
     token_budget: int | None = Field(default=None, gt=0, description="Target tokens including cached input.")
     budget_notice: BudgetNotice = Field(default=RunConfig.model_fields["budget_notice"].default)
     cost_limit: float | None = Field(default=None, gt=0, le=1000,
-                                     description="Target USD cap (Inspect cost_limit). Required for train_refund_late.")
+                                     description="Per-trial target-only USD cap (Inspect cost_limit); excludes world-service "
+                                                 "model calls. Required for train_refund_late.")
     time_limit: int | None = Field(default=None, ge=1, le=72000, description="Inspect wall-clock limit in seconds.")
     reasoning: bool = Field(default=False, description="Ask OpenRouter to return the target's reasoning.")
 

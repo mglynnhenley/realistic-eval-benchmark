@@ -189,7 +189,8 @@ def impossible_refund(
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
         agent gets a memory tool. 0 shows the full history. The log always keeps it all.
       cost_limit: Per-trial model spend cap in dollars (Inspect cost_limit;
-        counts every model call in the trial, including the simulator). A mapping
+        counts target and world model calls in-process, but only target model calls
+        with world_url; world-service model calls are excluded). A mapping
         resolves the selected target's cap. Late-refund requires an explicit cap;
         other scenarios default to $1 and accept None to disable the dollar cap.
       token_budget: Target-only token budget including cached input. Late-refund

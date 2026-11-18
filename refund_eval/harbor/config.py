@@ -59,7 +59,10 @@ class TrialSettings(AgentOptions):
     sim_weeks: float = Field(default=RunConfig.model_fields["sim_weeks"].default, gt=0)
     token_budget: int | None = Field(default=None, gt=0, strict=True)
     budget_notice: BudgetNotice = RunConfig.model_fields["budget_notice"].default
-    cost_limit: CostLimit = 1.0
+    cost_limit: CostLimit = Field(default=1.0, description=(
+        "Per-trial USD cap for target and world model calls in the in-process worker (Inspect cost_limit). "
+        "A mapping selects the cap for each target model; native world-service launches use RefundAgentOptions."
+    ))
     time_limit: int = Field(default=DEFAULT_TIME_LIMIT, ge=1, le=72000)
     trial_deadlines: dict | None = None
     research_mode: Literal["auto", "live", "saved"] = "auto"
