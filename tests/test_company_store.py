@@ -6,6 +6,7 @@ import json
 import stat
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fixtures.simulator import MockSim, install_mock_models, start_sample
@@ -187,16 +188,27 @@ def test_company_store_sync_rejects_symlink_entries(tmp_path):
         company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=tmp_path / "host")
 
 
-def test_company_store_sync_ignores_regular_temporary_files(tmp_path):
+def test_company_store_sync_ignores_disappearing_temporary_files(tmp_path, monkeypatch):
     source, destination = tmp_path / "source", tmp_path / "destination"
     entry = _sync_entry()
     company_store.save_entry(SCENARIO, ORG, entry, root=source)
     path = company_store._entry_path(
         SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], source,
     )
-    (path.parent / "tmp-save-in-progress").write_text("incomplete", encoding="utf-8")
+    temporary = path.parent / "tmp-save-in-progress"
+    temporary.write_text("incomplete", encoding="utf-8")
+    is_symlink = Path.is_symlink
+
+    def remove_during_scan(candidate):
+        result = is_symlink(candidate)
+        if candidate == temporary:
+            temporary.unlink(missing_ok=True)
+        return result
+
+    monkeypatch.setattr(Path, "is_symlink", remove_during_scan)
 
     assert company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=destination) == 1
+    assert not temporary.exists()
 
 
 def test_company_store_root_default_custom_and_off(tmp_path, monkeypatch):
@@ -211,7 +223,7 @@ def test_company_store_root_default_custom_and_off(tmp_path, monkeypatch):
     assert company_store.store_root() is None
 
 
-def test_native_jobs_registry_is_private_atomic_and_ignores_temporary_files(tmp_path):
+def test_native_jobs_registry_is_private_atomic_and_ignores_disappearing_temporary_files(tmp_path, monkeypatch):
     host_store = tmp_path / "host-store"
     jobs_root = tmp_path / "prepared" / "jobs"
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -228,8 +240,19 @@ def test_native_jobs_registry_is_private_atomic_and_ignores_temporary_files(tmp_
     assert stat.S_IMODE(files[0].stat().st_mode) == 0o600
     assert company_store.registered_native_jobs_roots(host_store) == [jobs_root.resolve()]
 
-    (registry / "registration-in-progress.tmp").write_text("partial", encoding="utf-8")
+    temporary = registry / "registration-in-progress.tmp"
+    temporary.write_text("partial", encoding="utf-8")
+    is_symlink = Path.is_symlink
+
+    def remove_during_scan(candidate):
+        result = is_symlink(candidate)
+        if candidate == temporary:
+            temporary.unlink(missing_ok=True)
+        return result
+
+    monkeypatch.setattr(Path, "is_symlink", remove_during_scan)
     assert company_store.registered_native_jobs_roots(host_store) == [jobs_root.resolve()]
+    assert not temporary.exists()
 
 
 def test_registered_harvest_is_scenario_scoped_and_ignores_unregistered_and_missing_roots(tmp_path):

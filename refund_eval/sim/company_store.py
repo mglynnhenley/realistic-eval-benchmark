@@ -310,10 +310,10 @@ def registered_native_jobs_roots(root: Path | str | None = None) -> list[Path]:
     for path in sorted(directory.iterdir()):
         if path.is_symlink() or _has_symlink(path, selected):
             raise ValueError("Native Harbor job registry paths must not contain symlinks")
-        if not path.is_file():
-            raise ValueError("Invalid native Harbor job registry entry path")
         if path.suffix != ".json":
             continue
+        if not path.is_file():
+            raise ValueError("Invalid native Harbor job registry entry path")
         roots.append(_read_native_jobs_registration(path, selected))
     return roots
 
@@ -573,10 +573,10 @@ def _entry_files(root: Path | str, scenario_id: str) -> list[Path]:
         for path in sorted(identity_dir.iterdir()):
             if path.is_symlink():
                 raise ValueError("Company-store entries must not be symlinks")
-            if not path.is_file():
-                raise ValueError("Invalid company-store entry path")
             if path.suffix != ".json":
                 continue
+            if not path.is_file():
+                raise ValueError("Invalid company-store entry path")
             paths.append(path)
     return paths
 
