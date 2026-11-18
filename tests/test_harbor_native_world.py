@@ -160,16 +160,21 @@ def test_fake_world_models_can_promise_a_follow_up(monkeypatch, tmp_path):
     assert CompanyAction.model_validate(reply).follow_up_in_hours == 30 and reply["follow_up_plan"]
     assert asyncio.run(FakeWorldModels().complete("simulator", [], schema=schema)).json().get("follow_up_in_hours") is None
 
-    # REFUND_EVAL_FAKE_WORLD_MODELS=follow_up gives the world those fake models; other values give none.
+    # An unrecognized fake mode cannot launch uncapped OpenRouter models.
     served = []
     monkeypatch.setattr("refund_eval.world_service.__main__.main", lambda argv, model_client: served.append(
         model_client) or 0)
     monkeypatch.setenv("WORLD_OUTPUT_DIR", str(tmp_path))
     for name in credentials_set(dict(os.environ)):
         monkeypatch.delenv(name)
-    for value in ("follow_up", "1", "yes"):
+    for value in ("follow_up", "1"):
         monkeypatch.setenv(world_entrypoint.FAKE_MODELS_ENV, value)
         assert world_entrypoint.main() == 0
+    monkeypatch.setenv(world_entrypoint.FAKE_MODELS_ENV, "yes")
+    monkeypatch.delenv("WORLD_COST_LIMIT", raising=False)
+    assert world_entrypoint.main() == 2
+    monkeypatch.setenv("WORLD_COST_LIMIT", "0.75")
+    assert world_entrypoint.main() == 0
     assert [m.action.get("follow_up_in_hours") if m else None for m in served] == [
         world_entrypoint.FAKE_FOLLOW_UP_HOURS, None, None]
     assert served[1] is not None and served[2] is None

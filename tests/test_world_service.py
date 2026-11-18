@@ -31,7 +31,14 @@ from mcp.client.streamable_http import streamable_http_client
 
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.models import client as models
-from refund_eval.models.client import Completion, Message, ModelLimitExceeded
+from refund_eval.models.budget import WORLD_BUDGET_KEY
+from refund_eval.models.client import (
+    Completion,
+    Message,
+    ModelLimitExceeded,
+    OutputSchema,
+    Usage,
+)
 from refund_eval.models.replay import RECORDINGS_KEY
 from refund_eval.published.adapter import _normalized
 from refund_eval.published.mail import _visible_id
@@ -468,6 +475,55 @@ async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path, monkey
     assert "SENT" not in sent.content[0].text
 
 
+async def test_world_allowance_during_recipient_identification_stops_without_a_bounce(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+
+    class BilledRecipient(FakeModels):
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            self.calls.append((role, schema.name))
+            text = '{"name":"New Advice Service","role":"advice","reason":"An advice service."}'
+            return Completion(text=text, message=Message("assistant", text), stop_reason="stop",
+                              usage=Usage(cost=1.0))
+
+    fake = BilledRecipient()
+    async with (WorldTrial(settings(tmp_path, world_cost_limit=1), model_client=fake) as trial,
+                session(trial) as (client, _, _)):
+        sent = await client.call_tool("send_message", {
+            "to": ["help@new-advice.example"], "subject": "Train refund", "body": "Can you advise?"})
+        world = trial.data()["world"]
+    assert fake.calls == [("simulator", "counterpart_profile")]
+    assert sent.isError and world["stop_reason"] == "model_limit"
+    assert not any(entry["email"]["id"].endswith("-bounce") for entry in world["pending"])
+
+
+@pytest.mark.parametrize(("charge", "status", "spent"), [(0.75, "exhausted", 1.5), (None, "unknown", 0.75)])
+async def test_world_model_allowance_is_shared_and_fails_closed(tmp_path, monkeypatch, charge, status, spent):
+    stub_browser(monkeypatch)
+
+    class BilledModels(FakeModels):
+        async def complete(self, role, messages, **kwargs):
+            result = await super().complete(role, messages, **kwargs)
+            result.usage = Usage(cost=0.75 if role == "simulator" else charge)
+            return result
+
+    fake = BilledModels()
+    async with WorldTrial(settings(tmp_path, world_cost_limit=1), model_client=fake) as trial:
+        from refund_eval.companies.models import CompanyAction
+        from refund_eval.sim.consistency import ResponseConsistency
+
+        client = models.client()
+        await client.complete("simulator", [], schema=OutputSchema("open_world_action", CompanyAction))
+        with pytest.raises(ModelLimitExceeded):
+            await client.complete("grader", [], schema=OutputSchema("response_consistency", ResponseConsistency))
+        with pytest.raises(ModelLimitExceeded, match=status):
+            await client.complete("simulator", [])
+        trial.persist()
+        state = json.loads((tmp_path / "world" / "state.json").read_text())
+    assert state["store"][WORLD_BUDGET_KEY] == {"limit_usd": 1, "spent_usd": spent, "status": status}
+    assert [c["response"]["usage"]["cost"] for c in state["store"][RECORDINGS_KEY]] == [0.75, charge]
+    assert [role for role, _ in fake.calls] == ["simulator", "grader"]
+
+
 # --------------------------------------------------------------------------- the agent in world-service mode
 
 WORLD_THREAD = "world-service"
@@ -701,7 +757,7 @@ def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatc
 # --------------------------------------------------------------------------- browser
 
 
-async def drive_browser_form(tmp_path) -> dict:
+async def drive_browser_form(tmp_path, *, model_client=None) -> dict:
     """Over MCP: open Trainline's authored contact page, fill and submit its form, then end turns until
     the company's reply wakes the agent."""
     from refund_eval.scenario.schema import load_scenario
@@ -709,7 +765,7 @@ async def drive_browser_form(tmp_path) -> dict:
     scenario = load_scenario("train_refund")
     fields = [("#email", scenario.user.email_addresses[0]), ("#booking_ref", scenario.journey.booking_ref),
               ("#subject", "Cancelled train refund"), ("#message", "My train was cancelled. Please refund me.")]
-    async with (WorldTrial(settings(tmp_path, max_turns=20), model_client=FakeModels()) as trial,
+    async with (WorldTrial(settings(tmp_path, max_turns=20), model_client=model_client or FakeModels()) as trial,
                 session(trial) as (client, base, _), httpx.AsyncClient() as http):
         opened = await client.call_tool("browser_navigate", {"url": scenario.org("trainline").contact_url})
         assert not opened.isError, opened.content
@@ -717,8 +773,12 @@ async def drive_browser_form(tmp_path) -> dict:
             typed = await client.call_tool("browser_type", {"target": target, "text": text})
             assert not typed.isError, typed.content
         sent = await client.call_tool("browser_click", {"target": "button[type=submit]"})
-        assert not sent.isError, sent.content
         turn = {"Authorization": f"Bearer {TURN}"}
+        if isinstance(model_client, OutOfCredit):
+            result = (await http.post(f"{base}/turn", json={"ended": False}, headers=turn)).json()
+            assert result["stopped"] and result["stop_reason"] == "model_limit"
+            return trial.data()
+        assert not sent.isError, sent.content
         assert (await http.post(f"{base}/turn", json={"ended": False}, headers=turn)).json()["wakeup"] is None
         for _ in range(10):
             woke = (await http.post(f"{base}/turn", json={"ended": True, "text": "Waiting."}, headers=turn)).json()
@@ -762,6 +822,12 @@ def test_browser_form_is_intercepted_and_answered_by_the_company(tmp_path, monke
         no_inspect_runtime(patch)
         data = asyncio.run(drive_browser_form(tmp_path))
     check_browser_form(tmp_path, data)
+
+
+@SMOKE
+async def test_model_limit_in_the_real_browser_callback_stops_the_world(tmp_path):
+    data = await drive_browser_form(tmp_path, model_client=OutOfCredit())
+    assert data["stop_reason"] == "model_limit"
 
 
 @SMOKE

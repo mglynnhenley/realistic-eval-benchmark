@@ -34,6 +34,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--inbox", default=None, help="Inbox JSON (default: the scenario's bundled inbox)")
     p.add_argument("--simulator-model", default=defaults.simulator_model)
     p.add_argument("--grader-model", default=defaults.grader_model)
+    p.add_argument("--world-cost-limit", type=float, help="Per-trial world model USD allowance")
     p.add_argument("--company-simulator", default=None, help="Simulator kind for every organisation (e.g. concordia)")
     p.add_argument("--browser-runtime", choices=["docker", "subprocess"], default=defaults.browser_runtime,
                    help="Browser: a network-disabled Docker container, or a Node subprocess (default: %(default)s)")
@@ -56,6 +57,7 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
         **({"sim_weeks": args.sim_weeks} if hasattr(args, "sim_weeks") else {}),
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
+        world_cost_limit=args.world_cost_limit,
         company_simulator=args.company_simulator, browser_runtime=args.browser_runtime, output_dir=args.output_dir,
     )
 

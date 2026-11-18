@@ -222,7 +222,7 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     config.write_text(json.dumps({
         "execution": execution, "scenario": "train_refund_late", "data_mode": "fixture",
         "research_mode": "saved", "models": ["openrouter/a", "openrouter/b"],
-        "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0},
+        "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0}, "world_cost_limit": 0.75,
         "max_turns": 50, "sim_weeks": 3, "time_limit": 120, "history_tokens": 0,
         "budget_notice": "daily", "trials": 3, "concurrency": 2, "seed": seed,
     }))
@@ -244,12 +244,14 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     compose = (task / "environment" / "docker-compose.yaml").read_text()
     world = yaml.safe_load(compose)["services"]["world"]["environment"]
     assert world["WORLD_SEED"] == ("" if seed is None else "0")
+    assert world["WORLD_COST_LIMIT"] == "0.75"
     assert world["WORLD_MAX_TURNS"] == "50" and world["WORLD_RESEARCH_MODE"] == "saved"
     meta = Task(task).config.metadata
     assert (meta["sim_weeks"], meta["data_mode"]) == (3.0, "fixture")
     record_text = (out / "run.json").read_text()
     record = json.loads(record_text)
     assert record["total_trials"] == 6 and record["config"]["seed"] == seed
+    assert record["world_cost_limit_usd_per_trial"] == record["config"]["world_cost_limit"] == 0.75
     assert record["seed_policy"] == meta["seed_policy"]
     assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task)[0]}"
     assert record["task"]["rules_sha256"] == meta["rules_sha256"]
@@ -260,16 +262,20 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     assert all("test-key-never-packaged" not in artifact for artifact in (record_text, job_bytes.decode(), compose))
     assert not (out / "jobs").exists()
     with pytest.raises(FileExistsError, match="empty output directory"):
-        batch.prepare(out, batch.RunConfig.model_validate_json(config.read_bytes()))
+        batch.prepare(out, batch.NativeBatchConfig.model_validate_json(config.read_bytes()))
 
 
 def test_batch_rejects_untrackable_inputs_before_writing(tmp_path):
+    config = {"scenario": "bills_price_rise", "execution": "docker"}
+    with pytest.raises(ValueError, match="world_cost_limit"):
+        batch.NativeBatchConfig(**config)
+    assert batch.NativeBatchConfig(**config, world_cost_limit=1).time_limit == 36000
     with pytest.raises(ValueError, match="concurrency cannot exceed"):
-        batch.prepare(tmp_path / "private", batch.RunConfig(scenario="bills_price_rise", execution="docker", concurrency=2))
+        batch.prepare(tmp_path / "private", batch.NativeBatchConfig(**config, world_cost_limit=1, concurrency=2))
     assert not (tmp_path / "private").exists()
     with pytest.raises(ValueError, match="Git-ignored"):
         batch.prepare(adapter.ROOT / "trackable-native-batch",
-                      batch.RunConfig(scenario="bills_price_rise", execution="docker"))
+                      batch.NativeBatchConfig(**config, world_cost_limit=1))
 
 
 # --------------------------------------------------------------------------- installed agent

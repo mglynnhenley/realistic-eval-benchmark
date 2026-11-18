@@ -44,6 +44,7 @@ from refund_eval.agent.schedule import aware, sim_deadline
 from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.killswitch import kill_reason
 from refund_eval.models import client as models
+from refund_eval.models.budget import BudgetedWorldModels
 from refund_eval.models.client import ModelClient, ModelLimitExceeded
 from refund_eval.models.replay import RecordingModelClient
 from refund_eval.output_paths import validate_private_output
@@ -163,7 +164,9 @@ class WorldTrial:
         self.trial = MemoryTrial(settings.scenario)  # as given, like the Inspect sample's metadata
         trial_store.install(self.trial)
         # Every world-side completion is kept in the store, so the trial can be replayed.
-        models.install(RecordingModelClient(self._model_client))
+        recorded = RecordingModelClient(self._model_client)
+        models.install(recorded if settings.world_cost_limit is None else
+                       BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist))
         try:
             init_world(scenario, settings.seed)
             store = world_store()
@@ -279,7 +282,11 @@ class WorldTrial:
         async def handle_request(request: dict[str, Any]) -> dict[str, Any]:
             # The browser serves requests from its own task, outside the MCP call: name the call there too.
             with active_tool_call(request.get("tool_call_id")):
-                return await boundary(request)
+                try:
+                    return await boundary(request)
+                except ModelLimitExceeded:
+                    _record_stop(STOP_MODEL_LIMIT)
+                    raise
 
         spool = Path(self._stack.enter_context(tempfile.TemporaryDirectory(prefix="refund-browser-"))) / "exchange"
         artifacts.mkdir(parents=True, exist_ok=True)

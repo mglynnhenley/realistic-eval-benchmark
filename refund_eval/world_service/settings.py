@@ -6,7 +6,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL, RunConfig
+from refund_eval.config import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_ROLE_MODEL,
+    CostCap,
+    RunConfig,
+)
 from refund_eval.runtime.events import CHECKIN_HOURS
 from refund_eval.scenario.schema import load_scenario
 
@@ -27,6 +32,7 @@ class WorldSettings(BaseModel):
     inbox: str | None = None  # inbox JSON; None uses the scenario's bundled fixture inbox
     simulator_model: str = DEFAULT_ROLE_MODEL
     grader_model: str = DEFAULT_GRADER_MODEL
+    world_cost_limit: CostCap | None = None
     company_simulator: str | None = None
     # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
     # (in a network namespace where the host allows one), as on the Inspect path.

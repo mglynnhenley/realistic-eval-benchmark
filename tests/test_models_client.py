@@ -134,6 +134,20 @@ async def test_rules_are_generated_on_the_client_and_name_its_model(fake):
     assert record["model"] == "fake/simulator" and client.calls[0]["max_tokens"] == RULES_MAX_TOKENS
 
 
+@pytest.mark.parametrize("operation", ["dossier", "person", "rules"])
+async def test_company_preparation_does_not_swallow_model_limits(fake, operation):
+    client = fake(ModelLimitExceeded("allowance exhausted"))
+    org = LATE.org("trainline")
+    with pytest.raises(ModelLimitExceeded, match="allowance exhausted"):
+        if operation == "dossier":
+            await research.research_live(org)
+        elif operation == "person":
+            await research.profile_person(org, ["Previous correspondence."])
+        else:
+            await generate_rules(LATE, org, None)
+    assert len(client.calls) == 1
+
+
 async def test_research_tool_loop_sends_back_the_assistant_message_and_tool_results(fake):
     asked = Completion(text="", message=Message("assistant", "", tool_calls=[ToolCall("c1", "nope", {})],
                                                 native="backend form"), stop_reason="tool_calls")
@@ -333,6 +347,18 @@ async def test_openrouter_credit_limit_is_a_model_limit():
     client = openrouter(lambda request: httpx.Response(402, json={"error": {"message": "Insufficient credits"}}))
     with pytest.raises(ModelLimitExceeded):
         await client.complete("simulator", [Message("user", "x")])
+
+
+async def test_budgeted_openrouter_uses_only_reported_charges_and_disables_sdk_retries(monkeypatch):
+    from refund_eval.world_service.settings import WorldSettings
+
+    monkeypatch.setattr(model_pricing.httpx, "get", lambda *a, **k: pytest.fail("not a provider-reported charge"))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+        200, json=reply({"role": "assistant", "content": "{}"}))))
+    sdk = AsyncOpenAI(api_key="not-a-key", http_client=http, max_retries=2)
+    client = OpenRouterClient.from_settings(WorldSettings(world_cost_limit=1), client=sdk)
+    assert client.client.max_retries == 0
+    assert (await client.complete("simulator", [])).usage.cost is None
 
 
 def test_openrouter_roles_come_from_settings_and_must_be_openrouter_models(monkeypatch):

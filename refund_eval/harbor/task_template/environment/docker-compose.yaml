@@ -23,6 +23,7 @@ services:
       WORLD_RESEARCH_MODE: "__RESEARCH_MODE__"
       WORLD_SIMULATOR_MODEL: "__SIMULATOR_MODEL__"
       WORLD_GRADER_MODEL: "__GRADER_MODEL__"
+      WORLD_COST_LIMIT: "__WORLD_COST_LIMIT__"
       WORLD_TASK_VERSION: "__TASK_VERSION__"
       WORLD_TRIAL: ${COMPOSE_PROJECT_NAME}  # Harbor's `<trial name>__env`; with the task version, the seed
       WORLD_SEED: "__WORLD_SEED__"
