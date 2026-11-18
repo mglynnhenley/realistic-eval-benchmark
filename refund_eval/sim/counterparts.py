@@ -158,8 +158,13 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
         if research.live_web() and research.research_mode() != "saved":
             found = Org(key=key, name=profile.name.strip(), kind="dynamic_advice",
                         email_domains=[host], web_domains=[host])
+            request_budget = research.request_budget_for(found)
             options = {"max_tool_calls": research.DEEP_RESEARCH_LOOKUPS} if company_store.enabled() else {}
-            record = await research.research_live(found, scenario=scenario, **options)
+            try:
+                record = await research.research_live(
+                    found, scenario=scenario, request_budget=request_budget, **options)
+            finally:
+                research.save_request_budget_for(found, request_budget)
             if record.get("dossier"):
                 world_store().set(research.DOSSIERS_KEY, {**world_store().get(research.DOSSIERS_KEY, {}), key: record})
                 role = "advice" if role == "unknown" else role

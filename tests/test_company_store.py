@@ -141,7 +141,7 @@ async def test_shared_first_contact_is_reused_without_model_calls(monkeypatch, t
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
     example_calls = []
 
-    async def find_examples(org, scenario):
+    async def find_examples(org, scenario, **_kwargs):
         example_calls.append(org.key)
         return {"examples": [{"kind": "reply", "subject": "A reply", "body": "Published text.",
                               "source": PAGE_URL, "retrieved": "2026-11-20",
@@ -180,7 +180,7 @@ async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(
     )
     dossier_records, example_records, rules_calls = [], [], []
 
-    async def fake_research_live(org, *, scenario, max_tool_calls):
+    async def fake_research_live(org, *, scenario, max_tool_calls, request_budget=None):
         record = _dossier(org)
         record["tool_calls"] = [{"tool": "read_page", "marker": "PRIVATE_TOOL_CALL_SENTINEL"}
                                 for _ in range(max_tool_calls)]
@@ -188,7 +188,7 @@ async def test_first_contact_shared_entry_is_public_and_lookup_budget_is_twenty(
         dossier_records.append((max_tool_calls, record))
         return record
 
-    async def fake_research_examples(_org, _scenario):
+    async def fake_research_examples(_org, _scenario, **_kwargs):
         record = {
             "examples": [], "pages": [],
             "tool_calls": [{"tool": "read_page"} for _ in range(research.EXAMPLE_LOOKUPS)],
@@ -249,7 +249,7 @@ async def test_shared_entry_uses_current_trial_recipient_as_reply_sender(monkeyp
     first_org = ORG.model_copy(update={"contact_emails": ["help@example.test"]})
     _seed_dossier(first_org)
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
-    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    monkeypatch.setattr(research, "research_examples", lambda *_, **__: _empty_examples())
     await company_record(first_org, load_world())
 
     entry = company_store.load_entry(SCENARIO, first_org)
@@ -285,7 +285,7 @@ async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch,
     identity = company_store.org_identity(concurrent_org)
     store().set(REGISTRY_KEY, {identity: {"org": other_org.model_dump(mode="json"), "source": "simulator_inference"}})
 
-    async def no_examples(_org, _scenario):
+    async def no_examples(_org, _scenario, **_kwargs):
         return {"examples": [], "pages": [], "errors": []}
 
     monkeypatch.setattr(research, "research_examples", no_examples)
@@ -316,7 +316,7 @@ async def test_changed_org_terms_generate_a_new_shared_entry(monkeypatch, tmp_pa
     _set_live(sim)
     _seed_dossier()
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
-    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    monkeypatch.setattr(research, "research_examples", lambda *_, **__: _empty_examples())
     await company_record(ORG, load_world())
     first = company_store.load_entry(SCENARIO, ORG)
     assert first is not None
@@ -342,7 +342,7 @@ async def test_generation_retries_once_then_saves_or_records_two_failures(monkey
     retry_org = ORG.model_copy(update={"key": "dynamic_retry_test"})
     _seed_dossier(retry_org)
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
-    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    monkeypatch.setattr(research, "research_examples", lambda *_, **__: _empty_examples())
     sim.rules_script = [RuntimeError("first generation failed"), sim.rules]
     await company_record(retry_org, load_world())
     assert company_store.load_entry(SCENARIO, retry_org) is not None
@@ -538,9 +538,13 @@ def test_example_sender_fallback_requires_an_owned_domain():
         org, unverified, [{"from": "help@example.test", "source": PAGE_URL}])
     assert unverified["dossier"]["persona"] == {}
 
-    persona_first = {"dossier": {"persona": {"Reply-from": "Team <team@example.test>"}}}
-    _apply_example_reply_from(org, persona_first, [{"from": "help@example.test"}])
-    assert persona_first["dossier"]["persona"]["Reply-from"] == "Team <team@example.test>"
+    persona_first = {
+        "dossier": {"persona": {"Reply-from": "Team <team@example.test>"}},
+        "pages": [{"url": PAGE_URL, "text": "Support help@example.test"}],
+    }
+    _apply_example_reply_from(
+        org, persona_first, [{"from": "help@example.test", "source": PAGE_URL}])
+    assert persona_first["dossier"]["persona"]["Reply-from"] == "Example Advice <help@example.test>"
 
 
 def test_committed_exemplars_override_entry_examples(tmp_path, monkeypatch):
@@ -585,7 +589,7 @@ async def test_store_off_keeps_dynamic_company_trial_only(monkeypatch, tmp_path)
     monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
     example_calls = []
 
-    async def no_examples(org, _scenario):
+    async def no_examples(org, _scenario, **_kwargs):
         example_calls.append(org.key)
         return await _empty_examples()
 
@@ -630,7 +634,7 @@ async def test_counterpart_first_contact_uses_deep_research_budget(monkeypatch):
     sim.profile = {"name": "Deep Advice", "role": "advice", "reason": "The recipient is an advice firm."}
     calls = []
 
-    async def fake_research_live(org, *, scenario, max_tool_calls):
+    async def fake_research_live(org, *, scenario, max_tool_calls, request_budget=None):
         calls.append(max_tool_calls)
         return {**_dossier(org), "dossier": {"summary": "Advice firm.", "facts": [], "persona": {}}}
 
@@ -639,3 +643,75 @@ async def test_counterpart_first_contact_uses_deep_research_budget(monkeypatch):
                       body="Please advise.", interception_id="deep-first-contact")
     org = await create_counterpart(SCENARIO, inbound)
     assert org and calls == [research.DEEP_RESEARCH_LOOKUPS] == [12]
+
+
+async def test_first_contact_shares_actual_request_budget_between_dossier_and_examples(monkeypatch, tmp_path):
+    _set_live(MockSim())
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    budgets = []
+
+    async def fake_researched(org, _world, *, max_tool_calls=None, request_budget=None):
+        budgets.append(request_budget)
+        assert max_tool_calls == research.DEEP_RESEARCH_LOOKUPS
+        for _ in range(19):
+            assert request_budget.consume()
+        return _dossier(org)
+
+    async def fake_examples(_org, _scenario, *, request_budget=None):
+        budgets.append(request_budget)
+        assert request_budget.consume()
+        assert not request_budget.consume()
+        return {"examples": [], "pages": [], "tool_calls": [], "errors": []}
+
+    async def fake_company_rules(scenario, org, _record, examples=None):
+        rule_record = {
+            "rules": {"terms": "Standard company terms.", "grounds": []},
+            "model": "fake/simulator", "generated_at": "2026-11-20T00:00:00+00:00", "errors": [],
+        }
+        store().set(rules.RULES_KEY, {org.key: rule_record})
+        return rule_record
+
+    monkeypatch.setattr("refund_eval.sim.open_world.researched", fake_researched)
+    monkeypatch.setattr(research, "research_examples", fake_examples)
+    monkeypatch.setattr("refund_eval.sim.open_world.company_rules", fake_company_rules)
+    await company_record(ORG, load_world())
+    assert budgets[0] is budgets[1]
+    assert budgets[0].used == research.MAX_RESEARCH_REQUESTS == 20
+
+
+async def test_scenario_private_research_is_trial_only_but_clean_research_saves(monkeypatch, tmp_path):
+    _set_live(MockSim())
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+
+    async def no_examples(_org, _scenario, **_kwargs):
+        return {"examples": [], "pages": [], "tool_calls": [], "errors": []}
+
+    async def clean_rules(_scenario, org, _record, examples=None):
+        rule_record = {
+            "rules": {"terms": "Standard company terms.", "grounds": []},
+            "model": "fake/simulator", "generated_at": "2026-11-20T00:00:00+00:00", "errors": [],
+        }
+        store().set(rules.RULES_KEY, {org.key: rule_record})
+        return rule_record
+
+    monkeypatch.setattr(research, "research_examples", no_examples)
+    monkeypatch.setattr("refund_eval.sim.open_world.company_rules", clean_rules)
+    private_record = _dossier()
+    private_record["dossier"]["summary"] = f"Public data includes {SCENARIO.user.email_addresses[0]}."
+    store().set(research.DOSSIERS_KEY, {ORG.key: private_record})
+    await company_record(ORG, load_world())
+
+    assert company_store.load_entry(SCENARIO, ORG) is None
+    assert store().get("company_entries")[ORG.key]["source"] == "trial_only"
+    failures = store().get("company_generation_failures")
+    assert failures[-1]["errors"] == ["private value in research; not shared"]
+    identity_dir = company_store.identity_dir(SCENARIO.id, company_store.org_identity(ORG))
+    assert not list(identity_dir.glob("*.json"))
+
+    start_sample(SCENARIO.id)
+    store().set("published_tool_profile", {"data_mode": "hybrid"})
+    store().set(research.MODE_KEY, "live")
+    _seed_dossier()
+    await company_record(ORG, load_world())
+    assert company_store.load_entry(SCENARIO, ORG) is not None
+    assert store().get("company_entries")[ORG.key]["source"] == "generated_and_saved"

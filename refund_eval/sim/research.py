@@ -74,6 +74,31 @@ MODES = ("auto", "live", "saved")
 MAX_TOOL_CALLS = 8
 DEEP_RESEARCH_LOOKUPS = 12
 EXAMPLE_LOOKUPS = 8
+REQUEST_BUDGETS_KEY = "company_research_request_counts"
+MAX_RESEARCH_REQUESTS = 20
+
+
+class ResearchRequestBudget:
+    def __init__(self, used: int = 0, limit: int = MAX_RESEARCH_REQUESTS):
+        self.used = used
+        self.limit = limit
+
+    def consume(self) -> bool:
+        if self.used >= self.limit:
+            return False
+        self.used += 1
+        return True
+
+
+def request_budget_for(org: Org) -> ResearchRequestBudget:
+    counts = world_store().get(REQUEST_BUDGETS_KEY) or {}
+    return ResearchRequestBudget(used=int(counts.get(org.key, 0)))
+
+
+def save_request_budget_for(org: Org, budget: ResearchRequestBudget) -> None:
+    counts = dict(world_store().get(REQUEST_BUDGETS_KEY) or {})
+    counts[org.key] = budget.used
+    world_store().set(REQUEST_BUDGETS_KEY, counts)
 MAX_RESULT_CHARS = 6_000
 MAX_PAGE_CHARS = 8_000
 MAX_OUTPUT_TOKENS = 12_000  # a dossier is a few thousand; also what OpenRouter reserves credit for
@@ -221,10 +246,13 @@ def saved_record(org: Org, subject: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------- tools
 
 
-async def _search(query: str, objective: str, *, scenario: Scenario) -> str:
+async def _search(query: str, objective: str, *, scenario: Scenario,
+                  request_budget: ResearchRequestBudget | None = None) -> str:
     from refund_eval.published.search import ExaSearchService
 
     for attempt in range(2):
+        if request_budget and not request_budget.consume():
+            raise RuntimeError("Company research request limit reached")
         async with ExaSearchService(policy=partial(allow_search_request, scenario=scenario), audit=lambda _event: None,
                                     api_key=os.environ.get(HYBRID_EXA_KEY_ENV)) as exa:
             result = await exa.call_tool("web_search_exa", {"query": query, "objective": objective, "numResults": 5})
@@ -247,12 +275,15 @@ def _html_text(body: bytes) -> str:
     return "\n".join(line for line in lines if line)
 
 
-async def _read_page(url: str, *, scenario: Scenario) -> str:
+async def _read_page(url: str, *, scenario: Scenario,
+                     request_budget: ResearchRequestBudget | None = None) -> str:
     """Anonymous GET through the same guarded read path as the agent's browser."""
     for _ in range(4):  # follow a few redirects, checking each URL afresh
         if contains_scenario_data(url, scenario):
             raise ExaPolicyDenied("Research page URL contains scenario data")
         validate_public_url(url)
+        if request_budget and not request_budget.consume():
+            raise RuntimeError("Company research request limit reached")
         result = await public_read({"url": url, "method": "GET"})
         location = result["headers"].get("location")
         if result["status"] in {301, 302, 303, 307, 308} and location:
@@ -287,13 +318,17 @@ def _tools() -> list[Tool]:
     ]
 
 
-async def _call(call: ToolCall, record: dict[str, Any], *, scenario: Scenario) -> str | None:
+async def _call(call: ToolCall, record: dict[str, Any], *, scenario: Scenario,
+                request_budget: ResearchRequestBudget | None = None) -> str | None:
     funcs = {"web_search_exa": _search, "read_page": _read_page}
     entry: dict[str, Any] = {"tool": call.function, "arguments": call.arguments or {}}
     try:
         if call.function not in funcs:
             raise ValueError(f"unknown tool {call.function}")
-        text = await funcs[call.function](scenario=scenario, **entry["arguments"])
+        options = {"scenario": scenario}
+        if request_budget is not None:
+            options["request_budget"] = request_budget
+        text = await funcs[call.function](**options, **entry["arguments"])
         entry["chars"] = len(text)
         if call.function == "read_page":
             header, separator, page_text = text.partition("\n\n")
@@ -366,7 +401,8 @@ def _brief(org: Org, subject: str) -> str:
 
 
 async def research_live(org: Org, *, scenario: Scenario, subject: str = "a customer request",
-                        max_tool_calls: int = MAX_TOOL_CALLS) -> dict[str, Any]:
+                        max_tool_calls: int = MAX_TOOL_CALLS,
+                        request_budget: ResearchRequestBudget | None = None) -> dict[str, Any]:
     """Research one organisation now: a tool loop for the simulator model, then its dossier."""
     model = client()
     record = {**_record(org, "live"), "subject": subject}
@@ -391,7 +427,7 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
         messages.append(output.message)
         if output.tool_calls:
             for call in output.tool_calls:
-                text = (await _call(call, record, scenario=scenario) if lookups > 0
+                text = (await _call(call, record, scenario=scenario, request_budget=request_budget) if lookups > 0
                         else "No lookups left. Write the dossier now.")
                 if text is None:
                     return record
@@ -428,7 +464,8 @@ def _published_address(org: Org, value: str | None) -> str | None:
     return address if address and any(address.endswith(("@" + domain, "." + domain)) for domain in domains) else None
 
 
-async def research_examples(org: Org, scenario: Scenario) -> dict[str, Any]:
+async def research_examples(org: Org, scenario: Scenario, *,
+                            request_budget: ResearchRequestBudget | None = None) -> dict[str, Any]:
     """Find real published correspondence and retain the pages supporting it."""
     record: dict[str, Any] = {"examples": [], "pages": [], "tool_calls": [], "errors": []}
     if not live_web() or research_mode() == "saved":
@@ -452,7 +489,7 @@ async def research_examples(org: Org, scenario: Scenario) -> dict[str, Any]:
         messages.append(output.message)
         if output.tool_calls:
             for call in output.tool_calls:
-                text = (await _call(call, record, scenario=scenario) if lookups > 0
+                text = (await _call(call, record, scenario=scenario, request_budget=request_budget) if lookups > 0
                         else "No lookups left. Return the examples now.")
                 if text is None:
                     return record
@@ -526,7 +563,8 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
 
 async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
                    subject: str = "a customer request",
-                   max_tool_calls: int = MAX_TOOL_CALLS) -> dict[str, Any] | None:
+                   max_tool_calls: int = MAX_TOOL_CALLS,
+                   request_budget: ResearchRequestBudget | None = None) -> dict[str, Any] | None:
     """The subject's research record for this trial, made at first use and cached in the store."""
     dossiers = dict(world_store().get(DOSSIERS_KEY, {}))
     if org.key in dossiers:
@@ -540,7 +578,7 @@ async def research(org: Org, inbox_excerpts: list[str] | None = None, *,
             record = saved
         else:
             record = await research_live(org, subject=subject, scenario=current_scenario(),
-                                         max_tool_calls=max_tool_calls)
+                                         max_tool_calls=max_tool_calls, request_budget=request_budget)
             if record["dossier"] is None and saved:  # failed research falls back to the committed file
                 record = {**saved, "errors": record["errors"]}
     dossiers[org.key] = record or {"org": org.key, "name": org.name, "mode": "none", "dossier": None}
