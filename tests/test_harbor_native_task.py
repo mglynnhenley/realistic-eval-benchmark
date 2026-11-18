@@ -171,7 +171,9 @@ def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkey
     company_store.save_entry(scenario, unregistered_org, unregistered_entry, root=unregistered_artifact)
 
     second = tmp_path / "prepared-two"
-    assert adapter.main(["--scenario", scenario.id, "--out", str(second)]) == 0
+    batch.prepare(second, batch.NativeBatchConfig(
+        scenario=scenario.id, execution="docker", cost_limit=1.0, world_cost_limit=1.0,
+    ))
     capsys.readouterr()
     second_task = second / scenario.id
     second_seed = second_task / "environment" / "company-store"

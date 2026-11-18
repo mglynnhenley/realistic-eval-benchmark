@@ -293,6 +293,29 @@ def test_harvest_jobs_accepts_outer_and_named_roots_and_rejects_symlinks(tmp_pat
         company_store.harvest_jobs(linked_root, destination_root=tmp_path / "linked-destination")
 
 
+def test_harvest_jobs_processes_all_scenarios_in_every_artifact(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    scenarios = [SCENARIO, load_scenario("bills_price_rise")]
+    orgs = [ORG, Org(
+        key="second_company", name="Second Advice", kind="dynamic_advice",
+        email_domains=["second.example"], web_domains=["second.example"],
+        terms="Published terms for the second company.",
+    )]
+    for index, org in enumerate(orgs):
+        artifact_store = jobs_root / f"job-{index}" / "trial" / "artifacts" / "world" / "company-store"
+        for scenario in scenarios:
+            company_store.save_entry(scenario, org, _sync_entry(scenario, org), root=artifact_store)
+
+    destination = tmp_path / "host-store"
+    assert company_store.harvest_jobs(jobs_root, destination_root=destination) == 4
+    for org in orgs:
+        for scenario in scenarios:
+            entry = _sync_entry(scenario, org)
+            assert company_store._entry_path(
+                scenario.id, company_store.org_identity(org), entry["fingerprint"], destination,
+            ).is_file()
+
+
 def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypatch):
     _set_live(MockSim())
     fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)

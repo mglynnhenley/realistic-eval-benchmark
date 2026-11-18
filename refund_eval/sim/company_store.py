@@ -662,10 +662,10 @@ def _harvest_jobs_root(jobs_root: Path, destination: Path, scenario: Scenario | 
             continue
         for scenario_id in _scenario_store_ids(artifact):
             try:
-                scenario = load_scenario(scenario_id)
+                loaded_scenario = load_scenario(scenario_id)
             except (OSError, ValueError) as exc:
                 raise ValueError(f"Unknown company-store scenario: {scenario_id}") from exc
-            count += sync_scenario_entries(scenario, source_root=artifact, destination_root=destination)
+            count += sync_scenario_entries(loaded_scenario, source_root=artifact, destination_root=destination)
     return count
 
 
