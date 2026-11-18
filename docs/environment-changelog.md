@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 3.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: cc2d56cf1f78db4ee70b35f3d7fceffac78c5743e391c2163462eff1a97f2f7a
+- Fingerprint: ab352f834478cd2d8637806f32d5b756b2ca69961afa4364dd392bbc2e7d38a1
 - Trial round: pending; only offline validation in this change.
 - Changes: block marked private scenario details before live search and public-page navigation, including simulator research; redact denied fields in tool and boundary audits (MAT-131).
 

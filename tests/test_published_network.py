@@ -224,6 +224,20 @@ def test_name_parts_match_whole_words_in_live_search_and_navigation():
     )
 
 
+async def test_malformed_navigation_keeps_blocked_boundary_evidence(ctx):
+    async def fetch(request):
+        pytest.fail("Malformed navigation reached the network")
+
+    request = public_req("https://[bad")
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    assert public_web_read_reason(request, ctx.scenario) == "url_guard"
+    assert boundary.audit_request(request) == request
+    assert (await boundary(request))["status"] == 400
+    recorded, decision = store().get(AUDIT_KEY)[-2:]
+    assert recorded["event"] == "browser_request" and recorded["request"] == request
+    assert (decision["event"], decision["action"], decision["status"]) == ("browser_decision", "blocked", 400)
+
+
 def public_req(url, method="GET", *, resource="document", navigation=True, body=""):
     return {**req(url, method, body, navigation), "resource_type": resource}
 
