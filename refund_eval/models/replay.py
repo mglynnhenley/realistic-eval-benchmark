@@ -60,10 +60,9 @@ def request_hash(role: Role, messages: Sequence[Message], *, schema: OutputSchem
         "schema": None if schema is None else {"name": schema.name, "description": schema.description,
                                                "json": schema.type.model_json_schema()},
         "tools": [asdict(t) for t in tools],
-        "temperature": temperature, "max_tokens": max_tokens, "stop": None if stop is None else list(stop),
+        "temperature": temperature, "max_tokens": None if default_output_cap else max_tokens,
+        "stop": None if stop is None else list(stop),
     }
-    if default_output_cap:
-        request["default_output_cap"] = True
     text = json.dumps(request, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 

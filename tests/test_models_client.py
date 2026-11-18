@@ -612,6 +612,14 @@ async def test_failed_world_requests_are_charged_and_retried(monkeypatch, kind):
             assert replayed.raw_finish_reason == first["raw_finish_reason"]
         if kind == "three":
             assert budget.status == "failed"
+        if kind == "success":
+            direct = ReplayModelClient(recordings)
+            replayed = await direct.complete("simulator", messages, **settings)
+            assert replayed.text == result.text
+            assert replayed.usage == result.usage
+            assert direct.position == len(recordings)
+            with pytest.raises(ReplayMismatch):
+                await ReplayModelClient(recordings).complete("simulator", messages, **settings, max_tokens=123)
         replay = ReplayModelClient(recordings)
         replay_budget = BudgetedWorldModels(replay, float(budget.limit), lambda: None)
         if kind in {"three", "allowance", "no_price", "unknown_price"}:
