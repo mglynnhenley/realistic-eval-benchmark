@@ -23,6 +23,7 @@ COPY source/pyproject.toml source/uv.lock /app/
 RUN uv sync --frozen --no-dev --no-install-project
 COPY source/ /app/
 RUN uv sync --frozen --no-dev && mkdir -p /var/log/world
+COPY company-store/ /opt/company-store-seed/
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 # Ready once the world is set up and serving MCP (the port opens only after setup).

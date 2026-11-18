@@ -155,6 +155,7 @@ def test_fake_world_models_answer_company_and_consistency_calls():
 def test_fake_world_models_can_promise_a_follow_up(monkeypatch, tmp_path):
     from refund_eval.companies.llm import CompanyAction
 
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
     schema = OutputSchema("open_world_action", CompanyAction)
     reply = asyncio.run(FakeWorldModels(30).complete("simulator", [], schema=schema)).json()
     assert CompanyAction.model_validate(reply).follow_up_in_hours == 30 and reply["follow_up_plan"]

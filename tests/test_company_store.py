@@ -6,6 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
+import pytest
 from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import ModelOutput
 from inspect_ai.util import store
@@ -65,6 +66,148 @@ def _company_entry(scenario, org, fingerprint, **extra):
         "org": org.model_dump(mode="json"), "rules": {"rules": {"grounds": []}},
         "examples": [], **extra,
     }
+
+
+def _sync_entry(scenario=SCENARIO, org=ORG, *, model="fixture/simulator", summary="Public company details"):
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    text = "The company publishes its contact details."
+    page = {"url": PAGE_URL, "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "retrieved_at": now}
+    page_refs = [{key: page[key] for key in ("url", "sha256", "retrieved_at")}]
+    pages_digest = hashlib.sha256(json.dumps(
+        [{"url": page["url"], "sha256": page["sha256"]}], sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    provenance = {
+        "identity": company_store.org_identity(org), "scenario_id": scenario.id,
+        "intent_sha256": hashlib.sha256((scenario.intent or "").encode()).hexdigest(),
+        "subject_sha256": hashlib.sha256((scenario.subject or "").encode()).hexdigest(),
+        "terms_sha256": hashlib.sha256((org.terms or "").encode()).hexdigest(),
+        "model": model, "temperature": 0, "rules_prompt_version": "1", "research_prompt_version": "2",
+        "exemplar_prompt_version": "2", "checker_version": "1", "pages": page_refs,
+        "pages_sha256": pages_digest,
+    }
+    inputs = {
+        "identity": provenance["identity"], "scenario": scenario.id,
+        "intent_sha256": provenance["intent_sha256"], "subject_sha256": provenance["subject_sha256"],
+        "terms_sha256": provenance["terms_sha256"], "model": model,
+        "rules_prompt_version": "1", "research_prompt_version": "2",
+        "exemplar_prompt_version": "2", "checker_version": "1",
+    }
+    fingerprint = hashlib.sha256(json.dumps(
+        inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()).hexdigest()[:16]
+    return {
+        "schema": 1, "fingerprint": fingerprint, "identity": provenance["identity"], "scenario": scenario.id,
+        "created_at": now, "provenance": provenance, "org": org.model_dump(mode="json"),
+        "research": {
+            "org": org.key, "name": org.name, "mode": "live", "retrieved_at": now,
+            "dossier": {"summary": summary, "facts": [], "persona": {"voice": "Professional."}},
+            "pages": [page],
+        },
+        "rules": {"rules": {"terms": "The published company terms.", "grounds": []},
+                  "model": model, "generated_at": now},
+        "temperament": "Professional.", "examples": [],
+    }
+
+
+def test_company_store_sync_sanitizes_and_keeps_first_save(tmp_path):
+    source, host = tmp_path / "source", tmp_path / "host"
+    entry = _sync_entry()
+    entry["private_extra"] = "discarded by the public-field allowlist"
+    company_store.save_entry(SCENARIO, ORG, entry, root=source)
+    assert "private_extra" not in json.loads(company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], source).read_text())
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=host) == 1
+    saved_path = company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], host)
+    first_bytes = saved_path.read_bytes()
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=host) == 0
+    assert saved_path.read_bytes() == first_bytes
+
+    artifact = tmp_path / "artifact"
+    later = _sync_entry(summary="Later research must not replace the first save.")
+    company_store.save_entry(SCENARIO, ORG, later, root=artifact)
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=artifact, destination_root=host) == 0
+    assert saved_path.read_bytes() == first_bytes
+
+
+def test_company_store_sync_preserves_historical_scenario_fingerprints(tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    entry = _sync_entry()
+    company_store.save_entry(SCENARIO, ORG, entry, root=source)
+    changed_scenario = SCENARIO.model_copy(update={"intent": "Updated intent.", "subject": "Updated subject."})
+
+    assert changed_scenario.id == SCENARIO.id
+    assert company_store.sync_scenario_entries(
+        changed_scenario, source_root=source, destination_root=destination,
+    ) == 1
+    saved = json.loads(company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], destination,
+    ).read_text())
+    assert saved["fingerprint"] == entry["fingerprint"]
+    assert saved["provenance"]["intent_sha256"] == entry["provenance"]["intent_sha256"]
+
+
+def test_company_store_sync_rejects_private_malformed_and_mismatched_entries(tmp_path):
+    destination = tmp_path / "destination"
+    entry = _sync_entry(summary=SCENARIO.facts.journey.booking_ref)
+    private_source = tmp_path / "private-source"
+    company_store.save_entry(SCENARIO, ORG, entry, root=private_source)
+    with pytest.raises(ValueError, match="scenario data"):
+        company_store.sync_scenario_entries(SCENARIO, source_root=private_source, destination_root=destination)
+
+    entry = _sync_entry()
+    entry["provenance"]["scenario_id"] = "another_scenario"
+    mismatch_source = tmp_path / "mismatch-source"
+    company_store.save_entry(SCENARIO, ORG, entry, root=mismatch_source)
+    with pytest.raises(ValueError, match="identity mismatch"):
+        company_store.sync_scenario_entries(SCENARIO, source_root=mismatch_source, destination_root=destination)
+
+    entry = _sync_entry()
+    malformed_source = tmp_path / "malformed-source"
+    company_store.save_entry(SCENARIO, ORG, entry, root=malformed_source)
+    path = company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], malformed_source)
+    path.write_text("not-json")
+    with pytest.raises(ValueError, match="Malformed company-store JSON"):
+        company_store.sync_scenario_entries(SCENARIO, source_root=malformed_source, destination_root=destination)
+
+
+def test_company_store_sync_rejects_symlink_entries(tmp_path):
+    source = tmp_path / "source"
+    entry = _sync_entry()
+    path = company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], source)
+    path.parent.mkdir(parents=True)
+    target = tmp_path / "outside.json"
+    target.write_text(json.dumps(entry))
+    path.symlink_to(target)
+    with pytest.raises(ValueError, match="symlink"):
+        company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=tmp_path / "host")
+
+
+def test_company_store_sync_ignores_regular_temporary_files(tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    entry = _sync_entry()
+    company_store.save_entry(SCENARIO, ORG, entry, root=source)
+    path = company_store._entry_path(
+        SCENARIO.id, company_store.org_identity(ORG), entry["fingerprint"], source,
+    )
+    (path.parent / "tmp-save-in-progress").write_text("incomplete", encoding="utf-8")
+
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=source, destination_root=destination) == 1
+
+
+def test_company_store_root_default_custom_and_off(tmp_path, monkeypatch):
+    default = tmp_path / "default"
+    monkeypatch.delenv("REFUND_EVAL_COMPANY_STORE", raising=False)
+    monkeypatch.setattr(company_store, "DEFAULT_ROOT", default)
+    assert company_store.store_root() == default.resolve()
+    custom = tmp_path / "custom"
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(custom))
+    assert company_store.store_root() == custom.resolve()
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    assert company_store.store_root() is None
 
 
 def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypatch):
@@ -153,6 +296,15 @@ async def test_shared_first_contact_is_reused_without_model_calls(monkeypatch, t
     assert first_entry and first_entry["research"] == first_research
     assert example_calls == [ORG.key]
     assert store().get("company_entries")[ORG.key]["source"] == "generated_and_saved"
+
+    host_root = company_store.store_root()
+    prepared_root, trial_root = tmp_path / "prepared-store", tmp_path / "trial-store"
+    assert host_root is not None
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=host_root,
+                                              destination_root=prepared_root) == 1
+    assert company_store.sync_scenario_entries(SCENARIO, source_root=prepared_root,
+                                              destination_root=trial_root) == 1
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(trial_root))
 
     start_sample(SCENARIO.id)
     sim.call_schemas.clear()

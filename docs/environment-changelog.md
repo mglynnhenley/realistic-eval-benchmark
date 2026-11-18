@@ -24,6 +24,11 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.1 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: 4d1096662cbd7de8599dc19d547fe6c2015c877ccf1b2f31643d757b4fe7f69f
+- Changes: stage sanitized shared company-store entries in native world images and provide explicit offline artifact harvesting (MAT-146).
+
 ## 7.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 45bcf1b87ad2207adb1784a68a522c0ffc7ab1bb3ad767783d4393796663ff44
