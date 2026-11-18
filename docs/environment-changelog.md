@@ -44,9 +44,9 @@ this was not a second version or trial round.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round
-- Fingerprint: 7c11efc46f43762bdfe7b0a28116d15439eca1c6e3e2b241ca2c4cf3561bb485
+- Fingerprint: 6b185266602ea8ff64ce9db455a3dfa94eff57d03aaba27e25bfd363eb983ec3
 - Trial round: one paid train_refund_late trial and grading comparison by Repro Auditor, coordinated separately (not yet run). This change uses offline tests only.
-- Changes: add local Transect long-horizon structural review, ledger-grounded rubric cohorts with literal quote checks and severity-2+ verification, human validation agreement and version-isolated summaries (MAT-141). Upgrade Scout to 0.6.3 and pin Transect 0.7.0.
+- Changes: add local Transect long-horizon structural review, ledger-grounded 40-turn rubric chunk cohorts with literal quote checks and severity-2+ verification, human validation agreement and version-isolated summaries (MAT-141). Estimate chunk, ledger, rubric-verifier and phase costs before approval. Classify phases with a two-model cohort and one roll; phase verification is off because cohort majority provides correction. Upgrade Scout to 0.6.3 and pin Transect 0.7.0.
 
 ## 5.0 — 2026-11-18
 - Kind: behaviour round

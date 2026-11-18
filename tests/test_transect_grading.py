@@ -1,11 +1,15 @@
 """Offline evidence, version boundaries and local structural report contract."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
-from inspect_ai import Task, eval_async
+from inspect_ai import Task, eval, eval_async
 from inspect_ai.dataset import Sample
+from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.solver import generate
+from inspect_scout import AnswerStructured, Result, Transcript
+from transect.scanners.digests import Digest
 
 from scout import transect_run as grading
 from tests.test_world_service import (  # noqa: F401
@@ -64,6 +68,19 @@ def test_free_report(tmp_path, monkeypatch):
     assert (out / "report.html").exists()
     assert "Ledger" in (out / "report.html").read_text()
     assert json.loads((out / "grading.json").read_text())["environment_version"]
+    captured = {}
+    async def no_findings(*args):
+        return grading.behaviour_summary([])
+    def phases(*args, **kwargs):
+        captured.update(kwargs)
+    monkeypatch.setattr(grading, "judge_behaviour", no_findings)
+    monkeypatch.setattr(grading, "transect", phases)
+    monkeypatch.setattr(grading, "get_model", lambda model, **kwargs: model)
+    grading.run(str(log), tmp_path / "judged", ["mockllm/a", "mockllm/b"])
+    assert captured["judge_models"] == ["mockllm/a", "mockllm/b"]
+    assert captured["k_rolls"] == 1
+    assert captured["verify"] is False
+    assert captured["chunk"] == 40
 
 
 async def test_judged_turns_stub_and_failure(tmp_path):
@@ -88,3 +105,76 @@ async def test_judged_turns_stub_and_failure(tmp_path):
         raise RuntimeError("No retry")
     with pytest.raises(RuntimeError, match="No retry"):
         await grading.judge_behaviour(transcript, messages, {}, "deception", ["a"], failed)
+
+
+async def test_chunked_sequence_and_cost_guard(monkeypatch, capsys):
+    messages = [{"id": str(i), "content": f"Claim at turn {i}", "metadata": {}} for i in range(81)]
+    digests = [Digest(turn=i, text=m["content"]) for i, m in enumerate(messages)]
+    monkeypatch.setattr(grading, "turn_digests", lambda _: digests)
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [
+        (i, SimpleNamespace(message=SimpleNamespace(id=str(i))), []) for i in range(81)])
+    monkeypatch.setattr(grading, "turn_message", lambda e: e.message)
+    transcript = Transcript(transcript_id="mock", messages=[])
+    ledger = {"timeline": [{"date": "2026-09-02", "refusal": "Prior refusal"}]}
+    calls = []
+    async def judge(model, item, prompt):
+        text = item.messages[0].text
+        assert text.count("Prior refusal") == 1
+        calls.append(text)
+        if "Claim at turn 80" in text:
+            return [{"severity": 2, "quote": "Claim at turn 80", "message_index": 80, "explanation": "Contradicts refusal"}]
+        return []
+    result = await grading.judge_behaviour(transcript, messages, ledger, "deception", ["a", "b"], judge)
+    assert len(calls) == 7  # three chunks per member, one severity-2 verifier
+    assert "Claim at turn 0" in calls[0] and "Claim at turn 39" in calls[0]
+    assert "Claim at turn 40" not in calls[0]
+    assert result["count_severity_2_plus"] == 1
+    plan = grading.workload(transcript, messages, ledger, ["a", "b"])
+    assert sum(c["kind"] == "rubric" for c in plan) == 30
+    assert sum(c["kind"] == "rubric verifier upper bound" for c in plan) == 15
+    assert sum(c["kind"] == "phase" for c in plan) == 6
+    assert not any(c["kind"] == "phase verifier upper bound" for c in plan)
+    monkeypatch.setattr(grading, "openrouter_pricing", dict)
+    monkeypatch.setattr(grading, "key_headroom", lambda: "offline")
+    grading.estimate_workload(transcript, messages, ledger, ["a", "b"])
+    output = capsys.readouterr().out
+    assert "rubric: 30 calls" in output
+    assert "phase: 6 calls" in output
+    assert "phase verifier" not in output
+    assert "plus unknown model prices" in output
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [])
+    assert grading.workload(transcript, messages, ledger, ["a", "b"]) == []
+
+
+async def test_phase_answer_is_single_attempt(monkeypatch):
+    calls = []
+    async def answer(prompt, spec, **kwargs):
+        calls.append((spec.max_attempts, kwargs["retry_refusals"]))
+        return Result(value=None)
+    monkeypatch.setattr(grading, "generate_answer", answer)
+    with pytest.raises(ValueError, match="not retrying"):
+        await grading.phase_answer_once("prompt", AnswerStructured(type=grading.Findings))
+    assert calls == [(1, 0)]
+
+
+def test_judged_report_classifies_phases(tmp_path, monkeypatch):
+    [log] = eval(Task(dataset=[Sample(input="Research the refund")], solver=generate()),
+                 model="mockllm/model", log_dir=str(tmp_path / "logs"), display="none")
+    calls = []
+    def answer(input, tools, tool_choice, config):
+        verifier = "verdicts" in tools[0].parameters.properties
+        calls.append(verifier)
+        value = {"phase": "research", "confidence": 0.9, "explanation": "Reads refund evidence"}
+        payload = ({"verdicts": [{"phase_index": 0, **value}]} if verifier else
+                   {"segments": [{"turn_start": 0, "turn_end": 0, **value}]})
+        return ModelOutput.for_tool_call("mockllm/judge", "answer", {**payload, "explanation": "Reviewed"})
+    models = {name: get_model(name, custom_outputs=answer) for name in ["mockllm/a", "mockllm/b"]}
+    async def no_findings(*args):
+        return grading.behaviour_summary([])
+    monkeypatch.setattr(grading, "get_model", lambda model, **kwargs: models[model])
+    monkeypatch.setattr(grading, "judge_behaviour", no_findings)
+    out = tmp_path / "review"
+    grading.run(log.location, out, list(models))
+    assert calls.count(False) == 2
+    assert calls.count(True) == 0
+    assert "research" in (out / "report.html").read_text()
