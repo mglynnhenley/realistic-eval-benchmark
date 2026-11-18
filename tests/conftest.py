@@ -30,3 +30,9 @@ def _no_transcript_upload(monkeypatch):
     """Trials in tests never upload to a Supabase project configured in the shell or .env."""
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_company_store(monkeypatch, tmp_path):
+    """Company-store tests and trials never write to persistent home data."""
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(tmp_path / "company-store"))

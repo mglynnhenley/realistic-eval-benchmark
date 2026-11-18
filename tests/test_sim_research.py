@@ -65,6 +65,9 @@ async def test_live_research_runs_the_tool_loop_then_takes_the_dossier(sim):
     assert record["dossier"]["facts"][0]["url"] == TERMS
     assert record["dossier"]["persona"]["Reply-from"] == "Trainline Support <help@thetrainline.com>"
     assert "28 days of the ticket's expiry" in sim.dossier_prompts[-1]  # the page text reached the model
+    assert record["pages"][0]["url"] == TERMS
+    assert record["pages"][0]["sha256"] and record["pages"][0]["retrieved_at"]
+    assert "28 days of the ticket's expiry" in record["pages"][0]["text"]
     assert len(sim.dossier_prompts) == 3
     assert await research.research(TRAINLINE) is record or len(sim.dossier_prompts) == 3  # cached per trial
     assert store().get(research.DOSSIERS_KEY)["trainline"]["dossier"] == record["dossier"]

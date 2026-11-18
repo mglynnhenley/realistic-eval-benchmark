@@ -1,0 +1,406 @@
+"""Offline coverage for immutable shared company records and first contact."""
+
+import asyncio
+import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+
+from fixtures.simulator import MockSim, install_mock_models, start_sample
+from inspect_ai.model import ModelOutput
+from inspect_ai.util import store
+
+from refund_eval.companies import exemplars
+from refund_eval.scenario.schema import Org, load_scenario
+from refund_eval.sim import company_store, research, rules
+from refund_eval.sim.counterparts import create_counterpart
+from refund_eval.sim.interface import Inbound
+from refund_eval.sim.open_world import (
+    COMPANIES_KEY,
+    _apply_example_reply_from,
+    _sender,
+    company_record,
+)
+from refund_eval.world.state import load_world
+
+SCENARIO = load_scenario("train_refund_late")
+PAGE_URL = "https://example.test/policy"
+ORG = Org(
+    key="dynamic_example_test", name="Example Advice", kind="dynamic_advice",
+    email_domains=["example.test"], web_domains=["www.example.test"],
+    terms="Refund requests must be made within 28 days.",
+)
+
+
+def _dossier(org: Org = ORG) -> dict:
+    text = "Requests must be made within 28 days."
+    return {
+        "org": org.key, "name": org.name, "mode": "live", "retrieved_at": "2026-11-20T00:00:00+00:00",
+        "dossier": {"summary": "An advice company.", "facts": [{
+            "statement": "The request window is 28 days.", "quote": text, "url": PAGE_URL,
+        }], "persona": {"voice": "Professional."}},
+        "pages": [{
+            "url": PAGE_URL, "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "retrieved_at": "2026-11-20T00:00:00+00:00",
+        }],
+        "tool_calls": [], "errors": [],
+    }
+
+
+def _set_live(sim: MockSim, scenario=SCENARIO) -> None:
+    install_mock_models(sim)
+    start_sample(scenario.id)
+    store().set("published_tool_profile", {"data_mode": "hybrid"})
+    store().set(research.MODE_KEY, "live")
+
+
+def _seed_dossier(org: Org = ORG) -> None:
+    store().set(research.DOSSIERS_KEY, {org.key: _dossier(org)})
+
+
+def _company_entry(scenario, org, fingerprint, **extra):
+    return {
+        "schema": 1, "fingerprint": fingerprint, "identity": company_store.org_identity(org),
+        "scenario": scenario.id, "created_at": datetime.now(UTC).isoformat(),
+        "org": org.model_dump(mode="json"), "rules": {"rules": {"grounds": []}},
+        "examples": [], **extra,
+    }
+
+
+def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypatch):
+    _set_live(MockSim())
+    fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
+    assert fingerprint == company_store.entry_fingerprint(SCENARIO, ORG)
+    first = _company_entry(SCENARIO, ORG, fingerprint, payload="first")
+    assert company_store.save_entry(SCENARIO, ORG, first) == first
+    path = company_store.entry_path(SCENARIO.id, company_store.org_identity(ORG), fingerprint)
+    original = path.read_bytes()
+
+    changed_inputs = [
+        (SCENARIO.model_copy(update={"intent": "A different intent."}), ORG),
+        (SCENARIO, ORG.model_copy(update={"terms": "Different authored terms."})),
+    ]
+    for scenario, org in changed_inputs:
+        assert company_store.entry_fingerprint(scenario, org) != fingerprint
+
+    from refund_eval.models import client as client_module
+    from refund_eval.sim import research as research_module
+    from refund_eval.sim import rules as rules_module
+
+    original_client = client_module.client
+
+    class DifferentModel:
+        def model_name(self, _role):
+            return "mockllm/other"
+
+    monkeypatch.setattr(client_module, "client", lambda: DifferentModel())
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
+    monkeypatch.setattr(client_module, "client", original_client)
+    monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "2")
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
+    monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "1")
+    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "2")
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
+    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "1")
+    monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "2")
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
+    monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "1")
+    monkeypatch.setattr(rules_module, "CHECKER_VERSION", "2")
+    assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
+
+    assert path.read_bytes() == original
+    different = company_store.entry_fingerprint(SCENARIO, ORG)
+    assert company_store.save_entry(SCENARIO, ORG, _company_entry(
+        SCENARIO, ORG, different, payload="different"))["payload"] == "different"
+    assert path.read_bytes() == original
+
+
+def test_concurrent_first_save_returns_one_immutable_payload():
+    _set_live(MockSim())
+    fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
+    candidates = [
+        _company_entry(SCENARIO, ORG, fingerprint, payload="first"),
+        _company_entry(SCENARIO, ORG, fingerprint, payload="second"),
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda entry: company_store.save_entry(SCENARIO, ORG, entry), candidates))
+    saved = company_store.load_entry(SCENARIO, ORG)
+    assert saved["payload"] in {"first", "second"}
+    assert [result["payload"] for result in results] == [saved["payload"], saved["payload"]]
+    assert len(list(company_store.identity_dir(
+        SCENARIO.id, company_store.org_identity(ORG)).glob("*.json"))) == 1
+
+
+async def test_shared_first_contact_is_reused_without_model_calls(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    _seed_dossier()
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    example_calls = []
+
+    async def find_examples(org, scenario):
+        example_calls.append(org.key)
+        return {"examples": [{"kind": "reply", "subject": "A reply", "body": "Published text.",
+                              "source": PAGE_URL, "retrieved": "2026-11-20",
+                              "representation": "verbatim_excerpt", "notes": ""}], "pages": [], "errors": []}
+
+    monkeypatch.setattr(research, "research_examples", find_examples)
+    pinned_org, first_research = await company_record(ORG, load_world())
+    first_entry = company_store.load_entry(SCENARIO, ORG)
+    assert first_entry and first_entry["research"] == first_research
+    assert example_calls == [ORG.key]
+    assert store().get("company_entries")[ORG.key]["source"] == "generated_and_saved"
+
+    start_sample(SCENARIO.id)
+    sim.call_schemas.clear()
+    inbound = Inbound(channel="email", tool="send_email", target="help@www.example.test", org=None,
+                      body="Please advise.", interception_id="second-trial")
+    reused_org = await create_counterpart(SCENARIO, inbound)
+    second_org, second_research = await company_record(reused_org, load_world())
+    assert reused_org == pinned_org == second_org
+    assert second_research == first_entry["research"]
+    assert store().get(COMPANIES_KEY)[ORG.key]["examples"] == first_entry["examples"]
+    assert store().get("company_entries")[ORG.key]["source"] == "shared_entry"
+    assert sim.call_schemas == []
+    assert example_calls == [ORG.key]
+
+
+async def test_concurrent_company_records_pin_the_first_saved_entry(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    concurrent_org = ORG.model_copy(update={"key": "dynamic_concurrent_test"})
+    _seed_dossier(concurrent_org)
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+
+    async def no_examples(_org, _scenario):
+        return {"examples": [], "pages": [], "errors": []}
+
+    monkeypatch.setattr(research, "research_examples", no_examples)
+    sim.rules_script = [
+        {"terms": "First generated record.", "grounds": []},
+        {"terms": "Second generated record.", "grounds": []},
+    ]
+    results = await asyncio.gather(
+        company_record(concurrent_org, load_world()),
+        company_record(concurrent_org, load_world()),
+    )
+    entry = company_store.load_entry(SCENARIO, concurrent_org)
+    assert entry is not None
+    assert [result[1] for result in results] == [entry["research"], entry["research"]]
+    assert store().get(COMPANIES_KEY)[concurrent_org.key]["rules"] == entry["rules"]
+    assert len(list(company_store.identity_dir(
+        SCENARIO.id, company_store.org_identity(concurrent_org)).glob("*.json"))) == 1
+
+
+async def test_generation_retries_once_then_saves_or_records_two_failures(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    retry_org = ORG.model_copy(update={"key": "dynamic_retry_test"})
+    _seed_dossier(retry_org)
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    monkeypatch.setattr(research, "research_examples", lambda *_: _empty_examples())
+    sim.rules_script = [RuntimeError("first generation failed"), sim.rules]
+    await company_record(retry_org, load_world())
+    assert company_store.load_entry(SCENARIO, retry_org) is not None
+    assert len(sim.rules_prompts) == 2
+
+    failed_org = ORG.model_copy(update={
+        "key": "dynamic_double_failure_test", "email_domains": ["failed.example.test"],
+        "web_domains": ["failed.example.test"],
+    })
+    _seed_dossier(failed_org)
+    sim.rules_script = [RuntimeError("first failed"), RuntimeError("second failed")]
+    await company_record(failed_org, load_world())
+    assert company_store.load_entry(SCENARIO, failed_org) is None
+    failures = store().get("company_generation_failures")
+    assert failures[-1]["org"] == failed_org.key
+    assert any(item.startswith("generation attempt 2:") for item in failures[-1]["errors"])
+
+
+async def _empty_examples():
+    return {"examples": [], "pages": [], "errors": []}
+
+
+async def test_ground_checks_require_matching_fact_page_and_intent(monkeypatch):
+    class GroundSim(MockSim):
+        def __init__(self):
+            super().__init__()
+            self.rules = {"terms": "Policy.", "grounds": [
+                {"key": "valid", "conditions": "Valid.", "quote": "within 28 days", "source": PAGE_URL},
+                {"key": "wrong_source", "conditions": "Wrong.", "quote": "within 28 days",
+                 "source": "https://other.test/terms"},
+                {"key": "not_on_page", "conditions": "Absent.", "quote": "a separate fact",
+                 "source": PAGE_URL},
+                {"key": "intent_false", "conditions": "No.", "quote": "within 28 days", "source": PAGE_URL},
+            ]}
+
+        def __call__(self, input, tools, tool_choice, config):
+            if config.response_schema and config.response_schema.name == "company_rules_intent_check":
+                self.call_schemas.append(config.response_schema.name)
+                request = json.loads(input[-1].text)
+                return ModelOutput.from_content(model="mockllm", content=json.dumps({"items": [
+                        {"id": item["id"], "fits_intent": item["id"] != "ground:1", "reason": "No."}
+                        for item in request["items"]
+                    ]}))
+            return super().__call__(input, tools, tool_choice, config)
+
+    sim = GroundSim()
+    _set_live(sim)
+    dossier = _dossier()
+    dossier["dossier"]["facts"].append({
+        "statement": "A fact absent from the captured page.", "quote": "a separate fact", "url": PAGE_URL,
+    })
+    record = await rules.generate_rules(SCENARIO, ORG, dossier)
+    assert [ground["key"] for ground in record["rules"]["grounds"]] == ["valid"]
+    assert any("wrong_source" in error for error in record["errors"])
+    assert any("not_on_page" in error for error in record["errors"])
+    assert any("intent check" in error and "intent_false" in error for error in record["errors"])
+
+
+async def test_researched_examples_are_verbatim_grounded_and_use_neutral_brief(monkeypatch):
+    sim = MockSim()
+    _set_live(sim)
+    text = "Subject: Your request\nDear customer, we have reviewed your case."
+    async def search(query, objective, *, scenario):
+        return f"Title: Published response\nURL: https://example.test/letters\n{text}"
+
+    async def read(url, *, scenario):
+        return f"URL: {url}\n\n{text}"
+
+    monkeypatch.setattr(research, "_search", search)
+    monkeypatch.setattr(research, "_read_page", read)
+    sim.example_script = [
+        ("web_search_exa", {"query": "Example Advice published response", "objective": "Find letters."}),
+        ("read_page", {"url": "https://example.test/letters"}),
+        {"examples": [
+            {"kind": "reply", "subject": "Your request", "body": "Dear customer, we have reviewed your case.",
+             "source": "https://www.example.test/letters", "from": "Support <help@example.test>"},
+            {"kind": "reply", "subject": "Not found", "body": "Invented content.",
+             "source": "https://example.test/letters", "from": None},
+        ]},
+    ]
+    result = await research.research_examples(ORG, SCENARIO)
+    assert [item["subject"] for item in result["examples"]] == ["Your request"]
+    assert result["examples"][0]["from"] == "help@example.test"
+    assert result["pages"][0]["text"] == text
+    assert any("body not found" in error for error in result["errors"])
+    prompt = sim.example_prompts[0]
+    assert SCENARIO.intent not in prompt
+    assert SCENARIO.facts.journey.booking_ref not in prompt
+    assert "PRIVATE INBOX" not in prompt
+    assert SCENARIO.subject in prompt and ORG.name in prompt and "example.test" in prompt
+    assert f"{research.DEEP_MAX_TOOL_CALLS} lookups" in prompt
+
+
+def test_example_sender_fallback_requires_an_owned_domain():
+    org = ORG.model_copy(update={"contact_emails": [], "web_domains": ["example.test"]})
+    dossier = {"dossier": {"persona": {"voice": "Professional."}}}
+    _apply_example_reply_from(org, dossier, [{"from": "Support <help@example.test>"}])
+    assert _sender(org, record=dossier) == "Example Advice <help@example.test>"
+
+    invalid = {"dossier": {"persona": {"voice": "Professional."}}}
+    _apply_example_reply_from(org, invalid, [{"from": "help@other.test"}])
+    assert "Reply-from" not in invalid["dossier"]["persona"]
+    assert _sender(org, record=invalid) == "Example Advice <noreply@example.test>"
+
+    persona_first = {"dossier": {"persona": {"Reply-from": "Team <team@example.test>"}}}
+    _apply_example_reply_from(org, persona_first, [{"from": "help@example.test"}])
+    assert persona_first["dossier"]["persona"]["Reply-from"] == "Team <team@example.test>"
+
+
+def test_committed_exemplars_override_entry_examples(tmp_path, monkeypatch):
+    monkeypatch.setattr(exemplars, "EXEMPLARS_DIR", tmp_path)
+    (tmp_path / "dynamic_example_test.json").write_text(json.dumps({
+        "org": ORG.key, "examples": [{"kind": "committed", "subject": "Committed",
+                                     "body": "File example.", "source": PAGE_URL}],
+    }))
+    rendered = exemplars.exemplars_text(
+        ORG.key, examples=[{"kind": "entry", "subject": "Entry", "body": "Stored example.",
+                            "source": PAGE_URL}])
+    assert "Committed" in rendered and "Entry" not in rendered
+
+
+async def test_committed_company_rules_stay_byte_exact_and_are_traced():
+    sim = MockSim()
+    _set_live(sim)
+    store().set(research.MODE_KEY, "saved")
+    committed = [org for org in SCENARIO.orgs
+                 if (rules.RULES_DIR / SCENARIO.id / f"{org.key}.json").is_file()]
+    assert len(committed) == 9
+    for org in committed:
+        path = rules.RULES_DIR / SCENARIO.id / f"{org.key}.json"
+        raw = path.read_bytes()
+        saved = rules.saved_rules(SCENARIO.id, org.key)
+        assert await rules.company_rules(SCENARIO, org, None) == saved
+        await company_record(org, load_world())
+        trace = store().get("company_entries")[org.key]
+        assert trace == {
+            "source": "committed", "rules_file": path.relative_to(rules.RULES_DIR.parents[2]).as_posix(),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    assert not list(company_store.store_root().rglob("*.json"))
+    assert not sim.call_schemas
+
+
+async def test_store_off_keeps_dynamic_company_trial_only(monkeypatch, tmp_path):
+    sim = MockSim()
+    _set_live(sim)
+    _seed_dossier()
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    monkeypatch.setattr("refund_eval.sim.open_world.EXEMPLARS_DIR", tmp_path / "exemplars")
+    example_calls = []
+
+    async def no_examples(org, _scenario):
+        example_calls.append(org.key)
+        return await _empty_examples()
+
+    monkeypatch.setattr(research, "research_examples", no_examples)
+    await company_record(ORG, load_world())
+    assert store().get("company_entries")[ORG.key]["source"] == "trial_only"
+    assert company_store.store_root() is None
+    assert not (tmp_path / "company-store").exists()
+    assert example_calls == [ORG.key]
+    _set_live(sim)
+    _seed_dossier()
+    await company_record(ORG, load_world())
+    assert store().get("company_entries")[ORG.key]["source"] == "trial_only"
+    assert len(sim.rules_prompts) == 2
+    assert example_calls == [ORG.key, ORG.key]
+
+
+def test_store_cli_lists_metadata_without_content(capsys):
+    _set_live(MockSim())
+    fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
+    entry = _company_entry(SCENARIO, ORG, fingerprint, rules={
+        "rules": {"grounds": [{"key": "one"}]},
+    }, examples=[{"body": "PRIVATE CONTENT"}])
+    company_store.save_entry(SCENARIO, ORG, entry)
+    assert company_store.main(["list", "--days", "7"]) == 0
+    output = capsys.readouterr().out
+    assert SCENARIO.id in output and ORG.name in output and "grounds=1" in output and "examples=1" in output
+    assert "PRIVATE CONTENT" not in output
+
+
+async def test_company_without_published_correspondence_gets_no_examples():
+    sim = MockSim()
+    _set_live(sim)
+    sim.example_script = [{"examples": []}]
+    result = await research.research_examples(ORG, SCENARIO)
+    assert result["examples"] == []
+
+
+async def test_counterpart_first_contact_uses_deep_research_budget(monkeypatch):
+    sim = MockSim()
+    _set_live(sim)
+    sim.profile = {"name": "Deep Advice", "role": "advice", "reason": "The recipient is an advice firm."}
+    calls = []
+
+    async def fake_research_live(org, *, scenario, max_tool_calls):
+        calls.append(max_tool_calls)
+        return {**_dossier(org), "dossier": {"summary": "Advice firm.", "facts": [], "persona": {}}}
+
+    monkeypatch.setattr(research, "research_live", fake_research_live)
+    inbound = Inbound(channel="email", tool="send_email", target="help@deep.example.test", org=None,
+                      body="Please advise.", interception_id="deep-first-contact")
+    org = await create_counterpart(SCENARIO, inbound)
+    assert org and calls == [research.DEEP_MAX_TOOL_CALLS] == [20]

@@ -22,9 +22,12 @@ def load_exemplars(org_key: str) -> list[dict]:
     return cached[1]
 
 
-def exemplars_text(org_key: str, limit: int = 3) -> str:
+def exemplars_text(org_key: str, limit: int = 3, examples: list[dict] | None = None) -> str:
     """Up to `limit` examples, one of each kind first, in file order, as "Subject:" blocks."""
-    examples = load_exemplars(org_key)
+    if (EXEMPLARS_DIR / f"{org_key}.json").is_file():
+        examples = load_exemplars(org_key)
+    else:
+        examples = examples or []
     seen: set[str] = set()
     first = []
     for i, example in enumerate(examples):

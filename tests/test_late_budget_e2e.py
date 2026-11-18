@@ -112,7 +112,7 @@ def run_agent(tmp_path, monkeypatch, followup, assessment, *, budget=10_000, rep
     monkeypatch.setenv("REFUND_EVAL_KILL_FILE", str(tmp_path / "KILL"))
     monkeypatch.setattr(adapters, "tool_scope", intercepted_tools)
 
-    async def company_rules(scenario, org, dossier_record):  # every company may pay on one scripted ground
+    async def company_rules(scenario, org, dossier_record, examples=None):  # every company may pay on one scripted ground
         return {"rules": {"terms": org.terms, "grounds": [{"key": "eligible", "conditions": "The terms are met."}]}}
 
     monkeypatch.setattr("refund_eval.sim.open_world.company_rules", company_rules)

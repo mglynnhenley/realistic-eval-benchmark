@@ -32,7 +32,7 @@ def start(monkeypatch, scenario_id, record):
     install_mock_models(sim)
     start_sample(scenario_id)
 
-    async def company_rules(scenario, org, dossier_record):
+    async def company_rules(scenario, org, dossier_record, examples=None):
         return record if org.key == "trainline" else None
 
     monkeypatch.setattr("refund_eval.sim.open_world.company_rules", company_rules)
