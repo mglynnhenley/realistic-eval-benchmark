@@ -138,7 +138,7 @@ uv run pytest -q tests/test_harbor_worker.py
 
 ## Native Harbor task (new)
 
-A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. Both containers are built from a copy of the source. A separate verifier container grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
+A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. The agent image builds from an allowlist of runtime files and a reduced copy of the selected scenario; it does not contain company rules, grading code or the task's tests. The world and separate verifier build from the full source snapshot, and the verifier grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
 
 ### Prepare a native batch
 

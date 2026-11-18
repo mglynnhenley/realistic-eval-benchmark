@@ -34,6 +34,7 @@ from harbor.utils.trajectory_validator import TrajectoryValidator
 from refund_eval.agent.prompt import task_message
 from refund_eval.harbor import adapter, atif, batch
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
+from refund_eval.scenario import schema
 from refund_eval.scenario.schema import load_scenario
 
 
@@ -138,6 +139,58 @@ def test_verifier_image_and_test_script(generated):
     for source in (tests / "source", generated / "train_refund_late" / "environment" / "source"):
         assert (source / "refund_eval" / "grading" / "verifier.py").is_file()
         assert (source / "uv.lock").is_file() and not (source / ".env").exists()
+
+
+def test_main_image_builds_from_only_the_agent_payload(generated):
+    task_dir = generated / "train_refund_late"
+    environment = task_dir / "environment"
+    payload = environment / "agent"
+    copy_inputs = [line.split()[1:-1] for line in (environment / "Dockerfile").read_text().splitlines()
+                   if line.startswith("COPY ") and not line.startswith("COPY --from=")]
+    assert copy_inputs == [["agent/pyproject.toml", "agent/uv.lock"], ["agent/"]]
+    assert (environment / "Dockerfile.dockerignore").read_text().splitlines() == ["*", "!agent/", "!agent/**"]
+    for forbidden in ("scenario/rules", "scenario/dossiers", "scenario/realism", "grading", "claims",
+                      "sim/rules.py", "tasks/train_refund/checklist.json", "tasks/household_bills/checklist.json"):
+        assert not (payload / "refund_eval" / forbidden).exists()
+    assert not list(payload.rglob("test.sh"))
+    assert (task_dir / "tests" / "test.sh").is_file()
+    assert "COPY source/ /app/" in (environment / "world" / "Dockerfile").read_text()
+    for source in (environment / "source", task_dir / "tests" / "source"):
+        assert (source / "refund_eval" / "scenario" / "rules" / "train_refund_late").is_dir()
+        assert (source / "refund_eval" / "grading" / "verifier.py").is_file()
+
+    original = load_scenario()
+    path = payload / "refund_eval" / "scenario" / "train_refund_late.yaml"
+    raw = yaml.safe_load(path.read_text())
+    assert not {"intent", "grading_notes", "seed_emails", "scheduled_emails"} & raw.keys()
+    assert all(not {"policy", "terms", "persona"} & org.keys() for org in raw["orgs"])
+    assert "true_circumstances" not in raw["facts"]
+    assert task_message(load_scenario(str(path)), 12.0) == task_message(original, 12.0)
+    manifest = Path("refund_eval/_source_manifest.json")
+    agent_manifest = json.loads((payload / manifest).read_text())
+    world_manifest = json.loads((environment / "source" / manifest).read_text())
+    memory = environment / "source" / "refund_eval" / "scenario" / "realism" / "train_refund_late.json"
+    assert agent_manifest.pop("realism_memory") == {
+        "train_refund_late": hashlib.sha256(memory.read_bytes()).hexdigest()[:8],
+    }
+    assert agent_manifest == world_manifest
+    assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
+
+
+def test_agent_loads_scenario_by_filename_when_it_differs_from_id(tmp_path, monkeypatch):
+    original = load_scenario()
+    name = "renamed_refund"
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    (scenarios / f"{name}.yaml").write_text(yaml.safe_dump(original.model_dump(mode="json")))
+    monkeypatch.setattr(schema, "SCENARIO_DIR", scenarios)
+    out = tmp_path / "tasks"
+    assert adapter.main(["--scenario", name, "--out", str(out)]) == 0
+    task_dir = out / name
+    lookup = Task(task_dir).config.environment.env["WORLD_SCENARIO"]
+    assert lookup == name
+    monkeypatch.setattr(schema, "SCENARIO_DIR", task_dir / "environment" / "agent" / "refund_eval" / "scenario")
+    assert load_scenario(lookup).id == original.id
 
 
 def test_dataset_metric_and_job(generated):
