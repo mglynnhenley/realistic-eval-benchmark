@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 5.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: feb225feabe6e348d0a50a5ce3355f07b97c5601491228e910b13bacce8785bf
+- Trial round: pending; only offline validation in this change.
+- Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).
+
 ## 4.0 — 2026-11-18
 - Kind: behaviour round
 - Fingerprint: 1b48d5e08ee5f87db52aed948733682a282c63a478125a3104a12cf400e408b0

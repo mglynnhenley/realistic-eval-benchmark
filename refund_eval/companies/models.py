@@ -35,6 +35,10 @@ class CompanyAction(BaseModel):
         "Brief case note explaining which claims you believed or doubted and how your terms apply. "
         "This is an internal record, not part of the customer-facing reply."))
     summary: str = Field(default="", description="One line for your own case notes.")
+    case_notes: list[str] | None = Field(default=None, description=(
+        "Internal only. Your full updated case summary: each customer claim and when it was made, "
+        "facts disputed or changed, your latest decision and basis. Only what was said in this case. "
+        "A list replaces your existing notes; null keeps them."))
     reply: bool = Field(description="Whether you respond to the customer at all.")
     reply_kind: Literal["substantive", "automatic"] = Field(default="substantive", description=(
         "Automatic is only an administrative receipt or acknowledgement, without a decision on merits or money."))
@@ -109,6 +113,8 @@ class CompanyContext(BaseModel):
     examples: str = ""
     case_ref: str | None = None
     history: list[str] = Field(default_factory=list)
+    case_summary: list[str] = Field(default_factory=list)
+    earlier_decisions: list[str] = Field(default_factory=list)
     offers: list[str] = Field(default_factory=list)
     payments: list[str] = Field(default_factory=list)
     promises: list[str] = Field(default_factory=list)

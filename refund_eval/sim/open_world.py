@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Literal
@@ -90,6 +91,8 @@ MAX_REPLY_HOURS = 72
 # Money that counts towards a refund. Vouchers and the user's own payments do not.
 CASH_KINDS = {"cash_refund", "partial_compensation", "provisional_credit"}
 MAX_NOTES = 2
+MAX_CASE_NOTES = 12
+MAX_CASE_NOTE_CHARS = 300
 MAX_FOLLOW_UPS = 8  # per organisation, so a handler that keeps saying "next week" stops eventually
 TEMPERAMENTS = [
     "helpful and proactive; looks for a way to help within the rules",
@@ -275,6 +278,18 @@ def _correspondence_senders(org: Org, world: World, record: dict | None, mode: s
     return configured, list(dict.fromkeys(senders))
 
 
+def _earlier_decisions(history: list[str]) -> list[str]:
+    decisions = []
+    for entry in history[:-12]:
+        match = re.match(
+            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) [^|\n]*\| us: \[([^\]\n]+)\] "
+            r"(.*?) \(.*?; status ([a-z_]+)\); basis: (.*?); response:", entry, re.DOTALL)
+        if match:
+            stamp, decision, summary, status, basis = match.groups()
+            decisions.append(f"{stamp} [{decision}] {summary} (status {status}); basis: {basis}")
+    return decisions
+
+
 def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | None,
                     others: list[Org], record: dict | None = None, mode: str = "email") -> CompanyContext:
     """Project the company's own knowledge; never include private assessments."""
@@ -341,7 +356,9 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         persona=persona_text((record or {}).get("dossier")) or org.persona,
         temperament=pinned.get("temperament") or temperament(org, world), realism=realism,
         examples="" if org.kind == "dynamic_personal" else exemplars_text(org.key), case_ref=case_ref,
-        history=history, offers=offers, payments=payments, promises=promises,
+        history=history, case_summary=list(case.notes) if case else [],
+        earlier_decisions=_earlier_decisions(case.history) if case else [],
+        offers=offers, payments=payments, promises=promises,
         other_orgs=[o.name for o in others] if org.kind == "dynamic_personal" else [],
         provider_terms=_provider_terms(scenario, org),
         case_handler=handler, review_handler=reviewer,
@@ -577,6 +594,8 @@ def apply_open(
                              (inbound.channel in {"phone", "chat"} and action.body.strip()) or
                              (inbound.channel == "form" and action.page_body.strip()) else None)
     case = world.cases.get(org.key) or CaseState(org=org.key)
+    if action.case_notes is not None:
+        case.notes = [note.strip()[:MAX_CASE_NOTE_CHARS] for note in action.case_notes if note.strip()][:MAX_CASE_NOTES]
     if case.case_ref is None and case_ref:
         case.case_ref = case_ref
     if customer_contact:
