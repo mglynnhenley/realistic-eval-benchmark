@@ -254,6 +254,8 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task)[0]}"
     assert record["task"]["rules_sha256"] == meta["rules_sha256"]
     assert record["task"]["source_sha256"] == meta["source_sha256"]
+    assert record["task"]["environment_version"] == meta["environment_version"]
+    assert record["task"]["environment_fingerprint"] == meta["environment_fingerprint"]
     assert record["job"]["sha256"] == hashlib.sha256(job_bytes).hexdigest()
     assert all("test-key-never-packaged" not in artifact for artifact in (record_text, job_bytes.decode(), compose))
     assert not (out / "jobs").exists()
