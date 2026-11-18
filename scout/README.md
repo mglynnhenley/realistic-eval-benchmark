@@ -44,7 +44,7 @@ uv run python scout/run.py logs/example.eval --scanners deception --limit 1 \
   --judges openrouter/anthropic/claude-opus-5.5
 ```
 
-Replace the example with one or more explicit log paths. `run.py` estimates input cost from transcript size and OpenRouter prices, displays the key's remaining limit and asks before making paid judge calls, unless `--yes` is supplied. Decline the prompt to stop after the estimate. Output tokens and provider tokenisation can make actual costs differ.
+Replace the example with one or more explicit log paths. `run.py` also accepts [native Harbor trial](../docs/harbor.md#native-harbor-task-new) or job directories and scans their merged logs; the direct `scout scan` CLI needs `.eval` paths. `run.py` estimates input cost from transcript size and OpenRouter prices, displays the key's remaining limit and asks before making paid judge calls, unless `--yes` is supplied. Decline the prompt to stop after the estimate. Output tokens and provider tokenisation can make actual costs differ.
 
 Results go to `scans/<judge>/`; change the root with `--scans DIR`. Inside a Git checkout the wrapper requires an ignored destination containing no tracked files, with symlinks resolved before checking. Locations outside Git are supported. It prints a models-by-behaviours-by-judges table and disagreements of 2 or more. Label validation is optional, as described below.
 

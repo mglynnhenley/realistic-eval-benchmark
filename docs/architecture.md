@@ -193,7 +193,7 @@ The target, simulator and grader use separate model roles. The runtime's grader 
 
 ## Execution and limits
 
-The dashboard launches local Inspect workers or Harbor batches and reads saved runs under `.context/dashboard/runs/`. Harbor packages Inspect, Node and Chromium into one Modal or Docker sandbox per trial. Local Inspect runs use a separate Docker browser.
+The dashboard launches local Inspect workers or Harbor batches and reads saved runs under `.context/dashboard/runs/`. Harbor packages Inspect, Node and Chromium into one Modal or Docker sandbox per trial. The [native Harbor task](harbor.md#native-harbor-task-new) instead runs the world in a `world` sidecar container beside the agent, with a separate verifier. Local Inspect runs use a separate Docker browser.
 
 The command-line kill switch stops at a tool or turn boundary. Dashboard batch cancellation stops the controller and collects available artifacts; a cancelled run may be partial.
 

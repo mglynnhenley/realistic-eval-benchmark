@@ -173,3 +173,13 @@ env -u OPENROUTER_API_KEY REFUND_EVAL_FAKE_WORLD_MODELS=1 scripts/harbor harbor 
 scripts/harbor python -m pytest -q tests/test_harbor_native_task.py
 uv run pytest -q tests/test_harbor_native_world.py
 ```
+
+### Parity gate
+
+The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. API keys are removed from every environment it launches, and it does not use Modal.
+
+```bash
+uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--seed 7] [--skip-harbor]
+```
+
+Each path writes `OUT/<script>/<path>/`. The comparison goes to `OUT/REPORT.md` and `OUT/results.json`. `--skip-harbor` runs only the two in-process paths.
