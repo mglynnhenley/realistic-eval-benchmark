@@ -13,6 +13,7 @@ refund or realism rate, and this loop does not train or update the target model.
 2. Use an independently authored synthetic example when it helps establish the cause or prevent regression. Preserve the relevant conditions without copying a user message, personal details or run identifiers into a test. A useful realism experiment does not require a reproduced implementation defect.
 3. Make a focused change that addresses the underlying problem, including related components where necessary. Test the affected behaviour and complete the checks required for the change; use broader tests when its reach or unresolved regression risk warrants them. Do not repeat unchanged checks merely to produce another receipt.
 4. Record the resulting behaviour, configuration requirements and limitations in the public documentation. Keep original evidence and operational notes private.
+5. For each accepted fix batch, bump `ENVIRONMENT_VERSION` once and add one [environment changelog](environment-changelog.md) entry: a trivial batch bumps MINOR with no trial round; a change that could move behaviour or score bumps MAJOR with its own authorised native round. Compare scores only within one exact version; replays do not count as trials.
 
 Evaluate correctness with appropriate checks and record realism scores as a
 separate trend signal. A small or incomplete sample does not establish improvement
