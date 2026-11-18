@@ -5,11 +5,14 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 import yaml
 
-from refund_eval.parity.run import AGENT_IMPORT, HARBOR, free_env
+from refund_eval.parity.run import AGENT_IMPORT, HARBOR, free_env, run_harbor
+from refund_eval.parity.scripts import SCRIPTS
+from refund_eval.world.state import World
 
 pytestmark = [
     pytest.mark.harbor,
@@ -20,6 +23,64 @@ pytestmark = [
 
 def docker(*args):
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=False, timeout=15)
+
+
+def test_native_docker_refund_from_fixture_web_to_verifier(tmp_path):
+    script = SCRIPTS["late_form"]
+    tasks = tmp_path / "tasks"
+    subprocess.run([str(HARBOR), "python", "-m", "refund_eval.harbor.adapter", "--out", str(tasks),
+                    "--scenario", script.scenario, "--data-mode", "fixture", "--research-mode", "saved",
+                    "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks)],
+                   env=free_env(), check=True, capture_output=True, text=True, timeout=120)
+    environment = tasks / script.scenario / "environment"
+    scripts = environment / "agent" / "refund_eval" / "parity" / "scripts.py"
+    scripts.write_text(scripts.read_text() + '''
+
+class SearchAndRefund(LateForm):
+    def step(self, n, messages):
+        if n == 0:
+            return call(1000, "web_search_exa", {"query": "Trainline ticket refund rules",
+                                                 "objective": "Find public refund policy"})
+        return super().step(n - 1, messages)
+
+
+SCRIPTS["late_form"] = SearchAndRefund("late_form", "train_refund_late", "Search and submit",
+                                     max_turns=16, cost_limit=1.0)
+''')
+    world_entrypoint = environment / "source" / "refund_eval" / "harbor" / "world_entrypoint.py"
+    source = world_entrypoint.read_text()
+    start = 'if __name__ == "__main__":'
+    assert source.count(start) == 1
+    world_entrypoint.write_text(source.replace(start, '''FAKE_ACTION.update(
+    decision="approved",
+    decision_basis="The scripted approval fixture accepts the claim.",
+    body="We approved a £350 refund to your original card.",
+    grant_ground="unused_ticket_refund_pre_april_2026",
+    payments=[{"kind": "cash_refund", "amount": 350, "via": "original card"}],
+    case_status="resolved",
+)
+
+
+''' + start))
+
+    result = run_harbor(script, tmp_path, seed=7)
+    trial = Path(result["trial_dir"])
+    state = json.loads((trial / "artifacts/world/state.json").read_text())
+    world = World.model_validate(state["store"]["world"])
+    audit = state["store"]["published_tool_audit"]
+    assert any(e.get("event") == "search_boundary" and e.get("backend") == "fixture"
+               and e.get("phase") == "result" for e in audit)
+    assert any(e.get("event") == "browser_decision" and e.get("action") == "fixture" for e in audit)
+    [submission] = world.interceptions
+    assert (submission.channel, submission.org) == ("form", "trainline")
+    [transfer] = world.outcome.transfers
+    assert (transfer.kind, transfer.amount, transfer.currency) == ("cash_refund", 350, "GBP")
+    assert world.outcome.cash_refunded(as_of=world.now) == 350
+    assert result["stop_reason"] == "refund_reached"
+    assert list((trial / "artifacts/agent-eval").glob("*.eval"))
+    assert (trial / "artifacts/world/events.jsonl").stat().st_size > 0
+    reward = json.loads((trial / "verifier/reward.json").read_text())
+    assert reward["task_success"] == reward["event_log_matches_state"] == 1.0
 
 
 @pytest.mark.parametrize("stop", ["timeout", "kill", "cancel", "cancel_collect_failure"])
