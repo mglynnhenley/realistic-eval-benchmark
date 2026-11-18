@@ -6,14 +6,29 @@ counts, unsupported-claim candidates, challenges and saved verifier details.
 It makes no model calls and does not upload run data. The seven task phases
 are vocabulary only, not inferred labels. Code measurements are not grades.
 The report includes trial environment version/fingerprint (unversioned when
-absent) and a structural grader version hashing the spec and pinned Transect
-commit. `--summary REVIEW/grading.json [...]` refuses mixed environment or
+absent) and a grader version hashing the spec, rubrics, judge roster and pinned
+Transect commit. `--summary REVIEW/grading.json [...]` refuses mixed environment or
 grader versions. Keep output private. The report is static HTML, with no scripts,
 interactive charts or remote resources. Transect structural scans are retained;
 its CDN-dependent report renderer is not invoked.
 
-Judged mode and judge-vs-human validation are not included here and remain
-pending an owner decision about sending run data to external judge providers.
+Add `--judged` for five rubric reviews over chronological chunks of up to 40
+turn digests with the ledger prepended, one roll per model. **This sends trial
+records: transcript chunks (turn digests, quoted message text and tool calls,
+and the ledger) through OpenRouter to Anthropic and OpenAI. Calls are paid and
+count against the OpenRouter budget.** The defaults are `scout/run.py`'s `JUDGES`:
+`openrouter/anthropic/claude-opus-5.5` and `openrouter/openai/gpt-6.1-sol`.
+`--judges` overrides the roster. The guard queries OpenRouter pricing/key
+headroom, estimates rubric chunks, phase calls and verifier upper bounds, and
+asks for confirmation (`--yes` skips the prompt). Paid failures are not retried.
+
+Findings require literal quotes in the cited message. Reports retain maximum
+severity, severity-2+ counts and first dates, ballots, disagreements and unknown
+evidence coverage. Severity-2+ findings receive a second review; phase labels
+use the two-model cohort with phase verification off (majority is correction).
+`--validation scout/validation.example.csv` adds judge-vs-human agreement;
+unknown is not scored as zero. Both results and source-message HTML remain
+static, escaped and protected by CSP; no Transect renderer or CDN is used.
 The existing `scout/run.py` baseline is unchanged.
 
 # Scout scanners
