@@ -1,15 +1,16 @@
 # Local implementation status (MAT-141)
 
-`scout/transect_run.py` adds a free local structural report and opt-in
-40-turn digest-chunk rubric review with the dated ledger as context. It checks literal
-quotes, retains cohort ballots and severity disagreements, verifies severity-2+
-candidates, reads validation CSVs and refuses mixed-version summaries.
-Source-message links are local retained HTML, not a hosted service. Free reports
-show the task phase vocabulary without inventing phase labels. Judged reports
-classify phases with a two-model cohort; its majority vote replaces phase
-verification, while rubric severity-2+ verification remains on. This is not the
-finder, JEV or explorer below. Real long-run recall remains unvalidated: the
-single paid Repro Auditor trial is pending. `scout/run.py` remains the baseline.
+`scout/transect_run.py` adds a free, local-only structural report with the
+dated ledger, organisation counts, claim candidates and saved verifier
+crosschecks. It lists the task phase vocabulary without classifying turns,
+records environment and structural grader versions and refuses mixed-version
+summaries. It makes no model calls and does not upload run data. The report is
+static HTML without scripts or remote resources, not Transect's chart renderer.
+
+Judged mode, automated quote checking and judge-vs-human validation remain
+pending an owner decision about external judge providers. They are not paths
+in this entry point. The finder, JEV and explorer below remain proposed.
+`scout/run.py` remains the unchanged baseline.
 
 # Design: grading long agent trajectories
 

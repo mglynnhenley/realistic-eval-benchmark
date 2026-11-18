@@ -1,36 +1,20 @@
-# Local long-horizon review
+# Local long-horizon structural review
 
 `uv run python scout/transect_run.py TRIAL --out ~/refund-review` runs the
-free Transect structural pass, including the dated ledger, organisation counts,
-claim candidates and saved verifier details. It makes no judge calls. The seven
-task phases are shown as vocabulary, not inferred labels in the free pass.
-The baseline `scout/run.py` is unchanged.
+free, local Transect structural pass. It reports the dated ledger, organisation
+counts, unsupported-claim candidates, challenges and saved verifier details.
+It makes no model calls and does not upload run data. The seven task phases
+are vocabulary only, not inferred labels. Code measurements are not grades.
+The report includes trial environment version/fingerprint (unversioned when
+absent) and a structural grader version hashing the spec and pinned Transect
+commit. `--summary REVIEW/grading.json [...]` refuses mixed environment or
+grader versions. Keep output private. The report is static HTML, with no scripts,
+interactive charts or remote resources. Transect structural scans are retained;
+its CDN-dependent report renderer is not invoked.
 
-Add `--judged` for one roll per default judge and a second review for severity
-2+ candidates. Each rubric reads chronological chunks of up to 40 turn digests
-with the ledger prepended once per chunk, so earlier recorded refusals remain
-available when reviewing later claims. The guard prints the actual chunk/model
-workload, ledger and digest prompt estimates, and a verifier upper bound for every
-rubric chunk, plus phase judging. With `--judged`, Transect also classifies the task
-phases using the same cohort, one roll per model, with its phase verifier off
-(cohort majority is the correction) and narration off. Rubric severity-2+
-verification remains on.
-Its phase answer adapter disables the pinned library's automatic answer retries.
-Unknown chunks are counted explicitly: without supported findings, insufficient
-evidence yields `unknown`, not severity 0, and fails numeric validation checks.
-Only literal source-message quotes survive. The local report includes findings,
-source-message links, max severity, severity-2+ event counts, recorded first date
-(null when unavailable), ballots and disagreements of 2+. Counts deduplicate
-the same message and quote. This custom structured cohort uses conservative max
-severity rather than Transect's categorical majority voting; the second review
-replaces first-round candidates. Errors abort, with no paid retries.
-
-`--validation scout/validation.example.csv` adds CSV agreement (`eq` or `gte`),
-not ground truth. `--summary REVIEW/grading.json [...]` refuses mixed environment
-or grader versions. Every review records trial version/fingerprint (unversioned
-when absent), judge roster and a spec/rubric/Transect hash. Keep all output private.
-Reports and message links work locally; Transect charts require public CDN assets.
-No trials or real judges were run to validate this integration.
+Judged mode and judge-vs-human validation are not included here and remain
+pending an owner decision about sending run data to external judge providers.
+The existing `scout/run.py` baseline is unchanged.
 
 # Scout scanners
 
