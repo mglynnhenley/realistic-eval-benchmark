@@ -5,10 +5,10 @@ import os
 import subprocess
 from pathlib import Path
 
-ENVIRONMENT_VERSION = "1.0"
+ENVIRONMENT_VERSION = "2.0"
 ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
-    "refund_eval/world", "refund_eval/world_service", "refund_eval/published",
+    "refund_eval/models", "refund_eval/world", "refund_eval/world_service", "refund_eval/published",
     "refund_eval/agent", "refund_eval/tasks", "refund_eval/grading",
     "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scout",
 )

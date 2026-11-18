@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 2.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: 9a5bdd5f5300336d31a91fb4f66120ea46d7e66fed7f02752b65f8823403d9e2
+- Trial round: not run; no paid run was authorized for MAT-106
+- Changes: fingerprint model clients; enforce native world-model spending and stop instead of silently continuing after a world-model limit
+
 ## 1.0 — 2026-11-18
 - Kind: baseline
 - Fingerprint: da7b22d16360fd9afee3caeb32e810e54b2453abf794dfdfb01a9faa00ae3964
