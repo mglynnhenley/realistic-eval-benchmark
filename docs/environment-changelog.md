@@ -42,11 +42,11 @@ this was not a second version or trial round.
 - Trial round: pending; only offline validation in this change.
 - Changes: retain bounded company-authored case notes and project older own decisions into company prompts without changing the recent case-log or letter windows (MAT-140).
 
-## 4.1 — 2026-11-18
-- Kind: trivial batch
-- Fingerprint: fe8e86bc94ec25d1e82edc1e3a11a7dee76358a5084ad83bcdfa8a9a70df5598
-- Trial round: none
-- Changes: reuse immutable first-contact company research, rules, temperament and grounded public correspondence across trials (MAT-139).
+## 5.0 — 2026-11-18
+- Kind: behaviour round
+- Fingerprint: da23496405c1a8c454f215e38e8a02b254fad56485235fe4125ba73e2afcf329
+- Trial round: pending; to be run by the Repro Auditor after review.
+- Changes: share deep first-contact company research, rules, temperament, grounded public correspondence and reply addresses across trials (MAT-139).
 
 ## 4.0 — 2026-11-18
 - Kind: behaviour round
