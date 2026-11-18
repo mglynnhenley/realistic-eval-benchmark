@@ -7,7 +7,11 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from refund_eval.scenario.schema import archived_scenario_names, load_scenario, scenario_names
+from refund_eval.scenario.schema import (
+    archived_scenario_names,
+    load_scenario,
+    scenario_names,
+)
 from refund_eval.world.snapshot_store import SNAPSHOT_NAME_PATTERN
 
 # Role defaults; the target is chosen per run. The grader role checks the simulator's
