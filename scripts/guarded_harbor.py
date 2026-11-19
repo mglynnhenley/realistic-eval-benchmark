@@ -12,6 +12,10 @@ launch approval. Billing and paid-grader holds remain separate; key metadata
 does not establish that OpenRouter BYOK is absent. Monitoring cannot prevent an
 in-flight call or billing delay from exceeding a threshold, and host failure or
 Modal cleanup failure can leave cleanup uncertain.
+
+Exit 0 means one finished trial with a valid verifier result and no recorded
+exceptions, regardless of its score. Trial failures reported by Harbor exit 1
+with a fixed reason, distinct from spend-guard failures.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from typing import Any
 import yaml
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig
+from harbor.models.job.result import JobResult
 from pydantic import ValidationError
 
 from scripts.offline_spend_guard import (
@@ -165,7 +170,7 @@ async def run_guarded_job(
     *,
     guard: SpendGuard | None = None,
     job_factory: Any | None = None,
-) -> object:
+) -> JobResult:
     require_pinned_harbor()
     validate_job_config(config)
     controller = guard or SpendGuard(thresholds)
@@ -217,6 +222,19 @@ async def run_guarded_job(
         await asyncio.shield(controller.close())
 
 
+def _trial_failure_reason(result: JobResult) -> str | None:
+    if result.n_total_trials != 1 or len(result.trial_results) != 1:
+        return "unexpected_trial_count"
+    trial = result.trial_results[0]
+    if trial.recorded_exceptions():
+        return "trial_exception"
+    if result.finished_at is None or trial.finished_at is None:
+        return "incomplete_result"
+    if not trial.reward_valid:
+        return "invalid_reward"
+    return None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one fresh Harbor Modal job behind fail-closed spend monitors."
@@ -253,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         require_pinned_harbor()
         config = load_job_config(args.config)
         validate_job_config(config)
-        asyncio.run(run_guarded_job(config, thresholds))
+        trial_failure = _trial_failure_reason(asyncio.run(run_guarded_job(config, thresholds)))
     except GuardFailure as failure:
         print(
             f"guard_failed={failure.reason} cleanup_uncertain={str(failure.cleanup_uncertain).lower()}",
@@ -268,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
             f"launcher_failed={type(failure).__name__} cleanup_uncertain=false",
             file=sys.stderr,
         )
+        return 1
+    if trial_failure is not None:
+        print(f"guarded_harbor_job=failed reason={trial_failure}", file=sys.stderr)
         return 1
     print("guarded_harbor_job=complete")
     return 0
