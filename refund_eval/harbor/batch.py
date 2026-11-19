@@ -45,6 +45,11 @@ class NativeBatchConfig(RunConfig):
 
 def prepare(out: Path, config: NativeBatchConfig) -> Path:
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
+    if config.identity_lock is not None:
+        raise ValueError(
+            "Native Harbor does not support exact browser artifact locks; "
+            "the generated sidecar task records its own source and rules identities."
+        )
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
         raise ValueError("Native batches require execution='docker' or execution='modal'")

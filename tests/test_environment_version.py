@@ -1,6 +1,7 @@
 """Keep environment changes tied to an explicit version and changelog entry."""
 
 import hashlib
+import json
 import re
 import subprocess
 from itertools import pairwise
@@ -75,3 +76,63 @@ def test_fingerprint_includes_individual_files(tmp_path, monkeypatch):
     before = environment.environment_fingerprint()
     source.write_text("DEFAULT = 2\n")
     assert environment.environment_fingerprint() != before
+
+
+def test_frozen_source_fingerprint_uses_only_manifest_backed_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(environment, "ROOT", tmp_path)
+    monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("scenario",))
+    directory = tmp_path / "scenario"
+    directory.mkdir()
+    (directory / "rules.txt").write_text("rules")
+    (directory / "__pycache__").mkdir()
+    (directory / "__pycache__/rules.pyc").write_bytes(b"cache")
+    (directory / "rules.pyc").write_bytes(b"cache")
+    (directory / "private.txt").write_text("not in the frozen source inventory")
+    manifest = tmp_path / "refund_eval/_source_manifest.json"
+    manifest.parent.mkdir()
+    source_digest = hashlib.sha256()
+    for value in (b"scenario/rules.txt", b"rules"):
+        source_digest.update(len(value).to_bytes(8, "big"))
+        source_digest.update(value)
+    manifest.write_text(json.dumps({
+        "files": ["scenario/rules.txt"], "source_sha256": source_digest.hexdigest(),
+    }))
+    monkeypatch.setattr(
+        environment.subprocess, "check_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(environment.subprocess.CalledProcessError(128, "git")),
+    )
+
+    digest = hashlib.sha256()
+    for value in (b"scenario/rules.txt", b"rules"):
+        digest.update(len(value).to_bytes(8, "big"))
+        digest.update(value)
+    assert environment.environment_fingerprint() == digest.hexdigest()
+
+
+def test_frozen_source_manifest_rejects_unsafe_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(environment, "ROOT", tmp_path)
+    monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("scenario",))
+    (tmp_path / "scenario").mkdir()
+    manifest = tmp_path / "refund_eval/_source_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({"files": ["../private"], "source_sha256": "0" * 64}))
+    monkeypatch.setattr(
+        environment.subprocess, "check_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(environment.subprocess.CalledProcessError(128, "git")),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid path"):
+        environment.environment_fingerprint()
+
+
+def test_frozen_source_fingerprint_requires_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(environment, "ROOT", tmp_path)
+    monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("scenario",))
+    (tmp_path / "scenario").mkdir()
+    monkeypatch.setattr(
+        environment.subprocess, "check_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(environment.subprocess.CalledProcessError(128, "git")),
+    )
+
+    with pytest.raises(RuntimeError, match="Git inventory unavailable"):
+        environment.environment_fingerprint()

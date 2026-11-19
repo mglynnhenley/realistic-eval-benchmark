@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
                      profile: str = RunConfig.model_fields["tool_profile"].default,
                      published_data: str = RunConfig.model_fields["data_mode"].default, fixture_path: str | None = None,
-                     browser_runtime: str = "docker", artifact_dir: str | None = None):
+                     browser_runtime: str = "docker", browser_image: str | None = None,
+                     artifact_dir: str | None = None):
     """Own all tool connections for one trial, including exception cleanup."""
     if profile != "published":
         raise ValueError("tool_profile must be published")
@@ -27,6 +28,7 @@ async def tool_scope(scenario: Scenario, mail_source_kind: str, *,
 
     async with published_tools(scenario, data_mode=published_data,
                                **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                               **({"browser_image": browser_image} if browser_image is not None else {}),
                                **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
         yield tools

@@ -6,7 +6,6 @@ import hashlib
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import time
 import uuid
@@ -19,6 +18,10 @@ from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import audit, fingerprint, inspect_tools
 from refund_eval.published.browser_runtimes import (
     DEFAULT_IMAGE as DEFAULT_BROWSER_IMAGE,
+)
+from refund_eval.published.browser_runtimes import (
+    BrowserBoundaryError,
+    resolve_local_image_id,
 )
 from refund_eval.published.network import contains_scenario_data
 from refund_eval.scenario.schema import Scenario
@@ -46,7 +49,7 @@ def validate_fixture_path(fixture_path: str | None, *, data_mode: str) -> str | 
     return str(path)
 
 
-def fixture_readiness(*, browser_runtime: str = "docker") -> dict:
+def fixture_readiness(*, browser_runtime: str = "docker", browser_image: str | None = None) -> dict:
     """Simulated data needs only the local, network-isolated browser runtime."""
     if browser_runtime == "subprocess":
         from refund_eval.published.browser_runtimes import subprocess_readiness
@@ -54,12 +57,17 @@ def fixture_readiness(*, browser_runtime: str = "docker") -> dict:
         return subprocess_readiness()
     if browser_runtime != "docker":
         return {"configured": False, "reason": f"Unknown browser runtime: {browser_runtime}"}
-    return dict(_fixture_readiness(int(time.monotonic() // 5)))
+    return dict(_fixture_readiness(int(time.monotonic() // 5), browser_image or DEFAULT_BROWSER_IMAGE))
 
 
-def hybrid_readiness(*, browser_runtime: str = "docker") -> dict:
+def hybrid_readiness(*, browser_runtime: str = "docker", browser_image: str | None = None) -> dict:
     """Check only the local browser; no Gmail config or live requests are needed."""
-    status = fixture_readiness(**({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}))
+    runtime_args = {}
+    if browser_runtime != "docker":
+        runtime_args["browser_runtime"] = browser_runtime
+    if browser_image is not None:
+        runtime_args["browser_image"] = browser_image
+    status = fixture_readiness(**runtime_args)
     if status["configured"]:
         status["reason"] = (
             "Simulated inbox and public web browser are ready; no Gmail connection is needed. "
@@ -70,23 +78,14 @@ def hybrid_readiness(*, browser_runtime: str = "docker") -> dict:
     return status
 
 
-@lru_cache(maxsize=2)
-def _fixture_readiness(_time_bucket: int) -> dict:
+@lru_cache(maxsize=4)
+def _fixture_readiness(_time_bucket: int, browser_image: str) -> dict:
     if not shutil.which("docker"):
         return {"configured": False, "reason": "Install and start Docker to run the simulated browser."}
     try:
-        result = subprocess.run(
-            ["docker", "image", "inspect", DEFAULT_BROWSER_IMAGE],
-            capture_output=True, timeout=5, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return {"configured": False, "reason": "Docker is not responding. Start Docker and retry."}
-    if result.returncode:
-        return {
-            "configured": False,
-            "reason": "Start Docker and build the browser image: "
-                      f"docker build -t {DEFAULT_BROWSER_IMAGE} refund_eval/published/browser_runtime",
-        }
+        resolve_local_image_id(browser_image)
+    except BrowserBoundaryError as error:
+        return {"configured": False, "reason": str(error)}
     return {"configured": True, "reason": "Simulated inbox and websites are ready; no Gmail connection is needed."}
 
 
@@ -109,6 +108,7 @@ def allow_search_request(request: dict, *, scenario: Scenario | None = None) -> 
 async def published_tools(
     scenario: Scenario, *, data_mode: str = RunConfig.model_fields["data_mode"].default,
     fixture_path: str | None = None, browser_runtime: str = "docker",
+    browser_image: str | None = None,
     artifact_dir: str | None = None,
     scenario_channel_policy: str | None = None,
 ):
@@ -125,11 +125,16 @@ async def published_tools(
     fixture_path = validate_fixture_path(fixture_path, data_mode=data_mode)
     artifact_root = validate_private_output(artifact_dir or ".context/artifacts")
     artifacts = validate_private_output(artifact_root / "browser")
-    runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
+    runtime_args = {}
+    if browser_runtime != "docker":
+        runtime_args["browser_runtime"] = browser_runtime
+    if browser_image is not None:
+        runtime_args["browser_image"] = browser_image
     status = (fixture_readiness(**runtime_args) if data_mode == "fixture" else
               hybrid_readiness(**runtime_args))
     if not status["configured"]:
         raise ValueError(status["reason"])
+    browser_image = browser_image or DEFAULT_BROWSER_IMAGE
     from refund_eval.runtime.snapshots import emit_snapshot
 
     emit_snapshot(phase="checking_tools")
@@ -146,8 +151,6 @@ async def published_tools(
         "name": source.path.name,
         "sha256": hashlib.sha256(source.path.read_bytes()).hexdigest(),
     }
-    browser_image = DEFAULT_BROWSER_IMAGE
-
     if data_mode == "fixture":
         from refund_eval.published.fixture_web import (
             FIXTURE_WEB_DATASET,
@@ -158,6 +161,7 @@ async def published_tools(
         profile_config = {
             "data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
             "web_dataset": FIXTURE_WEB_DATASET, "browser_image": browser_image,
+            "browser_image_ref": DEFAULT_BROWSER_IMAGE,
             "web_sha256": fingerprint(boundary_config),
             "inbox": inbox_provenance,
         }
@@ -166,6 +170,7 @@ async def published_tools(
         profile_config = {
             "data_mode": "hybrid", **mode_details,
             "mail": FIXTURE_MAIL_PROVENANCE, "browser_image": browser_image,
+            "browser_image_ref": DEFAULT_BROWSER_IMAGE,
             "public_read_policy": "public_web", "search_provider": "exa",
             "inbox": inbox_provenance,
         }

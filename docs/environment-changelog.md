@@ -12,8 +12,8 @@ newest-first entry below with the current fingerprint, printed by
 environment file names and contents, excluding Git-ignored files and Python
 caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
-Computing it requires Git and a checkout so private local data is never
-included by an unfiltered fallback. The changelog test checks the version,
+Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
+source tree validates its source manifest file allowlist before hashing it. The changelog test checks the version,
 fingerprint and bump kind.
 
 Run the CI changelog check locally with
@@ -58,7 +58,12 @@ this was not a second version or trial round.
 - Fingerprint: 2dcc1662aadff75128d6a4b27b7e288586635e7b6793bd2e53351b80a0b8bfe1
 - Trial round: none; offline validation only.
 - Changes: require verified browser network isolation before native Harbor world startup exposes agent tools (MAT-152).
-
+ 
+## 7.4 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 01f770f7b285a4ded172ef2da40bef82246e9d6fddbeefcdf45ca4fb25c21edf
+- Trial round: none; only offline validation in this change.
+- Changes: pin external Harbor/browser image inputs and Debian package snapshots; enforce optional source, scenario and browser-runtime identity locks before model-cost setup (MAT-64).
 ## 7.2 — 2026-11-18
 - Kind: trivial batch
 - Fingerprint: a18c882cf39985d035fad71b977cdab8e30f436ac53b30f500737ab0e20ea310

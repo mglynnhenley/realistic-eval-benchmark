@@ -1,5 +1,10 @@
 # Parallel trials with Harbor
 
+Exact browser artifact locks currently support local Docker runs only; Harbor
+subprocess and native sidecar builds do not expose an immutable browser artifact
+identity. Native task source and rules identities are recorded from the
+generated sidecar task. See docs/identity-locks.md for local Docker locks.
+
 The legacy Harbor batch path runs Inspect in one Modal or Docker sandbox per trial. Each sandbox
 has its own inbox, simulator state and Chromium browser. All trials use the open
 world and OpenRouter models. The default `hybrid` mode combines simulated Gmail
