@@ -443,6 +443,33 @@ def test_post_ready_probe_failures_and_thresholds_close_exec_and_clean_bound_san
     assert sandbox.terminate_calls == 1
 
 
+def test_custom_environment_import_path_is_rejected_before_probes_or_job_factory(
+    tmp_path,
+):
+    config = valid_config(tmp_path)
+    config.environment.import_path = "synthetic.backend:Environment"
+    guard, openrouter_probe, modal_probe = stable_guard()
+    job_factory_calls = []
+
+    async def job_factory(_):
+        job_factory_calls.append(True)
+
+    with pytest.raises(LauncherFailure, match="custom environment import paths"):
+        asyncio.run(
+            run_guarded_job(
+                config,
+                make_thresholds(),
+                guard=guard,
+                job_factory=job_factory,
+            )
+        )
+
+    assert openrouter_probe.calls == 0
+    assert modal_probe.calls == 0
+    assert job_factory_calls == []
+    assert guard._start_attempted is False
+
+
 def test_monitor_timeout_cleans_exact_bound_sandbox(tmp_path, monkeypatch):
     sandbox = FakeSandbox()
     entered = []

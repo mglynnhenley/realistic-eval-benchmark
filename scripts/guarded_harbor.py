@@ -90,6 +90,8 @@ def validate_job_config(config: JobConfig) -> None:
 
     if config.environment.type != EnvironmentType.MODAL or not config.environment.delete:
         raise LauncherFailure("job must use Modal with environment deletion enabled")
+    if config.environment.import_path is not None:
+        raise LauncherFailure("custom environment import paths are not supported")
 
     agent = config.agents[0]
     agent_env = agent.env or {}
