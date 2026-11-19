@@ -336,8 +336,9 @@ async def judge_rubrics(transcript, messages, ledger, judges, key):
 
 async def read_transcript(path: str):
     async with transcripts_from([path]).reader() as reader:
-        async for info in reader.index():
-            return await reader.read(info, TranscriptContent(messages="all", events="all", timeline=True))
+        infos = [info async for info in reader.index()]
+        if infos:
+            return await reader.read(infos[0], TranscriptContent(messages="all", events="all", timeline=True))
     raise ValueError("Saved trial contains no transcripts")
 
 
@@ -388,8 +389,10 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
               "phase_vocabulary": load_spec(SPEC).model_dump()["phases"], "behaviours": {}}
     resolved = eval_paths([path])
     if judges:
-        key, remaining = verify_judge_budget(budget_usd)
         transcript = asyncio.run(read_transcript(resolved[0]))
+        if next(orchestrator_turns(transcript), None) is None or not turn_digests(transcript):
+            raise ValueError("Judged review requires at least one assessable turn")
+        key, remaining = verify_judge_budget(budget_usd)
         estimate_workload(transcript, messages, ledger, judges)
         print(f"Verified OpenRouter key allowance: USD {remaining} remaining (approved up to USD {budget_usd}).")
         if not yes and input("Run paid judges? [y/N] ").strip().lower() != "y":

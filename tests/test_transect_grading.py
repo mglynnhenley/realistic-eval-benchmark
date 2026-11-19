@@ -339,6 +339,35 @@ async def test_openrouter_judge_rejects_unverified_key_before_send(monkeypatch):
             await judge.generate("Synthetic evidence")
 
 
+async def test_rubrics_reuse_and_close_verified_clients(monkeypatch):
+    calls = []
+    clients = []
+    def respond(request):
+        payload = json.loads(request.content)
+        calls.append(payload["model"])
+        return httpx2.Response(200, json={
+            "id": "stub", "object": "chat.completion", "created": 0, "model": payload["model"],
+            "choices": [{"index": 0, "finish_reason": "tool_calls", "message": {
+                "role": "assistant", "tool_calls": [{"id": "call", "type": "function", "function": {
+                    "name": payload["tools"][0]["function"]["name"],
+                    "arguments": json.dumps({"findings": [], "insufficient_evidence": False,
+                                             "explanation": "No issues found"}),
+                }}],
+            }}],
+        })
+    client = grading.DefaultAsyncHttpxClient
+    def offline_client(**kwargs):
+        clients.append(client(transport=httpx2.MockTransport(respond), **kwargs))
+        return clients[-1]
+    monkeypatch.setattr(grading, "DefaultAsyncHttpxClient", offline_client)
+    item = Transcript(transcript_id="synthetic", messages=[ChatMessageUser(content="Synthetic evidence")])
+    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [(0, 0, "synthetic rubric", item)])
+    results = await grading.judge_rubrics(item, [], {}, ROUTES, "verified-judge-key")
+    assert set(results) == set(grading.BEHAVIOURS)
+    assert calls == [route.removeprefix("openrouter/") for route in ROUTES] * len(results)
+    assert len(clients) == len(ROUTES) and all(client.is_closed for client in clients)
+
+
 async def test_insufficient_evidence_is_unknown(monkeypatch):
     monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="A promise cannot be verified")])
     monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [])
@@ -359,6 +388,21 @@ async def test_insufficient_evidence_is_unknown(monkeypatch):
     assert all(c["judge"] == "unknown" and not c["agrees"] for c in agreement["checks"])
     with pytest.raises(ValueError):
         grading.Findings.model_validate({"findings": []})
+
+
+def test_judged_rejects_transcript_without_assessable_turns(monkeypatch, tmp_path):
+    [log] = eval(Task(dataset=[Sample(input="Research the refund")], solver=generate()),
+                 model="mockllm/model", log_dir=str(tmp_path / "logs"), display="none")
+    async def no_turns(path):
+        return Transcript(transcript_id="empty")
+    def unexpected_budget(limit):
+        pytest.fail("No key should be checked when there are no assessable turns")
+    monkeypatch.setattr(grading, "read_transcript", no_turns)
+    monkeypatch.setattr(grading, "verify_judge_budget", unexpected_budget)
+    out = tmp_path / "review"
+    with pytest.raises(ValueError, match="at least one assessable turn"):
+        grading.run(log.location, out, ROUTES, budget_usd=Decimal(1), yes=True)
+    assert not out.exists()
 
 
 def test_finding_date_uses_matching_branch_only():

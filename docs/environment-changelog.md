@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.2 — 2026-11-19
 - Kind: trivial batch
-- Fingerprint: 97eba5320bb0a4c579a651edc23a1b44035d0ce9d3bf80630c8d26d0c4e71764
+- Fingerprint: e86f24b05af0cc35c11d8290d8b8bff82a2898be7a774aa2630c0387967abb06
 - Trial round: none. This opt-in grading pass does not change trial execution.
 - Changes: add capped, approved-route judging of saved transcripts, with local reports and no automatic retries (MAT-145).
 
