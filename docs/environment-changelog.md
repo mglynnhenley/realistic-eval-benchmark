@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.4 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 89dca3ed44127878f04372787747d17f75cdc5ef8daecf5b4c919790a0ff5ec4
+- Trial round: none; offline validation only.
+- Changes: include the error-screening module in the native Harbor agent allowlist without importing simulator modules at package startup (MAT-153).
+
 ## 7.3 — 2026-11-19
 - Kind: trivial batch
 - Fingerprint: 2dcc1662aadff75128d6a4b27b7e288586635e7b6793bd2e53351b80a0b8bfe1

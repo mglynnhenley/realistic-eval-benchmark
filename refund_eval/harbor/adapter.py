@@ -58,7 +58,7 @@ AGENT_MODULES = {
     "agent": "__init__ adapters budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
-    "models": "__init__ client replay",
+    "models": "__init__ client evidence replay",
     "parity": "__init__ inspect_cli scripts",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
