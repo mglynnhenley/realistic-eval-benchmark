@@ -21,6 +21,7 @@ import asyncio
 import importlib.metadata
 import math
 import sys
+import tomllib
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from scripts.offline_spend_guard import (
 )
 
 PINNED_HARBOR_VERSION = "0.26.0"
+OPENROUTER_KEY_REFERENCE = "${OPENROUTER_API_KEY}"
 
 
 class LauncherFailure(RuntimeError):
@@ -72,6 +74,37 @@ def load_job_config(path: Path) -> JobConfig:
         raise LauncherFailure("job configuration is invalid") from None
 
 
+def _reject_openrouter_key_override(env: dict[str, str], location: str) -> None:
+    value = env.get("OPENROUTER_API_KEY")
+    if value is not None and value != OPENROUTER_KEY_REFERENCE:
+        raise LauncherFailure(f"{location} overrides the monitored OpenRouter key")
+
+
+def _validate_local_task_envs(task_path: Path) -> None:
+    try:
+        task_config = tomllib.loads(
+            (task_path / "task.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        raise LauncherFailure("local task configuration is invalid") from None
+
+    def validate_env_maps(value: object) -> None:
+        if isinstance(value, dict):
+            if "env" in value:
+                env = value["env"]
+                if not isinstance(env, dict):
+                    raise LauncherFailure("local task configuration is invalid")
+                _reject_openrouter_key_override(env, "local task environment")
+            for key, nested in value.items():
+                if key != "env":
+                    validate_env_maps(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                validate_env_maps(nested)
+
+    validate_env_maps(task_config)
+
+
 def validate_job_config(config: JobConfig) -> None:
     if (
         config.n_attempts != 1
@@ -103,15 +136,13 @@ def validate_job_config(config: JobConfig) -> None:
         or not agent.model_name
         or not agent.model_name.startswith("openrouter/")
         or agent.base_url is not None
-        or agent_env.get("OPENROUTER_API_KEY") != "${OPENROUTER_API_KEY}"
+        or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE
     ):
         raise LauncherFailure("agent must use the host OpenRouter key without resume settings")
 
     environment_env = config.environment.env or {}
-    if "OPENROUTER_API_KEY" in environment_env and environment_env[
-        "OPENROUTER_API_KEY"
-    ] != "${OPENROUTER_API_KEY}":
-        raise LauncherFailure("Modal environment overrides the monitored OpenRouter key")
+    _reject_openrouter_key_override(environment_env, "Modal environment")
+    _reject_openrouter_key_override(config.verifier.env or {}, "verifier environment")
 
     task = config.tasks[0]
     if task.path is None or task.git_url or task.source:
@@ -119,6 +150,7 @@ def validate_job_config(config: JobConfig) -> None:
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
+    _validate_local_task_envs(task_path)
 
     if Path(config.job_name).name != config.job_name or config.job_name in {".", ".."}:
         raise LauncherFailure("job name must be a single path component")

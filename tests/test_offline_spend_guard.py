@@ -470,6 +470,58 @@ def test_custom_environment_import_path_is_rejected_before_probes_or_job_factory
     assert guard._start_attempted is False
 
 
+@pytest.mark.parametrize(
+    "location,task_config",
+    [
+        ("job_verifier", None),
+        ("task_environment", "[environment.env]\n"),
+        ("task_verifier", "[verifier.env]\n"),
+        ("separate_verifier_environment", "[verifier.environment.env]\n"),
+    ],
+)
+def test_alternate_task_or_verifier_key_is_rejected_before_probes_or_job_factory(
+    tmp_path, location, task_config
+):
+    config = valid_config(tmp_path)
+    if location == "job_verifier":
+        config.verifier.env["OPENROUTER_API_KEY"] = "synthetic-alternate-key"
+    else:
+        task_path = config.tasks[0].path
+        with (task_path / "task.toml").open("a", encoding="utf-8") as task_file:
+            task_file.write(
+                task_config
+                + 'OPENROUTER_API_KEY = "synthetic-alternate-key"\n'
+            )
+
+    guard, openrouter_probe, modal_probe = stable_guard()
+    job_factory_calls = []
+
+    async def job_factory(_):
+        job_factory_calls.append(True)
+
+    with pytest.raises(LauncherFailure, match="overrides the monitored OpenRouter key"):
+        asyncio.run(
+            run_guarded_job(
+                config,
+                make_thresholds(),
+                guard=guard,
+                job_factory=job_factory,
+            )
+        )
+
+    assert openrouter_probe.calls == 0
+    assert modal_probe.calls == 0
+    assert job_factory_calls == []
+    assert guard._start_attempted is False
+
+
+def test_generated_host_key_placeholder_is_accepted(tmp_path):
+    config = valid_config(tmp_path)
+
+    assert config.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
+    validate_job_config(config)
+
+
 def test_monitor_timeout_cleans_exact_bound_sandbox(tmp_path, monkeypatch):
     sandbox = FakeSandbox()
     entered = []
