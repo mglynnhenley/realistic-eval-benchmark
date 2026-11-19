@@ -28,6 +28,8 @@ simulator_model = "__SIMULATOR_MODEL__"
 grader_model = "__GRADER_MODEL__"
 rules_sha256 = "__RULES_SHA256__"
 source_sha256 = "__SOURCE_SHA256__"
+agent_wheel_filename = "__AGENT_WHEEL_FILENAME__"
+agent_wheel_sha256 = "__AGENT_WHEEL_SHA256__"
 seed_policy = __SEED_POLICY__
 browser_containment = "unshare -rn in the world container (seccomp=unconfined there only); recorded as unverified where user namespaces are refused"
 

@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.5 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f
+- Trial round: none; offline validation only.
+- Changes: require native Harbor tasks to install an approved wheel with a verified SHA-256; keep scripted parity fixtures test-only (MAT-154).
+
 ## 7.4 — 2026-11-19
 - Kind: trivial batch
 - Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f

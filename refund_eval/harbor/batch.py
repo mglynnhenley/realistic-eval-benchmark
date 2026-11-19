@@ -14,12 +14,19 @@ import yaml
 from pydantic import Field, model_validator
 
 from refund_eval.config import CostCap, RunConfig, resolve_cost_limits
-from refund_eval.harbor.adapter import AGENT_IMPORT_PATH, validate_and_index, write_task
+from refund_eval.harbor.adapter import (
+    AGENT_IMPORT_PATH,
+    read_verified_agent_wheel,
+    validate_and_index,
+    write_task,
+)
 from refund_eval.output_paths import validate_private_output
 
 
 class NativeBatchConfig(RunConfig):
     world_cost_limit: CostCap
+    agent_wheel: Path
+    agent_wheel_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
@@ -37,6 +44,7 @@ class NativeBatchConfig(RunConfig):
 
 
 def prepare(out: Path, config: NativeBatchConfig) -> Path:
+    verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
         raise ValueError("Native batches require execution='docker' or execution='modal'")
@@ -69,6 +77,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         max_turns=config.max_turns, research_mode=config.research_mode, simulator_model=config.simulator_model,
         grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=1.1 * config.time_limit,
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
+        agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
+        verified_wheel=verified_wheel,
     )
     options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice", "time_limit"},
                                 exclude_none=True)
@@ -97,7 +107,9 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "config": config.model_dump(mode="json"),
         "task": {"path": task.name, "digest": task_digest, "version": metadata["task_version"],
                  "environment_version": metadata["environment_version"], "environment_fingerprint": metadata["environment_fingerprint"],
-                 "source_sha256": metadata["source_sha256"], "rules_sha256": metadata["rules_sha256"]},
+                 "source_sha256": metadata["source_sha256"], "rules_sha256": metadata["rules_sha256"],
+                 "agent_wheel_filename": metadata["agent_wheel_filename"],
+                 "agent_wheel_sha256": metadata["agent_wheel_sha256"]},
         "job": {"path": job_path.name, "sha256": hashlib.sha256(job_bytes).hexdigest(), "max_retries": 0},
         "seed_policy": metadata["seed_policy"],
         "total_trials": total,

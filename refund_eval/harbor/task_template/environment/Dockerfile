@@ -7,6 +7,6 @@ WORKDIR /app
 COPY agent/pyproject.toml agent/uv.lock /app/
 RUN uv sync --frozen --no-dev --no-install-project
 COPY agent/ /app/
-RUN uv sync --frozen --no-dev
+RUN /app/.venv/bin/python /app/install-agent.py
 RUN uv run --no-sync python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
 ENV PATH="/app/.venv/bin:$PATH"

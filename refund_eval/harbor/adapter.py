@@ -1,8 +1,10 @@
 """Generate a native Harbor task for one scenario: a world sidecar, the Inspect agent in `main`, a separate verifier.
 
-    scripts/harbor python -m refund_eval.harbor.adapter --scenario train_refund_late --out .context/harbor_tasks
+    scripts/harbor python -m refund_eval.harbor.adapter --scenario train_refund_late --out .context/harbor_tasks \
+        --agent-wheel /path/to/approved-agent.whl --agent-wheel-sha256 SHA256_HEX
 
-Writes, and launches nothing:
+The approved wheel path and its SHA256 are required; the adapter hashes the bytes before output creation
+and stages those exact bytes. Writes, and launches nothing:
 - `OUT/<scenario>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
   docker-compose.yaml, world/Dockerfile and separate agent and world build inputs) and
   tests/ (the verifier image and test.sh);
@@ -25,6 +27,7 @@ import re
 import secrets
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -72,6 +75,29 @@ AGENT_MODULES = {
 }
 HOST_SEED = "${WORLD_SEED:-}"
 DERIVED_SEED = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>')"
+WHEEL_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+!-]*\.whl\Z")
+SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}\Z")
+
+
+@dataclass(frozen=True)
+class VerifiedAgentWheel:
+    path: Path
+    filename: str
+    sha256: str
+    content: bytes
+
+
+def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgentWheel:
+    filename = path.name
+    if not WHEEL_BASENAME.fullmatch(filename):
+        raise ValueError("Agent wheel path must have a safe .whl basename")
+    if not SHA256_HEX.fullmatch(expected_sha256):
+        raise ValueError("Agent wheel SHA256 must contain 64 hexadecimal characters")
+    content = path.read_bytes()
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if actual_sha256 != expected_sha256.lower():
+        raise ValueError("Agent wheel SHA256 does not match the supplied digest")
+    return VerifiedAgentWheel(path, filename, actual_sha256, content)
 
 
 def rules_sha256(scenario_id: str) -> str:
@@ -115,8 +141,23 @@ def _fill(text: str, values: dict[str, object]) -> str:
     return text
 
 
-def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario_name: str) -> None:
+def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario_name: str,
+                verified_wheel: VerifiedAgentWheel | None = None) -> None:
     from refund_eval.realism.track import SOURCE_MANIFEST
+
+    if verified_wheel is not None:
+        destination.mkdir(parents=True, exist_ok=True)
+        for name in ("pyproject.toml", "uv.lock"):
+            shutil.copyfile(source / name, destination / name)
+        wheel_dir = destination / "wheels"
+        wheel_dir.mkdir()
+        (wheel_dir / verified_wheel.filename).write_bytes(verified_wheel.content)
+        (destination / "agent-wheel.json").write_text(json.dumps({
+            "filename": verified_wheel.filename,
+            "sha256": verified_wheel.sha256,
+        }, indent=2) + "\n", encoding="utf-8")
+        shutil.copyfile(Path(__file__).with_name("install_agent.py"), destination / "install-agent.py")
+        return
 
     files = [Path(name) for name in SOURCE_FILES if name != "refund_eval"]
     files.append(Path("refund_eval/agent/system_prompt.md"))
@@ -144,9 +185,15 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
-               world_cost_limit: float | None = None) -> Path:
+               world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
+               verified_wheel: VerifiedAgentWheel | None = None) -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
+
+    if verified_wheel is None:
+        verified_wheel = read_verified_agent_wheel(agent_wheel, agent_wheel_sha256)
+    elif (verified_wheel.path != agent_wheel or verified_wheel.sha256 != agent_wheel_sha256.lower()):
+        raise ValueError("Verified agent wheel does not match the supplied wheel and SHA256")
 
     sc = load_scenario(scenario)
     if sim_weeks is None:
@@ -157,7 +204,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     shutil.copytree(TEMPLATE, task_dir)
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
-    stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario)
+    stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario,
+                verified_wheel=verified_wheel)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
     from refund_eval.sim import company_store
 
@@ -180,6 +228,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "DATA_MODE": data_mode, "SIM_WEEKS": sim_weeks, "MAX_TURNS": max_turns, "RESEARCH_MODE": research_mode,
         "SIMULATOR_MODEL": simulator_model, "GRADER_MODEL": grader_model, "RULES_SHA256": rules_sha256(sc.id),
         "SOURCE_SHA256": source_sha256, "AGENT_TIMEOUT": float(agent_timeout),
+        "AGENT_WHEEL_FILENAME": verified_wheel.filename, "AGENT_WHEEL_SHA256": verified_wheel.sha256,
         "VERIFIER_TIMEOUT": float(verifier_timeout), "CPUS": cpus, "MEMORY_MB": memory_mb,
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
         "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
@@ -267,11 +316,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--simulator-model", default=DEFAULT_ROLE_MODEL)
     p.add_argument("--grader-model", default=DEFAULT_GRADER_MODEL)
     p.add_argument("--world-cost-limit", type=float, help="Per-trial world model USD allowance; required for paid runs")
+    p.add_argument("--agent-wheel", type=Path, required=True, help="Approved agent wheel to install")
+    p.add_argument("--agent-wheel-sha256", required=True, help="Expected SHA256 of the approved agent wheel")
     p.add_argument("--agent-timeout", type=float, default=39_600, help="Harbor agent timeout in seconds")
     p.add_argument("--verifier-timeout", type=float, default=600)
     p.add_argument("--cpus", type=int, default=2)
     p.add_argument("--memory-mb", type=int, default=4096)
     args = p.parse_args(argv)
+    verified_wheel = read_verified_agent_wheel(args.agent_wheel, args.agent_wheel_sha256)
     if args.world_cost_limit is not None:
         try:
             TypeAdapter(CostCap).validate_python(args.world_cost_limit)
@@ -283,7 +335,9 @@ def main(argv: list[str] | None = None) -> int:
                           max_turns=args.max_turns, research_mode=args.research_mode,
                           simulator_model=args.simulator_model, grader_model=args.grader_model,
                           agent_timeout=args.agent_timeout, verifier_timeout=args.verifier_timeout,
-                          cpus=args.cpus, memory_mb=args.memory_mb, world_cost_limit=args.world_cost_limit)
+                          cpus=args.cpus, memory_mb=args.memory_mb, world_cost_limit=args.world_cost_limit,
+                          agent_wheel=args.agent_wheel, agent_wheel_sha256=args.agent_wheel_sha256,
+                          verified_wheel=verified_wheel)
     job = sample_job(out, task_dir, scenario=args.scenario)
     validate_and_index(out, task_dir, job)
     header = ("# Sample Harbor job for the native refund task; the adapter does not launch it.\n"
