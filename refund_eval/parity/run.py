@@ -232,13 +232,18 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
 def run_harbor(script: Script, out: Path, seed: int) -> dict:
     import yaml
 
+    agent_wheel = os.environ.get("REFUND_EVAL_AGENT_WHEEL")
+    agent_wheel_sha256 = os.environ.get("REFUND_EVAL_AGENT_WHEEL_SHA256")
+    if not agent_wheel or not agent_wheel_sha256:
+        raise ValueError("Set REFUND_EVAL_AGENT_WHEEL and REFUND_EVAL_AGENT_WHEEL_SHA256 for the Harbor parity path")
     env = free_env(**{FAKE_MODELS_ENV: script.fake_models, "WORLD_SEED": str(seed),
                       "REFUND_EVAL_KILL_FILE": str(out / "HOST_KILL_NEVER_SET")})
     tasks = out / "tasks"
     if not (tasks / script.scenario / "task.toml").is_file():
         subprocess.run([str(HARBOR), "python", "-m", "refund_eval.harbor.adapter", "--scenario", script.scenario,
                         "--out", str(tasks), "--data-mode", "fixture", "--research-mode", "saved",
-                        "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks)],
+                        "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks),
+                        "--agent-wheel", agent_wheel, "--agent-wheel-sha256", agent_wheel_sha256],
                        cwd=REPO, env=env, check=True, capture_output=True, text=True)
     kwargs: dict[str, Any] = {"script": script.name}
     if script.cost_limit is not None:

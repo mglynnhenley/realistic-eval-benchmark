@@ -25,16 +25,48 @@ def docker(*args):
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=False, timeout=15)
 
 
+def approved_wheel_args():
+    wheel = os.environ.get("REFUND_EVAL_AGENT_WHEEL")
+    digest = os.environ.get("REFUND_EVAL_AGENT_WHEEL_SHA256")
+    if not wheel or not digest:
+        pytest.skip("set approved-wheel environment variables to run the native Docker smoke test")
+    return ["--agent-wheel", wheel, "--agent-wheel-sha256", digest]
+
+
+def inject_installed_parity_scripts(environment: Path, *, needle: str | None = None,
+                                    replacement: str | None = None, append: str = "") -> None:
+    lines = [
+        "from pathlib import Path",
+        "import refund_eval.parity.scripts",
+        "scripts_path = Path(refund_eval.parity.scripts.__file__)",
+        "source = scripts_path.read_text()",
+    ]
+    if needle is not None:
+        lines.extend([
+            f"needle = {needle!r}",
+            "assert source.count(needle) == 1",
+            f"source = source.replace(needle, {replacement!r})",
+        ])
+    if append:
+        lines.append(f"source += {append!r}")
+    lines.append("scripts_path.write_text(source)")
+
+    test_hook = environment / "agent" / "lifecycle-test-inject.py"
+    test_hook.write_text("\n".join(lines) + "\n")
+    dockerfile = environment / "Dockerfile"
+    dockerfile.write_text(dockerfile.read_text() + "\nRUN /app/.venv/bin/python /app/lifecycle-test-inject.py\n")
+
+
 def test_native_docker_refund_from_fixture_web_to_verifier(tmp_path):
     script = SCRIPTS["late_form"]
     tasks = tmp_path / "tasks"
     subprocess.run([str(HARBOR), "python", "-m", "refund_eval.harbor.adapter", "--out", str(tasks),
                     "--scenario", script.scenario, "--data-mode", "fixture", "--research-mode", "saved",
-                    "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks)],
+                    "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks),
+                    *approved_wheel_args()],
                    env=free_env(), check=True, capture_output=True, text=True, timeout=120)
     environment = tasks / script.scenario / "environment"
-    scripts = environment / "agent" / "refund_eval" / "parity" / "scripts.py"
-    scripts.write_text(scripts.read_text() + '''
+    inject_installed_parity_scripts(environment, append='''
 
 class SearchAndRefund(LateForm):
     def step(self, n, messages):
@@ -92,12 +124,11 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
     subprocess.run([str(HARBOR), "python", "-m", "refund_eval.harbor.adapter", "--out", str(tasks),
                     "--scenario", "train_refund_late", "--data-mode", "fixture", "--research-mode", "saved",
                     "--world-cost-limit", "1", "--max-turns", "1000", "--sim-weeks", "12",
-                    "--agent-timeout", "15" if stop == "timeout" else "120"], env=env, check=True,
+                    "--agent-timeout", "15" if stop == "timeout" else "120",
+                    *approved_wheel_args()], env=env, check=True,
                    capture_output=True, text=True, timeout=120)
-    scripts = tasks / "train_refund_late" / "environment" / "agent" / "refund_eval" / "parity" / "scripts.py"
-    text = scripts.read_text()
+    environment = tasks / "train_refund_late" / "environment"
     start = "class TurnCap(Script):\n    def step(self, n, messages):\n"
-    assert text.count(start) == 1
     if stop in {"cancel", "cancel_collect_failure"}:
         injected = ("        if n == 1:\n"
                     "            from pathlib import Path\n"
@@ -108,7 +139,7 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
                     "            marker.with_name('model-completed').touch()\n")
     else:
         injected = "        if n == 2:\n            import time\n            time.sleep(25)\n"
-    scripts.write_text(text.replace(start, start + injected))
+    inject_installed_parity_scripts(environment, needle=start, replacement=start + injected)
     job_path = tasks / "job.yaml"
     if stop in {"cancel", "cancel_collect_failure"}:
         task_path = tasks / "train_refund_late" / "task.toml"

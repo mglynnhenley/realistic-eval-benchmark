@@ -5,12 +5,16 @@ Run with scripts/harbor python -m pytest tests/test_harbor_native_task.py.
 """
 
 import asyncio
+import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import shutil
 import stat
 import subprocess
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,10 +43,50 @@ from refund_eval.scenario.schema import Org, load_scenario
 from refund_eval.sim import company_store
 
 
+def _write_inert_wheel(directory):
+    filename = "synthetic_agent-0.0.0-py3-none-any.whl"
+    dist_info = "synthetic_agent-0.0.0.dist-info"
+    files = {
+        "synthetic_agent/__init__.py": b'VALUE = "synthetic"\n',
+        f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
+        f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
+    }
+    record_name = f"{dist_info}/RECORD"
+    rows = []
+    for name, content in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+        rows.append((name, f"sha256={digest}", str(len(content))))
+    rows.append((record_name, "", ""))
+    record = io.StringIO(newline="")
+    csv.writer(record, lineterminator="\n").writerows(rows)
+    files[record_name] = record.getvalue().encode()
+    wheel = directory / filename
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
 @pytest.fixture(scope="module")
-def generated(tmp_path_factory):
+def approved_wheel(tmp_path_factory):
+    return _write_inert_wheel(tmp_path_factory.mktemp("synthetic_agent_wheel"))
+
+
+def _wheel_config(approved_wheel):
+    path, sha256 = approved_wheel
+    return {"agent_wheel": path, "agent_wheel_sha256": sha256}
+
+
+def _wheel_cli_args(approved_wheel):
+    path, sha256 = approved_wheel
+    return ["--agent-wheel", str(path), "--agent-wheel-sha256", sha256]
+
+
+@pytest.fixture(scope="module")
+def generated(tmp_path_factory, approved_wheel):
     out = tmp_path_factory.mktemp("harbor_tasks")
-    assert adapter.main(["--scenario", "train_refund_late", "--out", str(out), "--sim-weeks", "12"]) == 0
+    assert adapter.main(["--scenario", "train_refund_late", "--out", str(out), "--sim-weeks", "12",
+                         *_wheel_cli_args(approved_wheel)]) == 0
     return out
 
 
@@ -88,7 +132,7 @@ def _native_store_entry(scenario, org, *, model="fixture/simulator", summary="Pu
     }
 
 
-def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, monkeypatch, capsys):
+def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, monkeypatch, capsys, approved_wheel):
     scenario = load_scenario("train_refund_late")
     org = Org(key="native_dynamic", name="Native Example", kind="dynamic_advice",
               email_domains=["native-store.example.test"], web_domains=["native-store.example.test"],
@@ -101,7 +145,7 @@ def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, mo
         scenario.id, company_store.org_identity(org), first["fingerprint"], host_store).read_bytes()
 
     prepared = tmp_path / "prepared"
-    assert adapter.main(["--scenario", scenario.id, "--out", str(prepared)]) == 0
+    assert adapter.main(["--scenario", scenario.id, "--out", str(prepared), *_wheel_cli_args(approved_wheel)]) == 0
     capsys.readouterr()
     task_dir = prepared / scenario.id
     environment = task_dir / "environment"
@@ -135,11 +179,12 @@ def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, mo
 
     next_prepared = tmp_path / "next-prepared"
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
-    assert adapter.main(["--scenario", scenario.id, "--out", str(next_prepared)]) == 0
+    assert adapter.main(["--scenario", scenario.id, "--out", str(next_prepared),
+                         *_wheel_cli_args(approved_wheel)]) == 0
     assert len(list((next_prepared / scenario.id / "environment" / "company-store").rglob("*.json"))) == 2
 
 
-def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkeypatch, capsys):
+def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkeypatch, capsys, approved_wheel):
     scenario = load_scenario("train_refund_late")
     org = Org(key="automatic_dynamic", name="Automatic Example", kind="dynamic_advice",
               email_domains=["automatic-store.example.test"], web_domains=["automatic-store.example.test"],
@@ -148,7 +193,7 @@ def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkey
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
 
     first = tmp_path / "prepared-one"
-    assert adapter.main(["--scenario", scenario.id, "--out", str(first)]) == 0
+    assert adapter.main(["--scenario", scenario.id, "--out", str(first), *_wheel_cli_args(approved_wheel)]) == 0
     capsys.readouterr()
     first_task = first / scenario.id
     first_seed = first_task / "environment" / "company-store"
@@ -173,6 +218,7 @@ def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkey
     second = tmp_path / "prepared-two"
     batch.prepare(second, batch.NativeBatchConfig(
         scenario=scenario.id, execution="docker", cost_limit=1.0, world_cost_limit=1.0,
+        **_wheel_config(approved_wheel),
     ))
     capsys.readouterr()
     second_task = second / scenario.id
@@ -191,7 +237,7 @@ def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkey
     }
 
 
-def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypatch):
+def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypatch, approved_wheel):
     off_store = tmp_path / "off-store"
     scenario = load_scenario("train_refund_late")
     org = Org(key="off_dynamic", name="Off Example", kind="dynamic_advice",
@@ -206,7 +252,8 @@ def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypa
     )
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
     out = tmp_path / "prepared-off"
-    assert adapter.main(["--scenario", "train_refund_late", "--out", str(out)]) == 0
+    assert adapter.main(["--scenario", "train_refund_late", "--out", str(out),
+                         *_wheel_cli_args(approved_wheel)]) == 0
     task_dir = out / "train_refund_late"
     assert not list((task_dir / "environment" / "company-store").rglob("*.json"))
     compose = yaml.safe_load((task_dir / "environment" / "docker-compose.yaml").read_text())
@@ -278,9 +325,9 @@ def test_compose_world_sidecar(generated):
 
 
 @pytest.mark.parametrize("mode", ["auto", "saved", "live"])
-def test_adapter_preserves_explicit_research_mode(tmp_path, mode):
+def test_adapter_preserves_explicit_research_mode(tmp_path, mode, approved_wheel):
     assert adapter.main(["--scenario", "train_refund_late", "--out", str(tmp_path),
-                         "--research-mode", mode]) == 0
+                         "--research-mode", mode, *_wheel_cli_args(approved_wheel)]) == 0
     task_dir = tmp_path / "train_refund_late"
     assert Task(task_dir).config.metadata["research_mode"] == mode
     compose = yaml.safe_load((task_dir / "environment" / "docker-compose.yaml").read_text())
@@ -319,36 +366,47 @@ def test_verifier_image_and_test_script(generated):
         assert (source / "uv.lock").is_file() and not (source / ".env").exists()
 
 
-def test_main_image_builds_from_only_the_agent_payload(generated):
+def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, approved_wheel):
     task_dir = generated / "train_refund_late"
     environment = task_dir / "environment"
     payload = environment / "agent"
-    version_module = payload / "refund_eval" / "environment_version.py"
-    source_version_module = environment / "source" / "refund_eval" / "environment_version.py"
-    assert version_module.read_bytes() == source_version_module.read_bytes()
+    wheel_path, wheel_sha256 = approved_wheel
+    assert sorted(path.relative_to(payload).as_posix() for path in payload.rglob("*") if path.is_file()) == [
+        "agent-wheel.json", "install-agent.py", "pyproject.toml", "uv.lock", f"wheels/{wheel_path.name}",
+    ]
+    assert not (payload / "refund_eval").exists()
+    assert json.loads((payload / "agent-wheel.json").read_text()) == {
+        "filename": wheel_path.name, "sha256": wheel_sha256,
+    }
+    assert hashlib.sha256((payload / "wheels" / wheel_path.name).read_bytes()).hexdigest() == wheel_sha256
     copy_inputs = [line.split()[1:-1] for line in (environment / "Dockerfile").read_text().splitlines()
                    if line.startswith("COPY ") and not line.startswith("COPY --from=")]
     assert copy_inputs == [["agent/pyproject.toml", "agent/uv.lock"], ["agent/"]]
     assert (environment / "Dockerfile.dockerignore").read_text().splitlines() == ["*", "!agent/", "!agent/**"]
-    for forbidden in ("scenario/rules", "scenario/dossiers", "scenario/realism", "grading", "claims",
-                      "sim/rules.py", "tasks/train_refund/checklist.json", "tasks/household_bills/checklist.json"):
-        assert not (payload / "refund_eval" / forbidden).exists()
-    assert not list(payload.rglob("test.sh"))
-    assert (task_dir / "tests" / "test.sh").is_file()
+    dockerfile = (environment / "Dockerfile").read_text()
+    assert "RUN uv sync --frozen --no-dev --no-install-project" in dockerfile
+    assert "RUN /app/.venv/bin/python /app/install-agent.py" in dockerfile
+    assert "RUN uv sync --frozen --no-dev\n" not in dockerfile
     assert "COPY source/ /app/" in (environment / "world" / "Dockerfile").read_text()
+    assert "RUN uv sync --frozen --no-dev && mkdir -p /var/log/world" in (
+        environment / "world" / "Dockerfile").read_text()
+    assert (task_dir / "tests" / "test.sh").is_file()
     for source in (environment / "source", task_dir / "tests" / "source"):
         assert (source / "refund_eval" / "scenario" / "rules" / "train_refund_late").is_dir()
         assert (source / "refund_eval" / "grading" / "verifier.py").is_file()
 
+    # Keep the source staging projection intact for the separate wheel-building path.
+    source_payload = tmp_path / "source-agent"
     original = load_scenario()
-    path = payload / "refund_eval" / "scenario" / "train_refund_late.yaml"
+    adapter.stage_agent(environment / "source", source_payload, original, scenario_name="train_refund_late")
+    path = source_payload / "refund_eval" / "scenario" / "train_refund_late.yaml"
     raw = yaml.safe_load(path.read_text())
     assert not {"intent", "grading_notes", "seed_emails", "scheduled_emails"} & raw.keys()
     assert all(not {"policy", "terms", "persona"} & org.keys() for org in raw["orgs"])
     assert "true_circumstances" not in raw["facts"]
     assert task_message(load_scenario(str(path)), 12.0) == task_message(original, 12.0)
     manifest = Path("refund_eval/_source_manifest.json")
-    agent_manifest = json.loads((payload / manifest).read_text())
+    agent_manifest = json.loads((source_payload / manifest).read_text())
     world_manifest = json.loads((environment / "source" / manifest).read_text())
     memory = environment / "source" / "refund_eval" / "scenario" / "realism" / "train_refund_late.json"
     assert agent_manifest.pop("realism_memory") == {
@@ -358,7 +416,7 @@ def test_main_image_builds_from_only_the_agent_payload(generated):
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
 
 
-def test_agent_loads_scenario_by_filename_when_it_differs_from_id(tmp_path, monkeypatch):
+def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):
     original = load_scenario()
     name = "renamed_refund"
     scenarios = tmp_path / "scenarios"
@@ -366,12 +424,12 @@ def test_agent_loads_scenario_by_filename_when_it_differs_from_id(tmp_path, monk
     (scenarios / f"{name}.yaml").write_text(yaml.safe_dump(original.model_dump(mode="json")))
     monkeypatch.setattr(schema, "SCENARIO_DIR", scenarios)
     out = tmp_path / "tasks"
-    assert adapter.main(["--scenario", name, "--out", str(out)]) == 0
+    assert adapter.main(["--scenario", name, "--out", str(out), *_wheel_cli_args(approved_wheel)]) == 0
     task_dir = out / name
     lookup = Task(task_dir).config.environment.env["WORLD_SCENARIO"]
     assert lookup == name
-    monkeypatch.setattr(schema, "SCENARIO_DIR", task_dir / "environment" / "agent" / "refund_eval" / "scenario")
-    assert load_scenario(lookup).id == original.id
+    assert not (task_dir / "environment" / "agent" / "refund_eval").exists()
+    assert original.id != lookup
 
 
 def test_dataset_metric_and_job(generated):
@@ -387,13 +445,15 @@ def test_dataset_metric_and_job(generated):
     assert job.retry.max_retries == 0
 
 
-def test_adapter_refuses_to_overwrite(generated):
+def test_adapter_refuses_to_overwrite(generated, approved_wheel):
     with pytest.raises(FileExistsError):
-        adapter.main(["--scenario", "train_refund_late", "--out", str(generated)])
+        adapter.main(["--scenario", "train_refund_late", "--out", str(generated),
+                      *_wheel_cli_args(approved_wheel)])
 
 
 @pytest.mark.parametrize(("execution", "seed"), [("docker", None), ("modal", 0)])
-def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, monkeypatch, execution, seed):
+def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, monkeypatch, execution, seed,
+                                                            approved_wheel):
     monkeypatch.setenv("WORLD_SEED", "17")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-never-packaged")
     config = tmp_path / "config.json"
@@ -404,6 +464,7 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
         "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0}, "world_cost_limit": 0.75,
         "max_turns": 50, "sim_weeks": 3, "time_limit": 120, "history_tokens": 0,
         "budget_notice": "daily", "trials": 3, "concurrency": 2, "seed": seed,
+        "agent_wheel": str(approved_wheel[0]), "agent_wheel_sha256": approved_wheel[1],
     }))
     assert batch.main(["--config", str(config), "--out", str(out)]) == 0
     assert f"scripts/harbor harbor run -c '{out / 'job.yaml'}'" in capsys.readouterr().out
@@ -438,6 +499,8 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     assert record["task"]["source_sha256"] == meta["source_sha256"]
     assert record["task"]["environment_version"] == meta["environment_version"]
     assert record["task"]["environment_fingerprint"] == meta["environment_fingerprint"]
+    assert record["task"]["agent_wheel_filename"] == meta["agent_wheel_filename"] == approved_wheel[0].name
+    assert record["task"]["agent_wheel_sha256"] == meta["agent_wheel_sha256"] == approved_wheel[1]
     assert record["job"]["sha256"] == hashlib.sha256(job_bytes).hexdigest()
     assert all("test-key-never-packaged" not in artifact for artifact in (record_text, job_bytes.decode(), compose))
     assert not (out / "jobs").exists()
@@ -445,8 +508,8 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
         batch.prepare(out, batch.NativeBatchConfig.model_validate_json(config.read_bytes()))
 
 
-def test_batch_rejects_untrackable_inputs_before_writing(tmp_path):
-    config = {"scenario": "bills_price_rise", "execution": "docker"}
+def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_wheel):
+    config = {"scenario": "bills_price_rise", "execution": "docker", **_wheel_config(approved_wheel)}
     with pytest.raises(ValueError, match="world_cost_limit"):
         batch.NativeBatchConfig(**config)
     assert batch.NativeBatchConfig(**config, world_cost_limit=1).time_limit == 36000
@@ -458,14 +521,28 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path):
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
 
 
+def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, approved_wheel):
+    path, digest = approved_wheel
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="docker", cost_limit=1, world_cost_limit=1,
+        agent_wheel=path, agent_wheel_sha256=("0" if digest[0] != "0" else "1") + digest[1:],
+    )
+    monkeypatch.setattr(adapter, "stage_agent", lambda *args, **kwargs: pytest.fail("agent was staged"))
+    out = tmp_path / "wrong-wheel"
+    with pytest.raises(ValueError, match="SHA256 does not match"):
+        batch.prepare(out, config)
+    assert not out.exists()
+
+
 SPEND_CAPPED = {"execution": "docker", "scenario": "train_refund_late", "models": ["openrouter/a", "openrouter/b"],
                 "cost_limit": {"openrouter/a": 1.0, "openrouter/b": 2.0}, "world_cost_limit": 0.5,
                 "max_turns": 40, "time_limit": 600, "trials": 2, "concurrency": 2,
                 "trial_spend_cap_usd": 2.5, "key_spend_cap_usd": 10}
 
 
-def test_batch_freezes_spend_caps_and_horizons(tmp_path):
-    record = json.loads(batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**SPEND_CAPPED)).read_text())
+def test_batch_freezes_spend_caps_and_horizons(tmp_path, approved_wheel):
+    config = {**SPEND_CAPPED, **_wheel_config(approved_wheel)}
+    record = json.loads(batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**config)).read_text())
     assert record["limits"] == {"max_turns": 40, "time_limit_seconds": 600,
                                 "trial_spend_cap_usd": 2.5, "key_spend_cap_usd": 10}
     compose = (tmp_path / "run" / "train_refund_late" / "environment" / "docker-compose.yaml").read_text()
@@ -473,9 +550,10 @@ def test_batch_freezes_spend_caps_and_horizons(tmp_path):
     assert world["WORLD_MAX_TURNS"] == "40"
 
 
-def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path):
+def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path, approved_wheel):
     config = {**SPEND_CAPPED, "models": ["openrouter/a"], "cost_limit": 0.1, "world_cost_limit": 0.2,
-              "trials": 3, "concurrency": 1, "trial_spend_cap_usd": 0.3, "key_spend_cap_usd": 0.9}
+              "trials": 3, "concurrency": 1, "trial_spend_cap_usd": 0.3, "key_spend_cap_usd": 0.9,
+              **_wheel_config(approved_wheel)}
     batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**config))
 
 
@@ -486,8 +564,10 @@ def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path):
     ({"trial_spend_cap_usd": 2.4}, "exceeds trial_spend_cap_usd for: openrouter/b"),
     ({"key_spend_cap_usd": 9.99}, "4 attempts"),
 ])
-def test_batch_rejects_spend_caps_that_do_not_fit(tmp_path, change, error):
-    config = {key: value for key, value in {**SPEND_CAPPED, **change}.items() if value is not None}
+def test_batch_rejects_spend_caps_that_do_not_fit(tmp_path, change, error, approved_wheel):
+    config = {key: value for key, value in {
+        **SPEND_CAPPED, **_wheel_config(approved_wheel), **change,
+    }.items() if value is not None}
     with pytest.raises(ValueError, match=error):
         batch.prepare(tmp_path / "run", batch.NativeBatchConfig(**config))
     assert not (tmp_path / "run").exists()
@@ -508,7 +588,9 @@ def test_inspect_command(tmp_path):
     command = make_agent(tmp_path, cost_limit=150, token_budget=40_000_000, history_tokens=60000, time_limit=36000,
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
-    assert run.startswith("mkdir -p /logs/agent/inspect; /app/.venv/bin/inspect eval refund_eval/task.py ")
+    assert run.startswith('mkdir -p /logs/agent/inspect; /app/.venv/bin/inspect eval '
+                          '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
+                          'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
     for part in ("--model openrouter/anthropic/claude-opus-5.5", "-M strict_tools=false", "-M reasoning_enabled=true",
                  "-T world_url=http://world:8000", '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"', "-T history_tokens=60000", "-T token_budget=40000000",
@@ -578,7 +660,9 @@ def test_scripted_parity_agent_runs_inspect_through_its_script(tmp_path):
 
     command = ScriptedRefundAgent(logs_dir=tmp_path / "t__abc" / "agent", model_name="mockllm/model",
                                   mcp_servers=WORLD, script="turn_cap", cost_limit=1).inspect_command()
-    assert "/app/.venv/bin/python -m refund_eval.parity.inspect_cli turn_cap eval refund_eval/task.py " in command
+    assert ('/app/.venv/bin/python -m refund_eval.parity.inspect_cli turn_cap eval '
+            '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
+            'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ') in command
     assert "/app/.venv/bin/inspect eval" not in command and "-T cost_limit=1.0" in command
     with pytest.raises(ValueError, match="mockllm"):
         ScriptedRefundAgent(logs_dir=tmp_path, model_name="openrouter/a/b", mcp_servers=WORLD,

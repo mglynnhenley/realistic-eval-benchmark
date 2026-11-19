@@ -4,7 +4,7 @@ Job config: `import_path: refund_eval.harbor.installed_agent:RefundInstalledAgen
 `model_name`, budgets as kwargs (`RefundAgentOptions`), `OPENROUTER_API_KEY` in the agent env.
 
 - install: the task's `main` image is prebuilt with the package and Inspect; this checks it.
-- run: `inspect eval refund_eval/task.py` in world-service mode (`-T world_url=` the task's
+- run: `inspect eval <installed refund_eval.task path>` in world-service mode (`-T world_url=` the task's
   `world` MCP server without `/mcp`; turn token in WORLD_TURN_TOKEN from the task env), with the
   scenario, simulated weeks and data mode from the task env and the budgets from the options.
   The `.eval` log goes to /logs/agent/inspect/, its ATIF conversion to /logs/agent/trajectory.json
@@ -94,8 +94,10 @@ class RefundInstalledAgent(BaseInstalledAgent):
         for name in ("token_budget", "cost_limit", "time_limit"):
             if getattr(options, name) is not None:
                 task_args[name] = getattr(options, name)
-        # Relative to /app (the exec's cwd): Inspect rejects absolute task paths on Python 3.14.
-        parts = [INSPECT, "eval", "refund_eval/task.py", "--model", shlex.quote(model),
+        # Inspect's task loader expects a cwd-relative path with Python 3.14.
+        task_file = (f'"$({PYTHON} -c \'import os, refund_eval.task; '
+                     'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')
+        parts = [INSPECT, "eval", task_file, "--model", shlex.quote(model),
                  *(f"-M {key}={json.dumps(value)}" for key, value in model_args.items()),
                  '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"',

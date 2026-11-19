@@ -138,7 +138,7 @@ uv run pytest -q tests/test_harbor_worker.py
 
 ## Native Harbor task (new)
 
-A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. The agent image builds from an allowlist of runtime files and a reduced copy of the selected scenario; it does not contain company rules, grading code or the task's tests. The world and separate verifier build from the full source snapshot, and the verifier grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
+A second path, beside the one above, runs each trial as a two-container Harbor task. The world (clock, companies, mail, search and the browser) runs in a `world` sidecar and the Inspect agent runs in `main`, connecting to the world over MCP. The agent image installs the supplied approved wheel; its SHA256 is checked before the batch output is created and again in the image. It does not stage loose `refund_eval` source or scenario YAML. The world and separate verifier build from the full source snapshot, and the verifier grades the trial from the world's records. The native task images use Python 3.14. This path is not the default yet.
 
 ### Prepare a native batch
 
@@ -148,6 +148,8 @@ Save a RunConfig JSON file. For example, this config prepares one Docker trial:
 {
   "execution": "docker",
   "scenario": "train_refund_late",
+  "agent_wheel": "/path/to/approved-agent.whl",
+  "agent_wheel_sha256": "<replace-with-the-wheel's-64-hex-sha256>",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "data_mode": "fixture",
   "research_mode": "saved",
@@ -165,7 +167,7 @@ scripts/harbor python -m refund_eval.harbor.batch --config run-config.json --out
 
 Preparation launches nothing. It requires a new or empty private directory and
 writes the task, `job.yaml`, and a `run.json` recording the resolved settings,
-task/source/rules and job hashes, environment version and fingerprint, seed policy, and attempt counts. Use `models`
+task/source/rules and job hashes, approved wheel filename and SHA256, environment version and fingerprint, seed policy, and attempt counts. The wheel is read and hashed before output creation; the same bytes are staged. Use `models`
 for multiple targets and a `cost_limit` object keyed by model ID for multiple
 late-refund targets. `trials` is per model; `concurrency` is shared and retries
 are disabled. A batch allows at most 100 total attempts, and concurrency cannot exceed that total. Without `seed`, each trial derives its seed from the task version
@@ -245,9 +247,11 @@ REFUND_EVAL_NATIVE_DOCKER_SMOKE=1 uv run pytest -q tests/test_harbor_native_life
 
 ### Parity gate
 
-The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. API keys are removed from every environment it launches, and it does not use Modal.
+The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. Set `REFUND_EVAL_AGENT_WHEEL` and `REFUND_EVAL_AGENT_WHEEL_SHA256` to the approved wheel path and its digest for the Harbor path. API keys are removed from every environment it launches, and it does not use Modal.
 
 ```bash
+REFUND_EVAL_AGENT_WHEEL=/path/to/approved-agent.whl \
+REFUND_EVAL_AGENT_WHEEL_SHA256=SHA256_HEX \
 uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--seed 7] [--skip-harbor] [--harbor-concurrency N]
 ```
 
