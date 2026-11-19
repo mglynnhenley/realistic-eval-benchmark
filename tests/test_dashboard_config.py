@@ -375,6 +375,28 @@ def test_dashboard_identity_lock_mismatch_fails_before_readiness_or_worker(tmp_p
         manager.close()
 
 
+def test_dashboard_unresolvable_lock_path_returns_api_error_before_readiness_or_worker(tmp_path, monkeypatch):
+    from refund_eval.published import profile
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("An invalid lock path must fail before readiness or worker startup")
+
+    monkeypatch.setattr(profile, "fixture_readiness", forbidden)
+    monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
+    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        with pytest.raises(server.APIError, match="Cannot resolve identity lock path"):
+            manager.start(server.RunConfig(
+                cost_limit=1, mode="model", model="mockllm/target",
+                simulator_model="mockllm/simulator", grader_model="mockllm/grader",
+                identity_lock="~definitely-no-such-local-user/lock.json",
+            ))
+        assert not manager.list() and not manager.processes
+    finally:
+        manager.close()
+
+
 @pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
 def test_unknown_profile_is_rejected(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)

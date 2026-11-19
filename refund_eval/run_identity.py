@@ -101,7 +101,10 @@ def load_identity_lock(value: str | dict[str, Any]) -> dict[str, Any]:
         if text.startswith("{"):
             lock = json.loads(text)
         else:
-            path = Path(text).expanduser()
+            try:
+                path = Path(text).expanduser()
+            except (OSError, RuntimeError) as error:
+                raise IdentityLockError(f"Cannot resolve identity lock path: {text}") from error
             if not path.is_absolute() and not path.is_file():
                 repo_path = ROOT / path
                 if repo_path.is_file():
