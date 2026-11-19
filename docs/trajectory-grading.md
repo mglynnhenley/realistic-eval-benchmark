@@ -1,3 +1,17 @@
+# Local implementation status (MAT-141)
+
+`scout/transect_run.py` adds a free, local-only structural report with the
+dated ledger, organisation counts, claim candidates and saved verifier
+crosschecks. It lists the task phase vocabulary without classifying turns,
+records environment and structural grader versions and refuses mixed-version
+summaries. It makes no model calls and does not upload run data. The report is
+static HTML without scripts or remote resources, not Transect's chart renderer.
+
+Judged mode, automated quote checking and judge-vs-human validation remain
+pending an owner decision about external judge providers. They are not paths
+in this entry point. The finder, JEV and explorer below remain proposed.
+`scout/run.py` remains the unchanged baseline.
+
 # Design: grading long agent trajectories
 
 **Status: partially implemented.**

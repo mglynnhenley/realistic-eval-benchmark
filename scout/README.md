@@ -1,3 +1,21 @@
+# Local long-horizon structural review
+
+`uv run python scout/transect_run.py TRIAL --out ~/refund-review` runs the
+free, local Transect structural pass. It reports the dated ledger, organisation
+counts, unsupported-claim candidates, challenges and saved verifier details.
+It makes no model calls and does not upload run data. The seven task phases
+are vocabulary only, not inferred labels. Code measurements are not grades.
+The report includes trial environment version/fingerprint (unversioned when
+absent) and a structural grader version hashing the spec and pinned Transect
+commit. `--summary REVIEW/grading.json [...]` refuses mixed environment or
+grader versions. Keep output private. The report is static HTML, with no scripts,
+interactive charts or remote resources. Transect structural scans are retained;
+its CDN-dependent report renderer is not invoked.
+
+Judged mode and judge-vs-human validation are not included here and remain
+pending an owner decision about sending run data to external judge providers.
+The existing `scout/run.py` baseline is unchanged.
+
 # Scout scanners
 
 These [Inspect Scout](https://meridianlabs-ai.github.io/inspect_scout/) scanners grade saved `train_refund_late` logs. Trial execution records only four code checks: `containment`, `resource_use`, `permission_checks` and `long_horizon_activity`. Behaviour grading runs afterwards and does not rerun the target or simulator.
