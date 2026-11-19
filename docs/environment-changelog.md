@@ -24,10 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.2 — 2026-11-18
+- Kind: trivial batch
+- Fingerprint: a18c882cf39985d035fad71b977cdab8e30f436ac53b30f500737ab0e20ea310
+- Trial round: none; only offline validation in this change.
+- Changes: stage sanitized shared company-store entries in native world images and automatically harvest registered local job artifacts at preparation (MAT-146).
+
 ## 7.1 — 2026-11-18
 - Kind: trivial batch
-- Fingerprint: dd54995722890f7edebb411461c141684377f93b192ef48b62e58e1fc9acea85
-- Changes: stage sanitized shared company-store entries in native world images and automatically harvest registered local job artifacts at preparation (MAT-146).
+- Fingerprint: 87fbf945b9427e16f58d8508bdf198a24beb514504b90993fcf76b4b83cabd0c
+- Trial round: none; only offline validation in this change.
+- Changes: persist per-attempt world-model spend reservations before dispatch and retain unresolved exposure across cancellation and restart (MAT-149).
 
 ## 7.0 — 2026-11-18
 - Kind: behaviour round

@@ -37,7 +37,7 @@ The dashboard launches paid model trials only when you start a run. The default 
 
 Both modes use the same tools and open-world simulator. During a trial, mail comes from the selected file and scenario messages. Gmail access is used only when you explicitly export a snapshot.
 
-Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Allowed reads whose URLs contain personal details are recorded as disclosures and counted by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
+Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Recognized private scenario values (such as configured names, email addresses, phone numbers and task-marked sensitive values) are screened from live search queries/objectives, browser read URLs and simulator research requests, including page URLs and redirects. A denial stops live company research and uses an existing saved dossier when available. Matching covers recognized values, not arbitrary private prose; denied fields are redacted in that request's audit record, not rewritten in model transcripts. Other permitted reads with personal-identifier fields can still be recorded as disclosures by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
 
 The unsupported Trainline background booking lookup returns a service error before
 company processing. The attempted request remains recorded, but it cannot open a
@@ -82,7 +82,7 @@ Pass task settings as `-T name=value`:
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
 | `budget_notice` | `every_step` | With a `token_budget`, when the runtime notice appears: `every_step` before each step, `daily` on the first step of each simulated London day, `low` only once under 20% of the tokens or session time remains. The system prompt's description of the notice follows the mode. |
 | `seed` | drawn per trial | Seed for simulated randomness (company temperaments, reply timing); later epochs derive their own. Each trial's seed is saved as `seed` in its world (`world.json`), so `-T seed=<that value>` reproduces it. Model replies stay non-deterministic. |
-| `world_url` | none | World-service mode: the world runs in `refund_eval.world_service` at this URL (turn token in `WORLD_TURN_TOKEN`) and its settings decide the world. No Inspect scorers; resume is refused. See [architecture](architecture.md#world-service-and-native-harbor-run). |
+| `world_url` | none | World-service mode: the world runs in `refund_eval.world_service` at this URL (turn token in `WORLD_TURN_TOKEN`) and its settings decide the world. No Inspect scorers; resume is refused. See [architecture](architecture.md#world-service-and-native-harbor-run) and [world-model spend reservations](world-spend-ledger.md). |
 | `resume_log` | none | Continue a `.eval` log or dashboard `snapshot.json` with the same target model. |
 | `browser_runtime` | `docker` | Local browser runtime; Harbor uses its packaged `subprocess`. |
 | `artifact_dir` | `.context/artifacts` | Browser audit artifact root. |
@@ -168,7 +168,7 @@ uv run python -m refund_eval.sim.rules --scenario train_refund_late \
 
 Without `--save` it only prints. `--org KEY` limits it to named organisations. Dropped grounds are listed under `errors`. Trials never generate rules with `research_mode=saved` or fixture web.
 
-Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
+Dynamic, non-committed companies can be researched and saved on first contact for reuse by later trials that share the store. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
 
 Native Harbor task preparation first harvests available artifacts from previously registered local job roots for the selected scenario, then snapshots its sanitized entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. A host-only `.native-jobs/` registry tracks prepared jobs roots; it is not copied into task, agent or world inputs. Sequentially prepared native tasks therefore reuse prior companies without a manual harvest or model calls.
 
@@ -179,6 +179,7 @@ scripts/harbor python -m refund_eval.sim.company_store harvest JOBS_DIR
 ```
 
 The command uses the same default or `REFUND_EVAL_COMPANY_STORE` root as trials; `REFUND_EVAL_COMPANY_STORE=off` disables native registration, automatic harvesting and seeding.
+
 ## Inbox snapshots
 
 The bundled inbox at [`refund_eval/scenario/inbox.json`](../refund_eval/scenario/inbox.json) is fictional. You can hand-write another file in that format or export your own Gmail:

@@ -55,6 +55,35 @@ def catalog_prices(entry: dict) -> dict[str, float]:
     }
 
 
+TARIFF_PER_TOKEN = {"prompt": "input", "completion": "output", "input_cache_read": "input_cache_read",
+                    "input_cache_write": "input_cache_write", "input_cache_write_1h": "input_cache_write_1h",
+                    "internal_reasoning": "internal_reasoning"}
+SEARCH_NATIVE_PREFIXES = ("perplexity/",)
+
+
+def catalog_tariff(entry: dict) -> dict[str, float]:
+    """Every charge component usable for a worst-case text request reservation."""
+    pricing = entry.get("pricing")
+    if not isinstance(pricing, dict):
+        raise TypeError("missing pricing")
+    model_id = entry.get("id", "")
+    if isinstance(model_id, str) and (model_id.startswith(SEARCH_NATIVE_PREFIXES) or model_id.endswith(":online")):
+        raise ValueError("model searches on every request; its search fees cannot be bounded")
+    if pricing.get("overrides") not in (None, []):
+        raise ValueError("tiered pricing")
+    tariff = {"input": _per_million(pricing, "prompt"), "output": _per_million(pricing, "completion")}
+    for field, key in TARIFF_PER_TOKEN.items():
+        if key not in tariff:
+            tariff[key] = (_per_million(pricing, field) if field in pricing
+                           else 0.0 if field == "internal_reasoning" else tariff["input"])
+    tariff["request"] = _per_million(pricing, "request") / 1_000_000 if "request" in pricing else 0.0
+    # World requests do not enable web search; a discount can only lower charges.
+    for field in set(pricing) - set(TARIFF_PER_TOKEN) - {"request", "overrides", "web_search", "discount"}:
+        if _per_million(pricing, field) != 0:
+            raise ValueError(f"unboundable {field} price")
+    return tariff
+
+
 def _catalog_cost(entry: dict) -> ModelCost:
     from inspect_ai.model import ModelCost
 
@@ -104,6 +133,34 @@ def openrouter_prices(models: Iterable[str]) -> dict[str, dict[str, float]]:
     catalog = _load_catalog()
     return {name: _world_catalog_prices(catalog[name.removeprefix("openrouter/")])
             for name in names if name.removeprefix("openrouter/") in catalog}
+
+
+def _endpoint_tariff(slug: str) -> dict[str, float]:
+    response = httpx.get(f"{CATALOG_URL}/{slug}/endpoints", timeout=15.0)
+    response.raise_for_status()
+    data = response.json().get("data")
+    endpoints = data.get("endpoints") if isinstance(data, dict) else None
+    if not isinstance(endpoints, list) or not endpoints:
+        raise TypeError("no provider endpoints")
+    tariffs = [catalog_tariff(endpoint) for endpoint in endpoints]
+    return {key: max(tariff[key] for tariff in tariffs) for key in tariffs[0]}
+
+
+def openrouter_tariffs(models: Iterable[str]) -> dict[str, dict[str, float]]:
+    """Worst-case tariffs over the public catalog entry and all provider endpoints."""
+    names = [name for name in dict.fromkeys(models) if name.startswith("openrouter/")]
+    if not names:
+        return {}
+    catalog = _load_catalog()
+    tariffs = {}
+    for name in names:
+        slug = name.removeprefix("openrouter/")
+        try:
+            listed, endpoints = catalog_tariff(catalog[slug]), _endpoint_tariff(slug)
+        except (KeyError, TypeError, ValueError, httpx.HTTPError):
+            continue
+        tariffs[name] = {key: max(listed[key], endpoints[key]) for key in listed}
+    return tariffs
 
 
 def register_openrouter_costs(models: Iterable[str]) -> None:
