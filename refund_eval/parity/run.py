@@ -99,6 +99,25 @@ def task_args(script: Script, **extra: Any) -> dict:
     return {**args, **script.task_args}
 
 
+def inprocess_task_args(script: Script, world_url: str, out: Path) -> dict:
+    from refund_eval.scenario.schema import AgentScenario, load_scenario
+
+    args = task_args(script, world_url=world_url)
+    scenario = load_scenario(args["scenario"])
+    agent_scenario = AgentScenario.model_validate(scenario.model_dump(mode="json", include={
+        "id": True,
+        "task_text": True,
+        "start_time": True,
+        "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    }))
+    path = (out / "agent-scenario.yaml").resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(agent_scenario.model_dump_json(), encoding="utf-8")
+    args["scenario"] = str(path)
+    return args
+
+
 def scripted_model(script: Script):
     from inspect_ai.model import get_model
 
@@ -203,7 +222,7 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
     if isinstance(url, BaseException):
         raise url
     try:
-        log = _eval(script, task_args(script, world_url=url), out / "logs")
+        log = _eval(script, inprocess_task_args(script, url, out), out / "logs")
     finally:
         stop.set()
         thread.join(600)
@@ -228,6 +247,30 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
 
 
 # --------------------------------------------------------------------------- harbor: local Docker
+
+
+def stage_scripted_agent(task_dir: Path) -> None:
+    """Stage parity-only fixtures outside the approved wheel payload for local tests."""
+    source = REPO / "refund_eval" / "parity"
+    agent = task_dir / "environment" / "agent"
+    destination = agent / "parity-fixtures" / "refund_eval" / "parity"
+    for filename in ("__init__.py", "inspect_cli.py", "scripts.py"):
+        target = destination / filename
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / filename, target)
+
+    marker = "# TEST-ONLY: overlay scripted parity fixtures after the approved wheel install"
+    hook = (
+        f"{marker}\n"
+        'RUN /app/.venv/bin/python -c "import refund_eval; from pathlib import Path; import shutil; '
+        "shutil.copytree('/app/parity-fixtures/refund_eval/parity', "
+        "Path(refund_eval.__file__).parent / 'parity', dirs_exist_ok=True)\"\n"
+    )
+    dockerfile = task_dir / "environment" / "Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8")
+    if marker not in content:
+        dockerfile.write_text(content.rstrip() + "\n\n" + hook, encoding="utf-8")
 
 
 def run_harbor(script: Script, out: Path, seed: int) -> dict:
@@ -261,6 +304,7 @@ def run_harbor(script: Script, out: Path, seed: int) -> dict:
     if manifest != identity:
         raise ValueError("Existing Harbor task agent wheel manifest does not match the approved wheel")
     read_verified_agent_wheel(agent_dir / "wheels" / approved.filename, approved.sha256)
+    stage_scripted_agent(task)
     kwargs: dict[str, Any] = {"script": script.name}
     if script.cost_limit is not None:
         kwargs["cost_limit"] = script.cost_limit

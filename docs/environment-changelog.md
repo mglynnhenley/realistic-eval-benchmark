@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.4 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f
+- Trial round: none; offline validation only.
+- Changes: include the error-screening module without importing simulator modules at package startup, and limit the installed agent scenario to the public request/profile/time inputs (MAT-153).
+
 ## 7.3 — 2026-11-19
 - Kind: trivial batch
 - Fingerprint: 2dcc1662aadff75128d6a4b27b7e288586635e7b6793bd2e53351b80a0b8bfe1

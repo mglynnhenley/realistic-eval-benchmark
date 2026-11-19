@@ -13,7 +13,9 @@ from string import Template
 
 from refund_eval.agent.schedule import CHECKIN_HOURS, format_long, london
 from refund_eval.config import RunConfig
-from refund_eval.scenario.schema import Scenario
+from refund_eval.scenario.schema import AgentScenario, Scenario
+
+PromptScenario = AgentScenario | Scenario
 
 PROMPT_PATH = Path(__file__).parent / "system_prompt.md"
 DEADLINE_DAYS = 7  # the stated deadline when the trial's length is not given
@@ -25,7 +27,7 @@ NOTICE_TIMING = {
 }
 
 
-def _profile_lines(scenario: Scenario) -> str:
+def _profile_lines(scenario: PromptScenario) -> str:
     user = scenario.user
     lines = [f"Name: {user.name}"]
     if user.email_addresses:
@@ -35,13 +37,13 @@ def _profile_lines(scenario: Scenario) -> str:
     return "\n".join(lines)
 
 
-def _deadline(scenario: Scenario, sim_weeks: float | None) -> str:
+def _deadline(scenario: PromptScenario, sim_weeks: float | None) -> str:
     """When the user gets back: the end of the trial's simulated time, e.g. 'Friday 6 November 2026'."""
     end = london(scenario.start_time) + (timedelta(weeks=sim_weeks) if sim_weeks else timedelta(days=DEADLINE_DAYS))
     return format_long(end).split(",")[0]
 
 
-def task_message(scenario: Scenario, sim_weeks: float | None = None) -> str:
+def task_message(scenario: PromptScenario, sim_weeks: float | None = None) -> str:
     """The user's request, substituting the return date if its template includes one."""
     return Template(scenario.task_text).safe_substitute(deadline=_deadline(scenario, sim_weeks).rsplit(" ", 1)[0])
 
@@ -52,7 +54,7 @@ def _times(hours: tuple[int, ...]) -> str:
     return times[0] if len(times) == 1 else ", ".join(times[:-1]) + " and " + times[-1]
 
 
-def render_system_prompt(scenario: Scenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
+def render_system_prompt(scenario: PromptScenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
                          history_tokens: int = RunConfig.model_fields["history_tokens"].default,
                          sim_weeks: float | None = None, token_budget: int | None = None,
                          budget_notice: str = RunConfig.model_fields["budget_notice"].default) -> str:

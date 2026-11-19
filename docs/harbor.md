@@ -245,9 +245,36 @@ uv run pytest -q tests/test_harbor_native_world.py
 REFUND_EVAL_NATIVE_DOCKER_SMOKE=1 uv run pytest -q tests/test_harbor_native_lifecycle.py
 ```
 
+With Python 3.14 and the locked dependencies cached (`uv sync --frozen`), run the installed-agent
+smoke without Docker:
+
+```bash
+REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel
+```
+
+The staged agent scenario is the public input descriptor at `refund_eval/scenario/<name>.yaml` with only
+`id`, `task_text`, `start_time`, `sim_weeks`, and `user.{name,email_addresses,phone}`. It contains no task
+facts, organization records, or hidden profile fields. Callers using `world_url` must pass this public
+descriptor or write an equivalent projection at their boundary; world-service task loading does not fall
+back to the full local scenario loader. Local simulation continues to accept full scenarios. For an exact-wheel
+smoke, set both
+`REFUND_EVAL_HARBOR_AGENT_WHEEL` and `REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256`; the test installs that wheel
+non-editably and offline without rebuilding the project. Report the wheel SHA-256 and embedded public-scenario
+SHA-256 separately. Keep wheel bytes outside the repository.
+
+```bash
+REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 \
+REFUND_EVAL_HARBOR_AGENT_WHEEL=/path/to/refund_eval.whl \
+REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256=<sha256> \
+uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel
+```
+It installs only the staged agent payload in a fresh environment and checks one scripted turn against a local fixture world.
+
 ### Parity gate
 
 The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. Set `REFUND_EVAL_AGENT_WHEEL` and `REFUND_EVAL_AGENT_WHEEL_SHA256` to the approved wheel path and its digest for the Harbor path. API keys are removed from every environment it launches, and it does not use Modal.
+
+Only the local scripted parity path stages fixture modules under `agent/parity-fixtures` and uses a generated test-only Dockerfile hook to copy them into the installed package after the approved wheel installer. Regular native tasks remain wheel-only.
 
 ```bash
 REFUND_EVAL_AGENT_WHEEL=/path/to/approved-agent.whl \

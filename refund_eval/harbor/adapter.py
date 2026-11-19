@@ -61,8 +61,7 @@ AGENT_MODULES = {
     "agent": "__init__ adapters budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
-    "models": "__init__ client replay",
-    "parity": "__init__ inspect_cli scripts",
+    "models": "__init__ client evidence replay",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
     "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
@@ -170,10 +169,9 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
         shutil.copyfile(source / relative, target)
 
     view = scenario.model_dump(mode="json", include={
-        "id": True, "task_kind": True, "task_text": True, "start_time": True, "sim_weeks": True,
-        "user": {"name", "email_addresses", "phone"}, "facts": True,
-        "orgs": {"__all__": {"key", "name", "kind", "email_domains", "contact_url"}},
-    }, exclude={"facts": {"true_circumstances"}})
+        "id": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
     (destination / "refund_eval" / "scenario" / f"{scenario_name}.yaml").write_text(
         yaml.safe_dump(view), encoding="utf-8",
     )
