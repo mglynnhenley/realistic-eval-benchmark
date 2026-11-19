@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.3 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 669c9240eed4dd5f276e3f91766619573b15f70763522219d3c233fe65169943
+- Trial round: none; no workflow run in this change.
+- Changes: add private startup markers and redacted exception locations to the local inprocess parity workflow (MAT-130).
+
 ## 7.2 — 2026-11-18
 - Kind: trivial batch
 - Fingerprint: a18c882cf39985d035fad71b977cdab8e30f436ac53b30f500737ab0e20ea310
