@@ -26,6 +26,12 @@ this was not a second version or trial round.
 
 ## 7.8 — 2026-11-20
 - Kind: trivial batch
+- Fingerprint: 0000000000000000000000000000000000000000000000000000000000000000
+- Trial round: none; offline validation only.
+- Changes: pin remaining Harbor/browser OCI inputs and the Debian package snapshot; add opt-in source, resolved-scenario and local browser image-ID locks that reject mismatches or unavailable images before model-cost setup. Native Harbor artifact locks remain unsupported (MAT-64).
+
+## 7.8 — 2026-11-20
+- Kind: trivial batch
 - Fingerprint: 52a9a403be15febd3df20be309cc107962e5354d50f750d26ef14ca4a6251b53
 - Trial round: none; offline validation only.
 - Changes: omit only the default temperature from Anthropic open-world company-action structured requests when provider routing requires support for every parameter; preserve non-default and unrelated sampling settings.
@@ -35,7 +41,6 @@ this was not a second version or trial round.
 - Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
 - Trial round: none; offline validation only.
 - Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
-
 ## 7.6 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: a363a49b11ef57c879a610e6d78a107eda5462bd775b595e2a0717990c82137b
@@ -59,11 +64,6 @@ this was not a second version or trial round.
 - Trial round: none; offline validation only.
 - Changes: require verified browser network isolation before native Harbor world startup exposes agent tools (MAT-152).
  
-## 7.4 — 2026-11-19
-- Kind: trivial batch
-- Fingerprint: 01f770f7b285a4ded172ef2da40bef82246e9d6fddbeefcdf45ca4fb25c21edf
-- Trial round: none; only offline validation in this change.
-- Changes: pin external Harbor/browser image inputs and Debian package snapshots; enforce optional source, scenario and browser-runtime identity locks before model-cost setup (MAT-64).
 ## 7.2 — 2026-11-18
 - Kind: trivial batch
 - Fingerprint: a18c882cf39985d035fad71b977cdab8e30f436ac53b30f500737ab0e20ea310
