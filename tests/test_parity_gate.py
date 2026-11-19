@@ -32,6 +32,7 @@ def test_harbor_reuse_checks_approved_wheel_before_launch(tmp_path, monkeypatch,
     task = tmp_path / "tasks" / script.scenario
     agent_dir = task / "environment/agent"
     (agent_dir / "wheels").mkdir(parents=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.14\n", encoding="utf-8")
     (agent_dir / "wheels" / wheel.name).write_bytes(wheel.read_bytes())
     (task / "task.toml").write_text(
         f'[metadata]\nagent_wheel_filename = "{wheel.name}"\nagent_wheel_sha256 = "{digest}"\n'
