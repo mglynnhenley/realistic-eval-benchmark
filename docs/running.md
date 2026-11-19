@@ -37,7 +37,7 @@ The dashboard launches paid model trials only when you start a run. The default 
 
 Both modes use the same tools and open-world simulator. During a trial, mail comes from the selected file and scenario messages. Gmail access is used only when you explicitly export a snapshot.
 
-Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Allowed reads whose URLs contain personal details are recorded as disclosures and counted by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
+Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Recognized private scenario values (such as configured names, email addresses, phone numbers and task-marked sensitive values) are screened from live search queries/objectives, browser read URLs and simulator research requests, including page URLs and redirects. A denial stops live company research and uses an existing saved dossier when available. Matching covers recognized values, not arbitrary private prose; denied fields are redacted in that request's audit record, not rewritten in model transcripts. Other permitted reads with personal-identifier fields can still be recorded as disclosures by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
 
 The unsupported Trainline background booking lookup returns a service error before
 company processing. The attempted request remains recorded, but it cannot open a
@@ -168,7 +168,7 @@ uv run python -m refund_eval.sim.rules --scenario train_refund_late \
 
 Without `--save` it only prints. `--org KEY` limits it to named organisations. Dropped grounds are listed under `errors`. Trials never generate rules with `research_mode=saved` or fixture web.
 
-Dynamic, non-committed companies can be researched and saved on first contact for reuse across trials. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
+Dynamic, non-committed companies can be researched and saved on first contact for reuse by later trials that share the store. The current native Harbor path does not synchronize this store, so separate native trials do not automatically reuse these entries. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
 
 ## Inbox snapshots
 
