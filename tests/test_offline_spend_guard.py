@@ -26,7 +26,7 @@ from harbor.environments.modal import ModalEnvironment
 from harbor.models.job.config import JobConfig
 from modal import App, Sandbox, Workspace
 from modal.types import WorkspaceBillingSummary
-from modal.workspace import _WorkspaceBillingManager
+from modal.workspace import WorkspaceBillingManager, _WorkspaceBillingManager
 
 from scripts.guarded_harbor import LauncherFailure, run_guarded_job, validate_job_config
 from scripts.offline_spend_guard import (
@@ -271,6 +271,8 @@ def test_pinned_modal_billing_shape_and_production_probe_adapter(monkeypatch):
     assert not inspect.iscoroutinefunction(Workspace.from_context)
     assert isinstance(Workspace.billing, property)
     assert inspect.iscoroutinefunction(_WorkspaceBillingManager.summary)
+    assert not inspect.iscoroutinefunction(WorkspaceBillingManager.summary)
+    assert inspect.iscoroutinefunction(WorkspaceBillingManager.summary.aio)
     assert {field.name for field in fields(WorkspaceBillingSummary)} >= {
         "start",
         "end",
@@ -278,17 +280,28 @@ def test_pinned_modal_billing_shape_and_production_probe_adapter(monkeypatch):
     }
 
     calls = []
+    expected_summary = SimpleNamespace(
+        start=START, end=END, metered_cost=Decimal("2.5")
+    )
 
     class FakeBilling:
-        async def summary(self):
-            calls.append("summary")
-            return SimpleNamespace(start=START, end=END, metered_cost=Decimal("2.5"))
+        def __init__(self):
+            def summary():
+                calls.append("summary")
+                return expected_summary
+
+            async def summary_aio():
+                calls.append("summary.aio")
+                return expected_summary
+
+            summary.aio = summary_aio
+            self.summary = summary
 
     workspace = SimpleNamespace(billing=FakeBilling())
     monkeypatch.setattr(Workspace, "from_context", staticmethod(lambda: workspace))
 
     result = asyncio.run(modal_cycle_probe())
-    assert calls == ["summary"]
+    assert calls == ["summary.aio"]
     assert result.start == START
     assert result.end == END
     assert result.metered_cost == Decimal("2.5")
@@ -330,6 +343,7 @@ def test_normal_environment_teardown_cleans_only_its_binding(monkeypatch):
     ("or_values", "modal_values"),
     [
         ([RuntimeError("must not expose details")], [modal()]),
+        ([openrouter()], [RuntimeError("must not expose details")]),
         ([openrouter(limit=51)], [modal()]),
         ([openrouter(usage="NaN")], [modal()]),
         ([openrouter(usage=41, remaining=9)], [modal()]),

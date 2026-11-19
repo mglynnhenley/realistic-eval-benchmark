@@ -196,7 +196,7 @@ async def modal_cycle_probe() -> object:
         from modal import Workspace
 
         workspace = Workspace.from_context()
-        return await workspace.billing.summary()
+        return await workspace.billing.summary.aio()
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001
