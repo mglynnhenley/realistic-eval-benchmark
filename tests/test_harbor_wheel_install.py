@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -14,7 +15,7 @@ import tomllib
 import venv
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
@@ -86,11 +87,11 @@ if __name__ == "__main__":
             "\n"
         ).encode(),
         f"{DIST_INFO}/WHEEL": (
-            "Wheel-Version: 1.0\n"
-            "Generator: refund-eval-offline-test\n"
-            "Root-Is-Purelib: true\n"
-            "Tag: py3-none-any\n"
-        ).encode(),
+            b"Wheel-Version: 1.0\n"
+            b"Generator: refund-eval-offline-test\n"
+            b"Root-Is-Purelib: true\n"
+            b"Tag: py3-none-any\n"
+        ),
     }
     record_rows = []
     for name, content in sorted(members.items()):
@@ -248,11 +249,11 @@ def _exercise_generated_command(
     monkeypatch.setattr(installed_agent, "APP", str(app))
     monkeypatch.setattr(installed_agent, "PYTHON", str(python))
     monkeypatch.setattr(installed_agent, "INSPECT", str(inspect))
-    monkeypatch.setattr(installed_agent.RefundInstalledAgent, "environment_logs_dir", logs, raising=False)
     agent = installed_agent.RefundInstalledAgent(
         logs_dir=root / "trial" / "agent",
         model_name="mockllm/wheel-fixture",
         mcp_servers=[],
+        environment_logs_dir=PurePosixPath(logs.as_posix()),
     )
     env = {
         **env,
@@ -285,12 +286,9 @@ def test_prepare_stages_and_installs_approved_wheel_offline(tmp_path, monkeypatc
 
     def stage_spy(source, destination, *args, **kwargs):
         staged_environment["source"] = _tree_sha256(source)
-        dockerfile = source.parent / "world" / "Dockerfile"
-        staged_environment["dockerfile"] = hashlib.sha256(dockerfile.read_bytes()).hexdigest()
         wheel.path.write_bytes(b"changed after the approved wheel was read")
         result = real_stage_agent(source, destination, *args, **kwargs)
         assert staged_environment["source"] == _tree_sha256(source)
-        assert staged_environment["dockerfile"] == hashlib.sha256(dockerfile.read_bytes()).hexdigest()
         return result
 
     def validate_spy(output, task, job):
@@ -318,8 +316,25 @@ def test_prepare_stages_and_installs_approved_wheel_offline(tmp_path, monkeypatc
 
     environment = task / "environment"
     assert staged_environment["source"] == _tree_sha256(environment / "source")
-    dockerfile = environment / "world" / "Dockerfile"
-    assert staged_environment["dockerfile"] == hashlib.sha256(dockerfile.read_bytes()).hexdigest()
+    world_dockerfile = environment / "world" / "Dockerfile"
+    expected_world_dockerfile = adapter.TEMPLATE / "environment" / "world" / "Dockerfile"
+    assert world_dockerfile.read_bytes() == expected_world_dockerfile.read_bytes()
+    agent_dockerfile = environment / "Dockerfile"
+    agent_dockerfile_text = agent_dockerfile.read_text(encoding="utf-8")
+    agent_dockerfile_lines = agent_dockerfile_text.splitlines()
+    install_line = "RUN /app/.venv/bin/python /app/install-agent.py"
+    assert agent_dockerfile_lines.count(install_line) == 1
+    install_line_index = agent_dockerfile_lines.index(install_line)
+    copy_agent_index = next(i for i, line in enumerate(agent_dockerfile_lines) if line.startswith("COPY agent/ /app"))
+    assert copy_agent_index < install_line_index
+    assert not any(
+        re.search(
+            r"\buv\s+sync\b|\buv\s+pip\s+install\b.*(?:--editable|(?:^|\s)-e(?:\s|$))"
+            r"|\bpip\s+install\b.*(?:--editable|(?:^|\s)-e(?:\s|$))",
+            line,
+        )
+        for line in agent_dockerfile_lines[install_line_index + 1:]
+    )
 
     installed, venv_path, python, env = _run_installer(agent_dir, tmp_path / "install")
     assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -344,7 +359,7 @@ def test_prepare_stages_and_installs_approved_wheel_offline(tmp_path, monkeypatc
     assert Path(launcher_report["scenario_file"]).is_relative_to(Path(launcher_report["purelib"]))
     assert not Path(launcher_report["module_file"]).is_relative_to((environment / "source").resolve())
     assert staged_environment["source"] == _tree_sha256(environment / "source")
-    assert staged_environment["dockerfile"] == hashlib.sha256(dockerfile.read_bytes()).hexdigest()
+    assert world_dockerfile.read_bytes() == expected_world_dockerfile.read_bytes()
     assert not venv_path.joinpath("refund_eval").exists()
 
 
