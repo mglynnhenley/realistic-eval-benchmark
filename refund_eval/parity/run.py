@@ -38,6 +38,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -232,10 +233,13 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
 def run_harbor(script: Script, out: Path, seed: int) -> dict:
     import yaml
 
+    from refund_eval.harbor.adapter import read_verified_agent_wheel
+
     agent_wheel = os.environ.get("REFUND_EVAL_AGENT_WHEEL")
     agent_wheel_sha256 = os.environ.get("REFUND_EVAL_AGENT_WHEEL_SHA256")
     if not agent_wheel or not agent_wheel_sha256:
         raise ValueError("Set REFUND_EVAL_AGENT_WHEEL and REFUND_EVAL_AGENT_WHEEL_SHA256 for the Harbor parity path")
+    approved = read_verified_agent_wheel(Path(agent_wheel), agent_wheel_sha256)
     env = free_env(**{FAKE_MODELS_ENV: script.fake_models, "WORLD_SEED": str(seed),
                       "REFUND_EVAL_KILL_FILE": str(out / "HOST_KILL_NEVER_SET")})
     tasks = out / "tasks"
@@ -245,6 +249,18 @@ def run_harbor(script: Script, out: Path, seed: int) -> dict:
                         "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks),
                         "--agent-wheel", agent_wheel, "--agent-wheel-sha256", agent_wheel_sha256],
                        cwd=REPO, env=env, check=True, capture_output=True, text=True)
+    task = tasks / script.scenario
+    metadata = tomllib.loads((task / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
+    identity = {"filename": approved.filename, "sha256": approved.sha256}
+    if (metadata.get("agent_wheel_filename"), metadata.get("agent_wheel_sha256")) != (
+        approved.filename, approved.sha256,
+    ):
+        raise ValueError("Existing Harbor task uses a different or unrecorded agent wheel; use a fresh output directory")
+    agent_dir = task / "environment" / "agent"
+    manifest = json.loads((agent_dir / "agent-wheel.json").read_text(encoding="utf-8"))
+    if manifest != identity:
+        raise ValueError("Existing Harbor task agent wheel manifest does not match the approved wheel")
+    read_verified_agent_wheel(agent_dir / "wheels" / approved.filename, approved.sha256)
     kwargs: dict[str, Any] = {"script": script.name}
     if script.cost_limit is not None:
         kwargs["cost_limit"] = script.cost_limit
