@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.2 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: e86f24b05af0cc35c11d8290d8b8bff82a2898be7a774aa2630c0387967abb06
+- Trial round: none. This opt-in grading pass does not change trial execution.
+- Changes: add capped, approved-route judging of saved transcripts, with local reports and no automatic retries (MAT-145).
+
 ## 7.1 — 2026-11-19
 - Kind: trivial batch
 - Fingerprint: 5c2bf14d1b468639a7cdee70738cbedd4f68788adb29a20d780307f4c168966b

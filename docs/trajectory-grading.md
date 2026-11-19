@@ -4,12 +4,23 @@
 dated ledger, organisation counts, claim candidates and saved verifier
 crosschecks. It lists the task phase vocabulary without classifying turns,
 records environment and structural grader versions and refuses mixed-version
-summaries. It makes no model calls and does not upload run data. The report is
+summaries. The default pass makes no model calls and does not upload run data. The report is
 static HTML without scripts or remote resources, not Transect's chart renderer.
 
-Judged mode, automated quote checking and judge-vs-human validation remain
-pending an owner decision about external judge providers. They are not paths
-in this entry point. The finder, JEV and explorer below remain proposed.
+Opt-in `--judged` sends transcript chunks (turn digests, quoted message text and
+tool calls, and the ledger) through OpenRouter to Anthropic and OpenAI. These
+calls are paid. Only `openrouter/anthropic/claude-opus-5.5` and
+`openrouter/openai/gpt-6.1-sol` are allowed, through their named providers
+without fallback. The CLI requires an approved USD amount and verifies that
+the dedicated OpenRouter key has a lifetime cap no higher than that amount
+before judging; workload estimates are for planning only. Rubric chunks contain
+up to 40 turns, literal quote checks
+drop unsupported citations, severity-2+ candidates receive verification, and
+unknown evidence coverage remains explicit. Phase classification uses a
+two-model cohort without its separate verifier. `--validation` reads CSV labels
+for judge-vs-human agreement, not ground truth. Judged findings, phase labels
+and agreement render in the same static CSP report with no remote assets.
+The finder, JEV and explorer below remain proposed.
 `scout/run.py` remains the unchanged baseline.
 
 # Design: grading long agent trajectories
