@@ -127,6 +127,15 @@ def run_worker(run_dir: str | Path) -> int:
     with worker_environment(destination):
         try:
             config = load_config(destination)
+            identity_image = None
+            if config.get("identity_lock") is not None:
+                from refund_eval.run_identity import validate_identity_lock
+
+                _, identity_image = validate_identity_lock(
+                    config["identity_lock"],
+                    config["scenario"],
+                    browser_runtime="docker" if config.get("execution", "local") == "local" else "subprocess",
+                )
             profile_args = {}
             if config.get("inbox_snapshot"):
                 from refund_eval.world.snapshot_store import (
@@ -147,7 +156,9 @@ def run_worker(run_dir: str | Path) -> int:
 
             profile_args.update(tool_profile="published", published_data=config["data_mode"],
                                 artifact_dir=str(destination))
-            status = fixture_readiness() if config["data_mode"] == "fixture" else hybrid_readiness()
+            readiness_args = {"browser_image": identity_image} if identity_image is not None else {}
+            status = (fixture_readiness(**readiness_args) if config["data_mode"] == "fixture" else
+                      hybrid_readiness(**readiness_args))
             if not status["configured"]:
                 raise ValueError(f"Published tools are not configured. {status['reason']}")
             logs = eval(

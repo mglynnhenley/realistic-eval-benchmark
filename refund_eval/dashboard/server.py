@@ -307,6 +307,18 @@ class RunManager:
             raise APIError(422, "A batch can contain at most 100 total trials across all models.")
         if config.execution == "local" and (config.trials != 1 or config.concurrency != 1):
             raise APIError(422, "Choose Harbor on Modal or Docker for multiple trials.")
+        identity_image = None
+        if config.identity_lock is not None:
+            from refund_eval.run_identity import validate_identity_lock
+
+            try:
+                _, identity_image = validate_identity_lock(
+                    config.identity_lock,
+                    config.scenario,
+                    browser_runtime="docker" if config.execution == "local" else "subprocess",
+                )
+            except ValueError as error:
+                raise APIError(422, str(error)) from error
         if config.execution != "local":
             if config.concurrency > total:
                 raise APIError(422, "Concurrency cannot exceed the number of trials.")
@@ -361,7 +373,9 @@ class RunManager:
                 hybrid_readiness,
             )
 
-            status = fixture_readiness() if config.data_mode == "fixture" else hybrid_readiness()
+            readiness_args = {"browser_image": identity_image} if identity_image is not None else {}
+            status = (fixture_readiness(**readiness_args) if config.data_mode == "fixture" else
+                      hybrid_readiness(**readiness_args))
             if not status["configured"]:
                 raise APIError(422, f"Published tools are not configured. {status['reason']}")
         if config.mode == "model":

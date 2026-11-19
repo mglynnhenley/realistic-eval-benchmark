@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from refund_eval import run_identity
@@ -11,7 +13,7 @@ IMAGE_ID = "sha256:" + "a" * 64
 def lock():
     return {
         "schema_version": 1,
-        "environment_version": "7.3",
+        "environment_version": run_identity.ENVIRONMENT_VERSION,
         "environment_fingerprint": "environment",
         "scenario": "train_refund_late",
         "scenario_fingerprint": "scenario",
@@ -30,6 +32,31 @@ def setup_identity(monkeypatch):
 def test_empty_identity_lock_is_rejected():
     with pytest.raises(IdentityLockError, match="empty"):
         run_identity.load_identity_lock("")
+
+
+def test_relative_identity_lock_path_falls_back_to_repo_root(tmp_path, monkeypatch):
+    repository = tmp_path / "repo"
+    lock_path = repository / ".context" / "run-lock.json"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(json.dumps(lock()))
+    task_cwd = repository / "task"
+    task_cwd.mkdir()
+    monkeypatch.setattr(run_identity, "ROOT", repository)
+    monkeypatch.chdir(task_cwd)
+
+    assert run_identity.load_identity_lock(".context/run-lock.json") == lock()
+
+
+def test_absolute_and_inline_json_identity_locks_are_preserved(tmp_path, monkeypatch):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    absolute_path = tmp_path / "run-lock.json"
+    expected = lock()
+    absolute_path.write_text(json.dumps(expected))
+    monkeypatch.setattr(run_identity, "ROOT", repository)
+
+    assert run_identity.load_identity_lock(str(absolute_path)) == expected
+    assert run_identity.load_identity_lock(json.dumps(expected)) == expected
 
 
 def test_unlocked_docker_run_records_reference_without_resolving_it(monkeypatch):
