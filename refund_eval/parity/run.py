@@ -98,6 +98,25 @@ def task_args(script: Script, **extra: Any) -> dict:
     return {**args, **script.task_args}
 
 
+def inprocess_task_args(script: Script, world_url: str, out: Path) -> dict:
+    from refund_eval.scenario.schema import AgentScenario, load_scenario
+
+    args = task_args(script, world_url=world_url)
+    scenario = load_scenario(args["scenario"])
+    agent_scenario = AgentScenario.model_validate(scenario.model_dump(mode="json", include={
+        "id": True,
+        "task_text": True,
+        "start_time": True,
+        "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    }))
+    path = (out / "agent-scenario.yaml").resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(agent_scenario.model_dump_json(), encoding="utf-8")
+    args["scenario"] = str(path)
+    return args
+
+
 def scripted_model(script: Script):
     from inspect_ai.model import get_model
 
@@ -202,7 +221,7 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
     if isinstance(url, BaseException):
         raise url
     try:
-        log = _eval(script, task_args(script, world_url=url), out / "logs")
+        log = _eval(script, inprocess_task_args(script, url, out), out / "logs")
     finally:
         stop.set()
         thread.join(600)
@@ -229,6 +248,17 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
 # --------------------------------------------------------------------------- harbor: local Docker
 
 
+def stage_scripted_agent(task_dir: Path) -> None:
+    """Stage parity-only CLI fixtures for a local scripted Harbor run."""
+    source = REPO / "refund_eval" / "parity"
+    destination = task_dir / "environment" / "agent" / "refund_eval" / "parity"
+    for filename in ("__init__.py", "inspect_cli.py", "scripts.py"):
+        target = destination / filename
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / filename, target)
+
+
 def run_harbor(script: Script, out: Path, seed: int) -> dict:
     import yaml
 
@@ -240,6 +270,7 @@ def run_harbor(script: Script, out: Path, seed: int) -> dict:
                         "--out", str(tasks), "--data-mode", "fixture", "--research-mode", "saved",
                         "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks)],
                        cwd=REPO, env=env, check=True, capture_output=True, text=True)
+    stage_scripted_agent(tasks / script.scenario)
     kwargs: dict[str, Any] = {"script": script.name}
     if script.cost_limit is not None:
         kwargs["cost_limit"] = script.cost_limit

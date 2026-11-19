@@ -252,7 +252,10 @@ REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/tes
 
 The staged agent scenario is the public input descriptor at `refund_eval/scenario/<name>.yaml` with only
 `id`, `task_text`, `start_time`, `sim_weeks`, and `user.{name,email_addresses,phone}`. It contains no task
-facts, organization records, or hidden profile fields. For an exact-wheel smoke, set both
+facts, organization records, or hidden profile fields. Callers using `world_url` must pass this public
+descriptor or write an equivalent projection at their boundary; world-service task loading does not fall
+back to the full local scenario loader. Local simulation continues to accept full scenarios. For an exact-wheel
+smoke, set both
 `REFUND_EVAL_HARBOR_AGENT_WHEEL` and `REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256`; the test installs that wheel
 non-editably and offline without rebuilding the project. Report the wheel SHA-256 and embedded public-scenario
 SHA-256 separately. Keep wheel bytes outside the repository.

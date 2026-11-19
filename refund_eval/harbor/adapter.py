@@ -59,7 +59,6 @@ AGENT_MODULES = {
     "companies": "__init__ models",
     "harbor": "__init__ atif",
     "models": "__init__ client evidence replay",
-    "parity": "__init__ inspect_cli scripts",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
     "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
