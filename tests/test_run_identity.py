@@ -59,6 +59,11 @@ def test_absolute_and_inline_json_identity_locks_are_preserved(tmp_path, monkeyp
     assert run_identity.load_identity_lock(json.dumps(expected)) == expected
 
 
+def test_unknown_user_identity_lock_path_is_reported_as_lock_error():
+    with pytest.raises(IdentityLockError, match="Cannot resolve identity lock path"):
+        run_identity.load_identity_lock("~definitely-no-such-local-user/lock.json")
+
+
 def test_unlocked_docker_run_records_reference_without_resolving_it(monkeypatch):
     monkeypatch.setattr(run_identity, "environment_fingerprint", lambda: "environment")
     monkeypatch.setattr(run_identity, "scenario_fingerprint", lambda _: "scenario")
