@@ -25,6 +25,7 @@ services:
       WORLD_GRADER_MODEL: "__GRADER_MODEL__"
       WORLD_COST_LIMIT: "__WORLD_COST_LIMIT__"
       WORLD_TASK_VERSION: "__TASK_VERSION__"
+      REFUND_EVAL_COMPANY_STORE: "__COMPANY_STORE_ROOT__"
       WORLD_TRIAL: ${COMPOSE_PROJECT_NAME}  # Harbor's `<trial name>__env`; with the task version, the seed
       WORLD_SEED: "__WORLD_SEED__"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

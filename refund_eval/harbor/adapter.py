@@ -161,6 +161,14 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     source_sha256 = copy_source(source)
     stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
+    from refund_eval.sim import company_store
+
+    store_root = company_store.store_root()
+    seed_store = task_dir / "environment" / "company-store"
+    seed_store.mkdir()
+    if store_root is not None:
+        company_store.harvest_registered_jobs(sc, destination_root=store_root)
+        company_store.sync_scenario_entries(sc, source_root=store_root, destination_root=seed_store)
     seed_policy = DERIVED_SEED
     if world_seed == HOST_SEED:
         seed_policy += "; WORLD_SEED overrides"
@@ -176,6 +184,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "SOURCE_SHA256": source_sha256, "AGENT_TIMEOUT": float(agent_timeout),
         "VERIFIER_TIMEOUT": float(verifier_timeout), "CPUS": cpus, "MEMORY_MB": memory_mb,
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
+        "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
@@ -184,6 +193,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         path.write_text(_fill(path.read_text(), values), encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
     (task_dir / "instruction.md").write_text(task_message(sc, sim_weeks) + "\n", encoding="utf-8")
+    if store_root is not None:
+        company_store.register_native_jobs_root(out / "jobs", root=store_root)
     return task_dir
 
 

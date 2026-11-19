@@ -32,10 +32,11 @@ from harbor.publisher.packager import Packager
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from refund_eval.agent.prompt import task_message
-from refund_eval.harbor import adapter, atif, batch
+from refund_eval.harbor import adapter, atif, batch, world_entrypoint
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario import schema
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import Org, load_scenario
+from refund_eval.sim import company_store
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +44,181 @@ def generated(tmp_path_factory):
     out = tmp_path_factory.mktemp("harbor_tasks")
     assert adapter.main(["--scenario", "train_refund_late", "--out", str(out), "--sim-weeks", "12"]) == 0
     return out
+
+
+def _native_store_entry(scenario, org, *, model="fixture/simulator", summary="Public company information"):
+    created = datetime.now(UTC).replace(microsecond=0).isoformat()
+    url = "https://native-store.example.test/contact"
+    text = "The company publishes its contact details."
+    page = {"url": url, "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "retrieved_at": created}
+    page_refs = [{key: page[key] for key in ("url", "sha256", "retrieved_at")}]
+    pages_digest = hashlib.sha256(json.dumps(
+        [{"url": url, "sha256": page["sha256"]}], sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    provenance = {
+        "identity": company_store.org_identity(org), "scenario_id": scenario.id,
+        "intent_sha256": hashlib.sha256((scenario.intent or "").encode()).hexdigest(),
+        "subject_sha256": hashlib.sha256((scenario.subject or "").encode()).hexdigest(),
+        "terms_sha256": hashlib.sha256((org.terms or "").encode()).hexdigest(),
+        "model": model, "temperature": 0, "rules_prompt_version": "1", "research_prompt_version": "2",
+        "exemplar_prompt_version": "2", "checker_version": "1", "pages": page_refs,
+        "pages_sha256": pages_digest,
+    }
+    inputs = {
+        "identity": provenance["identity"], "scenario": scenario.id,
+        "intent_sha256": provenance["intent_sha256"], "subject_sha256": provenance["subject_sha256"],
+        "terms_sha256": provenance["terms_sha256"], "model": model, "rules_prompt_version": "1",
+        "research_prompt_version": "2", "exemplar_prompt_version": "2", "checker_version": "1",
+    }
+    fingerprint = hashlib.sha256(json.dumps(
+        inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()).hexdigest()[:16]
+    return {
+        "schema": 1, "fingerprint": fingerprint, "identity": provenance["identity"], "scenario": scenario.id,
+        "created_at": created, "provenance": provenance, "org": org.model_dump(mode="json"),
+        "research": {
+            "org": org.key, "name": org.name, "mode": "live", "retrieved_at": created,
+            "dossier": {"summary": summary, "facts": [], "persona": {"voice": "Professional."}},
+            "pages": [page],
+        },
+        "rules": {"rules": {"terms": "The published company terms.", "grounds": []},
+                  "model": model, "generated_at": created},
+        "temperament": "Professional.", "examples": [],
+    }
+
+
+def test_native_company_store_roundtrip_is_world_only_and_immutable(tmp_path, monkeypatch, capsys):
+    scenario = load_scenario("train_refund_late")
+    org = Org(key="native_dynamic", name="Native Example", kind="dynamic_advice",
+              email_domains=["native-store.example.test"], web_domains=["native-store.example.test"],
+              terms="The published company terms.")
+    host_store = tmp_path / "host-store"
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
+    first = _native_store_entry(scenario, org)
+    company_store.save_entry(scenario, org, first, root=host_store)
+    original = company_store._entry_path(
+        scenario.id, company_store.org_identity(org), first["fingerprint"], host_store).read_bytes()
+
+    prepared = tmp_path / "prepared"
+    assert adapter.main(["--scenario", scenario.id, "--out", str(prepared)]) == 0
+    capsys.readouterr()
+    task_dir = prepared / scenario.id
+    environment = task_dir / "environment"
+    seed_root = environment / "company-store"
+    assert len(list(seed_root.rglob("*.json"))) == 1
+    assert not list((environment / "agent").rglob("company-store"))
+    assert not list((task_dir / "tests").rglob("company-store"))
+    assert not (environment / "source" / "company-store").exists()
+    world_dockerfile = (environment / "world" / "Dockerfile").read_text()
+    assert "COPY company-store/ /opt/company-store-seed/" in world_dockerfile
+    assert "!company-store/**" in (environment / "world" / "Dockerfile.dockerignore").read_text()
+
+    jobs_dir = tmp_path / "jobs"
+    artifact_store = jobs_dir / "trial-1" / "artifacts" / "world" / "company-store"
+    monkeypatch.setattr(world_entrypoint, "COMPANY_STORE_SEED_ROOT", seed_root)
+    assert world_entrypoint.initialize_company_store({
+        "REFUND_EVAL_COMPANY_STORE": str(artifact_store), "WORLD_SCENARIO": scenario.id,
+    }) == 1
+    assert company_store._entry_path(
+        scenario.id, company_store.org_identity(org), first["fingerprint"], artifact_store).is_file()
+
+    second = _native_store_entry(scenario, org, model="fixture/updated-simulator", summary="New public information")
+    company_store.save_entry(scenario, org, second, root=artifact_store)
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
+    assert company_store.main(["harvest", str(jobs_dir)]) == 0
+    assert capsys.readouterr().out == "Harvested 1 company-store entries.\n"
+    assert company_store._entry_path(
+        scenario.id, company_store.org_identity(org), first["fingerprint"], host_store).read_bytes() == original
+    assert company_store._entry_path(
+        scenario.id, company_store.org_identity(org), second["fingerprint"], host_store).is_file()
+
+    next_prepared = tmp_path / "next-prepared"
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
+    assert adapter.main(["--scenario", scenario.id, "--out", str(next_prepared)]) == 0
+    assert len(list((next_prepared / scenario.id / "environment" / "company-store").rglob("*.json"))) == 2
+
+
+def test_native_prepare_harvests_registered_jobs_before_seeding(tmp_path, monkeypatch, capsys):
+    scenario = load_scenario("train_refund_late")
+    org = Org(key="automatic_dynamic", name="Automatic Example", kind="dynamic_advice",
+              email_domains=["automatic-store.example.test"], web_domains=["automatic-store.example.test"],
+              terms="The published company terms.")
+    host_store = tmp_path / "host-store"
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", str(host_store))
+
+    first = tmp_path / "prepared-one"
+    assert adapter.main(["--scenario", scenario.id, "--out", str(first)]) == 0
+    capsys.readouterr()
+    first_task = first / scenario.id
+    first_seed = first_task / "environment" / "company-store"
+    assert not list(first_seed.rglob("*.json"))
+
+    jobs_root = first / "jobs"
+    artifact_store = jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store"
+    entry = _native_store_entry(scenario, org)
+    company_store.save_entry(scenario, org, entry, root=artifact_store)
+
+    unregistered_artifact = (
+        tmp_path / "unregistered-jobs" / "job" / "trial" / "artifacts" / "world" / "company-store"
+    )
+    unregistered_org = Org(
+        key="unregistered_dynamic", name="Unregistered Example", kind="dynamic_advice",
+        email_domains=["unregistered-store.example.test"], web_domains=["unregistered-store.example.test"],
+        terms="The published company terms.",
+    )
+    unregistered_entry = _native_store_entry(scenario, unregistered_org)
+    company_store.save_entry(scenario, unregistered_org, unregistered_entry, root=unregistered_artifact)
+
+    second = tmp_path / "prepared-two"
+    batch.prepare(second, batch.NativeBatchConfig(
+        scenario=scenario.id, execution="docker", cost_limit=1.0, world_cost_limit=1.0,
+    ))
+    capsys.readouterr()
+    second_task = second / scenario.id
+    second_seed = second_task / "environment" / "company-store"
+    assert len(list(second_seed.rglob("*.json"))) == 1
+    assert company_store._entry_path(
+        scenario.id, company_store.org_identity(org), entry["fingerprint"], host_store,
+    ).is_file()
+    assert not company_store._entry_path(
+        scenario.id, company_store.org_identity(unregistered_org), unregistered_entry["fingerprint"], host_store,
+    ).exists()
+    assert not any(path.name == ".native-jobs" for path in first_task.rglob(".native-jobs"))
+    assert not any(path.name == ".native-jobs" for path in second_task.rglob(".native-jobs"))
+    assert set(company_store.registered_native_jobs_roots(host_store)) == {
+        (first / "jobs").resolve(), (second / "jobs").resolve(),
+    }
+
+
+def test_native_company_store_off_is_not_accidentally_enabled(tmp_path, monkeypatch):
+    off_store = tmp_path / "off-store"
+    scenario = load_scenario("train_refund_late")
+    org = Org(key="off_dynamic", name="Off Example", kind="dynamic_advice",
+              email_domains=["off-store.example.test"], web_domains=["off-store.example.test"],
+              terms="The published company terms.")
+    jobs_root = tmp_path / "prior-jobs"
+    entry = _native_store_entry(scenario, org)
+    company_store.register_native_jobs_root(jobs_root, root=off_store)
+    company_store.save_entry(
+        scenario, org, entry,
+        root=jobs_root / "job" / "trial" / "artifacts" / "world" / "company-store",
+    )
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    out = tmp_path / "prepared-off"
+    assert adapter.main(["--scenario", "train_refund_late", "--out", str(out)]) == 0
+    task_dir = out / "train_refund_late"
+    assert not list((task_dir / "environment" / "company-store").rglob("*.json"))
+    compose = yaml.safe_load((task_dir / "environment" / "docker-compose.yaml").read_text())
+    assert compose["services"]["world"]["environment"]["REFUND_EVAL_COMPANY_STORE"] == "off"
+    assert world_entrypoint.initialize_company_store({
+        "REFUND_EVAL_COMPANY_STORE": "off", "WORLD_SCENARIO": "train_refund_late",
+    }) == 0
+    assert company_store.store_root() is None
+    assert company_store.registered_native_jobs_roots(off_store) == [jobs_root.resolve()]
+    assert not company_store._entry_path(
+        scenario.id, company_store.org_identity(org), entry["fingerprint"], off_store,
+    ).exists()
 
 
 def test_cost_limit_schema_documents_target_only_scope():
