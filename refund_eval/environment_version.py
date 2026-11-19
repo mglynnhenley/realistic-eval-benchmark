@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 ENVIRONMENT_VERSION = "8.2"
 ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
-    "refund_eval/model_pricing.py", "refund_eval/models", "refund_eval/world", "refund_eval/world_service",
+    "refund_eval/model_pricing.py", "refund_eval/model_io.py", "refund_eval/models", "refund_eval/world", "refund_eval/world_service",
     "refund_eval/published",
     "refund_eval/harbor",
     "refund_eval/task.py", "refund_eval/run_identity.py", "refund_eval/environment_version.py",
