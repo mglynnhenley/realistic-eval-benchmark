@@ -265,11 +265,6 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
     (destination / "refund_eval" / "scenario" / f"{scenario_name}.yaml").write_text(
         yaml.safe_dump(view), encoding="utf-8",
     )
-    manifest = json.loads((source / SOURCE_MANIFEST).read_text(encoding="utf-8"))
-    memory = source / "refund_eval" / "scenario" / "realism" / f"{scenario.id}.json"
-    if memory.is_file():
-        manifest["realism_memory"] = {scenario.id: hashlib.sha256(memory.read_bytes()).hexdigest()[:8]}
-    (destination / SOURCE_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
