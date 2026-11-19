@@ -48,6 +48,10 @@ from refund_eval.models import client as models
 from refund_eval.models.budget import BudgetedWorldModels
 from refund_eval.models.client import ModelClient, ModelLimitExceeded
 from refund_eval.models.replay import RecordingModelClient
+from refund_eval.models.world_spend_ledger import (
+    WorldSpendLedger,
+    WorldSpendLedgerError,
+)
 from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import AUDIT_KEY, MCPService, audit, fingerprint
 from refund_eval.published.profile import (
@@ -149,6 +153,8 @@ class WorldTrial:
         self._lock = anyio.Lock()
         self._tools: dict[str, NativeTool] = {}
         self._writer: OutputWriter | None = None
+        self._spend_ledger: WorldSpendLedger | None = None
+        self._spend_scope: dict[str, Any] | None = None
         self.trial: MemoryTrial | None = None
         self.scenario: Scenario | None = None
 
@@ -157,6 +163,17 @@ class WorldTrial:
     async def __aenter__(self) -> Self:
         settings = self.settings
         self.scenario = scenario = load_scenario(settings.scenario)
+        if settings.world_cost_limit is not None:
+            model_mapping = ({"simulator": settings.simulator_model, "grader": settings.grader_model}
+                             if self._model_client is None else
+                             {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
+            self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
+            self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
+            if self._spend_ledger.has_unresolved():
+                raise WorldSpendLedgerError(
+                    f"World-spend ledger in {self._spend_ledger.path} has an unresolved reservation; "
+                    "refusing to erase prior trial artifacts or resume paid work. Reconcile it or use a new output directory."
+                )
         if self._model_client is None:
             from refund_eval.models.openrouter import OpenRouterClient
 
@@ -167,7 +184,10 @@ class WorldTrial:
         # Every world-side completion is kept in the store, so the trial can be replayed.
         recorded = RecordingModelClient(self._model_client)
         models.install(recorded if settings.world_cost_limit is None else
-                       BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist))
+                       BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist,
+                                           prices=getattr(self._model_client, "tariffs", None) or {},
+                                           ledger=self._spend_ledger,
+                                           scope=self._spend_scope))
         try:
             init_world(scenario, settings.seed)
             store = world_store()

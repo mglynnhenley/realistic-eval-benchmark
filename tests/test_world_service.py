@@ -22,6 +22,7 @@ import re
 import threading
 import uuid
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
@@ -40,6 +41,10 @@ from refund_eval.models.client import (
     Usage,
 )
 from refund_eval.models.replay import RECORDINGS_KEY
+from refund_eval.models.world_spend_ledger import (
+    WorldSpendLedger,
+    WorldSpendLedgerError,
+)
 from refund_eval.published.adapter import AUDIT_KEY, _normalized
 from refund_eval.published.mail import _visible_id
 from refund_eval.published.profile import PROFILE_KEY
@@ -79,6 +84,10 @@ class FakeModels:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
+        self.tariffs = {f"fake/{role}": {"input": 1, "output": output, "input_cache_read": 1,
+                                          "input_cache_write": 1, "input_cache_write_1h": 1,
+                                          "internal_reasoning": 0, "request": 0}
+                        for role, output in (("simulator", 100), ("grader", 5))}
 
     def model_name(self, role):
         return f"fake/{role}"
@@ -517,7 +526,7 @@ async def test_world_allowance_during_recipient_identification_stops_without_a_b
     assert not any(entry["email"]["id"].endswith("-bounce") for entry in world["pending"])
 
 
-@pytest.mark.parametrize(("charge", "status", "spent"), [(0.75, "exhausted", 1.5), (None, "unknown", 0.75)])
+@pytest.mark.parametrize(("charge", "status", "spent"), [(0.75, "unknown", 1.5), (None, "unknown", 0.75)])
 async def test_world_model_allowance_is_shared_and_fails_closed(tmp_path, monkeypatch, charge, status, spent):
     stub_browser(monkeypatch)
 
@@ -540,9 +549,33 @@ async def test_world_model_allowance_is_shared_and_fails_closed(tmp_path, monkey
             await client.complete("simulator", [])
         trial.persist()
         state = json.loads((tmp_path / "world" / "state.json").read_text())
-    assert state["store"][WORLD_BUDGET_KEY] == {"limit_usd": 1, "spent_usd": spent, "status": status}
+    budget = state["store"][WORLD_BUDGET_KEY]
+    assert budget["limit_usd"] == 1 and budget["spent_usd"] == spent and budget["status"] == status
+    assert budget["reserved_usd"] >= 0
+    assert budget["committed_usd"] == pytest.approx(budget["spent_usd"] + budget["reserved_usd"])
+    assert (tmp_path / "world" / "world-spend-ledger.json").is_file()
     assert [c["response"]["usage"]["cost"] for c in state["store"][RECORDINGS_KEY]] == [0.75, charge]
     assert [role for role, _ in fake.calls] == ["simulator", "grader"]
+
+
+async def test_world_trial_with_direct_limit_uses_durable_ledger_and_refuses_unresolved_restart(tmp_path):
+    import hashlib
+
+    world_settings = settings(tmp_path, world_cost_limit=1)
+    directory = Path(world_settings.output_dir)
+    scope = {"scenario": world_settings.scenario,
+             "models": {"simulator": "fake/simulator", "grader": "fake/grader"}}
+    ledger = WorldSpendLedger(directory, 1, scope)
+    ledger.reserve(str(uuid.uuid4()), hashlib.sha256(b"prior attempt").hexdigest(), "0.1")
+    prior_state = directory / STATE_FILE
+    prior_events = directory / EVENTS_FILE
+    prior_state.write_text("prior state", encoding="utf-8")
+    prior_events.write_text("prior event\n", encoding="utf-8")
+
+    with pytest.raises(WorldSpendLedgerError, match="unresolved reservation"):
+        await WorldTrial(world_settings, model_client=FakeModels()).__aenter__()
+    assert prior_state.read_text(encoding="utf-8") == "prior state"
+    assert prior_events.read_text(encoding="utf-8") == "prior event\n"
 
 
 # --------------------------------------------------------------------------- the agent in world-service mode

@@ -805,3 +805,36 @@ def test_openrouter_prices_come_from_the_public_catalog(monkeypatch):
     monkeypatch.setattr(model_pricing.httpx, "get", get)
     assert model_pricing.openrouter_prices(["openrouter/a/sim", "openrouter/a/missing", "mockllm/model"]) == {
         "openrouter/a/sim": {"input": 1.0, "output": 5.0, "input_cache_read": 1.0, "input_cache_write": 1.0, "request": 0}}
+
+
+async def test_world_allowance_pins_catalog_tariffs_without_an_opt_in(monkeypatch):
+    from refund_eval.world_service.settings import WorldSettings
+
+    tariffs = {
+        "openrouter/provider/sim": {"input": 1, "output": 5, "input_cache_read": 1,
+                                     "input_cache_write": 1, "input_cache_write_1h": 1,
+                                     "internal_reasoning": 0, "request": 0.01},
+        "openrouter/provider/grader": {"input": 1, "output": 5, "input_cache_read": 1,
+                                        "input_cache_write": 1, "input_cache_write_1h": 1,
+                                        "internal_reasoning": 0, "request": 0.01},
+    }
+    monkeypatch.setattr(model_pricing, "openrouter_tariffs", lambda names: tariffs)
+    handler_bodies = []
+
+    def handler(request):
+        handler_bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "ok"}, usage={
+            "prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3, "cost": 0.001}))
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    sdk = AsyncOpenAI(api_key="not-a-key", base_url="https://openrouter.test/api/v1", http_client=http,
+                      max_retries=2)
+    settings = WorldSettings(world_cost_limit=1, simulator_model="openrouter/provider/sim",
+                             grader_model="openrouter/provider/grader")
+    client = OpenRouterClient.from_settings(settings, prices={}, client=sdk)
+    try:
+        assert client.pin_prices and client.tariffs == tariffs and client.client.max_retries == 0
+        await client.complete("simulator", [Message("user", "hello")], max_tokens=10)
+        assert handler_bodies[0]["provider"]["max_price"] == {"prompt": 1, "completion": 5, "request": 0.01}
+    finally:
+        await client.client.close()
