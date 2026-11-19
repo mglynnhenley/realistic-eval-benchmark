@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 7.4 — 2026-11-19
 - Kind: trivial batch
-- Fingerprint: 89dca3ed44127878f04372787747d17f75cdc5ef8daecf5b4c919790a0ff5ec4
+- Fingerprint: 3b917c8d64c3319afc772e749e33132b3ca0043d43dd68c0af97cbcd9465a851
 - Trial round: none; offline validation only.
-- Changes: include the error-screening module in the native Harbor agent allowlist without importing simulator modules at package startup (MAT-153).
+- Changes: include the error-screening module without importing simulator modules at package startup, and limit the installed agent scenario to the public request/profile/time inputs (MAT-153).
 
 ## 7.3 — 2026-11-19
 - Kind: trivial batch

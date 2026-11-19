@@ -244,7 +244,25 @@ REFUND_EVAL_NATIVE_DOCKER_SMOKE=1 uv run pytest -q tests/test_harbor_native_life
 ```
 
 With Python 3.14 and the locked dependencies cached (`uv sync --frozen`), run the installed-agent
-smoke without Docker: `REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel`.
+smoke without Docker:
+
+```bash
+REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel
+```
+
+The staged agent scenario is the public input descriptor at `refund_eval/scenario/<name>.yaml` with only
+`id`, `task_text`, `start_time`, `sim_weeks`, and `user.{name,email_addresses,phone}`. It contains no task
+facts, organization records, or hidden profile fields. For an exact-wheel smoke, set both
+`REFUND_EVAL_HARBOR_AGENT_WHEEL` and `REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256`; the test installs that wheel
+non-editably and offline without rebuilding the project. Report the wheel SHA-256 and embedded public-scenario
+SHA-256 separately. Keep wheel bytes outside the repository.
+
+```bash
+REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 \
+REFUND_EVAL_HARBOR_AGENT_WHEEL=/path/to/refund_eval.whl \
+REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256=<sha256> \
+uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel
+```
 It installs only the staged agent payload in a fresh environment and checks one scripted turn against a local fixture world.
 
 ### Parity gate

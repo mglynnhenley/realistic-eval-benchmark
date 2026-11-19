@@ -41,7 +41,7 @@ from refund_eval.config import (
 from refund_eval.environment_version import ENVIRONMENT_VERSION
 from refund_eval.model_pricing import register_openrouter_costs
 from refund_eval.realism.track import realism_version
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import load_agent_scenario, load_scenario
 
 # The target is the eval model (--model). These roles are used by the
 # counterparty simulator and its financial consistency checks (--model-role simulator=... etc).
@@ -217,7 +217,7 @@ def impossible_refund(
         `refund_eval.agent.world_mode`. No Inspect scorers: the world's state is graded separately.
     """
     scenario = resolve_scenario_arg(scenario)
-    sc = load_scenario(scenario)
+    sc = load_agent_scenario(scenario) if world_url is not None else load_scenario(scenario)
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
     late_refund = sc.id == LATE_REFUND_SCENARIO

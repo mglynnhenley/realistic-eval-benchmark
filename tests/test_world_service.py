@@ -49,7 +49,7 @@ from refund_eval.published.adapter import AUDIT_KEY, _normalized
 from refund_eval.published.mail import _visible_id
 from refund_eval.published.profile import PROFILE_KEY
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import AgentScenario, load_scenario
 from refund_eval.world import interception
 from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
@@ -379,6 +379,9 @@ def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url:
     from refund_eval.scenario.schema import load_scenario
 
     scenario = load_scenario("train_refund")
+    scenario_id = "train_refund"
+    if world_url is not None:
+        scenario_id = _write_agent_scenario(tmp_path / "agent-scenario.yaml", scenario)
     outputs = script or [
         ModelOutput.for_tool_call("mockllm/model", "send_message", {
             "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."}),
@@ -391,12 +394,29 @@ def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url:
         models.install(FakeModels())
     args = {"max_turns": MAX_TURNS, "history_tokens": 0, **agent_args}
     [log] = eval(Task(dataset=[Sample(input=scenario.task_text, metadata={"scenario": "train_refund"})],
-                      solver=refund_agent(scenario_id="train_refund", published_data="fixture", research_mode="saved",
+                      solver=refund_agent(scenario_id=scenario_id, published_data="fixture", research_mode="saved",
                                           seed=7, world_url=world_url, **args)),
                  model=get_model("mockllm/model", custom_outputs=outputs), log_dir=str(tmp_path / "logs"),
                  display="none")
     assert log.status == "success", log.error
     return log.samples[0]
+
+
+def _write_agent_scenario(path: Path, scenario) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    public = AgentScenario(
+        id=scenario.id,
+        task_text=scenario.task_text,
+        start_time=scenario.start_time,
+        sim_weeks=scenario.sim_weeks,
+        user={
+            "name": scenario.user.name,
+            "email_addresses": scenario.user.email_addresses,
+            "phone": scenario.user.phone,
+        },
+    )
+    path.write_text(public.model_dump_json(), encoding="utf-8")
+    return str(path)
 
 
 def _without_call_ids(value):
@@ -782,7 +802,7 @@ async def test_turn_records_the_agents_stop(tmp_path, monkeypatch):
         ("cost_limit", False, "cost_limit"), ("loop_ended", True, "cost_limit")]
 
 
-def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatch):
+def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(tmp_path, monkeypatch):
     from inspect_ai.solver import generate
 
     import refund_eval.task as task_module
@@ -802,7 +822,9 @@ def test_task_in_world_service_mode_passes_the_url_and_has_no_scorers(monkeypatc
     monkeypatch.setattr(task_module, "register_default_costs", lambda *a, **kw: None)
     monkeypatch.setattr(task_module, "default_model_roles", lambda *a: {})
     monkeypatch.setattr(profile, "fixture_readiness", not_here)
-    task = task_module.impossible_refund(scenario="train_refund", published_data="fixture",
+    scenario = load_scenario("train_refund")
+    agent_scenario = _write_agent_scenario(tmp_path / "agent-scenario.yaml", scenario)
+    task = task_module.impossible_refund(scenario=agent_scenario, published_data="fixture",
                                          world_url="http://world:8000")
     assert captured["world_url"] == "http://world:8000"
     assert not task.scorer

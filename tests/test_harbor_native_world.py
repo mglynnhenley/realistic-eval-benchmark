@@ -96,6 +96,17 @@ assert atif.main(["inspect", "--out", "trajectory.json"]) == 0
                     reason="needs a local Python 3.14 and cached uv dependencies")
 def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch):
     monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    wheel_path_value = os.environ.get("REFUND_EVAL_HARBOR_AGENT_WHEEL")
+    expected_sha256 = os.environ.get("REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256")
+    if bool(wheel_path_value) != bool(expected_sha256):
+        pytest.fail("Set both REFUND_EVAL_HARBOR_AGENT_WHEEL and its SHA-256", pytrace=False)
+    wheel_path = Path(wheel_path_value).expanduser().resolve() if wheel_path_value else None
+    if wheel_path is not None:
+        if not wheel_path.is_file():
+            pytest.fail("The exact agent wheel does not exist", pytrace=False)
+        actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+        if actual_sha256 != expected_sha256.lower():
+            pytest.fail("The exact agent wheel SHA-256 does not match", pytrace=False)
     task_dir = adapter.write_task(tmp_path / "prepared", scenario="train_refund_late",
                                   data_mode="fixture", research_mode="saved", sim_weeks=1, max_turns=1,
                                   simulator_model="mockllm/model", grader_model="mockllm/model",
@@ -105,12 +116,20 @@ def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch)
     venv = tmp_path / "venv"
     env = {"PATH": os.environ["PATH"], "HOME": str(run_dir), "PYTHON_DOTENV_DISABLED": "1"}
     uv_env = {key: os.environ[key] for key in ("HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR") if key in os.environ}
+    sync_args = ["uv", "sync", "--offline", "--no-config", "--frozen", "--no-dev", "--python", "3.14",
+                 "--project", str(task_dir / "environment" / "agent")]
+    sync_args.append("--no-install-project" if wheel_path is not None else "--no-editable")
     subprocess.run(
-        ["uv", "sync", "--offline", "--no-config", "--frozen", "--no-dev", "--no-editable", "--python", "3.14",
-         "--project", str(task_dir / "environment" / "agent")],
+        sync_args,
         cwd=run_dir, check=True, timeout=120,
         env={**env, **uv_env, "UV_PYTHON_DOWNLOADS": "never", "UV_PROJECT_ENVIRONMENT": str(venv)},
     )
+    if wheel_path is not None:
+        subprocess.run(
+            ["uv", "pip", "install", "--offline", "--no-deps", "--python", str(venv / "bin" / "python"),
+             str(wheel_path)],
+            cwd=run_dir, check=True, timeout=120, env={**env, **uv_env, "UV_PYTHON_DOWNLOADS": "never"},
+        )
     _check_installed_agent_first_turn(venv / "bin" / "python", run_dir, tmp_path, env, monkeypatch)
 
 

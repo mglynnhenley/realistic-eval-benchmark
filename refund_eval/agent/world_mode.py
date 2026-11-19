@@ -74,7 +74,7 @@ from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import sim_deadline
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.adapter import inspect_parameters, model_content
-from refund_eval.scenario.schema import Scenario
+from refund_eval.scenario.schema import AgentScenario
 from refund_eval.world.interception import current_tool_call_id
 from refund_eval.world.state import Wakeup, World
 
@@ -94,7 +94,7 @@ class WorldView:
     it does the sample's World on the native path; each `/turn` reply brings the clock and
     stop reason up to date."""
 
-    def __init__(self, scenario: Scenario) -> None:
+    def __init__(self, scenario: AgentScenario) -> None:
         self.world = World(start_time=scenario.start_time, now=scenario.start_time)
 
     def record_clock(self) -> None:
@@ -262,7 +262,7 @@ class WorldClient:
         return on_continue
 
 
-async def run_in_world(state: AgentState, *, scenario: Scenario, world_url: str, history_tokens: int,
+async def run_in_world(state: AgentState, *, scenario: AgentScenario, world_url: str, history_tokens: int,
                        sim_weeks: float, checkin_hours: tuple[int, ...], token_budget: int | None,
                        budget_notice: str) -> AgentState:
     """`refund_agent`'s execute in world-service mode."""
