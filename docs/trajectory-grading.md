@@ -9,10 +9,12 @@ static HTML without scripts or remote resources, not Transect's chart renderer.
 
 Opt-in `--judged` sends transcript chunks (turn digests, quoted message text and
 tool calls, and the ledger) through OpenRouter to Anthropic and OpenAI. These
-calls are paid and count against the OpenRouter budget. Defaults come from
-`scout/run.py`'s `JUDGES`: `openrouter/anthropic/claude-opus-5.5` and
-`openrouter/openai/gpt-6.1-sol`. A pricing/key-headroom guard estimates calls and
-asks before judging. Rubric chunks contain up to 40 turns, literal quote checks
+calls are paid. Only `openrouter/anthropic/claude-opus-5.5` and
+`openrouter/openai/gpt-6.1-sol` are allowed, through their named providers
+without fallback. The CLI requires an approved USD amount and verifies that
+the dedicated OpenRouter key has a lifetime cap no higher than that amount
+before judging; workload estimates are for planning only. Rubric chunks contain
+up to 40 turns, literal quote checks
 drop unsupported citations, severity-2+ candidates receive verification, and
 unknown evidence coverage remains explicit. Phase classification uses a
 two-model cohort without its separate verifier. `--validation` reads CSV labels

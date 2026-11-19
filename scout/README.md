@@ -16,11 +16,20 @@ Add `--judged` for five rubric reviews over chronological chunks of up to 40
 turn digests with the ledger prepended, one roll per model. **This sends trial
 records: transcript chunks (turn digests, quoted message text and tool calls,
 and the ledger) through OpenRouter to Anthropic and OpenAI. Calls are paid and
-count against the OpenRouter budget.** The defaults are `scout/run.py`'s `JUDGES`:
+count against the OpenRouter budget.** The approved defaults are
 `openrouter/anthropic/claude-opus-5.5` and `openrouter/openai/gpt-6.1-sol`.
-`--judges` overrides the roster. The guard queries OpenRouter pricing/key
-headroom, estimates rubric chunks, phase calls and verifier upper bounds, and
-asks for confirmation (`--yes` skips the prompt). Paid failures are not retried.
+`--judges` may select from these two routes only. Requests use OpenRouter's
+fixed API endpoint and the named model's first-party provider, with fallbacks off.
+
+After budget approval, the Repro Auditor supplies `--budget-usd APPROVED_USD`
+and a dedicated `OPENROUTER_API_KEY` for this run. Configure an OpenRouter
+[lifetime key cap](https://openrouter.ai/docs/guides/best-practices/capping-shared-agent-keys#step-3-a-credit-limit-on-each-agent-key)
+at or below the approved amount, with BYOK included in the cap. Use a
+workspace without BYOK provider credentials so the cap tracks the actual
+OpenRouter spend. If the key has no verifiable cap or no remaining credit,
+judging refuses to run. The workload estimate is for planning; OpenRouter
+enforces the key cap. `--yes` skips only confirmation, not the budget or
+route checks. Each judge has one attempt, with SDK and model retries disabled.
 
 Findings require literal quotes in the cited message. Reports retain maximum
 severity, severity-2+ counts and first dates, ballots, disagreements and unknown

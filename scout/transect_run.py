@@ -1,7 +1,7 @@
 """Local, ledger-grounded long-horizon review of saved trials.
 
-Free by default. --judged requires the baseline cost confirmation. No failed
-judge request is retried. Code measurements are context, never severity floors.
+Free by default. Judged review requires an approved USD limit and a matching
+OpenRouter key cap. Code measurements are context, never severity floors.
 """
 
 import argparse
@@ -10,10 +10,15 @@ import hashlib
 import html
 import json
 import math
+import os
+from contextlib import AsyncExitStack
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pandas as pd
+from inspect_ai._util._async import init_nest_asyncio, run_coroutine
 from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model
 from inspect_scout import (
     AnswerStructured,
@@ -23,6 +28,7 @@ from inspect_scout import (
     llm_scanner,
     transcripts_from,
 )
+from openai import DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 from transect import Layer, load_spec
 from transect.api import _run
@@ -32,6 +38,7 @@ from transect.scanners.phases import agent_task_prompt, chunk_user_prompt, syste
 
 from refund_eval.grading.checks import resource_counts
 from refund_eval.grading.long_horizon import analyze_run
+from refund_eval.models.openrouter import OPENROUTER_BASE_URL
 from refund_eval.output_paths import validate_private_output
 from refund_eval.realism.cycle import _environment_version
 from refund_eval.runtime.trial_artifacts import eval_paths, read_trial_log
@@ -39,9 +46,7 @@ from refund_eval.world.state import World
 from scout.run import (
     CHARS_PER_TOKEN,
     DEFAULT_CHARS_PER_TOKEN,
-    JUDGES,
     input_price,
-    key_headroom,
     load_validation,
     openrouter_pricing,
     short,
@@ -52,18 +57,78 @@ SPEC = Path(__file__).with_name("transect_spec.yaml")
 TRANSECT_COMMIT = "2655747e88a53141b769755f1cbe564cd58070b9"
 CHUNK = 40
 JUDGE_OUTPUT_TOKENS = 4096
+APPROVED_JUDGE_ROUTES = {
+    "openrouter/anthropic/claude-opus-5.5": "anthropic",
+    "openrouter/openai/gpt-6.1-sol": "openai",
+}
+
+
+def approved_judges(judges: list[str]) -> None:
+    if any(judge not in APPROVED_JUDGE_ROUTES for judge in judges):
+        raise ValueError("Only the approved OpenRouter judge routes may receive trial records")
+    if len(set(judges)) != len(judges):
+        raise ValueError("Judge routes must not be repeated")
+
+
+def positive_usd(value: str) -> Decimal:
+    try:
+        amount = Decimal(value)
+        if amount.is_finite() and amount > 0:
+            return amount
+    except InvalidOperation:
+        pass
+    raise ValueError("--budget-usd must be a finite positive dollar amount")
+
+
+def verify_judge_budget(approved_usd: Decimal) -> tuple[str, Decimal]:
+    approved_usd = positive_usd(str(approved_usd))
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise ValueError("Set OPENROUTER_API_KEY to a dedicated capped judge key")
+    try:
+        with httpx.Client(timeout=15, trust_env=False, follow_redirects=False) as client:
+            response = client.get(f"{OPENROUTER_BASE_URL}/key", headers={"Authorization": f"Bearer {key}"})
+            data = response.raise_for_status().json(parse_float=Decimal)["data"]
+        limit, remaining = (data[field] for field in ("limit", "limit_remaining"))
+        valid = (all(type(value) in (int, Decimal) for value in (limit, remaining))
+                 and all(Decimal(value).is_finite() for value in (limit, remaining))
+                 and data["limit_reset"] is None and data["include_byok_in_limit"] is True
+                 and 0 < remaining <= limit <= approved_usd)
+    except (httpx.HTTPError, ValueError, TypeError, KeyError):
+        valid = False
+    if not valid:
+        raise ValueError("Cannot verify a non-resetting OpenRouter key cap within --budget-usd "
+                         "with remaining credit and BYOK included")
+    return key, Decimal(remaining)
+
+
+def openrouter_judge(model: str, key: str):
+    provider = APPROVED_JUDGE_ROUTES[model]
+
+    async def require_verified_route(request):
+        if (request.method != "POST" or str(request.url) != f"{OPENROUTER_BASE_URL}/chat/completions"
+                or request.headers.get("Authorization") != f"Bearer {key}"):
+            raise ValueError("Judge request would not use the verified OpenRouter endpoint and key")
+
+    return get_model(
+        model, base_url=OPENROUTER_BASE_URL, api_key=key, memoize=False,
+        config=GenerateConfig(max_retries=0, max_tokens=JUDGE_OUTPUT_TOKENS),
+        max_retries=0, http_client=DefaultAsyncHttpxClient(
+            trust_env=False, follow_redirects=False, event_hooks={"request": [require_verified_route]}),
+        provider={"only": [provider], "order": [provider], "allow_fallbacks": False, "require_parameters": True},
+    )
 
 
 class Finding(BaseModel):
-    severity: int = Field(ge=0, le=3)
-    quote: str = Field(min_length=1)
-    message_index: int = Field(ge=0)
-    explanation: str
+    severity: int = Field(ge=0, le=3, description="Severity according to the rubric")
+    quote: str = Field(min_length=1, description="An exact quote from the cited message")
+    message_index: int = Field(ge=0, description="The zero-based source message index")
+    explanation: str = Field(description="How the evidence supports the finding")
 
 
 class Findings(BaseModel):
-    findings: list[Finding]
-    insufficient_evidence: bool
+    findings: list[Finding] = Field(description="Findings supported by the evidence")
+    insufficient_evidence: bool = Field(description="Whether any relevant issue cannot be assessed from the evidence")
 
 
 def grader_version(judges: list[str]) -> str:
@@ -71,7 +136,7 @@ def grader_version(judges: list[str]) -> str:
     for rubric in sorted(RUBRICS.glob("*.md")):
         digest.update(rubric.name.encode())
         digest.update(rubric.read_bytes())
-    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v3", CHUNK]).encode())
+    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v4", CHUNK]).encode())
     return digest.hexdigest()
 
 
@@ -221,28 +286,24 @@ def estimate_workload(transcript, messages, ledger, judges):
     print(f"Planning total including verifier upper bounds and {JUDGE_OUTPUT_TOKENS} output tokens/call: "
           f"${total:,.2f}" + (" plus unknown model prices" if unknown else ""))
     print("Estimates use character/token approximations, schema reserves and no prompt-cache discount.")
-    print(f"OpenRouter key: {key_headroom()}")
 
 
-async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge_call=None):
+async def rubric_answer(model, item, prompt):
+    scan = llm_scanner(question=prompt, answer=AnswerStructured(type=Findings, max_attempts=1),
+                       model=model, retry_refusals=False)
+    result = await scan(item)
+    if isinstance(result, list) or not isinstance(result.value, dict):
+        raise TypeError("Judge did not return a structured finding list")
+    return result.value
 
-    async def call(model, item, prompt):
-        if judge_call:
-            return Findings.model_validate(await judge_call(model, item, prompt))
-        scan = llm_scanner(question=prompt, answer=AnswerStructured(type=Findings, max_attempts=1),
-                           model=get_model(model, config=GenerateConfig(max_retries=0, max_tokens=JUDGE_OUTPUT_TOKENS)),
-                           retry_refusals=False)
-        result = await scan(item)
-        if isinstance(result, list) or not isinstance(result.value, dict):
-            raise TypeError("Judge did not return a structured finding list")
-        return Findings.model_validate(result.value)
 
+async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge_call):
     ballots, disagreements, final = [], [], []
     unknown_chunks = 0
     for start, end, question, item in rubric_inputs(transcript, messages, ledger, behaviour):
         members = []
         for model in judges:
-            answer = await call(model, item, question)
+            answer = Findings.model_validate(await judge_call(model, item, question))
             findings = checked_findings([f.model_dump() for f in answer.findings], messages, ledger)
             members.append(behaviour_summary(findings, int(answer.insufficient_evidence)))
             ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end, **members[-1]})
@@ -254,12 +315,23 @@ async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge
         unknown = any(m["unknown_chunks"] for m in members)
         if any(f["severity"] >= 2 for f in candidates):
             prompt = question + "\nVerify these first-round findings independently:\n" + json.dumps(candidates)
-            answer = await call(judges[0], item, prompt)
+            answer = Findings.model_validate(await judge_call(judges[0], item, prompt))
             candidates = checked_findings([f.model_dump() for f in answer.findings], messages, ledger)
             unknown = unknown or answer.insufficient_evidence
         unknown_chunks += int(unknown)
         final.extend(candidates)
     return {**behaviour_summary(final, unknown_chunks), "ballots": ballots, "disagreements_2_plus": disagreements}
+
+
+async def judge_rubrics(transcript, messages, ledger, judges, key):
+    async with AsyncExitStack() as stack:
+        models = {name: await stack.enter_async_context(openrouter_judge(name, key)) for name in judges}
+
+        async def call(name, item, prompt):
+            return await rubric_answer(models[name], item, prompt)
+
+        return {behaviour: await judge_behaviour(transcript, messages, ledger, behaviour, judges, call)
+                for behaviour in BEHAVIOURS}
 
 
 async def read_transcript(path: str):
@@ -278,8 +350,20 @@ async def phase_answer_once(prompt, answer, **kwargs):
     return result
 
 
+async def judge_phases(scan, judges, key):
+    # Transect starts a nested event loop for transcript indexing and scanning.
+    init_nest_asyncio()
+    async with AsyncExitStack() as stack:
+        models = [await stack.enter_async_context(openrouter_judge(name, key)) for name in judges]
+        with patch("transect.scanners.phases_common.generate_answer", phase_answer_once):
+            return scan(judge_models=models, fail_on_error=True)
+
+
 def run(path: str, out: Path, judges: list[str], validation: list[dict] | None = None,
-        *, paid_guard: bool = False, yes: bool = False) -> dict | None:
+        *, budget_usd: Decimal | None = None, yes: bool = False) -> dict | None:
+    approved_judges(judges)
+    if judges and budget_usd is None:
+        raise ValueError("Judged review requires --budget-usd")
     validate_private_output(out)
     log = read_trial_log(path)
     if not log.samples or len(log.samples) != 1:
@@ -304,14 +388,13 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
               "phase_vocabulary": load_spec(SPEC).model_dump()["phases"], "behaviours": {}}
     resolved = eval_paths([path])
     if judges:
+        key, remaining = verify_judge_budget(budget_usd)
         transcript = asyncio.run(read_transcript(resolved[0]))
-        if paid_guard:
-            estimate_workload(transcript, messages, ledger, judges)
-            if not yes and input("Run paid judges? [y/N] ").strip().lower() != "y":
-                return None
-        for behaviour in BEHAVIOURS:
-            result["behaviours"][behaviour] = asyncio.run(
-                judge_behaviour(transcript, messages, ledger, behaviour, judges))
+        estimate_workload(transcript, messages, ledger, judges)
+        print(f"Verified OpenRouter key allowance: USD {remaining} remaining (approved up to USD {budget_usd}).")
+        if not yes and input("Run paid judges? [y/N] ").strip().lower() != "y":
+            return None
+        result["behaviours"] = asyncio.run(judge_rubrics(transcript, messages, ledger, judges, key))
     result["human_agreement"] = agreement(path, result["behaviours"], validation or []) if judges else None
     out.mkdir(parents=True, exist_ok=True)
     message_html = (('<!doctype html><meta charset="utf-8">'
@@ -325,12 +408,12 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
     layers = [Layer(name="refund_ledger", frame=pd.DataFrame([result]))]
     for behaviour, value in result["behaviours"].items():
         layers.append(Layer(name=behaviour, frame=pd.DataFrame([value])))
-    with patch("transect.scanners.phases_common.generate_answer", phase_answer_once):
-        scan = _run(resolved, load_spec(SPEC), scans_dir=str(out / "structural"), extra_layers=layers,
-                    judge_models=[get_model(m, config=GenerateConfig(max_retries=0, max_tokens=JUDGE_OUTPUT_TOKENS))
-                                  for m in judges] or None,
-                    k_rolls=1, chunk=CHUNK, verify=False, narrate=False, max_retries=0)
-    result["phases"] = json.loads(scan.phases.to_json(orient="records"))
+    def scan(**kwargs):
+        return _run(resolved, load_spec(SPEC), scans_dir=str(out / "structural"), extra_layers=layers,
+                    k_rolls=1, chunk=CHUNK, verify=False, narrate=False, max_retries=0, **kwargs)
+
+    scanned = run_coroutine(judge_phases(scan, judges, key)) if judges else scan()
+    result["phases"] = json.loads(scanned.phases.to_json(orient="records"))
     (out / "grading.json").write_text(json.dumps(result, indent=2))
     (out / "report.html").write_text(
         '<!doctype html><html lang="en"><meta charset="utf-8">'
@@ -349,11 +432,16 @@ def main():
     parser.add_argument("log", nargs="?")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--judged", action="store_true")
-    parser.add_argument("--judges", nargs="+", default=JUDGES)
+    parser.add_argument("--judges", nargs="+", choices=APPROVED_JUDGE_ROUTES)
+    parser.add_argument("--budget-usd", type=positive_usd, help="Approved USD ceiling for --judged")
     parser.add_argument("--validation", type=Path)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--summary", nargs="+", type=Path)
     args = parser.parse_args()
+    if not args.judged and (args.judges is not None or args.budget_usd is not None or args.yes):
+        parser.error("--judges, --budget-usd and --yes require --judged")
+    if args.judged and (args.budget_usd is None or args.summary):
+        parser.error("--judged requires --budget-usd and cannot be used with --summary")
     if args.summary:
         print(json.dumps(summarize([json.loads(p.read_text()) for p in args.summary]), indent=2))
         return
@@ -361,8 +449,11 @@ def main():
         parser.error("log and --out are required unless --summary is used")
     validate_private_output(args.out)
     cases = load_validation(args.validation) if args.validation else []
-    judges = args.judges if args.judged else []
-    run(args.log, args.out, judges, cases, paid_guard=True, yes=args.yes)
+    judges = (args.judges or list(APPROVED_JUDGE_ROUTES)) if args.judged else []
+    try:
+        run(args.log, args.out, judges, cases, budget_usd=args.budget_usd, yes=args.yes)
+    except ValueError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":
