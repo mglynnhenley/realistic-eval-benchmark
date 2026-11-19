@@ -8,14 +8,19 @@ The Harbor-side pieces (adapter, installed agent) are in tests/test_harbor_nativ
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
+from datetime import date, datetime
+from pathlib import Path
 
 import pytest
+import yaml
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput, ModelUsage
 
+from refund_eval.agent.prompt import task_message
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.harbor import adapter, atif, world_entrypoint
 from refund_eval.harbor.world_entrypoint import (
@@ -26,6 +31,7 @@ from refund_eval.harbor.world_entrypoint import (
     world_argv,
 )
 from refund_eval.models.client import Message, OutputSchema
+from refund_eval.scenario.schema import SeedEmail
 from refund_eval.world_service.store import ACTIVITY_KEY
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
     MAX_TURNS,
@@ -108,9 +114,79 @@ def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch)
     _check_installed_agent_first_turn(venv / "bin" / "python", run_dir, tmp_path, env, monkeypatch)
 
 
+def test_native_agent_stage_does_not_depend_on_private_scenario_values(tmp_path):
+    name = "train_refund_late"
+    scenario = adapter.load_scenario(name)
+    change = {field: f"PRIVATE_HARBOR_CANARY_{field.upper()}" for field in (
+        "origin", "destination", "departure_time", "operator", "retailer", "ticket_type",
+        "booking_ref", "paid_by", "cancellation_reason", "currency",
+    )}
+    circumstances = "PRIVATE_HARBOR_CANARY_CIRCUMSTANCES"
+    journey = scenario.journey.model_copy(update={
+        **change, "date": date(2041, 7, 9), "fare": 8127.94, "cancelled": not scenario.journey.cancelled,
+    })
+    email = SeedEmail(id="canary", sender="fixture@example.test", to=["recipient@example.test"],
+                      subject="PRIVATE_HARBOR_CANARY_EMAIL", body="Synthetic mail", sent_at=scenario.start_time)
+    variant = scenario.model_copy(update={
+        "journey": journey, "true_circumstances": [circumstances],
+        "intent": "PRIVATE_HARBOR_CANARY_INTENT", "grading_notes": "PRIVATE_HARBOR_CANARY_GRADING",
+        "seed_emails": [email], "scheduled_emails": [email],
+        "user": scenario.user.model_copy(update={
+            "home_town": "PRIVATE_HARBOR_CANARY_TOWN", "card_last4": "4732",
+        }),
+        "orgs": [org.model_copy(update={"policy": "PRIVATE_HARBOR_CANARY_POLICY"}) for org in scenario.orgs],
+    })
+    source = tmp_path / "source"
+    adapter.copy_source(source)
+
+    def snapshot(agent, sc):
+        adapter.stage_agent(source, agent, sc, scenario_name=name)
+        fingerprints = {}
+        for file in sorted(agent.rglob("*")):
+            if not file.is_file():
+                continue
+            relative = file.relative_to(agent).as_posix()
+            contents = file.read_bytes()
+            if b"PRIVATE_HARBOR_CANARY_" in contents or "PRIVATE_HARBOR_CANARY_" in relative:
+                pytest.fail("A synthetic private scenario value reached the staged agent", pytrace=False)
+            fingerprints[relative] = hashlib.sha256(contents).hexdigest()
+        _check_public_scenario(agent / "refund_eval" / "scenario" / f"{name}.yaml", scenario)
+        return fingerprints
+
+    assert snapshot(tmp_path / "variant", variant) == snapshot(tmp_path / "original", scenario)
+
+
+def _check_public_scenario(path, scenario):
+    try:
+        public = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError):
+        pytest.fail("Missing or invalid agent-visible scenario", pytrace=False)
+    if not isinstance(public, dict) or set(public) != {"id", "task_text", "start_time", "sim_weeks", "user"}:
+        pytest.fail("Agent scenario fields exceed or differ from the public contract", pytrace=False)
+    expected_user = scenario.user.model_dump(include={"name", "email_addresses", "phone"}, exclude_none=True)
+    user = public["user"]
+    if not isinstance(user, dict) or {k: v for k, v in user.items() if v is not None or k != "phone"} != expected_user:
+        pytest.fail("Agent profile differs from the public contract", pytrace=False)
+    try:
+        start_time = datetime.fromisoformat(str(public["start_time"]))
+    except ValueError:
+        pytest.fail("Agent scenario has invalid public timing", pytrace=False)
+    if (public["id"], public["task_text"], start_time, public["sim_weeks"]) != (
+        scenario.id, scenario.task_text, scenario.start_time, scenario.sim_weeks,
+    ):
+        pytest.fail("Agent scenario does not match the resolved public values", pytrace=False)
+
+
 def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatch):
+    name = "train_refund_late"
+    installed = subprocess.check_output(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        cwd=run_dir, timeout=10, text=True, env=env,
+    )
+    scenario = adapter.load_scenario(name)
+    _check_public_scenario(Path(installed.strip()) / "refund_eval" / "scenario" / f"{name}.yaml", scenario)
     stub_browser(monkeypatch)
-    with world_service_thread(settings(tmp_path, scenario="train_refund_late", sim_weeks=1, max_turns=1),
+    with world_service_thread(settings(tmp_path, scenario=name, sim_weeks=1, max_turns=1),
                               monkeypatch) as (url, held):
         run = subprocess.run(
             [str(python), "-I", "-c", INSTALLED_AGENT_SMOKE, url],
@@ -122,6 +198,9 @@ def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatc
     assert read_eval_log(log_path).status == "success"
     trajectory = json.loads((run_dir / "trajectory.json").read_text())
     assert trajectory["schema_version"] == "ATIF-v1.8"
+    request = next(step["message"] for step in trajectory["steps"] if step["source"] == "user")
+    if request != task_message(scenario, 1):
+        pytest.fail("The installed agent did not receive the task's public request", pytrace=False)
     [step] = [step for step in trajectory["steps"] if step["source"] == "agent"]
     [call] = step["tool_calls"]
     assert (call["tool_call_id"], call["function_name"]) == ("installed_smoke_call", "list_labels")
