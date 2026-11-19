@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 
 import pytest
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput, ModelUsage
 
-from refund_eval.harbor import atif, world_entrypoint
+from refund_eval.agent.world_mode import TURN_TOKEN_ENV
+from refund_eval.harbor import adapter, atif, world_entrypoint
 from refund_eval.harbor.world_entrypoint import (
     FakeWorldModels,
     choose_seed,
@@ -24,6 +26,7 @@ from refund_eval.harbor.world_entrypoint import (
     world_argv,
 )
 from refund_eval.models.client import Message, OutputSchema
+from refund_eval.world_service.store import ACTIVITY_KEY
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
     MAX_TURNS,
     WORLD_KEY,
@@ -44,6 +47,96 @@ class WithUsage(ScriptedAgent):
         output.usage = ModelUsage(input_tokens=100, input_tokens_cache_read=700, output_tokens=50,
                                   total_tokens=850, total_cost=0.01)
         return output
+
+
+# Run this in the installed interpreter, not in pytest's checkout environment.
+INSTALLED_AGENT_SMOKE = """
+import sys
+import sysconfig
+from pathlib import Path
+
+def local_only(event, args):
+    if event == "socket.getaddrinfo" and args[0] not in (None, "127.0.0.1"):
+        raise AssertionError(f"Non-loopback DNS: {args[0]}")
+    if event == "socket.connect" and isinstance(args[1], tuple) and args[1][0] != "127.0.0.1":
+        raise AssertionError(f"Non-loopback connection: {args[1]}")
+
+sys.addaudithook(local_only)
+
+import inspect_ai
+import refund_eval.task
+from inspect_ai.model import ModelOutput, ModelUsage, get_model
+from refund_eval.harbor import atif
+
+site = Path(sysconfig.get_path("purelib")).resolve()
+for module in (inspect_ai, refund_eval.task, atif):
+    assert Path(module.__file__).resolve().is_relative_to(site), module.__file__
+
+model = "mockllm/model"
+output = ModelOutput.for_tool_call(model, "list_labels", {}, tool_call_id="installed_smoke_call")
+output.usage = ModelUsage(input_tokens=10, output_tokens=2, total_tokens=12, total_cost=0)
+[log] = inspect_ai.eval(
+    refund_eval.task.impossible_refund, model=get_model(model, custom_outputs=[output]),
+    task_args={"scenario": "train_refund_late", "world_url": sys.argv[1], "sim_weeks": 1,
+               "published_data": "fixture", "research_mode": "saved", "history_tokens": 0, "cost_limit": 1},
+    log_dir="inspect", log_format="eval", display="none",
+)
+assert log.status == "success", log.error
+assert atif.main(["inspect", "--out", "trajectory.json"]) == 0
+"""
+
+
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_HARBOR_PACKAGE_SMOKE") != "1",
+                    reason="needs a local Python 3.14 and cached uv dependencies")
+def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    task_dir = adapter.write_task(tmp_path / "prepared", scenario="train_refund_late",
+                                  data_mode="fixture", research_mode="saved", sim_weeks=1, max_turns=1,
+                                  simulator_model="mockllm/model", grader_model="mockllm/model",
+                                  agent_timeout=60, verifier_timeout=60, cpus=1, memory_mb=1024)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    venv = tmp_path / "venv"
+    env = {"PATH": os.environ["PATH"], "HOME": str(run_dir), "PYTHON_DOTENV_DISABLED": "1"}
+    uv_env = {key: os.environ[key] for key in ("HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR") if key in os.environ}
+    subprocess.run(
+        ["uv", "sync", "--offline", "--no-config", "--frozen", "--no-dev", "--no-editable", "--python", "3.14",
+         "--project", str(task_dir / "environment" / "agent")],
+        cwd=run_dir, check=True, timeout=120,
+        env={**env, **uv_env, "UV_PYTHON_DOWNLOADS": "never", "UV_PROJECT_ENVIRONMENT": str(venv)},
+    )
+    _check_installed_agent_first_turn(venv / "bin" / "python", run_dir, tmp_path, env, monkeypatch)
+
+
+def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatch):
+    stub_browser(monkeypatch)
+    with world_service_thread(settings(tmp_path, scenario="train_refund_late", sim_weeks=1, max_turns=1),
+                              monkeypatch) as (url, held):
+        run = subprocess.run(
+            [str(python), "-I", "-c", INSTALLED_AGENT_SMOKE, url],
+            cwd=run_dir, timeout=60, check=False, capture_output=True, text=True,
+            env={**env, TURN_TOKEN_ENV: os.environ[TURN_TOKEN_ENV]},
+        )
+    assert run.returncode == 0, run.stdout + run.stderr
+    [log_path] = (run_dir / "inspect").glob("*.eval")
+    assert read_eval_log(log_path).status == "success"
+    trajectory = json.loads((run_dir / "trajectory.json").read_text())
+    assert trajectory["schema_version"] == "ATIF-v1.8"
+    [step] = [step for step in trajectory["steps"] if step["source"] == "agent"]
+    [call] = step["tool_calls"]
+    assert (call["tool_call_id"], call["function_name"]) == ("installed_smoke_call", "list_labels")
+    [observation] = step["observation"]["results"]
+    assert observation["source_call_id"] == call["tool_call_id"]
+    assert "INBOX" in observation["content"]
+    assert trajectory["extra"]["world_turns"] == 1
+    assert trajectory["extra"]["world_stop_reason"] == "max_turns"
+    data = held["data"]
+    assert data["world"]["turn"] == 1
+    assert data["world"]["stop_reason"] == "max_turns"
+    [tool, turn] = data["store"][ACTIVITY_KEY]
+    assert (tool["kind"], tool["tool"], tool["call_id"], tool["status"]) == (
+        "tool_call", call["function_name"], call["tool_call_id"], "ok")
+    assert turn["kind"] == "turn" and turn["turn"] == 1 and turn["stopped"]
 
 
 def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):

@@ -243,6 +243,10 @@ uv run pytest -q tests/test_harbor_native_world.py
 REFUND_EVAL_NATIVE_DOCKER_SMOKE=1 uv run pytest -q tests/test_harbor_native_lifecycle.py
 ```
 
+With Python 3.14 and the locked dependencies cached (`uv sync --frozen`), run the installed-agent
+smoke without Docker: `REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel`.
+It installs only the staged agent payload in a fresh environment and checks one scripted turn against a local fixture world.
+
 ### Parity gate
 
 The free parity gate runs fixed scripted trials (a `mockllm/model` target, the world's fake models, fixture data, research mode `saved` and one seed) on three paths and compares the final world without wall-clock fields, the event log without wall time, and the graded keys. `old` is the Inspect path in one process. `inprocess` runs the world service on a thread with the agent in world-service mode. `harbor` is a local `harbor run --environment docker` on an adapter-generated task. API keys are removed from every environment it launches, and it does not use Modal.
