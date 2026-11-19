@@ -10,14 +10,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fixtures.simulator import start_sample
 
 from refund_eval.published import browser as browser_module
-from refund_eval.published import browser_runtimes, profile
+from refund_eval.published import browser_runtimes
+from refund_eval.published.adapter import AUDIT_KEY
 from refund_eval.published.browser import BROWSER_TOOLS, PublishedBrowserService
 from refund_eval.published.browser_runtimes import BrowserBoundaryError
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.world.store import world_store
+from refund_eval.world_service.settings import WorldSettings
+from refund_eval.world_service.store import ACTIVITY_KEY
+from refund_eval.world_service.trial import WorldTrial
 
 VALID_DOCKER_MANIFEST = {
     "verified": True,
@@ -39,6 +41,7 @@ class OfflineClient:
         self.spool_dir = spool_dir
         self.list_tools_calls = 0
         self.call_tool_calls = 0
+        self.closed = False
 
     async def initialize(self):
         return {}
@@ -81,7 +84,7 @@ class OfflineClient:
         raise AssertionError(f"offline browser request was not mediated: {url}")
 
     async def aclose(self):
-        return None
+        self.closed = True
 
 
 class OfflineRuntime:
@@ -102,6 +105,8 @@ class OfflineRuntime:
         return dict(self.manifest)
 
     async def aclose(self):
+        if self.client is not None:
+            await self.client.aclose()
         self.closed = True
 
 
@@ -135,110 +140,90 @@ def _stub_successful_canary(service, monkeypatch):
     monkeypatch.setattr(service, "_verify_interception_integrity", successful_canary)
 
 
-def _service(tmp_path, manifest, monkeypatch):
-    service = PublishedBrowserService(
-        lambda _request: pytest.fail("the isolation guard must run before policy dispatch"),
-        spool_dir=tmp_path / "exchange",
-        runtime="subprocess",
-        require_verified_browser_isolation=True,
-    )
-    runtime = OfflineRuntime(service.spool_dir, manifest)
-    service._runtime = runtime
-    _stub_successful_canary(service, monkeypatch)
-    return service, runtime
-
-
-@pytest.mark.parametrize("manifest", [
-    {},
-    {"verified": False, "mode": "docker-network-none", "network_mode": "none"},
-    {"verified": True, "mode": "subprocess-shared-network", "network_mode": "shared"},
-])
-async def test_browser_startup_rejects_bad_isolation_before_exposing_tools(tmp_path, manifest, monkeypatch):
-    service, runtime = _service(tmp_path, manifest, monkeypatch)
-    with pytest.raises(BrowserBoundaryError):
-        await service.list_tools()
-    assert runtime.closed is True
-    assert service._closed is True
-    assert runtime.start_calls == 1
-    assert runtime.client is not None
-    assert runtime.client.list_tools_calls == 0
-    assert runtime.client.call_tool_calls == 0
-
-
-async def test_interception_success_does_not_override_isolation_failure(tmp_path, monkeypatch):
-    service, runtime = _service(tmp_path, {
-        "verified": False,
-        "mode": "subprocess-shared-network",
-        "network_mode": "shared",
-    }, monkeypatch)
-    with pytest.raises(BrowserBoundaryError):
-        await service.list_tools()
-    assert runtime.closed is True
-    assert service._closed is True
-    assert runtime.client is not None
-    assert runtime.client.list_tools_calls == 0
-    assert runtime.client.call_tool_calls == 0
-
-
-async def test_published_tools_rejects_bad_isolation_before_profile_ready(tmp_path, monkeypatch):
-    start_sample()
-    monkeypatch.setattr(profile, "fixture_readiness", lambda **_kwargs: {"configured": True})
-    runtime_holder = {}
-    real_service = PublishedBrowserService
-
-    class Service(real_service):
+def _install_offline_browser(monkeypatch, manifest, runtime_holder):
+    class Service(PublishedBrowserService):
         def __init__(self, handler, **kwargs):
             super().__init__(handler, **kwargs)
-            runtime_holder["runtime"] = OfflineRuntime(self.spool_dir, {})
-            self._runtime = runtime_holder["runtime"]
+            runtime = OfflineRuntime(self.spool_dir, manifest)
+            self._runtime = runtime
+            runtime_holder["runtime"] = runtime
+            runtime_holder["service"] = self
             _stub_successful_canary(self, monkeypatch)
 
     monkeypatch.setattr(browser_module, "PublishedBrowserService", Service)
-    scenario = load_scenario("train_refund")
+
+
+def _settings(tmp_path, *, browser_runtime, require_verified_browser_isolation=True):
+    return WorldSettings(
+        scenario="train_refund",
+        seed=7,
+        data_mode="fixture",
+        research_mode="saved",
+        browser_runtime=browser_runtime,
+        require_verified_browser_isolation=require_verified_browser_isolation,
+        output_dir=str(tmp_path / "world"),
+    )
+
+
+REJECTED_MANIFESTS = [
+    {},
+    {"verified": False, "mode": "docker-network-none", "network_mode": "none"},
+    {"verified": True, "mode": "subprocess-shared-network", "network_mode": "shared"},
+    {"verified": True, "mode": "unknown", "network_mode": "none"},
+    {"verified": True, "mode": "subprocess-netns", "network_mode": "none", "namespace_verified": False},
+    {"verified": True, "mode": "docker-network-none", "network_mode": "shared"},
+    {"verified": True, "mode": "subprocess-netns", "network_mode": "none"},
+]
+
+
+@pytest.mark.parametrize("manifest", REJECTED_MANIFESTS)
+async def test_native_trial_rejects_bad_isolation_before_profile_ready(tmp_path, monkeypatch, manifest):
+    monkeypatch.setattr("refund_eval.published.profile.fixture_readiness", lambda **_kwargs: {"configured": True})
+    runtime_holder = {}
+    _install_offline_browser(monkeypatch, manifest, runtime_holder)
+    trial = WorldTrial(_settings(tmp_path, browser_runtime="subprocess"), model_client=_NoopModels())
     with pytest.raises(BrowserBoundaryError):
-        async with profile.published_tools(
-            scenario,
-            data_mode="fixture",
-            artifact_dir=str(tmp_path / "artifacts"),
-            require_verified_browser_isolation=True,
-        ):
-            pytest.fail("bad isolation must not expose tools")
+        async with trial:
+            pytest.fail("untrusted isolation must not yield a trial to the agent")
     assert runtime_holder["runtime"].closed is True
     assert runtime_holder["runtime"].start_calls == 1
     assert runtime_holder["runtime"].client is not None
-    assert runtime_holder["runtime"].client.list_tools_calls == 0
-    assert runtime_holder["runtime"].client.call_tool_calls == 0
-    events = world_store().get("published_tool_audit") or []
-    assert not any(event.get("event") == "profile_ready" for event in events)
-    assert not any(event.get("event") == "catalog" and event.get("source") == "playwright" for event in events)
+    assert runtime_holder["runtime"].client.closed is True
+    assert runtime_holder["service"]._closed is True
+    assert not any(event.get("event") == "profile_ready"
+                   for event in trial.trial.store().get(AUDIT_KEY, []))
+    assert not trial.trial.store().get(ACTIVITY_KEY)
 
 
-@pytest.mark.parametrize("manifest", [VALID_DOCKER_MANIFEST, VALID_SUBPROCESS_MANIFEST])
-async def test_published_tools_allows_verified_mediated_fixture_browsing(tmp_path, monkeypatch, manifest):
-    start_sample()
-    monkeypatch.setattr(profile, "fixture_readiness", lambda **_kwargs: {"configured": True})
+@pytest.mark.parametrize(("manifest", "browser_runtime"), [
+    (VALID_DOCKER_MANIFEST, "docker"),
+    (VALID_SUBPROCESS_MANIFEST, "subprocess"),
+])
+async def test_native_trial_allows_verified_mediated_fixture_browsing(
+    tmp_path, monkeypatch, manifest, browser_runtime
+):
     async def forbidden_network(*_args, **_kwargs):
         pytest.fail("fixture browsing attempted external network access")
 
     monkeypatch.setattr("refund_eval.published.network.public_read", forbidden_network)
-    real_service = PublishedBrowserService
-
-    class Service(real_service):
-        def __init__(self, handler, **kwargs):
-            super().__init__(handler, **kwargs)
-            self._runtime = OfflineRuntime(self.spool_dir, manifest)
-            _stub_successful_canary(self, monkeypatch)
-
-    monkeypatch.setattr(browser_module, "PublishedBrowserService", Service)
+    monkeypatch.setattr("refund_eval.published.profile.fixture_readiness", lambda **_kwargs: {"configured": True})
+    runtime_holder = {}
+    _install_offline_browser(monkeypatch, manifest, runtime_holder)
     scenario = load_scenario("train_refund")
-    async with profile.published_tools(
-        scenario,
-        data_mode="fixture",
-        artifact_dir=str(tmp_path / "artifacts"),
-        require_verified_browser_isolation=True,
-    ) as tools:
-        navigate = next(tool.tool for tool in tools if tool.name == "browser_navigate")
-        result = await navigate(url=scenario.org("trainline").policy_url)
+    async with WorldTrial(_settings(tmp_path, browser_runtime=browser_runtime), model_client=_NoopModels()) as trial:
+        result = await trial.call_tool(
+            "browser_navigate", {"url": scenario.org("trainline").contact_url}, call_id="offline-browse"
+        )
+    assert result["isError"] is False
     assert "refund" in json.dumps(result).casefold()
-    events = world_store().get("published_tool_audit") or []
+    assert runtime_holder["runtime"].closed is True
+    events = trial.trial.store().get(AUDIT_KEY) or []
     assert any(event.get("event") == "profile_ready" for event in events)
+
+
+class _NoopModels:
+    def model_name(self, role):
+        return f"offline/{role}"
+
+    async def complete(self, *args, **kwargs):
+        pytest.fail("native startup test attempted a model call")
