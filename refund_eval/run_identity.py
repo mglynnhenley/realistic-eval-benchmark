@@ -102,6 +102,10 @@ def load_identity_lock(value: str | dict[str, Any]) -> dict[str, Any]:
             lock = json.loads(text)
         else:
             path = Path(text).expanduser()
+            if not path.is_absolute() and not path.is_file():
+                repo_path = ROOT / path
+                if repo_path.is_file():
+                    path = repo_path
             try:
                 lock = json.loads(path.read_text(encoding="utf-8"))
             except OSError as error:
