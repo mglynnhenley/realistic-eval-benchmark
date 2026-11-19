@@ -588,7 +588,8 @@ def test_inspect_command(tmp_path):
     command = make_agent(tmp_path, cost_limit=150, token_budget=40_000_000, history_tokens=60000, time_limit=36000,
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
-    assert run.startswith('mkdir -p /logs/agent/inspect; /app/.venv/bin/inspect eval '
+    assert run.startswith('mkdir -p /logs/agent/inspect; REFUND_EVAL_KILL_FILE=/app/.context/KILL '
+                          '/app/.venv/bin/inspect eval '
                           '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
                           'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
     for part in ("--model openrouter/anthropic/claude-opus-5.5", "-M strict_tools=false", "-M reasoning_enabled=true",
@@ -637,7 +638,30 @@ async def test_run_executes_inspect_in_app_and_forwards_the_kill_switch(tmp_path
     await asyncio.wait_for(agent.run("ignored", environment, AgentContext()), timeout=10)
     [(command, cwd)] = [c for c in environment.commands if "inspect eval" in c[0]]
     assert cwd == "/app" and "world_url=http://world:8000" in command
-    assert [c for c, _ in environment.commands if "KILL" in c] == ["mkdir -p /app/.context && touch /app/.context/KILL"]
+    assert [c for c, _ in environment.commands if "touch " in c] == ["mkdir -p /app/.context && touch /app/.context/KILL"]
+
+
+def test_installed_task_detects_forwarded_kill_file(tmp_path, monkeypatch):
+    from refund_eval import killswitch
+    from refund_eval.harbor import installed_agent
+
+    app = tmp_path / "app"
+    installed = app / ".venv/lib/site-packages/refund_eval"
+    installed.mkdir(parents=True)
+    stop = app / ".context/KILL"
+    stop.parent.mkdir()
+    stop.touch()
+    monkeypatch.setattr(installed_agent, "APP", str(app))
+    monkeypatch.setattr(killswitch, "PROJECT_ROOT", installed.parent)
+    monkeypatch.chdir(installed)
+    monkeypatch.delenv("REFUND_EVAL_KILL", raising=False)
+    monkeypatch.delenv("REFUND_EVAL_KILL_FILE", raising=False)
+    assert killswitch.kill_reason() is None
+    command = make_agent(tmp_path).inspect_command()
+    assignment = command.split("; ", 1)[1].split()[0]
+    key, value = assignment.split("=", 1)
+    monkeypatch.setenv(key, value)
+    assert killswitch.kill_reason() == f"kill file {stop}"
 
 
 async def test_kill_switch_blocks_a_new_trial(tmp_path, monkeypatch):

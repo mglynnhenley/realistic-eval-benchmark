@@ -97,7 +97,8 @@ class RefundInstalledAgent(BaseInstalledAgent):
         # Inspect's task loader expects a cwd-relative path with Python 3.14.
         task_file = (f'"$({PYTHON} -c \'import os, refund_eval.task; '
                      'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')
-        parts = [INSPECT, "eval", task_file, "--model", shlex.quote(model),
+        parts = [f"REFUND_EVAL_KILL_FILE={shlex.quote(f'{APP}/.context/KILL')}",
+                 INSPECT, "eval", task_file, "--model", shlex.quote(model),
                  *(f"-M {key}={json.dumps(value)}" for key, value in model_args.items()),
                  '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"',
