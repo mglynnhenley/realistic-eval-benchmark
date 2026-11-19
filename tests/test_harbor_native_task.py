@@ -712,6 +712,40 @@ def test_requested_deadline_requires_guarded_shared_key_mode(mode, approved_whee
         batch.NativeBatchConfig(**options)
 
 
+def test_world_url_keeps_identity_in_the_sidecar(monkeypatch):
+    import builtins
+
+    import refund_eval.task as task_module
+    from refund_eval.published import provider
+
+    original_import = builtins.__import__
+
+    def reject_agent_identity(name, *args, **kwargs):
+        if name == "refund_eval.run_identity":
+            raise AssertionError("Native world-service runs must not import agent identity locks")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delenv("REFUND_EVAL_IDENTITY_LOCK", raising=False)
+    monkeypatch.setattr(builtins, "__import__", reject_agent_identity)
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: None)
+    monkeypatch.setattr(task_module, "default_model_roles",
+                        lambda _: {"simulator": "mockllm/model", "grader": "mockllm/model"})
+    monkeypatch.setattr(provider, "cache_conversation_prefix", lambda: None)
+
+    task = task_module.impossible_refund(
+        scenario="train_refund_late", cost_limit=150, token_budget=40_000_000,
+        research_mode="saved", world_url="http://world",
+    )
+    assert "environment_fingerprint" not in task.metadata
+    assert "environment_version" not in task.metadata
+    with pytest.raises(ValueError, match="generated Harbor sidecar task is the source of identity"):
+        task_module.impossible_refund(
+            scenario="train_refund_late", cost_limit=150, token_budget=40_000_000,
+            research_mode="saved", world_url="http://world", identity_lock={},
+        )
+
+
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):
     original = load_scenario()
     name = "renamed_refund"
@@ -1075,6 +1109,10 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_whee
     with pytest.raises(ValueError, match="Git-ignored"):
         batch.prepare(adapter.ROOT / "trackable-native-batch",
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
+    locked = batch.NativeBatchConfig(**config, world_cost_limit=1, identity_lock="unsupported")
+    with pytest.raises(ValueError, match="Native Harbor does not support exact browser artifact locks"):
+        batch.prepare(tmp_path / "locked-native", locked)
+    assert not (tmp_path / "locked-native").exists()
 
 
 def test_split_batch_rejects_bills_scenario_before_preparation(approved_split_budget_wheel):

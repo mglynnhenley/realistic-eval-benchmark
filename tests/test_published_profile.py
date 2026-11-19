@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 
 import pytest
 from inspect_ai import Task, eval
@@ -39,19 +38,18 @@ def clear_readiness_cache():
 def test_fixture_readiness_does_not_require_live_configuration(monkeypatch):
     calls = []
 
-    def run(args, **kwargs):
-        calls.append((args, kwargs))
-        return SimpleNamespace(returncode=0)
+    def resolve(image):
+        calls.append(image)
+        return "sha256:" + "a" * 64
 
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
-    monkeypatch.setattr(profile.subprocess, "run", run)
+    monkeypatch.setattr(profile, "resolve_local_image_id", resolve)
     monkeypatch.setattr(profile.time, "monotonic", lambda: 10)
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     result = profile.fixture_readiness()
     assert result["configured"] is True
     assert "no Gmail connection" in result["reason"]
-    assert calls == [(["docker", "image", "inspect", profile.DEFAULT_BROWSER_IMAGE],
-                      {"capture_output": True, "timeout": 5, "check": False})]
+    assert calls == [profile.DEFAULT_BROWSER_IMAGE]
     # Repeated polling is cached, but callers cannot change the cached verdict.
     result["configured"] = False
     assert profile.fixture_readiness()["configured"] is True
@@ -60,7 +58,7 @@ def test_fixture_readiness_does_not_require_live_configuration(monkeypatch):
 
 def test_fixture_readiness_explains_missing_docker(monkeypatch):
     monkeypatch.setattr(profile.shutil, "which", lambda name: None)
-    monkeypatch.setattr(profile.subprocess, "run", lambda *a, **kw: pytest.fail("Docker is absent"))
+    monkeypatch.setattr(profile, "resolve_local_image_id", lambda *a: pytest.fail("Docker is absent"))
     result = profile.fixture_readiness()
     assert result["configured"] is False
     assert "Install and start Docker" in result["reason"]
@@ -68,11 +66,11 @@ def test_fixture_readiness_explains_missing_docker(monkeypatch):
 
 @pytest.mark.parametrize("failure", [OSError("offline"), subprocess.TimeoutExpired("docker", 5)])
 def test_fixture_readiness_explains_unavailable_daemon(monkeypatch, failure):
-    def run(*args, **kwargs):
-        raise failure
-
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
-    monkeypatch.setattr(profile.subprocess, "run", run)
+    monkeypatch.setattr(
+        profile, "resolve_local_image_id",
+        lambda *args: (_ for _ in ()).throw(profile.BrowserBoundaryError(f"Docker is not responding: {failure}")),
+    )
     result = profile.fixture_readiness()
     assert result["configured"] is False
     assert "Docker is not responding" in result["reason"]
@@ -80,10 +78,13 @@ def test_fixture_readiness_explains_unavailable_daemon(monkeypatch, failure):
 
 def test_fixture_readiness_explains_missing_browser_image(monkeypatch):
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
-    monkeypatch.setattr(profile.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1))
+    monkeypatch.setattr(
+        profile, "resolve_local_image_id",
+        lambda *args: (_ for _ in ()).throw(profile.BrowserBoundaryError("image unavailable locally")),
+    )
     result = profile.fixture_readiness()
     assert result["configured"] is False
-    assert "docker build -t " + profile.DEFAULT_BROWSER_IMAGE in result["reason"]
+    assert "image unavailable locally" in result["reason"]
 
 
 async def test_adapter_preserves_explicit_fixture_selection_and_lifetime(monkeypatch):

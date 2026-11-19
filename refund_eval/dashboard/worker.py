@@ -162,6 +162,7 @@ def run_worker(run_dir: str | Path) -> int:
                     "budget_notice": config["budget_notice"],
                     "sim_weeks": config["sim_weeks"],
                     "scenario": config["scenario"],
+                    **({"identity_lock": config["identity_lock"]} if config.get("identity_lock") else {}),
                     **({"resume_log": config["resume_log"]} if config.get("resume_log") else {}),
                     **({"seed": config["seed"]} if config.get("seed") is not None else {}),
                     **({"time_limit": config["time_limit"]} if "time_limit" in config else {}),

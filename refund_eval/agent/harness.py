@@ -554,6 +554,7 @@ def refund_agent(
     company_simulator: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
+    browser_image: str | None = None,
     artifact_dir: str | None = None,
     resume_log: str | None = None,
     token_budget: int | None = None,
@@ -669,6 +670,7 @@ def refund_agent(
             async with adapters.tool_scope(scenario, mail_source_kind, profile=tool_profile,
                                            published_data=published_data,
                                            **({"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}),
+                                           **({"browser_image": browser_image} if browser_image is not None else {}),
                                            **({"artifact_dir": artifact_dir} if artifact_dir is not None else {}),
                                            **({"fixture_path": fixture_path} if fixture_path is not None else {})) as tools:
                 reason = kill_reason()

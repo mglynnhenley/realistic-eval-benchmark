@@ -179,6 +179,7 @@ def impossible_refund(
     company_simulator: str | None = None,
     fixture_path: str | None = None,
     browser_runtime: str = "docker",
+    identity_lock: str | dict | None = None,
     artifact_dir: str | None = None,
     resume_log: str | None = None,
     seed: int | None = None,
@@ -191,6 +192,7 @@ def impossible_refund(
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
       task_text: Optional rendered task message supplied by a task wrapper; scenario facts and grading do not change.
       task_id: Optional stable task identity supplied by a Harbor task wrapper.
+      identity_lock: Optional manifest path or JSON identity lock, validated before cost setup.
       mail_source: Bundled inbox, or a fixture:path alias for a saved inbox file.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
@@ -231,6 +233,41 @@ def impossible_refund(
         raise ValueError("task_text must not be empty")
     if task_id is not None and not task_id.strip():
         raise ValueError("task_id must not be empty")
+    lock_value = identity_lock if identity_lock is not None else os.environ.get("REFUND_EVAL_IDENTITY_LOCK")
+    if world_url is not None:
+        if lock_value is not None:
+            raise ValueError(
+                "Native world-service runs cannot validate an agent-side lock; "
+                "the generated Harbor sidecar task is the source of identity."
+            )
+        browser_image = None
+        identity_metadata = {}
+        environment_version_metadata = {}
+    elif lock_value is None:
+        from refund_eval.run_identity import current_run_identity
+
+        run_identity = current_run_identity(scenario, browser_runtime=browser_runtime)
+        browser_image = None
+        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        identity_metadata = {
+            key: run_identity[key] for key in (
+                "environment_fingerprint", "scenario_fingerprint", "browser_runtime",
+                "runtime_identity_kind", "runtime_identity",
+            )
+        }
+    else:
+        from refund_eval.run_identity import validate_identity_lock
+
+        run_identity, browser_image = validate_identity_lock(
+            lock_value, scenario, browser_runtime=browser_runtime,
+        )
+        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        identity_metadata = {
+            key: run_identity[key] for key in (
+                "environment_fingerprint", "scenario_fingerprint", "browser_runtime",
+                "runtime_identity_kind", "runtime_identity",
+            )
+        }
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
     late_refund = sc.id == LATE_REFUND_SCENARIO
@@ -301,7 +338,11 @@ def impossible_refund(
                 hybrid_readiness,
             )
 
-            runtime_args = {"browser_runtime": browser_runtime} if browser_runtime != "docker" else {}
+            runtime_args = {}
+            if browser_runtime != "docker":
+                runtime_args["browser_runtime"] = browser_runtime
+            if browser_image is not None:
+                runtime_args["browser_image"] = browser_image
             status = (fixture_readiness(**runtime_args) if published_data == "fixture" else
                       hybrid_readiness(**runtime_args))
             if not status["configured"]:
@@ -331,6 +372,7 @@ def impossible_refund(
                           "environment_version": ENVIRONMENT_VERSION,
                           **({"requested_deadline": requested_deadline.isoformat()}
                              if requested_deadline is not None else {}),
+                          **identity_metadata,
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),
                           **({"fixture_path": fixture_path} if fixture_path is not None else {}),
@@ -352,6 +394,7 @@ def impossible_refund(
             tool_profile=tool_profile,
             published_data=published_data,
             browser_runtime=browser_runtime,
+            browser_image=browser_image,
             artifact_dir=artifact_dir,
             research_mode=research_mode,
             **({"company_simulator": company_simulator} if company_simulator else {}),
@@ -380,6 +423,8 @@ def impossible_refund(
             "sim_weeks": sim_weeks,
             **({"requested_deadline": requested_deadline.isoformat()}
                if requested_deadline is not None else {}),
+            **environment_version_metadata,
+            **identity_metadata,
             **({"fixture_path": fixture_path} if fixture_path is not None else {}),
             **research_metadata,
             **({"company_simulator": company_simulator} if company_simulator else {}),
