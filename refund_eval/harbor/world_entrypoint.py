@@ -78,6 +78,7 @@ def world_argv(env: dict[str, str], seed: int | None) -> list[str]:
             argv += [flag, env[name].strip()]
     if seed is not None:
         argv += ["--seed", str(seed)]
+    argv.append("--require-verified-browser-isolation")
     return argv
 
 
