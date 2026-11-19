@@ -13,6 +13,7 @@ from dataclasses import fields
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -24,10 +25,16 @@ pytest.importorskip("modal")
 
 from harbor.environments.modal import ModalEnvironment
 from harbor.models.job.config import JobConfig
+from harbor.models.job.result import JobResult, JobStats
+from harbor.models.task.id import LocalTaskId
+from harbor.models.trial.config import TrialConfig
+from harbor.models.trial.result import AgentInfo, ExceptionInfo, StepResult, TrialResult
+from harbor.models.verifier.result import VerifierResult
 from modal import App, Sandbox, Workspace
 from modal.types import WorkspaceBillingSummary
 from modal.workspace import WorkspaceBillingManager, _WorkspaceBillingManager
 
+from scripts import guarded_harbor
 from scripts.guarded_harbor import LauncherFailure, run_guarded_job, validate_job_config
 from scripts.offline_spend_guard import (
     GuardFailure,
@@ -198,6 +205,71 @@ def stable_guard(*, events=None, clock=None, or_values=None, modal_values=None):
         clock=clock or time.monotonic,
     )
     return guard, or_probe, modal_probe
+
+
+@pytest.mark.parametrize(
+    ("record", "reason"),
+    [
+        ("setup_exception", "trial_exception"),
+        ("step_exception", "trial_exception"),
+        ("no_trial", "unexpected_trial_count"),
+        ("unfinished_trial", "incomplete_result"),
+        ("missing_reward", "invalid_reward"),
+        ("zero_reward", None),
+        ("success", None),
+    ],
+)
+def test_guarded_cli_reports_returned_trial_result(tmp_path, monkeypatch, capsys, record, reason):
+    config = valid_config(tmp_path)
+    config_path = tmp_path / "job.json"
+    config_path.write_text(config.model_dump_json(), encoding="utf-8")
+    exception = ExceptionInfo(
+        exception_type="ModuleNotFoundError",
+        exception_message="synthetic private diagnostic",
+        exception_traceback="synthetic private traceback",
+        occurred_at=START,
+    )
+    trial = TrialResult(
+        task_name="offline",
+        trial_name="offline-trial",
+        trial_uri="offline",
+        task_id=LocalTaskId(path=tmp_path / "task"),
+        task_checksum="offline",
+        config=TrialConfig(task=config.tasks[0]),
+        agent_info=AgentInfo(name="offline", version="1"),
+        started_at=START,
+        finished_at=None if record == "unfinished_trial" else END,
+        exception_info=exception if record == "setup_exception" else None,
+        step_results=[StepResult(step_name="offline", exception_info=exception)]
+        if record == "step_exception" else None,
+        verifier_result=None if record in {"setup_exception", "missing_reward"} else VerifierResult(
+            rewards={"score": 0 if record == "zero_reward" else 1},
+        ),
+    )
+    trials = [] if record == "no_trial" else [trial]
+    result = JobResult(
+        id=uuid4(),
+        started_at=START,
+        finished_at=END,
+        n_total_trials=1,
+        stats=JobStats.from_trial_results(trials, n_total_trials=1),
+        trial_results=trials,
+    )
+
+    async def run_job(config, thresholds):
+        return result
+
+    monkeypatch.setattr(guarded_harbor, "run_guarded_job", run_job)
+    exit_code = guarded_harbor.main([
+        "--config", str(config_path), "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "10", "--modal-cycle-stop", "27",
+    ])
+
+    stdout, stderr = capsys.readouterr()
+    if reason is None:
+        assert (exit_code, stdout, stderr) == (0, "guarded_harbor_job=complete\n", "")
+    else:
+        assert (exit_code, stdout, stderr) == (1, "", f"guarded_harbor_job=failed reason={reason}\n")
 
 
 def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatch):
