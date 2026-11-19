@@ -11,6 +11,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +36,7 @@ from refund_eval.agent.prompt import task_message
 from refund_eval.harbor import adapter, atif, batch, world_entrypoint
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario import schema
-from refund_eval.scenario.schema import Org, load_scenario
+from refund_eval.scenario.schema import Org, load_agent_scenario, load_scenario
 from refund_eval.sim import company_store
 
 
@@ -336,17 +337,35 @@ def test_main_image_builds_from_only_the_agent_payload(generated):
     assert not list(payload.rglob("test.sh"))
     assert (task_dir / "tests" / "test.sh").is_file()
     assert "COPY source/ /app/" in (environment / "world" / "Dockerfile").read_text()
-    for source in (environment / "source", task_dir / "tests" / "source"):
+    world_source = environment / "source"
+    verifier_source = task_dir / "tests" / "source"
+    for source in (world_source, verifier_source):
         assert (source / "refund_eval" / "scenario" / "rules" / "train_refund_late").is_dir()
         assert (source / "refund_eval" / "grading" / "verifier.py").is_file()
+    world_files = {
+        path.relative_to(world_source).as_posix(): path.read_bytes()
+        for path in world_source.rglob("*") if path.is_file()
+    }
+    verifier_files = {
+        path.relative_to(verifier_source).as_posix(): path.read_bytes()
+        for path in verifier_source.rglob("*") if path.is_file()
+    }
+    if world_files != verifier_files:
+        pytest.fail("Full world and verifier source snapshots differ", pytrace=False)
 
     original = load_scenario()
     path = payload / "refund_eval" / "scenario" / "train_refund_late.yaml"
     raw = yaml.safe_load(path.read_text())
-    assert not {"intent", "grading_notes", "seed_emails", "scheduled_emails"} & raw.keys()
-    assert all(not {"policy", "terms", "persona"} & org.keys() for org in raw["orgs"])
-    assert "true_circumstances" not in raw["facts"]
-    assert task_message(load_scenario(str(path)), 12.0) == task_message(original, 12.0)
+    assert set(raw) == {"id", "task_text", "start_time", "sim_weeks", "user"}
+    assert set(raw["user"]) == {"name", "email_addresses", "phone"}
+    agent_scenario = load_agent_scenario(str(path))
+    assert task_message(agent_scenario, 12.0) == task_message(original, 12.0)
+    for source in (environment / "source", task_dir / "tests" / "source"):
+        full_source_scenario = load_scenario(
+            str(source / "refund_eval" / "scenario" / "train_refund_late.yaml"),
+        )
+        if full_source_scenario.model_dump(mode="json") != original.model_dump(mode="json"):
+            pytest.fail("Full world/verifier scenario input changed during agent staging", pytrace=False)
     manifest = Path("refund_eval/_source_manifest.json")
     agent_manifest = json.loads((payload / manifest).read_text())
     world_manifest = json.loads((environment / "source" / manifest).read_text())
@@ -371,7 +390,170 @@ def test_agent_loads_scenario_by_filename_when_it_differs_from_id(tmp_path, monk
     lookup = Task(task_dir).config.environment.env["WORLD_SCENARIO"]
     assert lookup == name
     monkeypatch.setattr(schema, "SCENARIO_DIR", task_dir / "environment" / "agent" / "refund_eval" / "scenario")
-    assert load_scenario(lookup).id == original.id
+    assert load_agent_scenario(lookup).id == original.id
+
+
+def _normalize_scenario_string(value):
+    return " ".join(value.split()).casefold()
+
+
+def _scenario_leaf_strings(value, path="", generic_subject=None):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else key
+            yield from _scenario_leaf_strings(child, child_path, generic_subject)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _scenario_leaf_strings(child, f"{path}[{index}]", generic_subject)
+    elif isinstance(value, str):
+        parent, separator, field = path.rpartition(".")
+        if separator and field == "kind" and parent.startswith("orgs[") and parent.endswith("]"):
+            # Organization kinds are schema categories, not scenario-specific facts.
+            return
+        normalized = _normalize_scenario_string(value)
+        if path == "subject" and generic_subject is not None and normalized == generic_subject:
+            return
+        common_labels = {
+            "train_refund", "train_refund_late", "bills_price_rise", "refund", "train", "ticket",
+            "journey", "booking", "cancellation", "cancelled", "customer", "company", "operator",
+            "email", "phone", "scenario", "facts", "orgs", "true", "false", "none",
+        }
+        if len(normalized) >= 6 and len(set(normalized)) >= 4 and normalized not in common_labels:
+            yield normalized
+
+
+def _private_scenario_values(data, generic_subject=None):
+    public = {
+        "id": data.pop("id"),
+        "task_text": data.pop("task_text"),
+        "start_time": data.pop("start_time"),
+        "sim_weeks": data.pop("sim_weeks"),
+        "user": {key: data["user"].pop(key) for key in ("name", "email_addresses", "phone")
+                 if key in data["user"]},
+    }
+    public_text = " ".join(_scenario_leaf_strings(public))
+    return {
+        value for value in _scenario_leaf_strings(data, generic_subject=generic_subject)
+        if value not in public_text
+    }
+
+
+def _generic_subject_for_scenario(scenario, source_yaml):
+    if "subject" in source_yaml:
+        return None
+    schema_default = schema.Scenario.model_fields["subject"].default
+    if isinstance(schema_default, str) and _normalize_scenario_string(scenario.subject) == (
+        _normalize_scenario_string(schema_default)
+    ):
+        return _normalize_scenario_string(schema_default)
+    if source_yaml.get("extends") != "train_refund":
+        return None
+    base_path = Path("refund_eval/scenario/archive/train_refund.yaml")
+    base_yaml = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+    inherited_subject = base_yaml.get("subject")
+    if isinstance(inherited_subject, str) and _normalize_scenario_string(scenario.subject) == (
+        _normalize_scenario_string(inherited_subject)
+    ):
+        # The active scenario inherits this generic subject from its archived template.
+        return _normalize_scenario_string(inherited_subject)
+    return None
+
+
+def _find_private_value_asset(hidden_values, package):
+    for path in package.rglob("*"):
+        if path.is_file():
+            name = path.relative_to(package).as_posix().casefold()
+            contents = name + " " + b" ".join(path.read_bytes().split()).decode("utf-8", errors="ignore").casefold()
+            if any(value in contents for value in hidden_values):
+                return path
+    return None
+
+
+def test_scripted_parity_modules_are_opt_in_and_preserve_overrides(generated, tmp_path):
+    from refund_eval.parity.run import stage_scripted_agent
+
+    source_agent = generated / "train_refund_late" / "environment" / "agent"
+    assert not (source_agent / "refund_eval" / "parity").exists()
+    staged_agent = tmp_path / "environment" / "agent"
+    shutil.copytree(source_agent, staged_agent)
+
+    stage_scripted_agent(tmp_path)
+    parity = staged_agent / "refund_eval" / "parity"
+    assert {path.name for path in parity.glob("*.py")} == {"__init__.py", "inspect_cli.py", "scripts.py"}
+    env = {**os.environ, "PYTHONPATH": str(staged_agent)}
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib; importlib.import_module('refund_eval.parity.inspect_cli'); "
+                "importlib.import_module('refund_eval.parity.scripts')"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    scripts = parity / "scripts.py"
+    override = "fixture override preserved\n"
+    scripts.write_text(override, encoding="utf-8")
+    stage_scripted_agent(tmp_path)
+    assert scripts.read_text(encoding="utf-8") == override
+
+
+def test_payload_scan_checks_source_comments_and_subject_overrides(tmp_path):
+    canary = "synthetic-private-scenario-canary-48371"
+    source = tmp_path / "refund_eval" / "source_comment.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# {canary}\n", encoding="utf-8")
+
+    default_subject = "generic scenario subject default"
+    override = "non-default subject override canary"
+    private_kind = "synthetic-private-kind-canary-48371"
+    assert _generic_subject_for_scenario(
+        SimpleNamespace(subject=override), {"subject": override},
+    ) is None
+    hidden_values = _private_scenario_values(
+        {
+            "id": "synthetic-case-1",
+            "task_text": "public request",
+            "start_time": "2025-01-01T00:00:00Z",
+            "sim_weeks": 1,
+            "user": {"name": "Synthetic User", "email_addresses": [], "phone": None},
+            "subject": override,
+            "private_fact": canary,
+            "facts": {"journey": {"kind": private_kind}},
+        },
+        generic_subject=_normalize_scenario_string(default_subject),
+    )
+    assert _normalize_scenario_string(override) in hidden_values
+    assert _normalize_scenario_string(canary) in hidden_values
+    assert _normalize_scenario_string(private_kind) in hidden_values
+    assert not list(_scenario_leaf_strings({"orgs": [{"kind": "synthetic-org-category"}]}))
+    assert _find_private_value_asset(hidden_values, tmp_path) == source
+
+
+def test_agent_payload_excludes_hidden_scenario_values(generated):
+    scenario = load_scenario("train_refund_late")
+    source_yaml = yaml.safe_load(Path("refund_eval/scenario/train_refund_late.yaml").read_text())
+    assert "subject" not in source_yaml
+    generic_subject = _generic_subject_for_scenario(scenario, source_yaml)
+    hidden_values = _private_scenario_values(
+        scenario.model_dump(mode="json"), generic_subject=generic_subject,
+    )
+    if not hidden_values:
+        pytest.fail("No eligible private scenario values were available for the payload audit", pytrace=False)
+
+    package = generated / "train_refund_late" / "environment" / "agent" / "refund_eval"
+    asset = _find_private_value_asset(hidden_values, package)
+    if asset is not None:
+        pytest.fail(
+            f"Private scenario value detected in staged package asset {asset.relative_to(package)}",
+            pytrace=False,
+        )
 
 
 def test_dataset_metric_and_job(generated):

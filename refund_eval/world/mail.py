@@ -108,7 +108,7 @@ class FixtureMailSource:
             "user_phone": (user.phone if user and user.phone else persona.get("phone", "")),
             "home_town": (user.home_town if user and user.home_town else persona.get("home_town", "")),
         }
-        # 'Walthamstow, London' -> 'Walthamstow' for gym branches, venues and the like
+        # Normalize the profile area for mailbox routing.
         self._vars["home_area"] = self._vars["home_town"].split(",")[0].strip()
         # Usernames and profile URL slugs, for inboxes exported from real mail.
         self._vars["user_handle"] = email_addr.split("@")[0]

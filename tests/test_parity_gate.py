@@ -53,6 +53,25 @@ def check(name: str, out, paths) -> None:
         assert c["event_order_same"]
 
 
+def test_inprocess_task_args_write_public_agent_scenario(tmp_path):
+    from refund_eval.scenario.schema import load_agent_scenario, load_scenario
+
+    script = SCRIPTS["turn_cap"]
+    args = run.inprocess_task_args(script, "http://127.0.0.1:8000", tmp_path)
+    public = load_agent_scenario(args["scenario"])
+    full = load_scenario(script.scenario)
+    if args["world_url"] != "http://127.0.0.1:8000":
+        pytest.fail("In-process parity lost its world-service URL", pytrace=False)
+    if set(public.model_dump(mode="json")) != {"id", "task_text", "start_time", "sim_weeks", "user"}:
+        pytest.fail("Parity caller wrote a non-public top-level field", pytrace=False)
+    if set(public.model_dump(mode="json")["user"]) != {"name", "email_addresses", "phone"}:
+        pytest.fail("Parity caller wrote a non-public user field", pytrace=False)
+    if (public.id, public.task_text, public.start_time, public.sim_weeks) != (
+        full.id, full.task_text, full.start_time, full.sim_weeks,
+    ):
+        pytest.fail("Parity caller changed the public scenario inputs", pytrace=False)
+
+
 @DOCKER
 @pytest.mark.parametrize("name", list(SCRIPTS))
 def test_in_process_paths_match(name, tmp_path):

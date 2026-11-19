@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from refund_eval.parity.run import AGENT_IMPORT, HARBOR, free_env, run_harbor
+from refund_eval.parity.run import (
+    AGENT_IMPORT,
+    HARBOR,
+    free_env,
+    run_harbor,
+    stage_scripted_agent,
+)
 from refund_eval.parity.scripts import SCRIPTS
 from refund_eval.world.state import World
 
@@ -32,6 +38,7 @@ def test_native_docker_refund_from_fixture_web_to_verifier(tmp_path):
                     "--scenario", script.scenario, "--data-mode", "fixture", "--research-mode", "saved",
                     "--max-turns", str(script.max_turns), "--sim-weeks", str(script.sim_weeks)],
                    env=free_env(), check=True, capture_output=True, text=True, timeout=120)
+    stage_scripted_agent(tasks / script.scenario)
     environment = tasks / script.scenario / "environment"
     scripts = environment / "agent" / "refund_eval" / "parity" / "scripts.py"
     scripts.write_text(scripts.read_text() + '''
@@ -94,7 +101,9 @@ def test_native_docker_recovers_artifacts_and_deletes_trial_resources(tmp_path, 
                     "--world-cost-limit", "1", "--max-turns", "1000", "--sim-weeks", "12",
                     "--agent-timeout", "15" if stop == "timeout" else "120"], env=env, check=True,
                    capture_output=True, text=True, timeout=120)
-    scripts = tasks / "train_refund_late" / "environment" / "agent" / "refund_eval" / "parity" / "scripts.py"
+    task_dir = tasks / "train_refund_late"
+    stage_scripted_agent(task_dir)
+    scripts = task_dir / "environment" / "agent" / "refund_eval" / "parity" / "scripts.py"
     text = scripts.read_text()
     start = "class TurnCap(Script):\n    def step(self, n, messages):\n"
     assert text.count(start) == 1
