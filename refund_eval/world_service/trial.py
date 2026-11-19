@@ -225,7 +225,10 @@ class WorldTrial:
         the same profile record, startup checks and audit. The browser runs here, in the world."""
         from refund_eval.published import profile as published
         from refund_eval.published.browser import PublishedBrowserService
-        from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
+        from refund_eval.published.browser_runtimes import (
+            DEFAULT_IMAGE,
+            require_verified_browser_isolation,
+        )
         from refund_eval.published.fixtures import (
             FIXTURE_MAIL_PROVENANCE,
             make_fixture_mail,
@@ -319,6 +322,9 @@ class WorldTrial:
                                           output_dir=artifacts / "files")
         self._stack.push_async_callback(browser.aclose)
         # Starts the browser, runs the interception canary and records the isolation evidence.
+        if self.settings.require_verified_browser_isolation:
+            await browser.list_tools()
+            require_verified_browser_isolation(browser.security_manifest)
         await self._add_tools(browser, "playwright")
         manifest = getattr(browser, "security_manifest", {}) or {}
         profile = world_store().get(PROFILE_KEY)

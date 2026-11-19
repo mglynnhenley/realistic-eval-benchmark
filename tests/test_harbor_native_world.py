@@ -119,7 +119,8 @@ def test_world_argv_from_environment():
            "WORLD_GRADER_MODEL": "openrouter/c/d", "WORLD_COMPANY_SIMULATOR": ""}
     argv = world_argv(env, 42)
     assert argv[:4] == ["--browser-runtime", "subprocess", "--output-dir", "/var/log/world"]
-    pairs = dict(zip(argv[4::2], argv[5::2], strict=True))
+    assert argv[-1] == "--require-verified-browser-isolation"
+    pairs = dict(zip(argv[4:-1:2], argv[5:-1:2], strict=True))
     assert pairs == {"--scenario": "train_refund_late", "--sim-weeks": "12", "--max-turns": "1000",
                      "--data-mode": "hybrid", "--research-mode": "saved", "--simulator-model": "openrouter/a/b",
                      "--grader-model": "openrouter/c/d", "--seed": "42"}

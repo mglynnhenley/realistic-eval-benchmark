@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -20,6 +21,20 @@ MAX_RESPONSE_BYTES = 8_000_000
 
 class BrowserBoundaryError(RuntimeError):
     """The browser boundary failed; continuing the trial is not supported."""
+
+
+def require_verified_browser_isolation(manifest: Any) -> None:
+    """Reject startup unless the browser manifest proves an isolated network."""
+    if not isinstance(manifest, Mapping) or manifest.get("verified") is not True:
+        raise BrowserBoundaryError("Browser network isolation is not verified")
+    if manifest.get("network_mode") != "none":
+        raise BrowserBoundaryError("Browser network isolation evidence is inconsistent")
+    mode = manifest.get("mode")
+    if mode == "docker-network-none":
+        return
+    if mode == "subprocess-netns" and manifest.get("namespace_verified") is True:
+        return
+    raise BrowserBoundaryError("Browser network isolation evidence is missing or unknown")
 
 
 def docker_command(

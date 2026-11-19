@@ -37,4 +37,5 @@ class WorldSettings(BaseModel):
     # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
     # (in a network namespace where the host allows one), as on the Inspect path.
     browser_runtime: Literal["docker", "subprocess"] = "docker"
+    require_verified_browser_isolation: bool = False
     output_dir: str = DEFAULT_OUTPUT_DIR  # state.json, events.jsonl and browser/ (network audit, browser files)

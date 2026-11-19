@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.3 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 2dcc1662aadff75128d6a4b27b7e288586635e7b6793bd2e53351b80a0b8bfe1
+- Trial round: none; offline validation only.
+- Changes: require verified browser network isolation before native Harbor world startup exposes agent tools (MAT-152).
+
 ## 7.2 — 2026-11-18
 - Kind: trivial batch
 - Fingerprint: a18c882cf39985d035fad71b977cdab8e30f436ac53b30f500737ab0e20ea310
