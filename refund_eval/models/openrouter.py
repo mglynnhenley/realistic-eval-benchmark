@@ -333,9 +333,10 @@ class OpenRouterClient:
                 default_output_cap: bool = False) -> dict[str, Any]:
         name = self.model_name(role)
         params: dict[str, Any] = {"model": name.removeprefix(PREFIX), "messages": [to_openai(m) for m in messages]}
+        anthropic_company_schema = _is_anthropic_company_schema(name, schema)
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
-        if temperature is not None:
+        if temperature is not None and not (anthropic_company_schema and temperature == 1.0):
             params["temperature"] = temperature
         if stop is not None:
             params["stop"] = list(stop)
@@ -343,7 +344,6 @@ class OpenRouterClient:
             params["tools"] = [{"type": "function", "function": {
                 "name": t.name, "description": t.description, "parameters": t.parameters}} for t in tools]
         if schema is not None:
-            anthropic_company_schema = _is_anthropic_company_schema(name, schema)
             response_schema = (_anthropic_company_response_json_schema(schema.type) if anthropic_company_schema
                                else response_json_schema(schema.type))
             response = {"name": schema.name, "schema": response_schema}

@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.8 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: 52a9a403be15febd3df20be309cc107962e5354d50f750d26ef14ca4a6251b53
+- Trial round: none; offline validation only.
+- Changes: omit only the default temperature from Anthropic open-world company-action structured requests when provider routing requires support for every parameter; preserve non-default and unrelated sampling settings.
+
 ## 7.7 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
