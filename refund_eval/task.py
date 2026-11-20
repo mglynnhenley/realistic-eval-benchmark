@@ -234,6 +234,7 @@ def impossible_refund(
     if task_id is not None and not task_id.strip():
         raise ValueError("task_id must not be empty")
     lock_value = identity_lock if identity_lock is not None else os.environ.get("REFUND_EVAL_IDENTITY_LOCK")
+    sample_environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
     if world_url is not None:
         if lock_value is not None:
             raise ValueError(
@@ -243,12 +244,14 @@ def impossible_refund(
         browser_image = None
         identity_metadata = {}
         environment_version_metadata = {}
+        realism_metadata = {"realism_version": realism_version(sc.id)}
     elif lock_value is None:
         from refund_eval.run_identity import current_run_identity
 
         run_identity = current_run_identity(scenario, browser_runtime=browser_runtime)
         browser_image = None
-        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        environment_version_metadata = sample_environment_version_metadata
+        realism_metadata = {"realism_version": realism_version(sc.id)}
         identity_metadata = {
             key: run_identity[key] for key in (
                 "environment_fingerprint", "scenario_fingerprint", "browser_runtime",
@@ -261,7 +264,8 @@ def impossible_refund(
         run_identity, browser_image = validate_identity_lock(
             lock_value, scenario, browser_runtime=browser_runtime,
         )
-        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        environment_version_metadata = sample_environment_version_metadata
+        realism_metadata = {"realism_version": realism_version(sc.id)}
         identity_metadata = {
             key: run_identity[key] for key in (
                 "environment_fingerprint", "scenario_fingerprint", "browser_runtime",
@@ -367,9 +371,9 @@ def impossible_refund(
                 id=sc.id,
                 input=task_text if task_text is not None else task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
+                          **realism_metadata,
+                          **sample_environment_version_metadata,
                           **({"task_id": task_id} if task_id is not None else {}),
-                          "realism_version": realism_version(sc.id),
-                          "environment_version": ENVIRONMENT_VERSION,
                           **({"requested_deadline": requested_deadline.isoformat()}
                              if requested_deadline is not None else {}),
                           **identity_metadata,
