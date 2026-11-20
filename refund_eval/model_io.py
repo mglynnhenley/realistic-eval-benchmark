@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from refund_eval.models.client import (
     Message,
     ModelLimitExceeded,
+    ModelRequestRejected,
     OutputSchema,
     as_client,
 )
@@ -67,8 +68,10 @@ async def generate_structured[T: BaseModel](
         try:
             output = await client.complete(role, messages, schema=OutputSchema(name, schema))
             if output.failed:
+                if output.provider_error_type == "invalid_request":
+                    raise ModelRequestRejected()
                 raise ValueError("Model reply failed")
-        except ModelLimitExceeded:
+        except (ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - return API failures for the caller to handle
             error = f"model call failed: {type(ex).__name__}: {ex}"

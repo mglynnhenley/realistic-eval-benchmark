@@ -23,7 +23,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from refund_eval.config import DEFAULT_ROLE_MODEL
-from refund_eval.models.client import Message, ModelLimitExceeded, OutputSchema, client
+from refund_eval.models.client import (
+    Message,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+    OutputSchema,
+    client,
+)
 from refund_eval.scenario.schema import SCENARIO_DIR, Org, Scenario, load_scenario
 from refund_eval.sim.research import live_web, research_mode, saved_record
 from refund_eval.world.store import world_store
@@ -248,7 +254,7 @@ async def generate_rules(scenario: Scenario, org: Org, dossier_record: dict[str,
             record["rules"] = rules.model_dump()
             record["examples"] = kept_examples
             return record
-        except ModelLimitExceeded:
+        except (ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - the whole generation is retried once
             record["errors"].append(f"generation attempt {attempt + 1}: {ex}"[:300])

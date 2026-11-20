@@ -32,6 +32,7 @@ from refund_eval.models.client import (
     Completion,
     Message,
     ModelLimitExceeded,
+    ModelRequestRejected,
     OutputSchema,
     ToolCall,
     Usage,
@@ -327,6 +328,63 @@ async def test_openrouter_request_maps_role_schema_and_settings():
     assert body["usage"] == {"include": True} and "tools" not in body
     assert out.json() == ACTION and out.stop_reason == "stop" and out.model == client.roles["simulator"]
     assert client.model_name("grader") == "openrouter/anthropic/claude-haiku-4.5"
+
+
+def is_screened_provider_error(value, redacted):
+    return value == redacted
+
+
+@pytest.mark.parametrize(("location", "code", "metadata", "message", "expected"), [
+    ("response", 400, {"error_type": "invalid_request"}, "provider rejected", "invalid_request"),
+    ("choice", 400, {"error_type": "invalid_request"}, "provider rejected", "invalid_request"),
+    ("response", 400, None, "invalid_request", None),
+    ("response", 401, {"error_type": "invalid_request"}, "provider rejected", None),
+    ("response", 400, {"error_type": "other"}, "provider rejected", None),
+])
+async def test_openrouter_classifies_only_explicit_structured_invalid_request(
+        location, code, metadata, message, expected):
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    private_value = LATE.user.email_addresses[0]
+    error = {"code": code, "message": private_value if expected and location == "response" else message}
+    if metadata is not None:
+        error["metadata"] = metadata
+    body = reply({"role": "assistant", "content": ""})
+    if location == "response":
+        body["error"] = error
+        body["choices"] = []
+    else:
+        body["choices"][0]["error"] = error
+    client = openrouter(lambda request: httpx.Response(200, json=body))
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    try:
+        completion = await client.complete("simulator", [Message("user", "safe test")])
+    finally:
+        store.install(previous)
+    actual_error_type = completion.provider_error_type
+    assert actual_error_type == expected, \
+        "only code 400 with metadata.error_type invalid_request is non-retryable"
+    if location == "response" and expected:
+        from refund_eval.published import REDACTED_SCENARIO_VALUE
+
+        assert is_screened_provider_error(completion.error, REDACTED_SCENARIO_VALUE), \
+            "private provider text must be screened"
+
+
+def test_model_request_rejected_is_safe_and_not_a_limit():
+    assert not issubclass(ModelRequestRejected, ModelLimitExceeded), "provider rejection is not spending-limit exhaustion"
+    assert str(ModelRequestRejected()) == (
+        "Provider rejected the request (invalid_request, code 400); check schema and provider support; "
+        "rejected field unavailable."
+    )
+
+
+async def test_openrouter_http_402_remains_a_model_limit():
+    client = openrouter(lambda request: httpx.Response(402, json={"error": {"message": "out of credit"}}))
+    with pytest.raises(ModelLimitExceeded):
+        await client.complete("simulator", [Message("user", "safe test")])
 
 
 async def test_openrouter_tool_calls_round_trip_the_assistant_message():

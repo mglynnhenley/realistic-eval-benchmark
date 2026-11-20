@@ -41,6 +41,7 @@ from refund_eval.config import DEFAULT_ROLE_MODEL, HYBRID_EXA_KEY_ENV
 from refund_eval.models.client import (
     Message,
     ModelLimitExceeded,
+    ModelRequestRejected,
     OutputSchema,
     Tool,
     ToolCall,
@@ -418,7 +419,7 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
                                           schema=final if lookups <= 0 else None)
             if output.failed:
                 raise ValueError("Research model reply failed")
-        except ModelLimitExceeded:
+        except (ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - an unavailable model leaves the saved file, or nothing
             logger.warning("research model failed for %s: %s", org.key, ex)
@@ -481,7 +482,7 @@ async def research_examples(org: Org, scenario: Scenario, *,
                 "simulator", messages, tools=tools, max_tokens=MAX_OUTPUT_TOKENS,
                 schema=schema if lookups <= 0 else None, temperature=0,
             )
-        except ModelLimitExceeded:
+        except (ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - examples are optional
             record["errors"].append(f"model: {ex}"[:300])
@@ -553,7 +554,7 @@ async def profile_person(org: Org, inbox_excerpts: list[str]) -> dict[str, Any]:
         profile = PersonProfile.model_validate(output.json())
         record["dossier"] = Dossier(summary=profile.summary, facts=[],
                                     persona=Persona(voice=profile.voice)).model_dump(by_alias=True)
-    except ModelLimitExceeded:
+    except (ModelLimitExceeded, ModelRequestRejected):
         raise
     except Exception as ex:  # noqa: BLE001 - the person keeps the counterpart persona
         logger.warning("person profile failed for %s: %s", org.key, ex)

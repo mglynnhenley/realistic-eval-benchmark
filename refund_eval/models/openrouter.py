@@ -99,6 +99,15 @@ def _wire_content(content: str | list[str]) -> Any:
     return content if isinstance(content, str) else [{"type": "text", "text": part} for part in content]
 
 
+def _field(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
+
+
+def _is_invalid_request(error: Any) -> bool:
+    metadata = _field(error, "metadata")
+    return _field(error, "code") == 400 and _field(metadata, "error_type") == "invalid_request"
+
+
 def to_openai(message: Message) -> dict[str, Any]:
     if isinstance(message.native, dict):
         return message.native
@@ -338,6 +347,7 @@ class OpenRouterClient:
         finish = choice.finish_reason if choice is not None else None
         error = getattr(result, "error", None)
         choice_error = getattr(choice, "error", None)
+        provider_error_type = "invalid_request" if _is_invalid_request(error) or _is_invalid_request(choice_error) else None
         if choice_error is not None:
             error = {"response": error, "choice": choice_error} if error is not None else choice_error
         failed = (error is not None or finish in {"error", "length"} or choice is None
@@ -372,4 +382,5 @@ class OpenRouterClient:
                                        native=raw.model_dump(exclude_none=True) if raw is not None else None),
             stop_reason=_STOP.get(choice.finish_reason, "unknown") if choice is not None else "unknown",
             usage=usage, model=name, cost_method=cost_method, failed=failed, error=error,
-            generation_id=result.id, raw_finish_reason=finish, http_status=response.status_code, worst_case_cost=worst_case)
+            provider_error_type=provider_error_type, generation_id=result.id, raw_finish_reason=finish,
+            http_status=response.status_code, worst_case_cost=worst_case)

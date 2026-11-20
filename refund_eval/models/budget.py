@@ -16,6 +16,7 @@ from refund_eval.models.client import (
     Message,
     ModelClient,
     ModelLimitExceeded,
+    ModelRequestRejected,
     Role,
     Usage,
 )
@@ -92,6 +93,7 @@ class BudgetedWorldModels:
         self.reserved = Decimal(0)
         self.persist = persist
         self.lock = anyio.Lock()
+        self._request_rejected = False
         if self.ledger is None:
             self._mark("available")
         else:
@@ -140,6 +142,13 @@ class BudgetedWorldModels:
     def _reservation_status(self, error: WorldSpendLedgerError) -> str:
         return "unknown" if "unresolved hold" in str(error) else "exhausted"
 
+    def _reject_request(self) -> None:
+        self._request_rejected = True
+        if self.status in {"available", "unsettled"}:
+            self._mark("failed")
+        self.persist()
+        raise ModelRequestRejected() from None
+
     async def _complete_reserved(self, role: Role, messages: Sequence[Message], settings: dict[str, Any]) -> Completion:
         if self.status == "failed":
             raise ModelLimitExceeded("World model allowance is failed; no further requests")
@@ -172,6 +181,12 @@ class BudgetedWorldModels:
             request_exception = False
             try:
                 completion = await self.recorded.complete(role, messages, **settings)
+            except ModelRequestRejected:
+                snapshot = self.ledger.mark_unknown(attempt_id)
+                self._sync_ledger("unknown", snapshot)
+                self._request_rejected = True
+                self.persist()
+                raise
             except ModelLimitExceeded:
                 self.ledger.mark_unknown(attempt_id)
                 self._sync_ledger("unknown")
@@ -204,6 +219,8 @@ class BudgetedWorldModels:
                     snapshot = self.ledger.mark_unknown(attempt_id)
                     self._sync_ledger("unknown", snapshot)
                     self.persist()
+                    if completion.provider_error_type == "invalid_request":
+                        self._reject_request()
                     raise ModelLimitExceeded("Failed world model request has no defensible charge")
                 if reported is None and worst_case is None:
                     charge = bound
@@ -234,9 +251,14 @@ class BudgetedWorldModels:
             except WorldSpendLedgerError:
                 self._sync_ledger("unknown")
                 self.persist()
+                if completion.provider_error_type == "invalid_request":
+                    self._request_rejected = True
+                    raise ModelRequestRejected() from None
                 raise
             self._sync_ledger(snapshot=snapshot)
             self.persist()
+            if completion.provider_error_type == "invalid_request":
+                self._reject_request()
             if not completion.failed:
                 return completion
             if attempt == 2:
@@ -259,6 +281,11 @@ class BudgetedWorldModels:
             self.persist()
             try:
                 completion = await self.recorded.complete(role, messages, **settings)
+            except ModelRequestRejected:
+                self._mark("unknown")
+                self._request_rejected = True
+                self.persist()
+                raise
             except ModelLimitExceeded:
                 self._mark("unknown")
                 raise
@@ -274,14 +301,20 @@ class BudgetedWorldModels:
             cost = _decimal(completion.usage.cost if completion.usage else None)
             if cost is None:
                 self._mark("unknown")
+                if completion.provider_error_type == "invalid_request":
+                    self._reject_request()
                 raise ModelLimitExceeded("World model request did not report a valid charge")
             self.spent += cost
             if self.spent >= self.limit:
                 self._mark("exhausted")
+                if completion.provider_error_type == "invalid_request":
+                    self._reject_request()
                 raise ModelLimitExceeded(f"World model allowance reached: USD {self.spent} / {self.limit}")
             if not completion.failed:
                 self._mark("available")
                 return completion
+            if completion.provider_error_type == "invalid_request":
+                self._reject_request()
             if attempt == 2:
                 self._mark("failed")
                 raise ModelLimitExceeded("World model request failed after three attempts")
@@ -296,6 +329,8 @@ class BudgetedWorldModels:
 
     async def complete(self, role: Role, messages: Sequence[Message], **settings: Any) -> Completion:
         async with self.lock:
+            if self._request_rejected:
+                raise ModelRequestRejected()
             if self.ledger is None:
                 return await self._complete_legacy(role, messages, dict(settings))
             return await self._complete_reserved(role, messages, dict(settings))
