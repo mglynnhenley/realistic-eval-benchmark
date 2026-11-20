@@ -9,7 +9,6 @@ import socket
 import subprocess
 import time
 import urllib.request
-from dataclasses import fields
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -31,8 +30,6 @@ from harbor.models.trial.config import TrialConfig
 from harbor.models.trial.result import AgentInfo, ExceptionInfo, StepResult, TrialResult
 from harbor.models.verifier.result import VerifierResult
 from modal import App, Sandbox, Workspace
-from modal.types import WorkspaceBillingSummary
-from modal.workspace import WorkspaceBillingManager, _WorkspaceBillingManager
 
 from scripts import guarded_harbor
 from scripts.guarded_harbor import LauncherFailure, run_guarded_job, validate_job_config
@@ -41,7 +38,6 @@ from scripts.offline_spend_guard import (
     SpendGuard,
     Thresholds,
     install_modal_hooks,
-    modal_cycle_probe,
 )
 
 START = datetime(2026, 11, 1, tzinfo=UTC)
@@ -87,15 +83,10 @@ def openrouter(usage=0, *, limit=50, remaining=None):
     }
 
 
-def modal(metered_cost=0, *, start=START, end=END):
-    return {"metered_cost": metered_cost, "start": start, "end": end}
-
-
 def make_thresholds(**overrides):
     values = {
         "openrouter_key_ceiling": Decimal(50),
         "openrouter_trial_delta": Decimal(10),
-        "modal_cycle_stop": Decimal(27),
         "probe_timeout": 0.03,
         "poll_interval": 0.02,
         "max_sample_age": 0.2,
@@ -195,16 +186,14 @@ def valid_config(tmp_path):
     )
 
 
-def stable_guard(*, events=None, clock=None, or_values=None, modal_values=None):
+def stable_guard(*, events=None, clock=None, or_values=None):
     or_probe = ProbeSequence(or_values or [openrouter()], events=events, label="openrouter")
-    modal_probe = ProbeSequence(modal_values or [modal()], events=events, label="modal")
     guard = SpendGuard(
         make_thresholds(),
         openrouter_probe=or_probe,
-        modal_probe=modal_probe,
         clock=clock or time.monotonic,
     )
-    return guard, or_probe, modal_probe
+    return guard, or_probe
 
 
 @pytest.mark.parametrize(
@@ -262,7 +251,7 @@ def test_guarded_cli_reports_returned_trial_result(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(guarded_harbor, "run_guarded_job", run_job)
     exit_code = guarded_harbor.main([
         "--config", str(config_path), "--openrouter-key-ceiling", "50",
-        "--openrouter-trial-delta", "10", "--modal-cycle-stop", "27",
+        "--openrouter-trial-delta", "10",
     ])
 
     stdout, stderr = capsys.readouterr()
@@ -307,7 +296,7 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
     install_fake_harbor_methods(monkeypatch, create, execute)
     config = valid_config(tmp_path)
     validate_job_config(config)
-    guard, _, _ = stable_guard(events=events)
+    guard, _ = stable_guard(events=events)
 
     class FakeJob:
         async def run(self):
@@ -329,54 +318,12 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
     )
 
     assert result == "done"
-    assert events.index("job_factory") > max(
-        events.index("openrouter_2"), events.index("modal_2")
-    )
+    assert events.index("job_factory") > events.index("openrouter_2")
     assert events.index("job_run") > events.index("job_factory")
-    assert events.index("sandbox_create") > events.index("modal_2")
+    assert events.index("sandbox_create") > events.index("openrouter_2")
     assert exec_calls == ["offline command"]
     assert sandbox.terminate_calls == 1
     assert guard.monitor_task is not None and guard.monitor_task.cancelled()
-
-
-def test_pinned_modal_billing_shape_and_production_probe_adapter(monkeypatch):
-    assert not inspect.iscoroutinefunction(Workspace.from_context)
-    assert isinstance(Workspace.billing, property)
-    assert inspect.iscoroutinefunction(_WorkspaceBillingManager.summary)
-    assert not inspect.iscoroutinefunction(WorkspaceBillingManager.summary)
-    assert inspect.iscoroutinefunction(WorkspaceBillingManager.summary.aio)
-    assert {field.name for field in fields(WorkspaceBillingSummary)} >= {
-        "start",
-        "end",
-        "metered_cost",
-    }
-
-    calls = []
-    expected_summary = SimpleNamespace(
-        start=START, end=END, metered_cost=Decimal("2.5")
-    )
-
-    class FakeBilling:
-        def __init__(self):
-            def summary():
-                calls.append("summary")
-                return expected_summary
-
-            async def summary_aio():
-                calls.append("summary.aio")
-                return expected_summary
-
-            summary.aio = summary_aio
-            self.summary = summary
-
-    workspace = SimpleNamespace(billing=FakeBilling())
-    monkeypatch.setattr(Workspace, "from_context", staticmethod(lambda: workspace))
-
-    result = asyncio.run(modal_cycle_probe())
-    assert calls == ["summary.aio"]
-    assert result.start == START
-    assert result.end == END
-    assert result.metered_cost == Decimal("2.5")
 
 
 def test_normal_environment_teardown_cleans_only_its_binding(monkeypatch):
@@ -390,7 +337,7 @@ def test_normal_environment_teardown_cleans_only_its_binding(monkeypatch):
     install_fake_harbor_methods(monkeypatch, create)
 
     async def scenario():
-        guard, _, _ = stable_guard()
+        guard, _ = stable_guard()
         await guard.start()
         with install_modal_hooks(guard):
             verifier_environment = make_environment()
@@ -412,22 +359,19 @@ def test_normal_environment_teardown_cleans_only_its_binding(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("or_values", "modal_values"),
+    "or_values",
     [
-        ([RuntimeError("must not expose details")], [modal()]),
-        ([openrouter()], [RuntimeError("must not expose details")]),
-        ([openrouter(limit=51)], [modal()]),
-        ([openrouter(usage="NaN")], [modal()]),
-        ([openrouter(usage=41, remaining=9)], [modal()]),
-        ([openrouter()], [modal(27)]),
+        [RuntimeError("must not expose details")],
+        [openrouter(limit=51)],
+        [openrouter(usage="NaN")],
+        [openrouter(usage=41, remaining=9)],
+        [None],
     ],
 )
-def test_startup_probe_errors_thresholds_and_malformed_data_dispatch_nothing(
-    tmp_path, or_values, modal_values
-):
+def test_startup_probe_errors_thresholds_and_malformed_data_dispatch_nothing(tmp_path, or_values):
     config = valid_config(tmp_path)
     calls = []
-    guard, _, _ = stable_guard(or_values=or_values, modal_values=modal_values)
+    guard, _ = stable_guard(or_values=or_values)
 
     async def factory(_):
         calls.append("created")
@@ -447,8 +391,7 @@ def test_startup_probe_timeout_and_late_monitor_readiness_dispatch_nothing(tmp_p
 
     guard = SpendGuard(
         make_thresholds(),
-        openrouter_probe=ProbeSequence([openrouter()]),
-        modal_probe=ProbeSequence([modal(), hangs]),
+        openrouter_probe=ProbeSequence([openrouter(), hangs]),
     )
     calls = []
 
@@ -462,28 +405,16 @@ def test_startup_probe_timeout_and_late_monitor_readiness_dispatch_nothing(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("or_values", "modal_values"),
+    "or_values",
     [
-        ([openrouter(), openrouter(), RuntimeError("hidden")], [modal()]),
-        ([openrouter()], [modal(), modal(), RuntimeError("hidden")]),
-        ([openrouter(), openrouter(), openrouter(usage=10)], [modal()]),
-        ([openrouter()], [modal(), modal(), modal(27)]),
-        ([openrouter(usage=5), openrouter(usage=5), openrouter(usage=4)], [modal()]),
-        ([openrouter()], [modal(5), modal(5), modal(4)]),
-        ([openrouter(), openrouter(), openrouter(usage="NaN")], [modal()]),
-        (
-            [openrouter()],
-            [
-                modal(),
-                modal(),
-                modal(start=START.replace(month=10), end=END.replace(month=11)),
-            ],
-        ),
-        ([openrouter()], [modal(), modal(), {"start": START, "end": END}]),
+        [openrouter(), openrouter(), RuntimeError("hidden")],
+        [openrouter(), openrouter(), openrouter(usage=10)],
+        [openrouter(usage=5), openrouter(usage=5), openrouter(usage=4)],
+        [openrouter(), openrouter(), openrouter(usage="NaN")],
     ],
 )
 def test_post_ready_probe_failures_and_thresholds_close_exec_and_clean_bound_sandbox(
-    tmp_path, monkeypatch, or_values, modal_values
+    tmp_path, monkeypatch, or_values
 ):
     sandbox = FakeSandbox()
     exec_calls = []
@@ -499,7 +430,7 @@ def test_post_ready_probe_failures_and_thresholds_close_exec_and_clean_bound_san
 
     install_fake_harbor_methods(monkeypatch, create, execute)
     config = valid_config(tmp_path)
-    guard, _, _ = stable_guard(or_values=or_values, modal_values=modal_values)
+    guard, _ = stable_guard(or_values=or_values)
     environment = make_environment()
 
     class BlockingJob:
@@ -534,7 +465,7 @@ def test_custom_environment_import_path_is_rejected_before_probes_or_job_factory
 ):
     config = valid_config(tmp_path)
     config.environment.import_path = "synthetic.backend:Environment"
-    guard, openrouter_probe, modal_probe = stable_guard()
+    guard, openrouter_probe = stable_guard()
     job_factory_calls = []
 
     async def job_factory(_):
@@ -551,7 +482,6 @@ def test_custom_environment_import_path_is_rejected_before_probes_or_job_factory
         )
 
     assert openrouter_probe.calls == 0
-    assert modal_probe.calls == 0
     assert job_factory_calls == []
     assert guard._start_attempted is False
 
@@ -579,7 +509,7 @@ def test_alternate_task_or_verifier_key_is_rejected_before_probes_or_job_factory
                 + 'OPENROUTER_API_KEY = "synthetic-alternate-key"\n'
             )
 
-    guard, openrouter_probe, modal_probe = stable_guard()
+    guard, openrouter_probe = stable_guard()
     job_factory_calls = []
 
     async def job_factory(_):
@@ -596,7 +526,6 @@ def test_alternate_task_or_verifier_key_is_rejected_before_probes_or_job_factory
         )
 
     assert openrouter_probe.calls == 0
-    assert modal_probe.calls == 0
     assert job_factory_calls == []
     assert guard._start_attempted is False
 
@@ -616,7 +545,7 @@ def test_monitor_timeout_cleans_exact_bound_sandbox(tmp_path, monkeypatch):
         if len(entered) >= 2:
             await asyncio.Future()
         entered.append(True)
-        return modal()
+        return openrouter()
 
     async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
         return sandbox
@@ -625,8 +554,7 @@ def test_monitor_timeout_cleans_exact_bound_sandbox(tmp_path, monkeypatch):
     config = valid_config(tmp_path)
     guard = SpendGuard(
         make_thresholds(),
-        openrouter_probe=ProbeSequence([openrouter()]),
-        modal_probe=hangs_after_ready,
+        openrouter_probe=hangs_after_ready,
     )
     started = []
 
@@ -667,7 +595,7 @@ def test_monitor_failure_cancels_pending_exec_and_cleans_bound_sandbox(tmp_path,
 
     install_fake_harbor_methods(monkeypatch, create, pending_exec)
     config = valid_config(tmp_path)
-    guard, _, _ = stable_guard(
+    guard, _ = stable_guard(
         or_values=[openrouter(), openrouter(), RuntimeError("probe failed")]
     )
 
@@ -694,11 +622,9 @@ def test_creation_returning_after_monitor_trip_is_bound_and_cleaned(tmp_path, mo
     create_entered = asyncio.Event()
     release_create = asyncio.Event()
     or_probe = ProbeSequence([openrouter(), openrouter(), RuntimeError("probe failed")])
-    modal_probe = ProbeSequence([modal()])
     guard = SpendGuard(
         make_thresholds(cleanup_timeout=0.02),
         openrouter_probe=or_probe,
-        modal_probe=modal_probe,
     )
 
     async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
@@ -764,7 +690,7 @@ def test_missing_or_mismatched_creation_identity_never_cleans_returned_object(
             install_fake_harbor_methods(patcher, create)
 
             async def scenario():
-                guard, _, _ = stable_guard()
+                guard, _ = stable_guard()
                 await guard.start()
                 environment = make_environment()
                 with install_modal_hooks(guard), pytest.raises(GuardFailure):
@@ -786,7 +712,7 @@ def test_identity_change_after_binding_never_cleans_object(monkeypatch, identity
     install_fake_harbor_methods(monkeypatch, create)
 
     async def scenario():
-        guard, _, _ = stable_guard()
+        guard, _ = stable_guard()
         await guard.start()
         environment = make_environment()
         with install_modal_hooks(guard):
@@ -817,7 +743,7 @@ def test_mismatched_current_sandbox_never_touches_foreign_object(monkeypatch):
     install_fake_harbor_methods(monkeypatch, create)
 
     async def scenario():
-        guard, _, _ = stable_guard()
+        guard, _ = stable_guard()
         await guard.start()
         environment = make_environment()
         with install_modal_hooks(guard):
@@ -841,7 +767,7 @@ def test_cleanup_failure_is_nonzero_and_reports_uncertainty(tmp_path, monkeypatc
 
     install_fake_harbor_methods(monkeypatch, create)
     config = valid_config(tmp_path)
-    guard, _, _ = stable_guard(
+    guard, _ = stable_guard(
         or_values=[openrouter(), openrouter(), RuntimeError("probe failed")]
     )
 
@@ -881,7 +807,7 @@ def test_cleanup_timeout_is_nonzero_and_reports_uncertainty(monkeypatch):
     install_fake_harbor_methods(monkeypatch, create)
 
     async def scenario():
-        guard, _, _ = stable_guard()
+        guard, _ = stable_guard()
         guard.thresholds = make_thresholds(cleanup_timeout=0.01)
         await guard.start()
         environment = make_environment()
@@ -901,7 +827,7 @@ def test_cleanup_timeout_is_nonzero_and_reports_uncertainty(monkeypatch):
     "overrides",
     [
         {"openrouter_trial_delta": Decimal(0)},
-        {"modal_cycle_stop": Decimal("NaN")},
+        {"openrouter_trial_delta": Decimal("NaN")},
         {"probe_timeout": float("nan")},
     ],
 )
@@ -915,7 +841,6 @@ def test_initial_probe_failure_latches_start_attempt_and_prevents_rearm():
     guard = SpendGuard(
         make_thresholds(),
         openrouter_probe=openrouter_probe,
-        modal_probe=ProbeSequence([modal()]),
     )
 
     async def scenario():
@@ -937,7 +862,7 @@ def test_stale_readiness_cannot_dispatch_or_exec(tmp_path, monkeypatch):
             return self.value
 
     clock = Clock()
-    guard, _, _ = stable_guard(clock=clock)
+    guard, _ = stable_guard(clock=clock)
     original_start = guard.start
 
     async def start_then_stale():
@@ -977,7 +902,7 @@ def test_stale_post_ready_sample_closes_exec_and_cleans_bound_sandbox(tmp_path, 
 
     install_fake_harbor_methods(monkeypatch, create, execute)
     config = valid_config(tmp_path)
-    guard, _, _ = stable_guard(clock=clock)
+    guard, _ = stable_guard(clock=clock)
     environment = make_environment()
 
     class StaleJob:
@@ -1004,7 +929,7 @@ def test_monitor_cancellation_latches_and_cleans_only_bound_resource(monkeypatch
     install_fake_harbor_methods(monkeypatch, create)
 
     async def scenario():
-        guard, _, _ = stable_guard()
+        guard, _ = stable_guard()
         await guard.start()
         environment = make_environment()
         with install_modal_hooks(guard):
