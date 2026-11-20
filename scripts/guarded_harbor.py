@@ -1,17 +1,17 @@
-"""Opt-in host launcher for one fresh Harbor Modal job behind spend monitoring.
+"""Opt-in host launcher for one fresh Harbor Modal job behind an OpenRouter monitor.
 
 Usage::
 
     scripts/harbor python -m scripts.guarded_harbor \
         --config JOB.yaml --openrouter-key-ceiling 50 \
-        --openrouter-trial-delta "$OPENROUTER_TRIAL_DELTA" \
-        --modal-cycle-stop "$MODAL_CYCLE_STOP"
+        --openrouter-trial-delta "$OPENROUTER_TRIAL_DELTA"
 
 This script is not activated by repository configuration and its presence is not
-launch approval. Billing and paid-grader holds remain separate; key metadata
-does not establish that OpenRouter BYOK is absent. Monitoring cannot prevent an
-in-flight call or billing delay from exceeding a threshold, and host failure or
-Modal cleanup failure can leave cleanup uncertain.
+launch approval. Modal workspace costs are not monitored by this launcher and
+require owner monitoring. Paid-grader holds remain separate; key metadata does
+not establish that OpenRouter BYOK is absent. OpenRouter monitoring cannot
+prevent an in-flight call or billing delay from exceeding a threshold, and host
+failure or Modal cleanup failure can leave cleanup uncertain.
 
 Exit 0 means one finished trial with a valid verifier result and no recorded
 exceptions, regardless of its score. Trial failures reported by Harbor exit 1
@@ -237,12 +237,11 @@ def _trial_failure_reason(result: JobResult) -> str | None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run one fresh Harbor Modal job behind fail-closed spend monitors."
+        description="Run one fresh Harbor Modal job behind a fail-closed OpenRouter monitor."
     )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--openrouter-key-ceiling", type=_decimal_argument, required=True)
     parser.add_argument("--openrouter-trial-delta", type=_decimal_argument, required=True)
-    parser.add_argument("--modal-cycle-stop", type=_decimal_argument, required=True)
     parser.add_argument("--probe-timeout", type=float, default=10.0)
     parser.add_argument("--poll-interval", type=float, default=15.0)
     parser.add_argument("--max-sample-age", type=float, default=35.0)
@@ -262,7 +261,6 @@ def main(argv: list[str] | None = None) -> int:
         thresholds = Thresholds(
             openrouter_key_ceiling=args.openrouter_key_ceiling,
             openrouter_trial_delta=args.openrouter_trial_delta,
-            modal_cycle_stop=args.modal_cycle_stop,
             probe_timeout=args.probe_timeout,
             poll_interval=args.poll_interval,
             max_sample_age=args.max_sample_age,

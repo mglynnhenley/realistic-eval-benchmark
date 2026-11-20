@@ -9,7 +9,6 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -41,7 +40,6 @@ def _money(value: object) -> Decimal:
 class Thresholds:
     openrouter_key_ceiling: Decimal
     openrouter_trial_delta: Decimal
-    modal_cycle_stop: Decimal
     probe_timeout: float = 10.0
     poll_interval: float = 15.0
     max_sample_age: float = 35.0
@@ -51,13 +49,12 @@ class Thresholds:
         try:
             key_ceiling = _money(self.openrouter_key_ceiling)
             delta = _money(self.openrouter_trial_delta)
-            modal_stop = _money(self.modal_cycle_stop)
         except ValueError:
-            raise ValueError("cost thresholds must be finite and nonnegative") from None
+            raise ValueError("OpenRouter thresholds must be finite and nonnegative") from None
         if key_ceiling != KEY_CEILING:
             raise ValueError("OpenRouter key ceiling must be exactly $50")
-        if delta <= 0 or delta > key_ceiling or modal_stop <= 0:
-            raise ValueError("trial and Modal thresholds must be positive and bounded")
+        if delta <= 0 or delta > key_ceiling:
+            raise ValueError("OpenRouter trial threshold must be positive and bounded")
         for value in (
             self.probe_timeout,
             self.poll_interval,
@@ -75,7 +72,6 @@ class Thresholds:
             raise ValueError("sample freshness must exceed poll interval plus probe timeout")
         object.__setattr__(self, "openrouter_key_ceiling", key_ceiling)
         object.__setattr__(self, "openrouter_trial_delta", delta)
-        object.__setattr__(self, "modal_cycle_stop", modal_stop)
 
 
 @dataclass(frozen=True)
@@ -96,44 +92,6 @@ class OpenRouterSnapshot:
             limit=_money(data.get("limit")),
             remaining=_money(data.get("limit_remaining")),
         )
-
-
-def _datetime(value: object) -> datetime:
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            raise ValueError from None
-    else:
-        raise TypeError
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-@dataclass(frozen=True)
-class ModalSnapshot:
-    metered_cost: Decimal
-    cycle_start: datetime
-    cycle_end: datetime
-
-    @classmethod
-    def parse(cls, value: object) -> ModalSnapshot:
-        if isinstance(value, Mapping):
-            metered = value.get("metered_cost")
-            cycle_start = value.get("start", value.get("cycle_start"))
-            cycle_end = value.get("end", value.get("cycle_end"))
-        else:
-            metered = getattr(value, "metered_cost", None)
-            cycle_start = getattr(value, "start", None)
-            cycle_end = getattr(value, "end", None)
-        start = _datetime(cycle_start)
-        end = _datetime(cycle_end)
-        if start >= end:
-            raise ValueError
-        return cls(_money(metered), start, end)
 
 
 @dataclass(frozen=True)
@@ -191,37 +149,22 @@ async def openrouter_key_probe(timeout: float) -> object:
     return await asyncio.to_thread(_read_openrouter_sync, timeout)
 
 
-async def modal_cycle_probe() -> object:
-    try:
-        from modal import Workspace
-
-        workspace = Workspace.from_context()
-        return await workspace.billing.summary.aio()
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001
-        raise GuardFailure("Modal probe failed") from None
-
-
 class SpendGuard:
     def __init__(
         self,
         thresholds: Thresholds,
         *,
         openrouter_probe: Probe | None = None,
-        modal_probe: Probe | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.thresholds = thresholds
         self.openrouter_probe = openrouter_probe or (
             lambda: openrouter_key_probe(thresholds.probe_timeout)
         )
-        self.modal_probe = modal_probe or modal_cycle_probe
         self._clock = clock
         self._owner = object()
         self._baseline: OpenRouterSnapshot | None = None
         self._previous_openrouter: OpenRouterSnapshot | None = None
-        self._previous_modal: ModalSnapshot | None = None
         self._last_sample_at: float | None = None
         self._start_attempted = False
         self._started = False
@@ -276,24 +219,15 @@ class SpendGuard:
         except Exception:  # noqa: BLE001
             raise GuardFailure(f"{name} probe failed") from None
 
-    async def _read_pair(self) -> tuple[OpenRouterSnapshot, ModalSnapshot]:
-        openrouter_task = asyncio.create_task(self._probe("OpenRouter", self.openrouter_probe))
-        modal_task = asyncio.create_task(self._probe("Modal", self.modal_probe))
+    async def _read_openrouter(self) -> OpenRouterSnapshot:
+        value = await self._probe("OpenRouter", self.openrouter_probe)
         try:
-            openrouter_value, modal_value = await asyncio.gather(openrouter_task, modal_task)
-        except BaseException:
-            for task in (openrouter_task, modal_task):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(openrouter_task, modal_task, return_exceptions=True)
-            raise
-        try:
-            return OpenRouterSnapshot.parse(openrouter_value), ModalSnapshot.parse(modal_value)
+            return OpenRouterSnapshot.parse(value)
         except (ValueError, TypeError, OverflowError):
             raise GuardFailure("monitor data malformed") from None
 
     def _accept_sample(
-        self, openrouter: OpenRouterSnapshot, modal: ModalSnapshot, *, initial: bool = False
+        self, openrouter: OpenRouterSnapshot, *, initial: bool = False
     ) -> None:
         if openrouter.limit != self.thresholds.openrouter_key_ceiling:
             raise GuardFailure("OpenRouter key ceiling does not match $50")
@@ -303,19 +237,13 @@ class SpendGuard:
             raise GuardFailure("OpenRouter counters malformed")
         if openrouter.usage + openrouter.remaining > openrouter.limit + _MONEY_EPSILON:
             raise GuardFailure("OpenRouter counters malformed")
-        if modal.cycle_start >= modal.cycle_end:
-            raise GuardFailure("Modal cycle data malformed")
-
         if initial:
             if openrouter.remaining < self.thresholds.openrouter_trial_delta:
                 raise GuardFailure("OpenRouter remaining limit is below trial threshold")
-            if modal.metered_cost >= self.thresholds.modal_cycle_stop:
-                raise GuardFailure("Modal cycle threshold already reached")
             self._baseline = openrouter
         else:
             previous_openrouter = self._previous_openrouter
-            previous_modal = self._previous_modal
-            if previous_openrouter is None or previous_modal is None or self._baseline is None:
+            if previous_openrouter is None or self._baseline is None:
                 raise GuardFailure("monitor state invalid")
             if openrouter.usage < previous_openrouter.usage:
                 raise GuardFailure("OpenRouter usage counter decreased")
@@ -323,17 +251,10 @@ class SpendGuard:
                 raise GuardFailure("OpenRouter remaining counter increased")
             if openrouter.limit != previous_openrouter.limit:
                 raise GuardFailure("OpenRouter key ceiling changed")
-            if modal.cycle_start != previous_modal.cycle_start or modal.cycle_end != previous_modal.cycle_end:
-                raise GuardFailure("Modal billing cycle changed")
-            if modal.metered_cost < previous_modal.metered_cost:
-                raise GuardFailure("Modal metered counter decreased")
             if openrouter.usage - self._baseline.usage >= self.thresholds.openrouter_trial_delta:
                 raise GuardFailure("OpenRouter trial threshold reached")
-            if modal.metered_cost >= self.thresholds.modal_cycle_stop:
-                raise GuardFailure("Modal cycle threshold reached")
 
         self._previous_openrouter = openrouter
-        self._previous_modal = modal
         self._last_sample_at = self._clock()
 
     async def start(self) -> None:
@@ -342,8 +263,8 @@ class SpendGuard:
             raise self._failure()
         self._start_attempted = True
         try:
-            openrouter, modal = await self._read_pair()
-            self._accept_sample(openrouter, modal, initial=True)
+            openrouter = await self._read_openrouter()
+            self._accept_sample(openrouter, initial=True)
         except GuardFailure as failure:
             self._latch(failure.reason)
             raise self._failure() from None
@@ -360,8 +281,8 @@ class SpendGuard:
     async def _monitor(self) -> None:
         try:
             while not self._closing:
-                openrouter, modal = await self._read_pair()
-                self._accept_sample(openrouter, modal)
+                openrouter = await self._read_openrouter()
+                self._accept_sample(openrouter)
                 self._ready.set()
                 await asyncio.sleep(self.thresholds.poll_interval)
         except asyncio.CancelledError:
