@@ -46,7 +46,11 @@ from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.killswitch import kill_reason
 from refund_eval.models import client as models
 from refund_eval.models.budget import BudgetedWorldModels
-from refund_eval.models.client import ModelClient, ModelLimitExceeded
+from refund_eval.models.client import (
+    ModelClient,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+)
 from refund_eval.models.replay import RecordingModelClient
 from refund_eval.models.world_spend_ledger import (
     WorldSpendLedger,
@@ -309,6 +313,9 @@ class WorldTrial:
             with active_tool_call(request.get("tool_call_id")):
                 try:
                     return await boundary(request)
+                except ModelRequestRejected:
+                    _record_stop("model_request_rejected")
+                    raise
                 except ModelLimitExceeded:
                     _record_stop(STOP_MODEL_LIMIT)
                     raise
@@ -383,6 +390,10 @@ class WorldTrial:
                 return _error(str(ex))
             except ModelLimitExceeded as ex:
                 _record_stop(STOP_MODEL_LIMIT)
+                entry.update(status="error", error=str(ex))
+                return _error(str(ex))
+            except ModelRequestRejected as ex:
+                _record_stop("model_request_rejected")
                 entry.update(status="error", error=str(ex))
                 return _error(str(ex))
             except Exception as ex:
@@ -482,6 +493,9 @@ class WorldTrial:
             return None
         except ModelLimitExceeded:
             _record_stop(STOP_MODEL_LIMIT)
+            return None
+        except ModelRequestRejected:
+            _record_stop("model_request_rejected")
             return None
         wakeup, _ = wake_after_turn(sim_weeks=settings.sim_weeks, checkin_hours=settings.checkin_hours)
         return wakeup

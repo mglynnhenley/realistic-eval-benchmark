@@ -12,7 +12,12 @@ from refund_eval.companies.models import (
     CompanyModelRefusal,
 )
 from refund_eval.formatting import long_date, money
-from refund_eval.models.client import Message, OutputSchema, as_client
+from refund_eval.models.client import (
+    Message,
+    ModelRequestRejected,
+    OutputSchema,
+    as_client,
+)
 
 ACTION_SHAPE = json.dumps({
     "decision": "snake_case_label",
@@ -328,6 +333,8 @@ class LLMCompanySimulator:
             "simulator", build_messages(event, context), temperature=1.0, schema=OutputSchema(
                 "open_world_action", CompanyAction, "What this organisation or person does in response."))
         if output.failed:
+            if output.provider_error_type == "invalid_request":
+                raise ModelRequestRejected()
             raise ValueError("Company model reply failed")
         if output.stop_reason == "content_filter":
             raise CompanyModelRefusal("Company model provider refused the response.")

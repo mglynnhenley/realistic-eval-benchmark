@@ -569,8 +569,11 @@ class GmailService:
             # Sent entries. Inspect limits are deliberately propagated.
             from inspect_ai.util import LimitExceededError
 
-            from refund_eval.models.client import ModelLimitExceeded
-            if isinstance(exc, (LimitExceededError, ModelLimitExceeded)):
+            from refund_eval.models.client import (
+                ModelLimitExceeded,
+                ModelRequestRejected,
+            )
+            if isinstance(exc, (LimitExceededError, ModelLimitExceeded, ModelRequestRejected)):
                 raise
             return _error(str(exc))
         with world_tx() as world:

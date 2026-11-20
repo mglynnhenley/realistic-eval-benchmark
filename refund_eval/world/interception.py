@@ -23,7 +23,7 @@ from typing import Any
 from inspect_ai.tool import ToolError
 from inspect_ai.util import LimitExceededError
 
-from refund_eval.models.client import ModelLimitExceeded
+from refund_eval.models.client import ModelLimitExceeded, ModelRequestRejected
 from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.world import clock, event_log
@@ -282,6 +282,12 @@ async def intercept(
             "type": ex.type, "value": ex.value, "limit": ex.limit, "message": ex.message,
         })
         _note({"dispatch_limit": ex.type, "interception_id": icpt.id, "tool": tool})
+        raise
+    except ModelRequestRejected:
+        with world_tx() as world:
+            if world.stop_reason is None:
+                world.stop_reason = "model_request_rejected"
+        _note({"dispatch_error": "model_request_rejected", "interception_id": icpt.id, "tool": tool})
         raise
     except ModelLimitExceeded:
         # A world-side model client limit outside Inspect (the world service) stops the trial the same way.
