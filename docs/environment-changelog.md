@@ -24,12 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.6 — 2026-11-20
+## 7.7 — 2026-11-20
 - Kind: trivial batch
-- Fingerprint: 21551a3e3923a9a30cf69eabe2f68d0b25bfbf6e3e647b621c01f2e155be14b6
+- Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
 - Trial round: none; offline validation only.
 - Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
 
+## 7.6 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: a363a49b11ef57c879a610e6d78a107eda5462bd775b595e2a0717990c82137b
+- Trial round: none; offline validation only. The synthetic single-contact acceptance probe is prepared but unrun under the no-paid-call instruction.
+- Changes: Adapt Anthropic OpenRouter company-action schemas to Claude structured-output constraints and require parameter-capable provider routing while preserving existing price ceilings (MAT-160).
 ## 7.5 — 2026-11-19
 - Kind: trivial batch
 - Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f

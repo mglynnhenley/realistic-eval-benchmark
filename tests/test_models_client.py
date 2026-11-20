@@ -17,6 +17,7 @@ from inspect_ai.model._model import prepare_tools
 from inspect_ai.tool import ToolDef
 from inspect_ai.util import LimitExceededError, json_schema
 from openai import AsyncOpenAI
+from pydantic import BaseModel, ValidationError
 
 from refund_eval import model_pricing
 from refund_eval.companies import (
@@ -291,7 +292,8 @@ def openrouter(handler, **kwargs):
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     sdk = AsyncOpenAI(api_key="not-a-key", base_url="https://openrouter.test/api/v1", http_client=http,
                       max_retries=0)
-    roles = {"simulator": "openrouter/anthropic/claude-opus-5.5", "grader": "openrouter/anthropic/claude-haiku-4.5"}
+    roles = kwargs.pop("roles", {"simulator": "openrouter/anthropic/claude-opus-5.5",
+                                  "grader": "openrouter/anthropic/claude-haiku-4.5"})
     return OpenRouterClient(roles, client=sdk, **kwargs)
 
 
@@ -323,9 +325,13 @@ async def test_openrouter_request_maps_role_schema_and_settings():
     assert body["messages"] == [{"role": "system", "content": "sys"}, {"role": "user", "content": [
         {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}]
     assert (body["temperature"], body["max_tokens"], body["stop"]) == (1.0, 50, ["\n\n"])
-    assert body["response_format"] == {"type": "json_schema", "json_schema": {
-        "name": "open_world_action", "schema": response_json_schema(CompanyAction), "description": "What it does."}}
-    assert body["usage"] == {"include": True} and "tools" not in body
+    response_schema = body["response_format"]["json_schema"]
+    assert response_schema["name"] == "open_world_action"
+    assert response_schema["schema"]["required"] == response_json_schema(CompanyAction)["required"]
+    assert response_schema["schema"] != response_json_schema(CompanyAction)
+    assert response_schema["strict"] is True and response_schema["description"] == "What it does."
+    assert body["usage"] == {"include": True} and body["provider"] == {"require_parameters": True}
+    assert "tools" not in body
     assert out.json() == ACTION and out.stop_reason == "stop" and out.model == client.roles["simulator"]
     assert client.model_name("grader") == "openrouter/anthropic/claude-haiku-4.5"
 
@@ -400,6 +406,106 @@ async def test_openrouter_http_402_remains_a_model_limit():
     client = openrouter(lambda request: httpx.Response(402, json={"error": {"message": "out of credit"}}))
     with pytest.raises(ModelLimitExceeded):
         await client.complete("simulator", [Message("user", "safe test")])
+
+
+def assert_anthropic_company_schema(schema):
+    unsupported = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength"}
+
+    def visit(node):
+        if isinstance(node, dict):
+            assert unsupported.isdisjoint(node)
+            if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+                assert node.get("additionalProperties") is False
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(schema)
+
+
+async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_local_validation():
+    requests = []
+    action = {"decision": "deny", "reply": False, "reply_after_hours": 0, "body": ""}
+    tariffs = {"openrouter/anthropic/claude-opus-5.5": {"input": 1.0, "output": 2.0, "request": 0.01}}
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        schema = body["response_format"]["json_schema"]["schema"]
+        assert_anthropic_company_schema(schema)
+        return httpx.Response(200, json=reply({"role": "assistant", "content": json.dumps(action)}))
+
+    model = openrouter(handler, pin_prices=True, tariffs=tariffs)
+    simulator = LLMCompanySimulator(model)
+    context = CompanyContext(
+        org=CompanyProfile(key="example", name="Example Rail", kind="railway"),
+        subject="Synthetic journey", customer_name="Alex Example", customer_email="customer@example.test",
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    result = await simulator.respond(CompanyEvent(incoming="Synthetic contact"), context)
+
+    [body] = requests
+    formatted = body["response_format"]["json_schema"]
+    schema = formatted["schema"]
+    assert result.decision == "deny" and result.reply is False
+    assert formatted["strict"] is True
+    assert schema["required"] == response_json_schema(CompanyAction)["required"]
+    assert schema["properties"]["case_notes"]["anyOf"][-1] == {"type": "null"}
+    assert schema["properties"]["case_status"]["default"] == "open"
+    assert "at least 0" in schema["properties"]["reply_after_hours"]["description"]
+    assert "at least 0" in schema["properties"]["new_offers"]["items"]["properties"]["amount"]["description"]
+    assert "greater than 0" in schema["properties"]["payments"]["items"]["properties"]["amount"]["description"]
+    assert body["provider"] == {"max_price": {"prompt": 1.0, "completion": 2.0, "request": 0.01},
+                                 "require_parameters": True}
+
+
+@pytest.mark.parametrize("invalid", [
+    {"reply_after_hours": -1},
+    {"payments": [{"kind": "cash_refund", "amount": -1, "via": "card"}]},
+])
+def test_company_action_still_rejects_negative_bounds_locally(invalid):
+    action = {"decision": "deny", "reply": False, "reply_after_hours": 0, "body": ""} | invalid
+    with pytest.raises(ValidationError):
+        CompanyAction.model_validate(action)
+
+
+async def test_non_anthropic_company_schema_keeps_existing_wire_format():
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "{}"}))
+
+    client = openrouter(handler, roles={"simulator": "openrouter/openai/gpt-4.1"})
+    await client.complete("simulator", [Message("user", "synthetic")],
+                          schema=OutputSchema("open_world_action", CompanyAction))
+
+    [body] = requests
+    assert body["response_format"]["json_schema"]["schema"] == response_json_schema(CompanyAction)
+    assert "strict" not in body["response_format"]["json_schema"]
+    assert "provider" not in body
+
+
+async def test_unrelated_anthropic_map_schema_is_left_unchanged():
+    class MapOutput(BaseModel):
+        values: dict[str, str]
+
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "{}"}))
+
+    client = openrouter(lambda request: handler(request))
+    await client.complete("simulator", [Message("user", "synthetic")],
+                          schema=OutputSchema("unrelated_map", MapOutput))
+
+    [body] = requests
+    assert body["response_format"]["json_schema"]["schema"] == response_json_schema(MapOutput)
+    assert "provider" not in body
+    assert "strict" not in body["response_format"]["json_schema"]
 
 
 async def test_openrouter_tool_calls_round_trip_the_assistant_message():

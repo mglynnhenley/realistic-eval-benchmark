@@ -84,15 +84,64 @@ def _keep_schema_keys(node: Any) -> Any:
     return out
 
 
-def response_json_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """The schema Inspect's `json_schema(model)` sends: references inlined, titles dropped, closed at the top."""
-    schema = _inline_refs(model.model_json_schema())
+_ANTHROPIC_CONSTRAINTS = {
+    "minimum": "at least",
+    "maximum": "at most",
+    "exclusiveMinimum": "greater than",
+    "exclusiveMaximum": "less than",
+    "multipleOf": "a multiple of",
+    "minLength": "at least",
+    "maxLength": "at most",
+}
+
+
+def _anthropic_schema(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_anthropic_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    if (node.get("type") == "object" and "additionalProperties" in node
+            and node["additionalProperties"] is not False):
+        return node
+
+    constraints = {key: node[key] for key in _ANTHROPIC_CONSTRAINTS if key in node}
+    out = {key: _anthropic_schema(value) for key, value in node.items() if key not in constraints}
+    if constraints:
+        notes = []
+        for key, value in constraints.items():
+            label = _ANTHROPIC_CONSTRAINTS[key]
+            if key in {"minLength", "maxLength"}:
+                notes.append(f"{label} {value} characters")
+            else:
+                notes.append(f"{label} {value}")
+        description = out.get("description") or ""
+        out["description"] = f"{description.rstrip()}\nValidation constraints: {'; '.join(notes)}.".strip()
+    if out.get("type") == "object" and isinstance(out.get("properties"), dict):
+        out["additionalProperties"] = False
+    return out
+
+
+def _response_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"type": "object",
                            "properties": {k: _keep_schema_keys(v) for k, v in schema.get("properties", {}).items()}}
     if schema.get("required"):
         out["required"] = schema["required"]
     out["additionalProperties"] = False
     return out
+
+
+def response_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """The schema Inspect's `json_schema(model)` sends: references inlined, titles dropped, closed at the top."""
+    return _response_json_schema(_inline_refs(model.model_json_schema()))
+
+
+def _anthropic_company_response_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    return _response_json_schema(_anthropic_schema(_inline_refs(model.model_json_schema())))
+
+
+def _is_anthropic_company_schema(model_name: str, schema: OutputSchema | None) -> bool:
+    return (schema is not None and schema.name == "open_world_action"
+            and model_name.startswith("openrouter/anthropic/"))
 
 
 def _wire_content(content: str | list[str]) -> Any:
@@ -294,7 +343,12 @@ class OpenRouterClient:
             params["tools"] = [{"type": "function", "function": {
                 "name": t.name, "description": t.description, "parameters": t.parameters}} for t in tools]
         if schema is not None:
-            response = {"name": schema.name, "schema": response_json_schema(schema.type)}
+            anthropic_company_schema = _is_anthropic_company_schema(name, schema)
+            response_schema = (_anthropic_company_response_json_schema(schema.type) if anthropic_company_schema
+                               else response_json_schema(schema.type))
+            response = {"name": schema.name, "schema": response_schema}
+            if anthropic_company_schema:
+                response["strict"] = True
             if schema.description is not None:
                 response["description"] = schema.description
             params["response_format"] = {"type": "json_schema", "json_schema": response}
@@ -332,6 +386,8 @@ class OpenRouterClient:
                     raise ModelLimitExceeded(f"No catalog tariff to pin for {name}; not sent")
                 extra["provider"] = {"max_price": {"prompt": tariff["input"], "completion": tariff["output"],
                                                      "request": tariff["request"]}}
+            if _is_anthropic_company_schema(name, schema):
+                extra.setdefault("provider", {})["require_parameters"] = True
             response = await self.client.chat.completions.with_raw_response.create(
                 **params, extra_body=extra)
             result = response.parse()
