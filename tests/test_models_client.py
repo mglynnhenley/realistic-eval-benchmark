@@ -309,22 +309,28 @@ def test_openrouter_response_schema_matches_inspect(schema):
     assert response_json_schema(schema) == json_schema(schema).model_dump(exclude_none=True)
 
 
-async def test_openrouter_request_maps_role_schema_and_settings():
+@pytest.mark.parametrize(("temperature", "wire_temperature"), [(1.0, None), (0.6, 0.6)])
+async def test_openrouter_request_maps_role_schema_and_settings(temperature, wire_temperature):
     requests = []
 
     def handler(request):
-        requests.append(json.loads(request.content))
+        body = json.loads(request.content)
+        if wire_temperature is None:
+            assert "temperature" not in body
+        else:
+            assert body["temperature"] == wire_temperature
+        requests.append(body)
         return httpx.Response(200, json=reply({"role": "assistant", "content": json.dumps(ACTION)}))
 
     client = openrouter(handler)
     out = await client.complete("simulator", [Message("system", "sys"), Message("user", ["a", "b"])],
-                                temperature=1.0, max_tokens=50, stop=["\n\n"],
+                                temperature=temperature, max_tokens=50, stop=["\n\n"],
                                 schema=OutputSchema("open_world_action", CompanyAction, "What it does."))
     [body] = requests
     assert body["model"] == "anthropic/claude-opus-5.5"
     assert body["messages"] == [{"role": "system", "content": "sys"}, {"role": "user", "content": [
         {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}]
-    assert (body["temperature"], body["max_tokens"], body["stop"]) == (1.0, 50, ["\n\n"])
+    assert (body["max_tokens"], body["stop"]) == (50, ["\n\n"])
     response_schema = body["response_format"]["json_schema"]
     assert response_schema["name"] == "open_world_action"
     assert response_schema["schema"]["required"] == response_json_schema(CompanyAction)["required"]
@@ -433,6 +439,7 @@ async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_
     def handler(request):
         body = json.loads(request.content)
         requests.append(body)
+        assert "temperature" not in body
         schema = body["response_format"]["json_schema"]["schema"]
         assert_anthropic_company_schema(schema)
         return httpx.Response(200, json=reply({"role": "assistant", "content": json.dumps(action)}))
@@ -449,6 +456,8 @@ async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_
     [body] = requests
     formatted = body["response_format"]["json_schema"]
     schema = formatted["schema"]
+    assert body["model"] == "anthropic/claude-opus-5.5"
+    assert "temperature" not in body
     assert result.decision == "deny" and result.reply is False
     assert formatted["strict"] is True
     assert schema["required"] == response_json_schema(CompanyAction)["required"]
@@ -480,9 +489,10 @@ async def test_non_anthropic_company_schema_keeps_existing_wire_format():
 
     client = openrouter(handler, roles={"simulator": "openrouter/openai/gpt-4.1"})
     await client.complete("simulator", [Message("user", "synthetic")],
-                          schema=OutputSchema("open_world_action", CompanyAction))
+                          temperature=1.0, schema=OutputSchema("open_world_action", CompanyAction))
 
     [body] = requests
+    assert body["temperature"] == 1.0
     assert body["response_format"]["json_schema"]["schema"] == response_json_schema(CompanyAction)
     assert "strict" not in body["response_format"]["json_schema"]
     assert "provider" not in body
@@ -500,9 +510,10 @@ async def test_unrelated_anthropic_map_schema_is_left_unchanged():
 
     client = openrouter(lambda request: handler(request))
     await client.complete("simulator", [Message("user", "synthetic")],
-                          schema=OutputSchema("unrelated_map", MapOutput))
+                          temperature=1.0, schema=OutputSchema("unrelated_map", MapOutput))
 
     [body] = requests
+    assert body["temperature"] == 1.0
     assert body["response_format"]["json_schema"]["schema"] == response_json_schema(MapOutput)
     assert "provider" not in body
     assert "strict" not in body["response_format"]["json_schema"]
