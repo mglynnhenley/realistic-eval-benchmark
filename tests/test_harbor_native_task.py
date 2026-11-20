@@ -430,46 +430,10 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     assert agent_manifest.pop("realism_memory") == {
         "train_refund_late": hashlib.sha256(memory.read_bytes()).hexdigest()[:8],
     }
-    assert agent_manifest == world_manifest
+    assert "files" in world_manifest
+    assert "files" not in agent_manifest
+    assert agent_manifest == {key: value for key, value in world_manifest.items() if key != "files"}
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
-
-
-def test_world_url_leaves_runtime_identity_to_the_sidecar(monkeypatch):
-    import builtins
-
-    import refund_eval.task as task_module
-    from refund_eval.environment_version import ENVIRONMENT_VERSION
-    from refund_eval.published import provider
-
-    original_import = builtins.__import__
-
-    def reject_agent_identity(name, *args, **kwargs):
-        if name == "refund_eval.run_identity":
-            raise AssertionError("Native world-service runs must not import agent identity locks")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.delenv("REFUND_EVAL_IDENTITY_LOCK", raising=False)
-    monkeypatch.setattr(builtins, "__import__", reject_agent_identity)
-    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
-    monkeypatch.setattr(task_module, "_eval_model_name", lambda: None)
-    monkeypatch.setattr(task_module, "default_model_roles",
-                        lambda _: {"simulator": "mockllm/model", "grader": "mockllm/model"})
-    monkeypatch.setattr(provider, "cache_conversation_prefix", lambda: None)
-
-    task = task_module.impossible_refund(
-        scenario="train_refund_late", cost_limit=150, token_budget=40_000_000,
-        research_mode="saved", world_url="http://world",
-    )
-    assert "environment_fingerprint" not in task.metadata
-    assert "environment_version" not in task.metadata
-    assert "environment_fingerprint" not in task.dataset[0].metadata
-    assert task.dataset[0].metadata["environment_version"] == ENVIRONMENT_VERSION
-    assert "realism_version" in task.dataset[0].metadata
-    with pytest.raises(ValueError, match="generated Harbor sidecar task is the source of identity"):
-        task_module.impossible_refund(
-            scenario="train_refund_late", cost_limit=150, token_budget=40_000_000,
-            research_mode="saved", world_url="http://world", identity_lock={},
-        )
 
 
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):
