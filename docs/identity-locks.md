@@ -26,7 +26,7 @@ image available; cross-host distribution is not configured or verified here.
 Exact artifact locks are unsupported for Harbor subprocess/browser builds:
 their resulting artifacts have no immutable identity available here. Native
 Harbor records source and rules identity from the generated sidecar task; it
-does not treat the stripped agent tree as the runtime identity.
+does not treat the installed agent wheel as the runtime identity.
 The checked-in refund_eval/image-lock.json pins external OCI build inputs,
 and the Dockerfiles use the fixed Debian snapshot 20261118T000000Z.
 
