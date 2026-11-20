@@ -13,8 +13,8 @@ environment file names and contents, excluding Git-ignored files and Python
 caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
 Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
-source tree validates its source manifest file allowlist before hashing it. The changelog test checks the version,
-fingerprint and bump kind.
+source tree validates its source manifest file allowlist before hashing it. The
+changelog test checks the version, fingerprint and bump kind.
 
 Run the CI changelog check locally with
 `uv run --frozen pytest -q tests/test_environment_version.py`. Native task
@@ -24,9 +24,9 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.8 — 2026-11-20
+## 7.9 — 2026-11-20
 - Kind: trivial batch
-- Fingerprint: 98d01b89cfb177cebf82fb1dc61801215fbcee4ca0de9a03651afeafec1cde17
+- Fingerprint: a71d9e3c0a6eb79e0fcf268a4dfb2030d277750eafac97c38c72cce1c822491e
 - Trial round: none; offline validation only.
 - Changes: pin remaining Harbor/browser OCI inputs and the Debian package snapshot; add opt-in source, resolved-scenario and local browser image-ID locks that reject mismatches or unavailable images before model-cost setup. Native Harbor artifact locks remain unsupported (MAT-64).
 
@@ -41,6 +41,7 @@ this was not a second version or trial round.
 - Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
 - Trial round: none; offline validation only.
 - Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
+
 ## 7.6 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: a363a49b11ef57c879a610e6d78a107eda5462bd775b595e2a0717990c82137b
