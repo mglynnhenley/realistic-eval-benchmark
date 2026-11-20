@@ -112,6 +112,8 @@ class Completion:
         from refund_eval.model_io import completion_json
 
         if self.failed:
+            if self.provider_error_type == "invalid_request":
+                raise ModelRequestRejected()
             raise ValueError("Model reply failed")
 
         return completion_json(self.text)

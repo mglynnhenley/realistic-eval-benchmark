@@ -728,6 +728,34 @@ async def test_unbudgeted_list_contact_propagates_structured_rejection_once(tmp_
         await model.client.close()
 
 
+async def test_unbudgeted_dynamic_recipient_rejection_stops_before_retry_or_bounce(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "id": "recipient-rejection-1", "object": "chat.completion", "created": 0,
+            "model": "offline/test", "choices": [],
+            "error": {"code": 400, "metadata": {"error_type": "invalid_request"},
+                      "message": "Provider rejected the request."},
+        })
+
+    model = mocked_openrouter(handler)
+    try:
+        async with (WorldTrial(settings(tmp_path, scenario="train_refund_late"), model_client=model) as trial,
+                    session(trial) as (client, _, _)):
+            sent = await client.call_tool("send_message", {
+                "to": ["help@new-advice.example"], "subject": "Refund request", "body": "Please review this request."})
+            data = trial.data()
+        assert len(requests) == 1
+        assert requests[0]["response_format"]["json_schema"]["name"] == "counterpart_profile"
+        assert sent.isError and data["stop_reason"] == "model_request_rejected"
+        assert not any(entry["email"]["id"].endswith("-bounce") for entry in data["world"]["pending"])
+    finally:
+        await model.client.close()
+
+
 def contains_private_value(value, private_value):
     return private_value in str(value)
 

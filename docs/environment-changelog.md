@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.6 — 2026-11-20
 - Kind: trivial batch
-- Fingerprint: d394d582f3d6b7139bfae216311f0b410d42433696a2feabc5814a131e08170a
+- Fingerprint: 21551a3e3923a9a30cf69eabe2f68d0b25bfbf6e3e647b621c01f2e155be14b6
 - Trial round: none; offline validation only.
 - Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
 

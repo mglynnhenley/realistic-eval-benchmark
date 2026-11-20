@@ -381,6 +381,21 @@ def test_model_request_rejected_is_safe_and_not_a_limit():
     )
 
 
+def test_failed_completion_json_preserves_request_rejection():
+    completion = Completion(text="", message=Message("assistant", ""), failed=True,
+                            provider_error_type="invalid_request")
+    with pytest.raises(ModelRequestRejected):
+        completion.json()
+
+
+async def test_failed_research_request_rejection_propagates(fake):
+    client = fake(Completion(text="", message=Message("assistant", ""), failed=True,
+                             provider_error_type="invalid_request"))
+    with pytest.raises(ModelRequestRejected):
+        await research.research_live(LATE.org("trainline"), scenario=LATE)
+    assert len(client.calls) == 1
+
+
 async def test_openrouter_http_402_remains_a_model_limit():
     client = openrouter(lambda request: httpx.Response(402, json={"error": {"message": "out of credit"}}))
     with pytest.raises(ModelLimitExceeded):

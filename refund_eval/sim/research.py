@@ -418,6 +418,8 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
             output = await model.complete("simulator", messages, tools=tools, max_tokens=MAX_OUTPUT_TOKENS,
                                           schema=final if lookups <= 0 else None)
             if output.failed:
+                if output.provider_error_type == "invalid_request":
+                    raise ModelRequestRejected()
                 raise ValueError("Research model reply failed")
         except (ModelLimitExceeded, ModelRequestRejected):
             raise
