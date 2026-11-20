@@ -368,7 +368,7 @@ async def drive_mcp(tmp_path) -> dict:
     return {"data": data, "visible": visible, "calls": fake.calls}
 
 
-def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url: str | None = None, **agent_args):
+def run_inspect(tmp_path, visible: str | None = None, *, scenario: str = "train_refund", script=None, world_url: str | None = None, **agent_args):
     """The same calls through the Inspect harness: its native tools (browser stubbed out), or with
     `world_url` the world service's. `script` replaces the fixed outputs (a mockllm callable)."""
     from inspect_ai import Task, eval
@@ -378,10 +378,10 @@ def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url:
     from refund_eval.agent.harness import refund_agent
     from refund_eval.scenario.schema import load_scenario
 
-    scenario = load_scenario("train_refund")
-    scenario_id = "train_refund"
+    scenario_data = load_scenario(scenario)
+    scenario_id = scenario
     if world_url is not None:
-        scenario_id = _write_agent_scenario(tmp_path / "agent-scenario.yaml", scenario)
+        scenario_id = _write_agent_scenario(tmp_path / "agent-scenario.yaml", scenario_data)
     outputs = script or [
         ModelOutput.for_tool_call("mockllm/model", "send_message", {
             "to": [AVANTI], "subject": "Cancelled train refund", "body": "My train was cancelled."}),
@@ -393,7 +393,7 @@ def run_inspect(tmp_path, visible: str | None = None, *, script=None, world_url:
     if world_url is None:
         models.install(FakeModels())
     args = {"max_turns": MAX_TURNS, "history_tokens": 0, **agent_args}
-    [log] = eval(Task(dataset=[Sample(input=scenario.task_text, metadata={"scenario": "train_refund"})],
+    [log] = eval(Task(dataset=[Sample(input=scenario_data.task_text, metadata={"scenario": scenario})],
                       solver=refund_agent(scenario_id=scenario_id, published_data="fixture", research_mode="saved",
                                           seed=7, world_url=world_url, **args)),
                  model=get_model("mockllm/model", custom_outputs=outputs), log_dir=str(tmp_path / "logs"),
@@ -604,7 +604,7 @@ WORLD_THREAD = "world-service"
 
 
 @contextmanager
-def world_service_thread(settings: WorldSettings, monkeypatch):
+def world_service_thread(settings: WorldSettings, monkeypatch, model_client=None):
     """The world service on a thread of its own, as its container would run it beside the agent's.
 
     Its store is the only world: any agent-side read or write of it (from another thread) fails."""
@@ -621,7 +621,7 @@ def world_service_thread(settings: WorldSettings, monkeypatch):
     holder: dict = {}
 
     async def serve():
-        async with (WorldTrial(settings, model_client=FakeModels()) as trial,
+        async with (WorldTrial(settings, model_client=model_client if model_client is not None else FakeModels()) as trial,
                     server.running(trial, host="127.0.0.1", port=0, admin_port=0, turn_token=TURN,
                                    admin_token=ADMIN) as (port, _)):
             holder["trial"] = trial
