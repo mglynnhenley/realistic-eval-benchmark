@@ -51,7 +51,10 @@ from refund_eval.world.state import World
 ACTION = {
     "decision": "evidence_required", "decision_basis": "We need a medical note.", "summary": "Asked for evidence.",
     "reply": True, "reply_after_hours": 24, "subject": "Your renewal", "body": "Please send a medical note.",
-    "page_body": "", "payments": [], "case_status": "open",
+    "case_notes": None, "reply_kind": "substantive", "page_body": "", "from_address": None,
+    "new_offers": [], "accept_offer": None, "withdraw_offers": False, "payments": [],
+    "grant_ground": None, "case_status": "open", "notes_to_others": [], "follow_up_in_hours": None,
+    "follow_up_plan": "", "follow_up_action": "new", "follow_up_ids": [],
 }
 LATE = load_scenario("train_refund_late")
 
@@ -333,7 +336,7 @@ async def test_openrouter_request_maps_role_schema_and_settings(temperature, wir
     assert (body["max_tokens"], body["stop"]) == (50, ["\n\n"])
     response_schema = body["response_format"]["json_schema"]
     assert response_schema["name"] == "open_world_action"
-    assert response_schema["schema"]["required"] == response_json_schema(CompanyAction)["required"]
+    assert_anthropic_company_schema(response_schema["schema"])
     assert response_schema["schema"] != response_json_schema(CompanyAction)
     assert response_schema["strict"] is True and response_schema["description"] == "What it does."
     assert body["usage"] == {"include": True} and body["provider"] == {"require_parameters": True}
@@ -422,6 +425,7 @@ def assert_anthropic_company_schema(schema):
             assert unsupported.isdisjoint(node)
             if node.get("type") == "object" and isinstance(node.get("properties"), dict):
                 assert node.get("additionalProperties") is False
+                assert set(node.get("required", [])) == set(node["properties"])
             for value in node.values():
                 visit(value)
         elif isinstance(node, list):
@@ -433,7 +437,9 @@ def assert_anthropic_company_schema(schema):
 
 async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_local_validation():
     requests = []
-    action = {"decision": "deny", "reply": False, "reply_after_hours": 0, "body": ""}
+    action = CompanyAction.model_validate({
+        "decision": "deny", "reply": False, "reply_after_hours": 0, "body": "",
+    }).model_dump(mode="json")
     tariffs = {"openrouter/anthropic/claude-opus-5.5": {"input": 1.0, "output": 2.0, "request": 0.01}}
 
     def handler(request):
@@ -460,7 +466,7 @@ async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_
     assert "temperature" not in body
     assert result.decision == "deny" and result.reply is False
     assert formatted["strict"] is True
-    assert schema["required"] == response_json_schema(CompanyAction)["required"]
+    assert set(schema["required"]) == set(schema["properties"])
     assert schema["properties"]["case_notes"]["anyOf"][-1] == {"type": "null"}
     assert schema["properties"]["case_status"]["default"] == "open"
     assert "at least 0" in schema["properties"]["reply_after_hours"]["description"]
@@ -468,6 +474,29 @@ async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_
     assert "greater than 0" in schema["properties"]["payments"]["items"]["properties"]["amount"]["description"]
     assert body["provider"] == {"max_price": {"prompt": 1.0, "completion": 2.0, "request": 0.01},
                                  "require_parameters": True}
+
+
+def test_anthropic_company_required_fields_preserve_default_normalization():
+    original = CompanyAction.model_validate({
+        "decision": "offer_voucher",
+        "reply": True,
+        "reply_after_hours": 2.5,
+        "body": "A synthetic voucher offer.",
+        "summary": "Voucher offered.",
+        "new_offers": [{"kind": "voucher", "amount": 17.5}],
+        "follow_up_action": "continue",
+    })
+    explicit_data = original.model_dump(mode="json")
+    assert explicit_data["new_offers"][0]["expires_in_days"] is None
+
+    explicit = CompanyAction.model_validate(explicit_data)
+
+    assert explicit.model_dump(mode="json") == explicit_data
+    assert set(explicit.model_fields_set) == set(CompanyAction.model_fields)
+    assert explicit.new_offers[0].expires_in_days is None
+    assert set(explicit.new_offers[0].model_fields_set) == {"kind", "amount", "expires_in_days"}
+    assert (explicit.decision, explicit.reply_after_hours, explicit.follow_up_action,
+            explicit.new_offers[0].amount) == ("offer_voucher", 2.5, "continue", 17.5)
 
 
 @pytest.mark.parametrize("invalid", [

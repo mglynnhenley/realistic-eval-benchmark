@@ -10,6 +10,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput
 from openai import AsyncOpenAI
 
+from refund_eval.companies.models import CompanyAction
 from refund_eval.harbor import atif
 from refund_eval.models.openrouter import OpenRouterClient
 from refund_eval.published.mail import _visible_id
@@ -131,7 +132,7 @@ def _openrouter(case: str, artifact_dir):
         }
         requests.append(metadata)
         if schema_name == "open_world_action":
-            output = {**REPLIES[case], "subject": SUBJECT}
+            output = CompanyAction.model_validate({**REPLIES[case], "subject": SUBJECT}).model_dump(mode="json")
         elif schema_name == "response_consistency":
             output = {"consistent": True, "reason": "synthetic fixture response"}
         else:
@@ -253,6 +254,7 @@ def test_synthetic_company_correspondence_is_delivered_read_and_traced(case, tmp
             assert unsupported.isdisjoint(node)
             if node.get("type") == "object" and isinstance(node.get("properties"), dict):
                 assert node.get("additionalProperties") is False
+                assert set(node.get("required", [])) == set(node["properties"])
             for value in node.values():
                 visit_schema(value)
         elif isinstance(node, list):

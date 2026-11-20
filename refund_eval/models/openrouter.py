@@ -118,6 +118,7 @@ def _anthropic_schema(node: Any) -> Any:
         out["description"] = f"{description.rstrip()}\nValidation constraints: {'; '.join(notes)}.".strip()
     if out.get("type") == "object" and isinstance(out.get("properties"), dict):
         out["additionalProperties"] = False
+        out["required"] = list(out["properties"])
     return out
 
 
