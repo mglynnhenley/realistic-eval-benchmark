@@ -176,6 +176,7 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
         yaml.safe_dump(view), encoding="utf-8",
     )
     manifest = json.loads((source / SOURCE_MANIFEST).read_text(encoding="utf-8"))
+    manifest.pop("files", None)
     memory = source / "refund_eval" / "scenario" / "realism" / f"{scenario.id}.json"
     if memory.is_file():
         manifest["realism_memory"] = {scenario.id: hashlib.sha256(memory.read_bytes()).hexdigest()[:8]}

@@ -185,6 +185,7 @@ async def run_batch(directory: Path) -> int:
             simulator_model=config["simulator_model"],
             grader_model=config["grader_model"],
             scenario=config.get("scenario", TrialSettings.model_fields["scenario"].default),
+            identity_lock=config.get("identity_lock"),
             inbox_sha256=config.get("inbox_sha256"),
             resume_sha256=config.get("resume_sha256"),
         )

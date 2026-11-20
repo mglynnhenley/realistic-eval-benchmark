@@ -71,6 +71,10 @@ class TrialSettings(AgentOptions):
     reasoning: bool = False  # ask OpenRouter to return the target's reasoning
     scenario: str = RunConfig.model_fields["scenario"].default
     seed: int | None = Field(default=None, ge=0, strict=True)
+    identity_lock: str | None = Field(
+        default=None, max_length=4096,
+        description="Expected local Docker browser identity; unsupported for Harbor subprocess or native sidecar artifacts.",
+    )
 
     @model_validator(mode="after")
     def finite_lifecycle(self):

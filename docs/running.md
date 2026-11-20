@@ -2,6 +2,9 @@
 
 The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a real Chromium browser. An open-world simulator answers intercepted emails and website submissions. See [architecture.md](architecture.md) for the design and [harbor.md](harbor.md) for isolated Modal or Docker batches.
 
+See the identity-lock guide at docs/identity-locks.md to pin and enforce
+source, scenario, and local browser-runtime identities for repeatable runs.
+
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. Then:
