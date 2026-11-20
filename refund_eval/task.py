@@ -221,6 +221,7 @@ def impossible_refund(
     scenario = resolve_scenario_arg(scenario)
     sc = load_agent_scenario(scenario) if world_url is not None else load_scenario(scenario)
     lock_value = identity_lock if identity_lock is not None else os.environ.get("REFUND_EVAL_IDENTITY_LOCK")
+    sample_environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
     if world_url is not None:
         if lock_value is not None:
             raise ValueError(
@@ -230,13 +231,13 @@ def impossible_refund(
         browser_image = None
         identity_metadata = {}
         environment_version_metadata = {}
-        realism_metadata = {}
+        realism_metadata = {"realism_version": realism_version(sc.id)}
     elif lock_value is None:
         from refund_eval.run_identity import current_run_identity
 
         run_identity = current_run_identity(scenario, browser_runtime=browser_runtime)
         browser_image = None
-        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        environment_version_metadata = sample_environment_version_metadata
         realism_metadata = {"realism_version": realism_version(sc.id)}
         identity_metadata = {
             key: run_identity[key] for key in (
@@ -250,7 +251,7 @@ def impossible_refund(
         run_identity, browser_image = validate_identity_lock(
             lock_value, scenario, browser_runtime=browser_runtime,
         )
-        environment_version_metadata = {"environment_version": ENVIRONMENT_VERSION}
+        environment_version_metadata = sample_environment_version_metadata
         realism_metadata = {"realism_version": realism_version(sc.id)}
         identity_metadata = {
             key: run_identity[key] for key in (
@@ -358,7 +359,7 @@ def impossible_refund(
                 input=task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
                           **realism_metadata,
-                          **environment_version_metadata,
+                          **sample_environment_version_metadata,
                           **identity_metadata,
                           **({"mail_data_mode": "fixture", "web_data_mode": "live", "web_time_basis": "wall_clock"}
                              if published_data == "hybrid" else {}),

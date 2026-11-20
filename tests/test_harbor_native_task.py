@@ -434,10 +434,11 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
 
 
-def test_world_url_keeps_identity_in_the_sidecar(monkeypatch):
+def test_world_url_leaves_runtime_identity_to_the_sidecar(monkeypatch):
     import builtins
 
     import refund_eval.task as task_module
+    from refund_eval.environment_version import ENVIRONMENT_VERSION
     from refund_eval.published import provider
 
     original_import = builtins.__import__
@@ -461,6 +462,9 @@ def test_world_url_keeps_identity_in_the_sidecar(monkeypatch):
     )
     assert "environment_fingerprint" not in task.metadata
     assert "environment_version" not in task.metadata
+    assert "environment_fingerprint" not in task.dataset[0].metadata
+    assert task.dataset[0].metadata["environment_version"] == ENVIRONMENT_VERSION
+    assert "realism_version" in task.dataset[0].metadata
     with pytest.raises(ValueError, match="generated Harbor sidecar task is the source of identity"):
         task_module.impossible_refund(
             scenario="train_refund_late", cost_limit=150, token_budget=40_000_000,
