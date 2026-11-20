@@ -491,10 +491,13 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     assert agent_manifest.pop("realism_memory") == {
         "train_refund_late": hashlib.sha256(memory.read_bytes()).hexdigest()[:8],
     }
-    assert agent_manifest == world_manifest
+    assert "files" in world_manifest
+    assert "files" not in agent_manifest
+    assert agent_manifest == {key: value for key, value in world_manifest.items() if key != "files"}
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
 
 
+<<<<<<< HEAD
 @pytest.mark.parametrize("days", [365, 730])
 def test_staged_public_scenario_keeps_requested_deadline_separate_from_horizon(generated, tmp_path, days):
     sim_weeks = days / 7
@@ -750,6 +753,7 @@ def test_world_url_leaves_runtime_identity_to_the_sidecar(monkeypatch):
         )
 
 
+||||||| parent of cfa1a0e (MAT-64: redact source manifest paths from agent payload)
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):
     original = load_scenario()
     name = "renamed_refund"

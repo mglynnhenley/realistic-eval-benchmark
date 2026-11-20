@@ -148,6 +148,53 @@ def test_trials_must_be_positive():
         impossible_refund(trials=0, scenario=SCENARIO_PATH)
 
 
+def test_world_url_leaves_runtime_identity_to_the_sidecar(tmp_path, monkeypatch):
+    import builtins
+
+    import yaml
+
+    from refund_eval.published import provider
+    from refund_eval.scenario.schema import load_scenario
+
+    scenario = load_scenario("train_refund_late")
+    public_scenario = scenario.model_dump(mode="json", include={
+        "id": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
+    scenario_path = tmp_path / "train_refund_late.yaml"
+    scenario_path.write_text(yaml.safe_dump(public_scenario), encoding="utf-8")
+
+    original_import = builtins.__import__
+
+    def reject_agent_identity(name, *args, **kwargs):
+        if name == "refund_eval.run_identity":
+            raise AssertionError("Native world-service runs must not import agent identity locks")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delenv("REFUND_EVAL_IDENTITY_LOCK", raising=False)
+    monkeypatch.setattr(builtins, "__import__", reject_agent_identity)
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: None)
+    monkeypatch.setattr(task_module, "default_model_roles",
+                        lambda _: {"simulator": "mockllm/model", "grader": "mockllm/model"})
+    monkeypatch.setattr(provider, "cache_conversation_prefix", lambda: None)
+
+    task = task_module.impossible_refund(
+        scenario=str(scenario_path), cost_limit=150, token_budget=40_000_000,
+        research_mode="saved", world_url="http://world",
+    )
+    assert "environment_fingerprint" not in task.metadata
+    assert "environment_version" not in task.metadata
+    assert "environment_fingerprint" not in task.dataset[0].metadata
+    assert task.dataset[0].metadata["environment_version"] == ENVIRONMENT_VERSION
+    assert "realism_version" in task.dataset[0].metadata
+    with pytest.raises(ValueError, match="generated Harbor sidecar task is the source of identity"):
+        task_module.impossible_refund(
+            scenario=str(scenario_path), cost_limit=150, token_budget=40_000_000,
+            research_mode="saved", world_url="http://world", identity_lock={},
+        )
+
+
 @pytest.mark.parametrize(("mail_source", "reason"), [
     ("gmail", "Unknown mail_source"),
     ("Gmail", "Unknown mail_source"),

@@ -98,7 +98,7 @@ this was not a second version or trial round.
 
 ## 7.8 — 2026-11-20
 - Kind: trivial batch
-- Fingerprint: bb3c55cca635b7bbf3f7ef66b0a7c9255f2ce8743569f697026858aef5a86422
+- Fingerprint: 98d01b89cfb177cebf82fb1dc61801215fbcee4ca0de9a03651afeafec1cde17
 - Trial round: none; offline validation only.
 - Changes: pin remaining Harbor/browser OCI inputs and the Debian package snapshot; add opt-in source, resolved-scenario and local browser image-ID locks that reject mismatches or unavailable images before model-cost setup. Native Harbor artifact locks remain unsupported (MAT-64).
 
