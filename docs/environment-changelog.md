@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.9 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: 0bdd56442b2b22671533b80a9efbaa74e629e423bdfa35b0aa300514ca77fa93
+- Trial round: none; offline validation only.
+- Changes: Require defaulted fields in fixed-object Anthropic company-action schemas to reduce strict-output grammar complexity while preserving local CompanyAction defaults.
+
 ## 7.8 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: 52a9a403be15febd3df20be309cc107962e5354d50f750d26ef14ca4a6251b53
