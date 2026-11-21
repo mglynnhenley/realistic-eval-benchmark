@@ -344,6 +344,54 @@ def test_external_instruction_and_skill_inputs_are_fingerprinted(tmp_path, monke
         laura_trial.verify_setup(bundle.manifest_path)
 
 
+def test_compose_overlay_change_fails_before_guard(tmp_path, monkeypatch, capsys):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    overlay = tmp_path / "compose-overlay.yaml"
+    overlay.write_text(
+        "services:\n  agent:\n    environment:\n      FIXTURE_OVERLAY: before\n",
+        encoding="utf-8",
+    )
+    job = yaml.safe_load(bundle.config_path.read_bytes())
+    job["environment"]["extra_docker_compose"] = [str(overlay)]
+    bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+
+    inputs = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))["config_inputs"]
+    [entry] = [item for item in inputs if item["kind"] == "extra_docker_compose"]
+    assert entry["path"] == str(overlay.resolve())
+
+    overlay.write_text(
+        "services:\n  agent:\n    environment:\n      FIXTURE_OVERLAY: after\n",
+        encoding="utf-8",
+    )
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"
+
+
+def test_compose_overlay_local_file_references_fail_closed(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    overlay = tmp_path / "compose-overlay.yaml"
+    overlay.write_text(
+        "services:\n  agent:\n    env_file: ./runtime.env\n",
+        encoding="utf-8",
+    )
+    job = yaml.safe_load(bundle.config_path.read_bytes())
+    job["environment"]["extra_docker_compose"] = [str(overlay)]
+    bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
+
+
 def test_empty_optional_external_input_lists_can_be_snapshotted(tmp_path, monkeypatch):
     bundle = _native_setup(tmp_path, monkeypatch)
     job = yaml.safe_load(bundle.config_path.read_bytes())

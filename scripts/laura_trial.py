@@ -127,6 +127,47 @@ def _file_entry(path: Path, relative: str) -> dict[str, Any]:
     }
 
 
+def _looks_like_local_path(value: Any) -> bool:
+    return isinstance(value, str) and (
+        value.startswith((".", "/", "~")) or "/" in value or "\\" in value or "$" in value
+    )
+
+
+def _has_local_volume_reference(value: Any) -> bool:
+    if isinstance(value, str):
+        source, separator, _ = value.partition(":")
+        return bool(separator) and _looks_like_local_path(source)
+    if isinstance(value, dict):
+        return value.get("type") == "bind" or _looks_like_local_path(value.get("source"))
+    raise SetupFailure
+
+
+def _validate_compose_overlay(path: Path) -> None:
+    try:
+        compose = yaml.safe_load(path.read_bytes())
+    except (OSError, yaml.YAMLError):
+        raise SetupFailure from None
+    if not isinstance(compose, dict):
+        raise SetupFailure
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"build", "develop", "env_file", "include"} and item:
+                    raise SetupFailure
+                if key in {"file", "driver_opts"} and item:
+                    raise SetupFailure
+                if key == "volumes" and isinstance(item, list):
+                    if any(_has_local_volume_reference(mount) for mount in item):
+                        raise SetupFailure
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(compose)
+
+
 def _digest_entries(entries: list[dict[str, Any]]) -> str:
     data = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(data).hexdigest()
@@ -224,6 +265,10 @@ def _load_config(path: Path, path_base: Path) -> tuple[Path, bytes, JobConfig]:
             task.path = _anchor_path(
                 task.path, path_base, strict=True, reject_symlink=True
             )
+    config.environment.extra_docker_compose = [
+        _anchor_path(path, path_base, strict=True, reject_symlink=True)
+        for path in config.environment.extra_docker_compose
+    ]
     for agent in config.agents:
         skills = []
         for skill in agent.skills:
@@ -242,6 +287,11 @@ def _config_inputs(config: JobConfig) -> list[dict[str, Any]]:
     for index, path in enumerate(config.extra_instruction_paths):
         entry = _file_entry(path, str(path))
         entry.update({"kind": "extra_instruction", "index": index})
+        inputs.append(entry)
+    for index, path in enumerate(config.environment.extra_docker_compose):
+        _validate_compose_overlay(path)
+        entry = _file_entry(path, str(path))
+        entry.update({"kind": "extra_docker_compose", "index": index})
         inputs.append(entry)
     for agent_index, agent in enumerate(config.agents):
         for skill_index, skill in enumerate(agent.skills):
