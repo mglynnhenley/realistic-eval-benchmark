@@ -38,6 +38,7 @@ New launches default to `train_refund_late` and require an explicit cost cap. Ea
 - **Paid work needs an explicit budget from the owner.** That covers trials, judges, Modal GPU and rule generation. Never retry a paid failure implicitly, and never resume a paused loop without the owner saying so.
 - **Privacy.** Logs, scans, inbox exports and `.secrets/` stay out of git. Never print inbox contents or credentials.
 - **Keep changes minimal.** Make the smallest change that does what was asked; no extra safeguards or redesigns unless requested.
+- **Dependent PR handoffs.** Before resuming a dependent PR, freshly verify whether each dependency has merged, the intended target/base branch and its current revision, and the relevant project version (including `ENVIRONMENT_VERSION` when applicable). If a dependency landed, safely refresh the branch against the verified base; resolve substantive conflicts with the user rather than continuing from a stale handoff. Record the verified base and version in the handoff.
 - **Environment versions.** Follow `docs/environment-changelog.md`: bump MINOR for a trivial environment-change batch without a trial round, or MAJOR (resetting MINOR) for a behaviour round with its own trials. Update `ENVIRONMENT_VERSION` and the changelog fingerprint together; `tests/test_environment_version.py` enforces them. Versioning started at 1.0; runs before that baseline are unversioned.
 - **Data** lives outside the repo in `~/refund-eval-data/`; see its `INDEX.md`. Archived branches are in `~/refund-eval-archive/`.
 
