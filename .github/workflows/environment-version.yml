@@ -21,3 +21,16 @@ jobs:
           python-version: "3.14"
       - run: uv sync --frozen
       - run: uv run --frozen pytest -q tests/test_environment_version.py
+
+  harbor-wheel-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --frozen --project integrations/harbor
+      - run: scripts/harbor python -m pytest -q tests/test_harbor_wheel_install.py
