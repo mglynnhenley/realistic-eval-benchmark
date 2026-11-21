@@ -7,7 +7,7 @@ import os
 import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -477,7 +477,11 @@ class SpendGuard:
 
 
 @contextmanager
-def install_modal_hooks(guard: SpendGuard):
+def install_modal_hooks(
+    guard: SpendGuard,
+    *,
+    on_sandbox_created: Callable[[Any], None] | None = None,
+):
     from harbor.environments.modal import ModalEnvironment
 
     original_create = ModalEnvironment._create_sandbox
@@ -528,6 +532,9 @@ def install_modal_hooks(guard: SpendGuard):
         except GuardFailure:
             await guard.cleanup_bound()
             raise
+        if on_sandbox_created is not None:
+            with suppress(Exception):
+                on_sandbox_created(self)
         return binding.sandbox
 
     async def guarded_exec(

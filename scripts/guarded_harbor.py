@@ -26,6 +26,8 @@ import importlib.metadata
 import math
 import sys
 import tomllib
+from collections.abc import Callable
+from contextlib import suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -170,13 +172,15 @@ async def run_guarded_job(
     *,
     guard: SpendGuard | None = None,
     job_factory: Any | None = None,
+    on_job_created: Callable[[Any], None] | None = None,
+    on_sandbox_created: Callable[[Any], None] | None = None,
 ) -> JobResult:
     require_pinned_harbor()
     validate_job_config(config)
     controller = guard or SpendGuard(thresholds)
     try:
         await controller.start()
-        with install_modal_hooks(controller):
+        with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
             await controller.ensure_healthy()
             if job_factory is None:
                 from harbor.job import Job
@@ -193,6 +197,9 @@ async def run_guarded_job(
             controller.attach_job_task(None)
             if getattr(job, "is_resuming", False):
                 raise LauncherFailure("existing Harbor jobs cannot be resumed")
+            if on_job_created is not None:
+                with suppress(Exception):
+                    on_job_created(job)
             await controller.ensure_healthy()
 
             run_task = asyncio.create_task(job.run())
@@ -235,6 +242,52 @@ def _trial_failure_reason(result: JobResult) -> str | None:
     return None
 
 
+def run_guarded_config(
+    config: JobConfig,
+    thresholds: Thresholds,
+    *,
+    on_job_created: Callable[[Any], None] | None = None,
+    on_sandbox_created: Callable[[Any], None] | None = None,
+) -> int:
+    if thresholds.openrouter_key_ceiling != KEY_CEILING:
+        print("guard_failed=OpenRouter key ceiling must be exactly $50 cleanup_uncertain=false", file=sys.stderr)
+        return 2
+    if not math.isfinite(thresholds.probe_timeout):
+        print("guard_failed=invalid timeout cleanup_uncertain=false", file=sys.stderr)
+        return 2
+    try:
+        require_pinned_harbor()
+        validate_job_config(config)
+        hooks = {}
+        if on_job_created is not None:
+            hooks["on_job_created"] = on_job_created
+        if on_sandbox_created is not None:
+            hooks["on_sandbox_created"] = on_sandbox_created
+        trial_failure = _trial_failure_reason(
+            asyncio.run(run_guarded_job(config, thresholds, **hooks))
+        )
+    except GuardFailure as failure:
+        print(
+            f"guard_failed={failure.reason} cleanup_uncertain={str(failure.cleanup_uncertain).lower()}",
+            file=sys.stderr,
+        )
+        return 2
+    except LauncherFailure:
+        print("launcher_failed=configuration_or_Harbor_validation", file=sys.stderr)
+        return 2
+    except Exception as failure:  # noqa: BLE001
+        print(
+            f"launcher_failed={type(failure).__name__} cleanup_uncertain=false",
+            file=sys.stderr,
+        )
+        return 1
+    if trial_failure is not None:
+        print(f"guarded_harbor_job=failed reason={trial_failure}", file=sys.stderr)
+        return 1
+    print("guarded_harbor_job=complete")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one fresh Harbor Modal job behind a fail-closed OpenRouter monitor."
@@ -268,8 +321,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         require_pinned_harbor()
         config = load_job_config(args.config)
-        validate_job_config(config)
-        trial_failure = _trial_failure_reason(asyncio.run(run_guarded_job(config, thresholds)))
     except GuardFailure as failure:
         print(
             f"guard_failed={failure.reason} cleanup_uncertain={str(failure.cleanup_uncertain).lower()}",
@@ -285,11 +336,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if trial_failure is not None:
-        print(f"guarded_harbor_job=failed reason={trial_failure}", file=sys.stderr)
-        return 1
-    print("guarded_harbor_job=complete")
-    return 0
+    return run_guarded_config(config, thresholds)
 
 
 if __name__ == "__main__":
