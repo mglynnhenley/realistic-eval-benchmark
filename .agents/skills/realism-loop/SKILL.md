@@ -20,6 +20,13 @@ sessions and Modal/other compute are separately billed and not capped by this
 ledger. Without paid authorization, use saved evidence, local checks and unpaid
 preparation only. Routine work already authorized needs no repeated confirmation.
 
+For an offline-only request (including an offline cancellation check), put the
+exact offline result requested in the first line of the handoff, using the task's
+named check or output without inventing acceptance criteria. Stop once that result
+is delivered. Do not expand into live-run credential or provider readiness unless
+a live run is explicitly requested. For requested live runs, retain the
+authorization and readiness requirements below.
+
 Use four distinct configurable explicit versioned investigator model IDs,
 preferably from different families, pinned with settings for the round. There are
 no fallback models. Each needs `max_tokens`; never silently substitute an
