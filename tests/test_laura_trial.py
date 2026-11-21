@@ -488,20 +488,23 @@ def test_compose_overlay_change_fails_before_guard(tmp_path, monkeypatch, capsys
     bundle = _native_setup(tmp_path, monkeypatch)
     overlay = tmp_path / "compose-overlay.yaml"
     overlay.write_text(
-        "services:\n  agent:\n    environment:\n      FIXTURE_OVERLAY: before\n",
+        "services:\n  agent:\n    labels:\n      build: '123'\n"
+        "    environment:\n      env_file: text\n      FIXTURE_OVERLAY: before\n",
         encoding="utf-8",
     )
     job = yaml.safe_load(bundle.config_path.read_bytes())
     job["environment"]["extra_docker_compose"] = [str(overlay)]
     bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
     _save(bundle)
+    laura_trial.verify_setup(bundle.manifest_path)
 
     inputs = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))["config_inputs"]
     [entry] = [item for item in inputs if item["kind"] == "extra_docker_compose"]
     assert entry["path"] == str(overlay.resolve())
 
     overlay.write_text(
-        "services:\n  agent:\n    environment:\n      FIXTURE_OVERLAY: after\n",
+        "services:\n  agent:\n    labels:\n      build: '123'\n"
+        "    environment:\n      env_file: text\n      FIXTURE_OVERLAY: after\n",
         encoding="utf-8",
     )
     guard_calls = []

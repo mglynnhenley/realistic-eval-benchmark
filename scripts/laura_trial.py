@@ -158,23 +158,44 @@ def _validate_compose_overlay(path: Path) -> None:
         raise SetupFailure from None
     if not isinstance(compose, dict):
         raise SetupFailure
+    if compose.get("include"):
+        raise SetupFailure
 
-    def visit(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in {"build", "develop", "env_file", "include"} and item:
-                    raise SetupFailure
-                if key in {"file", "driver_opts"} and item:
-                    raise SetupFailure
-                if (key == "volumes" and isinstance(item, list)
-                        and any(_has_local_volume_reference(mount) for mount in item)):
-                    raise SetupFailure
-                visit(item)
-        elif isinstance(value, list):
-            for item in value:
-                visit(item)
+    services = compose.get("services", {})
+    if not isinstance(services, dict):
+        raise SetupFailure
+    for service in services.values():
+        if not isinstance(service, dict):
+            raise SetupFailure
+        if any(service.get(key) for key in ("build", "develop", "env_file", "label_file")):
+            raise SetupFailure
+        extends = service.get("extends")
+        if isinstance(extends, dict) and extends.get("file"):
+            raise SetupFailure
+        volumes = service.get("volumes", [])
+        if isinstance(volumes, list) and any(
+            _has_local_volume_reference(mount) for mount in volumes
+        ):
+            raise SetupFailure
 
-    visit(compose)
+    for resource_type in ("configs", "secrets"):
+        resources = compose.get(resource_type, {})
+        if not isinstance(resources, dict):
+            raise SetupFailure
+        if any(
+            isinstance(resource, dict) and resource.get("file")
+            for resource in resources.values()
+        ):
+            raise SetupFailure
+
+    volumes = compose.get("volumes", {})
+    if not isinstance(volumes, dict):
+        raise SetupFailure
+    if any(
+        isinstance(volume, dict) and volume.get("driver_opts")
+        for volume in volumes.values()
+    ):
+        raise SetupFailure
 
 
 def _digest_entries(entries: list[dict[str, Any]]) -> str:
