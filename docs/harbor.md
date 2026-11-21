@@ -192,11 +192,16 @@ launching. Use `"execution": "modal"` to prepare a Modal job.
 not select Muse or native defaults. Save the exact prepared JobConfig and task
 tree you intend to use, including the originally attested staged wheel; replacing
 the wheel path, filename, digest or bytes changes the setup identity. Save and
-verify are identity checks only: they do not validate public-scenario behavior,
-package startup, or launch approval. A matching manifest means only that the
-recorded inputs are unchanged, not that they are healthy or approved. Remote
-agent skills are not snapshotted and therefore fail closed; local skills and
-`extra_instruction_paths` are fingerprinted.
+verify also validate the public-only scenario descriptor embedded in that exact
+wheel: the wheel named in `environment/agent/agent-wheel.json` must match its
+SHA-256 and the task metadata, and the descriptor selected by the metadata's
+`scenario` field is checked with `AgentScenario` (currently `train_refund_late`).
+Missing or duplicate descriptors and private fields fail closed. This is schema
+validation only: the wheel is not installed or run, so startup health, scenario
+behavior and launch approval remain unvalidated. A matching manifest means only
+that the recorded inputs are unchanged and the public descriptor still matches
+its schema. Remote agent skills are not snapshotted and therefore fail closed;
+local skills and `extra_instruction_paths` are fingerprinted.
 
 ```bash
 scripts/harbor python -m scripts.laura_trial save \
@@ -206,9 +211,11 @@ scripts/harbor python -m scripts.laura_trial verify \
   --manifest .context/laura/setup.json
 ```
 
-Relative task, jobs, instruction and local-skill paths are anchored to the
-working directory used by `save`, matching Harbor's normal CLI path semantics;
-that base is captured in the private manifest. Verify uses a fresh, non-existing
+Relative task, jobs, instruction, local-skill and extra-compose paths are anchored
+to the working directory used by `save`, matching Harbor's normal CLI path
+semantics; that base is captured in the private manifest. Extra Compose overlay
+files are fingerprinted; overlays with unverified local file references are
+unsupported and fail closed. Verify uses a fresh, non-existing
 validation job name, creates no job, and does not read or hash runtime outputs;
 it only checks whether that random validation-name path is already occupied. A
 completed source job does not prevent reuse. Only Python caches are omitted
@@ -231,9 +238,8 @@ prints the dashboard URL returned by the Modal App SDK; it does not construct a
 URL from a sandbox ID. A fresh job and Modal sandbox do not resume prior runtime
 state; frozen task inputs may be reused. The wrapper does not run post-run
 Scout/claim grading, and it preserves the configured Harbor verifier. The
-existing offline adapter/wheel checks (for example
-`refund_eval.harbor.adapter.validate_and_index` and the native task tests) remain
-separate from this identity-only check.
+existing installed-agent smoke remains separate and can check startup using an
+exact wheel; save/verify perform only the public descriptor schema check above.
 
 #### Optional batch spend planning
 

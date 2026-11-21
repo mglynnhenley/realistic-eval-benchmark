@@ -7,6 +7,8 @@ import io
 import json
 import os
 import subprocess
+import tomllib
+import warnings
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,8 +24,24 @@ from refund_eval.harbor import batch
 from refund_eval.harbor.batch import NativeBatchConfig
 from scripts import laura_trial
 
+_PUBLIC_SCENARIO_MEMBER = "refund_eval/scenario/train_refund_late.yaml"
+_PUBLIC_SCENARIO = {
+    "id": "train_refund_late",
+    "task_text": "Synthetic public request for an offline fixture.",
+    "start_time": "2040-01-01T00:00:00+00:00",
+    "sim_weeks": 6,
+    "user": {
+        "name": "Fixture User",
+        "email_addresses": ["fixture@example.test"],
+        "phone": None,
+    },
+}
 
-def _write_test_only_wheel(directory: Path) -> tuple[Path, str]:
+
+def _write_test_only_wheel(
+    directory: Path, *, scenario=None, include_scenario=True, duplicate_scenario=False,
+    alias_scenario=False, raw_wheel=None
+) -> tuple[Path, str]:
     """Create inert dummy wheel bytes for offline fixture preparation only."""
     directory.mkdir(parents=True)
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
@@ -33,6 +51,13 @@ def _write_test_only_wheel(directory: Path) -> tuple[Path, str]:
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
+    if include_scenario:
+        public_scenario = _PUBLIC_SCENARIO if scenario is None else scenario
+        files[_PUBLIC_SCENARIO_MEMBER] = yaml.safe_dump(public_scenario, sort_keys=False).encode()
+        if alias_scenario:
+            files[f"synthetic_agent-0.0.0.data/purelib/{_PUBLIC_SCENARIO_MEMBER}"] = files[
+                _PUBLIC_SCENARIO_MEMBER
+            ]
     record_name = f"{dist_info}/RECORD"
     rows = []
     for name, content in files.items():
@@ -43,9 +68,16 @@ def _write_test_only_wheel(directory: Path) -> tuple[Path, str]:
     csv.writer(record, lineterminator="\n").writerows(rows)
     files[record_name] = record.getvalue().encode()
     wheel = directory / filename
+    if raw_wheel is not None:
+        wheel.write_bytes(raw_wheel)
+        return wheel, hashlib.sha256(raw_wheel).hexdigest()
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, content in files.items():
             archive.writestr(name, content)
+            if duplicate_scenario and name == _PUBLIC_SCENARIO_MEMBER:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    archive.writestr(name, content)
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
@@ -90,9 +122,15 @@ def _source_repo(root: Path, monkeypatch) -> Path:
     return root
 
 
-def _native_setup(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+def _native_setup(
+    tmp_path: Path, monkeypatch, *, scenario=None, include_scenario=True,
+    duplicate_scenario=False, alias_scenario=False, raw_wheel=None,
+) -> SimpleNamespace:
     source_root = _source_repo(tmp_path / "source-root", monkeypatch)
-    wheel, wheel_sha256 = _write_test_only_wheel(tmp_path / "wheel")
+    wheel, wheel_sha256 = _write_test_only_wheel(
+        tmp_path / "wheel", scenario=scenario, include_scenario=include_scenario,
+        duplicate_scenario=duplicate_scenario, alias_scenario=alias_scenario, raw_wheel=raw_wheel,
+    )
     config = NativeBatchConfig.model_validate(
         {
             "execution": "modal",
@@ -101,10 +139,10 @@ def _native_setup(tmp_path: Path, monkeypatch) -> SimpleNamespace:
             "research_mode": "saved",
             "model": "openrouter/test-model",
             "models": ["openrouter/test-model"],
-            "cost_limit": {"openrouter/test-model": 1.25},
-            "world_cost_limit": 0.75,
+            "cost_limit": {"openrouter/test-model": 10.0},
+            "world_cost_limit": 10.0,
             "max_turns": 50,
-            "sim_weeks": 3,
+            "sim_weeks": 6,
             "time_limit": 120,
             "history_tokens": 0,
             "budget_notice": "daily",
@@ -172,17 +210,30 @@ def test_save_and_verify_are_identity_only_and_preserve_completed_source_job(
         "save", "--config", str(bundle.config_path), "--manifest", str(bundle.manifest_path)
     ]) == 0
     assert capsys.readouterr().out == (
-        "laura_setup_saved=identity_only public_validation=false "
+        "laura_setup_saved=identity_and_public_schema public_validation=true "
         "startup_validated=false launch_approval=false\n"
     )
     manifest_bytes = bundle.manifest_path.read_bytes()
+    public_validation = json.loads(manifest_bytes)["public_validation"]
+    staged_wheel = next((bundle.task_path / "environment" / "agent" / "wheels").glob("*.whl"))
+    assert public_validation == {
+        "status": "passed",
+        "checker": "refund_eval.scenario.schema.AgentScenario.model_validate",
+        "scenario": "train_refund_late",
+        "wheel_path": staged_wheel.relative_to(bundle.task_path).as_posix(),
+        "wheel_sha256": hashlib.sha256(staged_wheel.read_bytes()).hexdigest(),
+        "scenario_member": _PUBLIC_SCENARIO_MEMBER,
+        "scenario_sha256": hashlib.sha256(
+            yaml.safe_dump(_PUBLIC_SCENARIO, sort_keys=False).encode()
+        ).hexdigest(),
+    }
     assert "openrouter/test-model" not in manifest_bytes.decode()
     assert "OPENROUTER_API_KEY" not in manifest_bytes.decode()
 
     marker.write_text("changed runtime output\n", encoding="utf-8")
     assert laura_trial.main(["verify", "--manifest", str(bundle.manifest_path)]) == 0
     assert capsys.readouterr().out == (
-        "laura_setup_verified=identity_only public_validation=false "
+        "laura_setup_verified=identity_and_public_schema public_validation=true "
         "startup_validated=false launch_approval=false\n"
     )
     assert marker.read_text(encoding="utf-8") == "changed runtime output\n"
@@ -229,7 +280,7 @@ def test_fresh_run_changes_only_job_name_and_surfaces_links_before_completion(
     assert captured["config"].tasks[0].path == saved.tasks[0].path
     output = capsys.readouterr().out.splitlines()
     assert output[0] == (
-        "laura_setup_verified=identity_only public_validation=false "
+        "laura_setup_verified=identity_and_public_schema public_validation=true "
         "startup_validated=false launch_approval=false"
     )
     assert output[1] == f"harbor_job_log_uri={ (bundle.jobs_dir / 'laura-fresh' / 'job.log').resolve().as_uri() }"
@@ -292,6 +343,95 @@ def test_staged_wheel_identity_changes_fail_before_guard(
         "run_guarded_config",
         lambda *args, **kwargs: guard_calls.append(True) or 0,
     )
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["missing_wheel", "invalid_zip", "missing_descriptor", "duplicate_descriptor", "private_top_level", "private_user"],
+)
+def test_public_validation_rejects_invalid_digest_valid_staged_wheel(
+    tmp_path, monkeypatch, case
+):
+    setup = {}
+    if case == "invalid_zip":
+        setup["raw_wheel"] = b"synthetic digest-valid bytes, not a zip archive"
+    elif case == "missing_descriptor":
+        setup["include_scenario"] = False
+    elif case == "duplicate_descriptor":
+        setup["duplicate_scenario"] = True
+    elif case == "private_top_level":
+        setup["scenario"] = {**_PUBLIC_SCENARIO, "facts": {"fixture_only": True}}
+    elif case == "private_user":
+        setup["scenario"] = {
+            **_PUBLIC_SCENARIO,
+            "user": {**_PUBLIC_SCENARIO["user"], "home_town": "Synthetic private field"},
+        }
+    bundle = _native_setup(tmp_path, monkeypatch, **setup)
+    if case == "missing_wheel":
+        wheel_manifest = json.loads(
+            (bundle.task_path / "environment" / "agent" / "agent-wheel.json").read_text()
+        )
+        (bundle.task_path / "environment" / "agent" / "wheels" / wheel_manifest["filename"]).unlink()
+    else:
+        wheel_path = next((bundle.task_path / "environment" / "agent" / "wheels").glob("*.whl"))
+        wheel_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+        wheel_manifest = json.loads(
+            (bundle.task_path / "environment" / "agent" / "agent-wheel.json").read_text()
+        )
+        metadata = tomllib.loads((bundle.task_path / "task.toml").read_text())["metadata"]
+        assert wheel_manifest["sha256"] == metadata["agent_wheel_sha256"] == wheel_sha256
+
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
+
+
+def test_public_validation_rejects_wheel_purelib_scenario_alias(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch, alias_scenario=True)
+    wheel_path = next((bundle.task_path / "environment" / "agent" / "wheels").glob("*.whl"))
+    wheel_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    wheel_manifest = json.loads(
+        (bundle.task_path / "environment" / "agent" / "agent-wheel.json").read_text()
+    )
+    metadata = tomllib.loads((bundle.task_path / "task.toml").read_text())["metadata"]
+    assert wheel_manifest["sha256"] == metadata["agent_wheel_sha256"] == wheel_sha256
+
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
+
+
+def test_verify_reruns_public_scenario_schema_check(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    _save(bundle)
+    validation_calls = []
+    validate = laura_trial._public_validation_result
+
+    def record_validation(task_path):
+        validation_calls.append(task_path)
+        return validate(task_path)
+
+    monkeypatch.setattr(laura_trial, "_public_validation_result", record_validation)
+    laura_trial.verify_setup(bundle.manifest_path)
+    assert validation_calls == [bundle.task_path]
+
+
+def test_missing_public_validation_record_fails_before_guard(tmp_path, monkeypatch, capsys):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    _save(bundle)
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    del manifest["public_validation"]
+    bundle.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
     assert laura_trial.main(_run_args(bundle)) == 2
     assert guard_calls == []
     assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"

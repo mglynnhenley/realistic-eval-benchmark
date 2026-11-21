@@ -1,7 +1,7 @@
-"""Opt-in saved-setup identity checks for a guarded fresh Harbor job.
+"""Opt-in saved-setup checks for a guarded fresh Harbor job.
 
 This wraps the existing guarded runner; it does not select Muse or native defaults.
-Saving and verifying establish identity only, not package startup health or launch approval.
+Save and verify validate the public scenario schema, not package startup health or launch approval.
 """
 
 from __future__ import annotations
@@ -10,14 +10,20 @@ import argparse
 import hashlib
 import importlib
 import importlib.metadata
+import io
 import json
 import os
+import re
 import stat
+import struct
 import subprocess
 import sys
+import tomllib
+import zipfile
+import zlib
 from contextlib import suppress
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
@@ -26,11 +32,14 @@ from harbor.models.job.config import JobConfig
 from pydantic import ValidationError
 
 from refund_eval.output_paths import validate_private_output
+from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
 from scripts.offline_spend_guard import Thresholds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-_MANIFEST_SCHEMA = 1
+_MANIFEST_SCHEMA = 2
+_LAURA_SCENARIO = "train_refund_late"
+_PUBLIC_VALIDATION_CHECKER = "refund_eval.scenario.schema.AgentScenario.model_validate"
 _CACHE_SUFFIXES = {".pyc", ".pyo"}
 _SOURCE_DIRECTORIES = ("refund_eval", "scripts", "scout")
 _SOURCE_FILES = (
@@ -157,9 +166,9 @@ def _validate_compose_overlay(path: Path) -> None:
                     raise SetupFailure
                 if key in {"file", "driver_opts"} and item:
                     raise SetupFailure
-                if key == "volumes" and isinstance(item, list):
-                    if any(_has_local_volume_reference(mount) for mount in item):
-                        raise SetupFailure
+                if (key == "volumes" and isinstance(item, list)
+                        and any(_has_local_volume_reference(mount) for mount in item)):
+                    raise SetupFailure
                 visit(item)
         elif isinstance(value, list):
             for item in value:
@@ -333,6 +342,86 @@ def _task_identity(task_path: Path) -> dict[str, Any]:
     return {"path": str(task_path), "entries": entries, "sha256": _digest_entries(entries)}
 
 
+def _public_validation_result(task_path: Path) -> dict[str, str]:
+    agent_dir = task_path / "environment" / "agent"
+    wheel_manifest_path = agent_dir / "agent-wheel.json"
+    task_manifest_path = task_path / "task.toml"
+    try:
+        if not stat.S_ISREG(wheel_manifest_path.lstat().st_mode):
+            raise SetupFailure
+        wheel_manifest = json.loads(
+            wheel_manifest_path.read_bytes(), object_pairs_hook=_unique_object
+        )
+        if not stat.S_ISREG(task_manifest_path.lstat().st_mode):
+            raise SetupFailure
+        task_metadata = tomllib.loads(task_manifest_path.read_text(encoding="utf-8"))["metadata"]
+        if not isinstance(wheel_manifest, dict) or set(wheel_manifest) != {"filename", "sha256"}:
+            raise SetupFailure
+        if not isinstance(task_metadata, dict) or task_metadata.get("scenario") != _LAURA_SCENARIO:
+            raise SetupFailure
+        filename = wheel_manifest["filename"]
+        expected_sha256 = wheel_manifest["sha256"]
+        if not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+!-]*\.whl", filename):
+            raise SetupFailure
+        if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise SetupFailure
+        if (task_metadata.get("agent_wheel_filename") != filename
+                or task_metadata.get("agent_wheel_sha256") != expected_sha256):
+            raise SetupFailure
+
+        wheel_path = agent_dir / "wheels" / filename
+        if not stat.S_ISREG(wheel_path.lstat().st_mode):
+            raise SetupFailure
+        wheel_bytes = wheel_path.read_bytes()
+        wheel_sha256 = hashlib.sha256(wheel_bytes).hexdigest()
+        if wheel_sha256 != expected_sha256:
+            raise SetupFailure
+
+        scenario_member = f"refund_eval/scenario/{task_metadata['scenario']}.yaml"
+        with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+            members = archive.infolist()
+            matches = [info for info in members if info.filename == scenario_member]
+            scenario_parts = PurePosixPath(scenario_member).parts
+            aliases = []
+            for info in members:
+                parts = PurePosixPath(info.filename).parts
+                for index in range(max(0, len(parts) - len(scenario_parts) - 1)):
+                    if (parts[index].endswith(".data")
+                            and parts[index + 1] in {"purelib", "platlib"}
+                            and parts[index + 2:] == scenario_parts):
+                        aliases.append(info)
+                        break
+            if len(matches) != 1 or aliases:
+                raise SetupFailure
+            scenario_bytes = archive.read(matches[0])
+        scenario = AgentScenario.model_validate(yaml.safe_load(scenario_bytes))
+        if scenario.id != task_metadata["scenario"]:
+            raise SetupFailure
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, yaml.YAMLError,
+            ValidationError, zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError,
+            EOFError, struct.error, zlib.error):
+        raise SetupFailure from None
+
+    return {
+        "status": "passed",
+        "checker": _PUBLIC_VALIDATION_CHECKER,
+        "scenario": task_metadata["scenario"],
+        "wheel_path": wheel_path.relative_to(task_path).as_posix(),
+        "wheel_sha256": wheel_sha256,
+        "scenario_member": scenario_member,
+        "scenario_sha256": hashlib.sha256(scenario_bytes).hexdigest(),
+    }
+
+
+def _require_task_wheel_match(
+    task: dict[str, Any], public_validation: dict[str, str]
+) -> None:
+    matches = [entry for entry in task["entries"] if entry.get("path") == public_validation["wheel_path"]]
+    if (len(matches) != 1
+            or matches[0].get("sha256") != public_validation["wheel_sha256"]):
+        raise SetupFailure
+
+
 def _manifest_path(path: Path) -> Path:
     requested = path.expanduser()
     if requested.name in {"", ".", ".."}:
@@ -376,6 +465,9 @@ def _manifest_document(
         raise SetupFailure
     guarded_harbor.require_pinned_harbor()
     _validate_with_fresh_name(config)
+    task_identity = _task_identity(task_path)
+    public_validation = _public_validation_result(task_path)
+    _require_task_wheel_match(task_identity, public_validation)
     return {
         "schema_version": _MANIFEST_SCHEMA,
         "path_base": str(path_base),
@@ -384,10 +476,11 @@ def _manifest_document(
             "size": len(config_bytes),
             "sha256": hashlib.sha256(config_bytes).hexdigest(),
         },
-        "task": _task_identity(task_path),
+        "task": task_identity,
         "config_inputs": _config_inputs(config),
         "current_source": {"sha256": _source_identity()},
         "runtime": _runtime_identity(),
+        "public_validation": public_validation,
     }
 
 
@@ -436,7 +529,7 @@ def _read_manifest(path: Path) -> dict[str, Any]:
         raise SetupFailure from None
     keys = {
         "schema_version", "path_base", "config", "task", "config_inputs",
-        "current_source", "runtime",
+        "current_source", "runtime", "public_validation",
     }
     if not isinstance(document, dict) or set(document) != keys:
         raise SetupFailure
@@ -464,6 +557,26 @@ def _read_manifest(path: Path) -> dict[str, Any]:
         raise SetupFailure
     if not isinstance(document["runtime"], dict):
         raise SetupFailure
+    public_validation = document["public_validation"]
+    validation_keys = {
+        "status", "checker", "scenario", "wheel_path", "wheel_sha256",
+        "scenario_member", "scenario_sha256",
+    }
+    if not isinstance(public_validation, dict) or set(public_validation) != validation_keys:
+        raise SetupFailure
+    if (public_validation["status"] != "passed"
+            or public_validation["checker"] != _PUBLIC_VALIDATION_CHECKER
+            or public_validation["scenario"] != _LAURA_SCENARIO):
+        raise SetupFailure
+    if (not isinstance(public_validation["wheel_path"], str)
+            or Path(public_validation["wheel_path"]).is_absolute()
+            or ".." in Path(public_validation["wheel_path"]).parts
+            or public_validation["scenario_member"] != f"refund_eval/scenario/{_LAURA_SCENARIO}.yaml"):
+        raise SetupFailure
+    for key in ("wheel_sha256", "scenario_sha256"):
+        if (not isinstance(public_validation[key], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", public_validation[key])):
+            raise SetupFailure
     return document
 
 
@@ -482,6 +595,10 @@ def verify_setup(manifest_path: Path) -> JobConfig:
         raise SetupFailure
     actual_task = _task_identity(config.tasks[0].path) if config.tasks and config.tasks[0].path else None
     if actual_task != document["task"]:
+        raise SetupFailure
+    actual_public_validation = _public_validation_result(config.tasks[0].path)
+    _require_task_wheel_match(actual_task, actual_public_validation)
+    if actual_public_validation != document["public_validation"]:
         raise SetupFailure
     if _config_inputs(config) != document["config_inputs"]:
         raise SetupFailure
@@ -563,18 +680,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "save":
             save_setup(args.config, args.manifest)
-            print("laura_setup_saved=identity_only public_validation=false startup_validated=false launch_approval=false")
+            print("laura_setup_saved=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false")
             return 0
         if args.command == "verify":
             verify_setup(args.manifest)
-            print("laura_setup_verified=identity_only public_validation=false startup_validated=false launch_approval=false")
+            print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false")
             return 0
         config = prepare_fresh_job(args.manifest, args.job_name)
     except (OSError, ValueError, TypeError, ImportError, yaml.YAMLError, guarded_harbor.LauncherFailure):
         print("laura_setup_failed=identity_or_job_validation", file=sys.stderr)
         return 2
 
-    print("laura_setup_verified=identity_only public_validation=false startup_validated=false launch_approval=false", flush=True)
+    print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
     try:
         thresholds = Thresholds(
             openrouter_key_ceiling=args.openrouter_key_ceiling,
