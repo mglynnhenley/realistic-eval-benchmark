@@ -392,6 +392,28 @@ def test_compose_overlay_local_file_references_fail_closed(tmp_path, monkeypatch
     assert not bundle.manifest_path.exists()
 
 
+@pytest.mark.parametrize("input_tree", ["task", "skill"])
+def test_manifest_inside_fingerprinted_tree_is_rejected_before_write(
+    tmp_path, monkeypatch, input_tree
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    root = bundle.task_path if input_tree == "task" else bundle.skill
+    manifest = root / "laura-setup.json"
+    overlap_checks = []
+    reject_overlap = laura_trial._reject_manifest_overlap
+
+    def record_overlap_check(*args):
+        overlap_checks.append(True)
+        return reject_overlap(*args)
+
+    monkeypatch.setattr(laura_trial, "_reject_manifest_overlap", record_overlap_check)
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, manifest)
+
+    assert overlap_checks == [True]
+    assert not manifest.exists()
+
+
 def test_empty_optional_external_input_lists_can_be_snapshotted(tmp_path, monkeypatch):
     bundle = _native_setup(tmp_path, monkeypatch)
     job = yaml.safe_load(bundle.config_path.read_bytes())

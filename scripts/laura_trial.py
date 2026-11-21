@@ -345,6 +345,24 @@ def _manifest_path(path: Path) -> Path:
     return parent / absolute.name
 
 
+def _reject_manifest_overlap(
+    manifest_path: Path, config_path: Path, config: JobConfig
+) -> None:
+    output = manifest_path.resolve(strict=False)
+    roots = [
+        task.path for task in config.tasks if task.path is not None
+    ] + [Path(skill) for agent in config.agents for skill in agent.skills]
+    if any(output == root or root in output.parents for root in roots):
+        raise SetupFailure
+    files = [
+        config_path,
+        *config.extra_instruction_paths,
+        *config.environment.extra_docker_compose,
+    ]
+    if output in files:
+        raise SetupFailure
+
+
 def _manifest_document(
     config_path: Path,
     config_bytes: bytes,
@@ -393,6 +411,7 @@ def save_setup(config_path: Path, manifest_path: Path) -> None:
         raise SetupFailure
     path_base = Path.cwd().resolve()
     config_path, config_bytes, config = _load_config(config_path, path_base)
+    _reject_manifest_overlap(output, config_path, config)
     document = _manifest_document(config_path, config_bytes, config, path_base)
     _write_manifest(output, document)
 
