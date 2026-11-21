@@ -128,15 +128,27 @@ def current_tool_call_id() -> str | None:
     span_id = current_span_id()
     if span_id is None:
         return None
+
+    def tool_call_id(events: list[Any]) -> tuple[bool, str | None]:
+        for n in range(len(events) - 1, -1, -1):
+            ev = events[n]
+            if isinstance(ev, SpanBeginEvent) and ev.id == span_id:
+                return True, next((e.id for e in events[n + 1 :] if isinstance(e, ToolEvent)), None)
+        return False, None
+
     try:
-        events = list(transcript().history.recent_events(200))
+        history = transcript().history
+        events = list(history.recent_events(100))
     except Exception:  # noqa: BLE001 - history unavailable: fall back to a fresh id
         return None
-    for n in range(len(events) - 1, -1, -1):
-        ev = events[n]
-        if isinstance(ev, SpanBeginEvent) and ev.id == span_id:
-            return next((e.id for e in events[n + 1 :] if isinstance(e, ToolEvent)), None)
-    return None
+    found, call_id = tool_call_id(events)
+    if found:
+        return call_id
+    try:
+        events = list(history.recent_events(200))
+    except Exception:  # noqa: BLE001 - history unavailable: fall back to a fresh id
+        return None
+    return tool_call_id(events)[1]
 
 
 def log_interception(
