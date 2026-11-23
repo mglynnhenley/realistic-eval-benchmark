@@ -470,3 +470,28 @@ such as `reasoning.encrypted` are refused: OpenRouter documents them as opaque a
 using provider-native token counts, but does not document a token-count upper bound from ciphertext bytes.
 Known text, summary and signature reasoning metadata remains replayable and is included in the serialized
 request bound.
+
+### One-key role budgets (`shared_roles`)
+
+`openrouter_key_mode: "shared_roles"` is a separate native Modal mode for one ordinary
+`OPENROUTER_API_KEY`. It keeps the target and world request ceilings separate (at most `$50`
+and `$100`) and requires an explicit positive `shared_allowance_usd` (`H`) no greater than
+their sum or `$150`. For example, target `$50`, world `$100`, and `H = $90` leaves the role
+ceilings at `$50`/`$100`; it does **not** raise the shared allocation to `$150`. The task stops
+before dispatch when its next bounded reservation would exceed either the relevant role cap
+or `H`. Roles share the aggregate allowance; neither role has an earmarked allocation.
+
+`H` is the operator-verified allocation available to this task after other known commitments,
+not a claim that the account is funded for `$150` or that the provider has reserved this amount.
+The guarded launcher uses one fresh ordinary-key metadata baseline and requires enough finite
+`limit_remaining` plus any applicable finite budget/effective-budget remainder. It rejects
+resetting or unsupported metadata. `/api/v1/key` is a runtime limit check, not proof of account
+credit or balance; this mode does not query `/api/v1/credits` or require a management key.
+
+The shared reservation ledger is a task-local Compose volume used only by the target and world
+containers. It serializes their role and aggregate holds; it does not coordinate other tasks,
+Modal jobs, or unrelated users of the same key. Account for those commitments when choosing
+`H`. If external concurrent usage cannot be bounded, do not claim the task has protected or
+guaranteed provider headroom. Launch this mode only through the guarded native launcher so the
+one-attempt, zero-retry configuration and source, wheel, task, and volume attestations are
+checked before the metadata probe.

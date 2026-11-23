@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import zipfile
 from decimal import Decimal
@@ -15,6 +16,14 @@ from refund_eval.harbor import adapter
 from refund_eval.harbor.adapter import (
     SPLIT_BUDGET_WHEEL_SOURCES,
     verify_split_budget_wheel,
+)
+from refund_eval.models import budget as world_budget
+from refund_eval.models.budget import BudgetedWorldModels
+from refund_eval.models.client import Message, ModelLimitExceeded
+from refund_eval.models.shared_role_spend_ledger import (
+    CONFIG_ENV,
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedger,
 )
 from refund_eval.models.world_spend_ledger import WorldSpendLedgerError
 from refund_eval.scenario.schema import load_scenario
@@ -661,3 +670,72 @@ def test_split_wheel_attestation_requires_exact_budget_sources(tmp_path):
     stale = _write_public_agent_wheel(tmp_path / "stale", stale="refund_eval/agent/world_mode.py")
     with pytest.raises(ValueError, match="current approved wheel source"):
         verify_split_budget_wheel(stale)
+
+
+def test_shared_roles_target_spend_blocks_world_dispatch_via_budgeted_models(tmp_path, monkeypatch):
+    world_model = "openrouter/test-world-model"
+    config = SharedRoleBudgetConfig(
+        allowance_usd="1",
+        role_limits_usd={"target": "1", "world": "1"},
+        scenario="train_refund_late",
+        models={"target": MODEL_ID, "simulator": world_model, "grader": world_model},
+    )
+    config_raw = json.dumps({
+        "schema_version": 1,
+        "shared_allowance_usd": "1",
+        "role_limits_usd": {"target": "1", "world": "1"},
+        "scenario": "train_refund_late",
+        "models": {"target": MODEL_ID, "simulator": world_model, "grader": world_model},
+    })
+    ledger_dir = tmp_path / "role-budget"
+    monkeypatch.setattr(dollar_budget, "SHARED_ROLE_LEDGER_DIRECTORY", ledger_dir)
+    monkeypatch.setattr(dollar_budget, "OpenRouterAPI", FakeAPI)
+    target_prices = dict.fromkeys(PRICES, 0.0)
+    target_prices["request"] = 0.8
+    monkeypatch.setattr(dollar_budget, "openrouter_tariffs", lambda _models: {MODEL_ID: target_prices})
+    monkeypatch.setenv("REFUND_EVAL_AGENT_DOLLAR_CAP", "1")
+    monkeypatch.setenv("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "4")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_roles")
+    monkeypatch.setenv(CONFIG_ENV, config_raw)
+    monkeypatch.setenv("WORLD_SCENARIO", "train_refund_late")
+    events = []
+    target = FakeModel(events)
+    target.api.reported_cost = Decimal("0.8")
+
+    async def complete_target():
+        async with dollar_budget.target_dollar_budget(target):
+            await target.api._generate_completion(_request(), {})
+
+    asyncio.run(complete_target())
+    assert events[-1][0] == "send"
+
+    class FakeWorldClient:
+        def __init__(self):
+            self.dispatches = []
+
+        def model_name(self, role):
+            return config.models[role]
+
+        async def complete(self, role, messages, **settings):
+            self.dispatches.append((role, messages, settings))
+            raise AssertionError("unaffordable world request was dispatched")
+
+    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+    world_prices = dict.fromkeys(PRICES, 0.0)
+    world_prices["request"] = 0.3
+    recorded = FakeWorldClient()
+    world = BudgetedWorldModels(
+        recorded,
+        limit=1,
+        persist=lambda: None,
+        prices={world_model: world_prices},
+        ledger=SharedRoleSpendLedger(ledger_dir, config).view("world"),
+        scope=config.scope,
+        strict_budget=True,
+    )
+    with pytest.raises(ModelLimitExceeded, match="aggregate allowance"):
+        asyncio.run(world.complete("simulator", [Message("user", "world request")], max_tokens=4))
+
+    snapshot = SharedRoleSpendLedger(ledger_dir, config).snapshot()
+    assert Decimal(str(snapshot["spent_usd"])) == Decimal("0.8")
+    assert recorded.dispatches == []
