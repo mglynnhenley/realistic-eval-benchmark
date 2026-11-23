@@ -24,18 +24,42 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.14 — 2026-11-23
+## 7.18 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 025421f7ca9f4d5e0aba801dfcb76e9db014ea509ab5e8ec1ff03465a2f25d98
+- Fingerprint: dcbff328e1849e7e0202890934083858d383e72045f21ebd7b987951cdd98f56
 - Trial round: none; offline validation only.
 - Changes: accept an independent requested deadline in native `shared_roles` preparation, applying it only to the agent-facing late-refund task and preserving default and world/company data.
 
+## 7.17 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 531ec81288488128c28631fb1e5cc9d846050d45b9cd2d5074a6b1256b0837cc
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Mark invalid multipart charset declarations as undecodable, including NUL-containing defaults and part headers, while preserving raw payloads.
+
+## 7.16 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 6e665b5a1a143f3718fa71fd5e3b47ddc2f521cec59cc29d013a77300d3966a9
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Preserve correspondence fixes through 7.15, harden Markdown code spans, and retain multipart transfer-encoded values and `_charset_` decoding.
+- Merged main: retain one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance from origin/main 292b151 (original 7.13 fingerprint e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd).
+
+## 7.15 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: cb983641e0085d92f97ec160be1adeca62d708fc928e4170d86c6b035f140f93
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Safely render untrusted correspondence metadata, decode text-only multipart submissions, and retain explicit empty outbound bodies.
+
+## 7.14 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 0bf216587ab0d34d8cfa8a63c9ae68ac02831d0c588c29e5ce2fece841daea80
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Secure private correspondence outputs and correct read-marker direction, immediate form timing, saved browser-body decoding, silent interaction provenance, and JSONL Unicode separator handling.
+
 ## 7.13 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd
-- Trial round: none; offline validation only.
-- Changes: add one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance.
-
+- Fingerprint: 6d7d013fb224e8d6e38adff14cb86cb7654302cd0478a249ac56c34e10baa90e
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Add the offline private correspondence exporter and merge split-key routing and strict independent budget enforcement; no new trial or behavior round.
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 27654f1bce57fb61d41243cff8fcae0db19cf393243fec687ed55c0d525f4f73

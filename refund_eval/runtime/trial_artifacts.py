@@ -86,7 +86,7 @@ def world_store(trial: str | Path) -> dict[str, Any]:
     state = _json(world / "state.json")
     store = dict(state["store"]) if isinstance(state, dict) and isinstance(state.get("store"), dict) else {}
     try:
-        lines = (world / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        lines = (world / "events.jsonl").read_text(encoding="utf-8").split("\n")
     except OSError:
         lines = None
     if lines is not None:
