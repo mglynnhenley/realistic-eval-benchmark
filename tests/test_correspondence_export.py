@@ -374,9 +374,43 @@ def test_markdown_escapes_untrusted_body_encoding_and_preserves_raw_header():
     row = next(row for row in export["records"] if row.get("interception_id") == "injected-charset")
     markdown = render_markdown(export)
 
-    assert row["body_encoding"] == "utf-8`\n## Injected heading\n- forged metadata"
+    assert row["body"] is None
     assert row["raw_payload"]["headers"]["content-type"] == content_type
     assert "\n## Injected heading\n" not in markdown
+
+
+def test_web_action_decodes_text_only_multipart_but_not_binary_uploads():
+    text_body = (
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"subject\"\r\n\r\nEnquiry\r\n"
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\nPlease reply, \xc3\x89lodie.\r\n"
+        b"--SavedBoundary--\r\n"
+    )
+    binary_body = (
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\nPlease reply.\r\n"
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"proof.bin\"\r\n"
+        b"Content-Type: application/octet-stream\r\n\r\n\x00\xff\x01\r\n--SavedBoundary--\r\n"
+    )
+    text_encoded = base64.b64encode(text_body).decode()
+    binary_encoded = base64.b64encode(binary_body).decode()
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("text-multipart", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": text_encoded,
+            "headers": {"content-type": "multipart/form-data; boundary=SavedBoundary"},
+        }),
+        _interception("binary-multipart", "web_action", "2026-10-30T12:01:00Z", {
+            "body_base64": binary_encoded,
+            "headers": {"content-type": "multipart/form-data; boundary=SavedBoundary"},
+        }),
+    ]}})
+    rows = {row["interception_id"]: row for row in export["records"]}
+
+    assert rows["text-multipart"]["body"] == "subject: Enquiry\nmessage: Please reply, Élodie."
+    assert rows["text-multipart"]["body_encoding"] == "multipart/form-data"
+    assert rows["text-multipart"]["body_decoding_status"] == "decoded_text"
+    assert rows["text-multipart"]["raw_payload"]["body_base64"] == text_encoded
+    assert rows["binary-multipart"]["body"] is None
+    assert rows["binary-multipart"]["body_decoding_status"] == "nontext"
+    assert rows["binary-multipart"]["raw_payload"]["body_base64"] == binary_encoded
 
 
 @pytest.mark.parametrize("status", ["silent", "failed", "pending"])

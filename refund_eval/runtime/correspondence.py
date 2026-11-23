@@ -17,6 +17,8 @@ import os
 import re
 from collections.abc import Mapping
 from datetime import datetime
+from email import policy as email_policy
+from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +105,27 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
         "application/graphql", "application/json", "application/javascript", "application/xml",
         "application/x-www-form-urlencoded",
     } or media_type.endswith(("+json", "+xml")))
+    if media_type == "multipart/form-data":
+        headers = (f"MIME-Version: 1.0\r\nContent-Type: {content_type}\r\n\r\n"
+                   .encode("utf-8", errors="replace"))
+        message = BytesParser(policy=email_policy.default).parsebytes(headers + body)
+        if not message.is_multipart():
+            return None, "base64", "nontext"
+        text_parts = []
+        for part in message.iter_parts():
+            if part.get_filename() is not None or part.get_content_maintype() != "text":
+                return None, "base64", "nontext"
+            content = part.get_payload(decode=True)
+            if content is None:
+                return None, "base64", "nontext"
+            part_charset = part.get_content_charset() or "utf-8"
+            try:
+                text = content.decode(part_charset, errors="strict")
+            except (LookupError, UnicodeDecodeError):
+                return None, part_charset, "undecodable"
+            name = part.get_param("name", header="content-disposition")
+            text_parts.append(f"{name}: {text}" if isinstance(name, str) and name else text)
+        return "\n".join(text_parts), "multipart/form-data", "decoded_text"
     if media_type and not text_media_type:
         return None, "base64", "nontext"
     try:
