@@ -32,8 +32,9 @@ class NativeBatchConfig(RunConfig):
     agent_wheel_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
-    openrouter_key_mode: Literal["shared", "split"] = "shared"
+    openrouter_key_mode: Literal["shared", "split", "shared_roles"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
+    shared_allowance_usd: CostCap | None = None
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
 
@@ -41,25 +42,38 @@ class NativeBatchConfig(RunConfig):
     def _validate_spend_caps(self) -> NativeBatchConfig:
         if (self.trial_spend_cap_usd is None) != (self.key_spend_cap_usd is None):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
-        if self.openrouter_key_mode == "split":
+        if self.openrouter_key_mode in {"split", "shared_roles"}:
+            mode = self.openrouter_key_mode
+            if self.scenario != "train_refund_late":
+                raise ValueError(f"{mode} mode only supports train_refund_late")
             if self.execution != "modal":
-                raise ValueError("split mode requires Modal execution")
+                raise ValueError(f"{mode} mode requires Modal execution")
             if self.agent_max_output_tokens is None:
-                raise ValueError("split mode requires agent_max_output_tokens")
+                raise ValueError(f"{mode} mode requires agent_max_output_tokens")
             targets = self.models or [self.model]
             if self.trials != 1 or self.concurrency != 1 or len(targets) != 1:
-                raise ValueError("split mode requires one target attempt and concurrency one")
+                raise ValueError(f"{mode} mode requires one target attempt and concurrency one")
             if self.trial_spend_cap_usd is not None:
-                raise ValueError("split mode does not support combined planning caps")
+                raise ValueError(f"{mode} mode does not support combined planning caps")
             roles = [targets[0], self.simulator_model, self.grader_model]
             if any(not isinstance(model, str) or not model.startswith("openrouter/") for model in roles):
-                raise ValueError("split mode requires OpenRouter models for all roles")
+                raise ValueError(f"{mode} mode requires OpenRouter models for all roles")
             agent = Decimal(str(resolve_cost_limits(self.cost_limit, targets, scenario=self.scenario)[targets[0]]))
             world = Decimal(str(self.world_cost_limit))
             if agent <= 0 or agent > 50 or world <= 0 or world > 100:
-                raise ValueError("split role caps exceed supported $50/$100 key ceilings")
+                raise ValueError(f"{mode} role caps exceed supported $50/$100 ceilings")
+            if mode == "shared_roles":
+                if self.shared_allowance_usd is None:
+                    raise ValueError("shared_roles mode requires shared_allowance_usd")
+                allowance = Decimal(str(self.shared_allowance_usd))
+                if allowance <= 0 or allowance > min(Decimal(150), agent + world):
+                    raise ValueError("shared_allowance_usd must be positive and no greater than the role caps or $150")
+            elif "shared_allowance_usd" in self.model_fields_set:
+                raise ValueError("shared_allowance_usd is only valid in shared_roles mode")
         elif self.agent_max_output_tokens is not None:
-            raise ValueError("agent_max_output_tokens is only valid in split mode")
+            raise ValueError("agent_max_output_tokens is only valid in strict role-budget modes")
+        elif "shared_allowance_usd" in self.model_fields_set:
+            raise ValueError("shared_allowance_usd is only valid in shared_roles mode")
         if self.trial_spend_cap_usd is None:
             return self
         missing = {"max_turns", "time_limit"} - self.model_fields_set
@@ -72,7 +86,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     if config.total_time_limit_seconds is not None:
         raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
-    if config.openrouter_key_mode == "split":
+    if config.openrouter_key_mode in {"split", "shared_roles"}:
         verify_split_budget_wheel(config.agent_wheel)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
@@ -83,6 +97,15 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     if total > 100 or config.concurrency > total:
         raise ValueError("A batch allows at most 100 trials and concurrency cannot exceed the trial count")
     caps = resolve_cost_limits(config.cost_limit, targets, scenario=config.scenario)
+    shared_role_budget_config = None
+    if config.openrouter_key_mode == "shared_roles":
+        shared_role_budget_config = json.dumps({
+            "schema_version": 1,
+            "shared_allowance_usd": str(config.shared_allowance_usd),
+            "role_limits_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
+            "scenario": config.scenario,
+            "models": {"target": targets[0], "simulator": config.simulator_model, "grader": config.grader_model},
+        }, sort_keys=True, separators=(",", ":"))
     worker_time_limit = config.time_limit
     agent_timeout = 1.1 * config.time_limit
     limits = None
@@ -110,8 +133,9 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
+        shared_allowance_usd=config.shared_allowance_usd, shared_role_budget_config=shared_role_budget_config,
     )
-    if config.openrouter_key_mode == "split":
+    if config.openrouter_key_mode in {"split", "shared_roles"}:
         verify_split_budget_task_sources(task)
     options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice"}, exclude_none=True)
     options["time_limit"] = worker_time_limit
@@ -127,7 +151,14 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
              "env": ({"OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
                       "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens)}
-                     if config.openrouter_key_mode == "split" else {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
+                     if config.openrouter_key_mode == "split" else
+                     {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
+                      "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
+                      "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens),
+                      "REFUND_EVAL_SHARED_ROLE_MODE": "shared_roles",
+                      "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config}
+                     if config.openrouter_key_mode == "shared_roles" else
+                     {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
             for model in targets
         ],
         "tasks": [{"path": str(task)}],
@@ -151,12 +182,20 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested",
     }
-    if config.openrouter_key_mode == "split":
+    if config.openrouter_key_mode in {"split", "shared_roles"}:
         effective_parameters.update({
             "openrouter_key_mode": "split",
             "agent_max_output_tokens": config.agent_max_output_tokens,
             "agent_key_ceiling_usd": 50,
             "world_key_ceiling_usd": 100,
+        })
+    elif config.openrouter_key_mode == "shared_roles":
+        effective_parameters.update({
+            "openrouter_key_mode": "shared_roles",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "shared_allowance_usd": str(config.shared_allowance_usd),
+            "role_caps_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
+            "shared_allowance_is_operator_attested": True,
         })
     record.write_text(json.dumps({
         "schema_version": 1,
@@ -188,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Prepared {record}")
-    if config.openrouter_key_mode == "split":
+    if config.openrouter_key_mode in {"split", "shared_roles"}:
         manifest = record.with_name("laura-setup.json")
         job_name = f"laura-native-{record.parent.name}"
         commands = (
@@ -198,7 +237,10 @@ def main(argv: list[str] | None = None) -> int:
             ["scripts/harbor", "python", "-m", "scripts.laura_trial", "run", "--manifest", str(manifest),
              "--job-name", job_name],
         )
-        print("Guarded split launch recipe; set OPENROUTER_AGENT_API_KEY and OPENROUTER_WORLD_API_KEY first:")
+        if config.openrouter_key_mode == "split":
+            print("Guarded split launch recipe; set OPENROUTER_AGENT_API_KEY and OPENROUTER_WORLD_API_KEY first:")
+        else:
+            print("Guarded shared_roles launch recipe; set the ordinary OPENROUTER_API_KEY and verify its available allocation")
         for command in commands:
             print(shlex.join(command))
     else:

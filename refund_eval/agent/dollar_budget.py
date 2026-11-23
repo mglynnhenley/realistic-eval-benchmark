@@ -23,6 +23,12 @@ from refund_eval.models.world_spend_ledger import (
     WorldSpendLedger,
     WorldSpendLedgerError,
 )
+from refund_eval.models.shared_role_spend_ledger import (
+    CONFIG_ENV as SHARED_ROLE_CONFIG_ENV,
+    LEDGER_DIRECTORY as SHARED_ROLE_LEDGER_DIRECTORY,
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedger,
+)
 
 TARIFF_KEYS = {"input", "output", "input_cache_read", "input_cache_write", "input_cache_write_1h",
                "internal_reasoning", "request"}
@@ -283,7 +289,10 @@ def _apply_cache_markers(api: OpenRouterAPI, request: dict[str, Any], config: An
 async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     cap_raw = os.environ.get("REFUND_EVAL_AGENT_DOLLAR_CAP")
     tokens_raw = os.environ.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
-    if cap_raw is None and tokens_raw is None:
+    shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+    if shared_role_mode not in (None, "", "disabled", "shared_roles"):
+        raise WorldSpendLedgerError("Target shared-role budget mode is invalid")
+    if cap_raw is None and tokens_raw is None and shared_role_mode != "shared_roles":
         yield
         return
     cap = _money(cap_raw)
@@ -305,7 +314,16 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     scenario = os.environ.get("WORLD_SCENARIO")
     if not scenario:
         raise WorldSpendLedgerError("Target dollar budget requires the active scenario identity")
-    ledger = WorldSpendLedger(Path("/logs/agent/agent-spend"), cap, {"scenario": scenario, "models": {"agent": model_id}})
+    if shared_role_mode == "shared_roles":
+        shared_config = SharedRoleBudgetConfig.from_environment()
+        if (shared_config.scenario != scenario or shared_config.models["target"] != model_id
+                or shared_config.role_limits_usd["target"] != cap
+                or os.environ.get(SHARED_ROLE_CONFIG_ENV) is None):
+            raise WorldSpendLedgerError("Target shared-role budget scope does not match the prepared run")
+        ledger = SharedRoleSpendLedger(SHARED_ROLE_LEDGER_DIRECTORY, shared_config).view("target")
+    else:
+        ledger = WorldSpendLedger(Path("/logs/agent/agent-spend"), cap,
+                                  {"scenario": scenario, "models": {"agent": model_id}})
     original_method = api._generate_completion
     original_client = api.client
     old_max_retries = api.model_args.get("max_retries")

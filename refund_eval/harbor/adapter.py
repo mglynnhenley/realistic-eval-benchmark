@@ -62,7 +62,7 @@ AGENT_MODULES = {
     "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
-    "models": "__init__ client evidence replay world_spend_ledger",
+    "models": "__init__ client evidence replay shared_role_spend_ledger world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
     "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
@@ -80,6 +80,7 @@ SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/world_mode.py",
     "refund_eval/model_pricing.py",
     "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/models/shared_role_spend_ledger.py",
     "refund_eval/published/provider.py",
     "refund_eval/task.py",
 )
@@ -89,6 +90,7 @@ SPLIT_BUDGET_TASK_SOURCES = (
     "refund_eval/models/client.py",
     "refund_eval/models/openrouter.py",
     "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/models/shared_role_spend_ledger.py",
     "refund_eval/world_service/settings.py",
     "refund_eval/world_service/__main__.py",
     "refund_eval/world_service/trial.py",
@@ -235,7 +237,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
                world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
-               verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared") -> Path:
+               verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
+               shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None) -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
@@ -282,13 +285,33 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
         "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
-        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode == "split" else "false",
+        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles"} else "false",
         "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
+        "OPENROUTER_KEY_MODE": openrouter_key_mode,
+        "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),
+        "SHARED_ROLE_MODE": "shared_roles" if openrouter_key_mode == "shared_roles" else "disabled",
+        "SHARED_ROLE_BUDGET_CONFIG_TOML": json.dumps(shared_role_budget_config or ""),
+        "SHARED_ROLE_BUDGET_CONFIG_YAML": yaml.safe_dump(shared_role_budget_config or "", default_style='"').strip(),
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):
         path = task_dir / name
-        path.write_text(_fill(path.read_text(), values), encoding="utf-8")
+        rendered = _fill(path.read_text(), values)
+        if name == "environment/docker-compose.yaml":
+            if openrouter_key_mode == "shared_roles":
+                rendered = rendered.replace(
+                    "    # ROLE_BUDGET_MAIN_VOLUME\n",
+                    "    volumes:\n      - role-budget:/var/lib/refund-eval/role-budget\n",
+                ).replace(
+                    "      # ROLE_BUDGET_WORLD_VOLUME\n",
+                    "      - role-budget:/var/lib/refund-eval/role-budget\n"
+                    "      - role-budget:/var/log/world/role-budget\n",
+                ).replace("  # ROLE_BUDGET_VOLUME\n", "  role-budget:\n")
+            else:
+                rendered = rendered.replace("    # ROLE_BUDGET_MAIN_VOLUME\n", "")
+                rendered = rendered.replace("      # ROLE_BUDGET_WORLD_VOLUME\n", "")
+                rendered = rendered.replace("  # ROLE_BUDGET_VOLUME\n", "")
+        path.write_text(rendered, encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
     (task_dir / "instruction.md").write_text(task_message(sc, sim_weeks) + "\n", encoding="utf-8")
     if store_root is not None:

@@ -43,6 +43,7 @@ from harbor.models.job.result import JobResult
 from pydantic import ValidationError
 
 from refund_eval.harbor import adapter
+from refund_eval.models.shared_role_spend_ledger import SharedRoleBudgetConfig, SharedRoleSpendLedgerError
 from refund_eval.harbor.adapter import (
     AGENT_IMPORT_PATH,
     verify_split_budget_task_sources,
@@ -51,6 +52,8 @@ from refund_eval.harbor.adapter import (
 from scripts.offline_spend_guard import (
     KEY_CEILING,
     GuardFailure,
+    SharedRoleSpendGuard,
+    SharedRoleThresholds,
     SpendGuard,
     SplitSpendGuard,
     SplitThresholds,
@@ -110,17 +113,17 @@ def _has_role_key_reference(env: dict[str, Any]) -> bool:
     )
 
 
-def _validate_local_task_envs(task_path: Path, *, split: bool = False) -> None:
+def _validate_local_task_envs(task_path: Path, *, split: bool = False, shared_roles: bool = False) -> None:
     try:
         task_config = tomllib.loads(
             (task_path / "task.toml").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise LauncherFailure("local task configuration is invalid") from None
-    if split:
+    if split or shared_roles:
         environment = task_config.get("environment")
         if not isinstance(environment, dict) or environment.get("docker_image") is not None:
-            raise LauncherFailure("split task may not use a prebuilt docker_image")
+            raise LauncherFailure("strict role-budget task may not use a prebuilt docker_image")
 
     def validate_env_maps(value: object) -> None:
         if isinstance(value, dict):
@@ -128,7 +131,7 @@ def _validate_local_task_envs(task_path: Path, *, split: bool = False) -> None:
                 env = value["env"]
                 if not isinstance(env, dict):
                     raise LauncherFailure("local task configuration is invalid")
-                if split:
+                if split or shared_roles:
                     if OPENROUTER_ROLE_KEY_NAMES.intersection(env) or _has_role_key_reference(env):
                         raise LauncherFailure("split task base environment may not inject a shared OpenRouter key")
                 else:
@@ -212,7 +215,62 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         raise LauncherFailure("split task Compose environment is invalid") from None
 
 
-def validate_job_config(config: JobConfig, *, expected_split: bool | None = None) -> None:
+def _shared_roles_compose_values(task_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        environment_dir = task_path / "environment"
+        if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
+            raise ValueError
+        compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
+        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+            raise ValueError
+        if compose["volumes"] != {"world-logs": None, "role-budget": None}:
+            raise ValueError
+        services = compose["services"]
+        if not isinstance(services, dict) or set(services) != {"main", "world"}:
+            raise ValueError
+        main, world_service = services["main"], services["world"]
+        if main != {"depends_on": {"world": {"condition": "service_healthy"}},
+                    "volumes": ["role-budget:/var/lib/refund-eval/role-budget"]}:
+            raise ValueError
+        if not isinstance(world_service, dict) or set(world_service) != {
+            "build", "expose", "environment", "security_opt", "volumes"
+        }:
+            raise ValueError
+        if (world_service["build"] != {"context": "${CONTEXT_DIR}", "dockerfile": "world/Dockerfile"}
+                or world_service["expose"] != ["8000"]
+                or world_service["security_opt"] != ["seccomp=unconfined"]
+                or world_service["volumes"] != ["world-logs:/var/log/world",
+                    "role-budget:/var/lib/refund-eval/role-budget", "role-budget:/var/log/world/role-budget"]):
+            raise ValueError
+        world = _compose_environment(world_service["environment"])
+        task = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+        task_environment = task.get("environment")
+        task_env = task_environment.get("env") if isinstance(task_environment, dict) else None
+        metadata = task.get("metadata")
+        if not isinstance(task_env, dict) or not isinstance(metadata, dict):
+            raise ValueError
+        if (metadata.get("openrouter_key_mode") != "shared_roles"
+                or world.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
+                or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
+                or world.get("WORLD_STRICT_BUDGET") != "true"
+                or world.get("OPENROUTER_API_KEY") != "${OPENROUTER_API_KEY:-}"):
+            raise ValueError
+        for source in (world, task_env):
+            if source.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG") != task_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"):
+                raise ValueError
+        for name, value in world.items():
+            if name == "OPENROUTER_API_KEY":
+                if value != "${OPENROUTER_API_KEY:-}":
+                    raise ValueError
+            elif _ROLE_KEY_REFERENCE.search(str(value)):
+                raise ValueError
+        return world, metadata
+    except (OSError, UnicodeError, yaml.YAMLError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError):
+        raise LauncherFailure("shared_roles task Compose, volume, or metadata is invalid") from None
+
+
+def validate_job_config(config: JobConfig, *, expected_split: bool | None = None,
+                        expected_shared_roles: bool | None = None) -> None:
     if (
         config.n_attempts != 1
         or config.n_concurrent_trials != 1
@@ -236,8 +294,13 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     agent = config.agents[0]
     agent_env = agent.env or {}
     split = agent_env.get("OPENROUTER_API_KEY") == OPENROUTER_AGENT_KEY_REFERENCE
+    shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
+    if split and shared_roles:
+        raise LauncherFailure("guarded key modes conflict")
     if expected_split is not None and split != expected_split:
         raise LauncherFailure("guard mode does not match the prepared role-key routing")
+    if expected_shared_roles is not None and shared_roles != expected_shared_roles:
+        raise LauncherFailure("guard mode does not match the prepared shared-role routing")
     if not split and agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE:
         raise LauncherFailure("agent must use the host OpenRouter key without resume settings")
     if (
@@ -274,9 +337,34 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
                 or _has_role_key_reference({key: value for key, value in agent_env.items()
                                             if key != "OPENROUTER_API_KEY"})):
             raise LauncherFailure("split mode requires the native guarded agent and role-isolated key env")
+    elif shared_roles:
+        kwargs = getattr(agent, "kwargs", {}) or {}
+        try:
+            cap = Decimal(str(kwargs["cost_limit"]))
+            declared_cap = Decimal(str(agent_env["REFUND_EVAL_AGENT_DOLLAR_CAP"]))
+            output_tokens_raw = agent_env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"]
+            if not isinstance(output_tokens_raw, str) or not output_tokens_raw.isdecimal():
+                raise ValueError
+            output_cap = int(output_tokens_raw)
+            role_config_raw = agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"]
+            role_config = SharedRoleBudgetConfig.from_json(role_config_raw)
+        except (KeyError, InvalidOperation, ValueError, TypeError, SharedRoleSpendLedgerError):
+            raise LauncherFailure("shared_roles agent caps or budget configuration are invalid") from None
+        if (not cap.is_finite() or cap <= 0 or cap > 50 or cap != declared_cap or output_cap <= 0
+                or role_config.role_limits_usd["target"] != cap):
+            raise LauncherFailure("shared_roles target cap or output bound is invalid")
+        if (agent.import_path != AGENT_IMPORT_PATH
+                or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE
+                or set(agent_env) != {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
+                    "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
+                    "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+                or OPENROUTER_ROLE_KEY_NAMES.intersection(agent_env) - {"OPENROUTER_API_KEY"}
+                or _has_role_key_reference({key: value for key, value in agent_env.items()
+                                            if key != "OPENROUTER_API_KEY"})):
+            raise LauncherFailure("shared_roles requires the native agent and one ordinary key")
 
     environment_env = config.environment.env or {}
-    if split:
+    if split or shared_roles:
         if (OPENROUTER_ROLE_KEY_NAMES.intersection(environment_env)
                 or OPENROUTER_ROLE_KEY_NAMES.intersection(config.verifier.env or {})
                 or _has_role_key_reference(environment_env)
@@ -298,7 +386,17 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
-    _validate_local_task_envs(task_path, split=split)
+    _validate_local_task_envs(task_path, split=split, shared_roles=shared_roles)
+    try:
+        task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        raise LauncherFailure("task metadata is invalid") from None
+    task_mode = task_metadata.get("openrouter_key_mode") if isinstance(task_metadata, dict) else None
+    expected_task_mode = "split" if split else "shared_roles" if shared_roles else "shared"
+    if task_mode in {"split", "shared_roles"} and task_mode != expected_task_mode:
+        raise LauncherFailure("task budget mode does not match guarded key routing")
+    if (split or shared_roles) and task_mode != expected_task_mode:
+        raise LauncherFailure("strict role budget task metadata is missing")
     if split:
         try:
             verify_split_budget_task_sources(task_path)
@@ -345,6 +443,51 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             verify_split_budget_wheel(wheel_path)
         except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError):
             raise LauncherFailure("split agent wheel does not attest current budget sources") from None
+    elif shared_roles:
+        try:
+            verify_split_budget_task_sources(task_path)
+            world, metadata = _shared_roles_compose_values(task_path)
+            role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
+            task_config = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+            task_env = task_config["environment"]["env"]
+            world_cap = Decimal(str(world["WORLD_COST_LIMIT"]))
+            target_cap = Decimal(str((agent.kwargs or {})["cost_limit"]))
+            allowance = Decimal(str(metadata["shared_allowance_usd"]))
+            declared_agent = Decimal(str(agent_env["REFUND_EVAL_AGENT_DOLLAR_CAP"]))
+            output_tokens = agent_env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"]
+            if (not world_cap.is_finite() or world_cap <= 0 or world_cap > 100
+                    or target_cap != declared_agent or target_cap != role_config.role_limits_usd["target"]
+                    or world_cap != role_config.role_limits_usd["world"]
+                    or allowance != role_config.allowance_usd or allowance > min(Decimal(150), target_cap + world_cap)
+                    or metadata.get("scenario") != role_config.scenario or metadata.get("scenario") != "train_refund_late"
+                    or role_config.models != {"target": agent.model_name,
+                        "simulator": world.get("WORLD_SIMULATOR_MODEL"), "grader": world.get("WORLD_GRADER_MODEL")}
+                    or task_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                        != agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                    or world.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                        != agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                    or world.get("WORLD_COST_LIMIT") is None
+                    or not isinstance(output_tokens, str) or not output_tokens.isdecimal() or int(output_tokens) <= 0):
+                raise ValueError
+            for relative, trusted in (
+                ("environment/Dockerfile", adapter.TEMPLATE / "environment" / "Dockerfile"),
+                ("environment/world/Dockerfile", adapter.TEMPLATE / "environment" / "world" / "Dockerfile"),
+                ("environment/agent/install-agent.py", Path(adapter.__file__).with_name("install_agent.py")),
+            ):
+                if (task_path / relative).read_bytes() != trusted.read_bytes():
+                    raise ValueError
+            task_toml = task_config["metadata"]
+            wheel_name = task_toml["agent_wheel_filename"]
+            wheel_path = task_path / "environment" / "agent" / "wheels" / wheel_name
+            wheel_digest = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+            wheel_record = json.loads((task_path / "environment" / "agent" / "agent-wheel.json").read_text())
+            if (Path(wheel_name).name != wheel_name or wheel_record != {"filename": wheel_name, "sha256": wheel_digest}
+                    or task_toml.get("agent_wheel_sha256") != wheel_digest):
+                raise ValueError
+            verify_split_budget_wheel(wheel_path)
+        except (OSError, KeyError, TypeError, ValueError, InvalidOperation, SharedRoleSpendLedgerError,
+                tomllib.TOMLDecodeError):
+            raise LauncherFailure("shared_roles task source, wheel, scope, or routing is invalid") from None
 
     if Path(config.job_name).name != config.job_name or config.job_name in {".", ".."}:
         raise LauncherFailure("job name must be a single path component")
@@ -355,23 +498,36 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
 
 async def run_guarded_job(
     config: JobConfig,
-    thresholds: Thresholds | SplitThresholds,
+    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds,
     *,
     guard: SpendGuard | None = None,
     job_factory: Any | None = None,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
     before_job_run: Callable[[Any], None] | None = None,
+    on_guard_ready: Callable[[dict[str, Any]], None] | None = None,
     total_time_limit_seconds: int | None = None,
 ) -> JobResult:
     if total_time_limit_seconds is not None:
         raise LauncherFailure("strict_total_deadline_unsupported_by_modal")
     require_pinned_harbor()
     split = isinstance(thresholds, SplitThresholds)
-    validate_job_config(config, expected_split=split)
-    controller = guard or (SplitSpendGuard(thresholds) if split else SpendGuard(thresholds))
+    shared_roles = isinstance(thresholds, SharedRoleThresholds)
+    validate_job_config(config, expected_split=split, expected_shared_roles=shared_roles)
+    controller = guard or (SplitSpendGuard(thresholds) if split else
+                           SharedRoleSpendGuard(thresholds) if shared_roles else SpendGuard(thresholds))
     try:
         await controller.start()
+        if on_guard_ready is not None and isinstance(controller, SharedRoleSpendGuard):
+            metadata = controller.sanitized_effective_parameters()
+            if metadata is None:
+                await controller.fail_closed("shared-role runtime metadata is unavailable", cancel_job=False)
+                raise controller._failure()
+            try:
+                on_guard_ready(metadata)
+            except Exception:
+                await controller.fail_closed("shared-role runtime metadata could not be recorded", cancel_job=False)
+                raise
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
             await controller.ensure_healthy()
             if job_factory is None:
@@ -443,11 +599,12 @@ def _trial_failure_reason(result: JobResult) -> str | None:
 
 def run_guarded_config(
     config: JobConfig,
-    thresholds: Thresholds | SplitThresholds,
+    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds,
     *,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
     before_job_run: Callable[[Any], None] | None = None,
+    on_guard_ready: Callable[[dict[str, Any]], None] | None = None,
     total_time_limit_seconds: int | None = None,
 ) -> int:
     if total_time_limit_seconds is not None:
@@ -464,7 +621,8 @@ def run_guarded_config(
         return 2
     try:
         require_pinned_harbor()
-        validate_job_config(config, expected_split=isinstance(thresholds, SplitThresholds))
+        validate_job_config(config, expected_split=isinstance(thresholds, SplitThresholds),
+                            expected_shared_roles=isinstance(thresholds, SharedRoleThresholds))
         hooks = {}
         if on_job_created is not None:
             hooks["on_job_created"] = on_job_created
@@ -472,6 +630,8 @@ def run_guarded_config(
             hooks["on_sandbox_created"] = on_sandbox_created
         if before_job_run is not None:
             hooks["before_job_run"] = before_job_run
+        if on_guard_ready is not None:
+            hooks["on_guard_ready"] = on_guard_ready
         trial_failure = _trial_failure_reason(
             asyncio.run(run_guarded_job(config, thresholds, **hooks))
         )

@@ -33,10 +33,11 @@ from pydantic import ValidationError
 
 from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor import batch
+from refund_eval.models.shared_role_spend_ledger import SharedRoleBudgetConfig, SharedRoleSpendLedgerError
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
-from scripts.offline_spend_guard import KEY_CEILING, SplitThresholds, Thresholds
+from scripts.offline_spend_guard import KEY_CEILING, SharedRoleThresholds, SplitThresholds, Thresholds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
@@ -694,7 +695,7 @@ def _amount_text(value: Any) -> str | None:
 
 
 def _guard_parameters(
-    parameters: dict[str, Any], thresholds: Thresholds | SplitThresholds, total: int | None
+    parameters: dict[str, Any], thresholds: Thresholds | SplitThresholds | SharedRoleThresholds, total: int | None
 ) -> dict[str, Any]:
     common = {
         **parameters,
@@ -710,6 +711,13 @@ def _guard_parameters(
             "world_trial_delta_usd": str(thresholds.world_trial_delta),
             "agent_key_ceiling_usd": 50,
             "world_key_ceiling_usd": 100,
+        }
+    if isinstance(thresholds, SharedRoleThresholds):
+        return common | {
+            "openrouter_key_mode": "shared_roles",
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "runtime_metadata_confirmed": False,
         }
     return common | {
         "openrouter_trial_delta_usd": str(thresholds.openrouter_trial_delta),
@@ -752,6 +760,24 @@ def _split_thresholds(args: argparse.Namespace, agent_cap: Any, world_cap: Any) 
     )
 
 
+def _shared_role_thresholds(args: argparse.Namespace, allowance: Any) -> SharedRoleThresholds:
+    if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
+        raise SetupFailure("shared_roles_rejects_shared_threshold_flags")
+    amount = _amount(allowance)
+    if amount is None:
+        raise SetupFailure("shared_roles_allowance_must_be_finite")
+    try:
+        return SharedRoleThresholds(
+            shared_allowance_usd=amount,
+            probe_timeout=args.probe_timeout,
+            poll_interval=args.poll_interval,
+            max_sample_age=args.max_sample_age,
+            cleanup_timeout=args.cleanup_timeout,
+        )
+    except ValueError:
+        raise SetupFailure("shared_roles_allowance_invalid") from None
+
+
 def _saved_split_caps(config: JobConfig) -> tuple[Any, Any]:
     agent_env = config.agents[0].env or {}
     task_path = Path(config.tasks[0].path)
@@ -774,7 +800,7 @@ def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
 
 
 def _native_effective_parameters(
-    config: batch.NativeBatchConfig, thresholds: Thresholds | SplitThresholds
+    config: batch.NativeBatchConfig, thresholds: Thresholds | SplitThresholds | SharedRoleThresholds
 ) -> dict[str, Any]:
     targets = _native_targets(config)
     if config.execution != "modal":
@@ -793,25 +819,35 @@ def _native_effective_parameters(
     if agent_cost is None or world_cost is None:
         raise SetupFailure("native_cost_limits_must_be_finite")
     split = config.openrouter_key_mode == "split"
-    if split != isinstance(thresholds, SplitThresholds):
+    shared_roles = config.openrouter_key_mode == "shared_roles"
+    if split != isinstance(thresholds, SplitThresholds) or shared_roles != isinstance(thresholds, SharedRoleThresholds):
         raise SetupFailure("native_key_mode_does_not_match_runtime_guard")
-    if split:
+    if split or shared_roles:
         if config.agent_max_output_tokens is None:
-            raise SetupFailure("split_mode_requires_agent_max_output_tokens")
-        if agent_cost > thresholds.agent_trial_delta or world_cost > thresholds.world_trial_delta:
+            raise SetupFailure("strict_role_mode_requires_agent_max_output_tokens")
+        if split and (agent_cost > thresholds.agent_trial_delta or world_cost > thresholds.world_trial_delta):
             raise SetupFailure("split_role_caps_exceed_runtime_trial_deltas")
+        if shared_roles:
+            assert isinstance(thresholds, SharedRoleThresholds)
+            allowance = _amount(config.shared_allowance_usd)
+            if (allowance is None or allowance != thresholds.shared_allowance_usd
+                    or allowance > min(Decimal(150), agent_cost + world_cost)):
+                raise SetupFailure("shared_roles_allowance_does_not_match_role_caps")
     else:
         assert isinstance(thresholds, Thresholds)
         runtime_delta = thresholds.openrouter_trial_delta
         if agent_cost + world_cost > runtime_delta:
             raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
+    if shared_roles:
+        assert isinstance(thresholds, SharedRoleThresholds)
+        runtime_delta = thresholds.shared_allowance_usd
     if config.trial_spend_cap_usd is not None:
         trial_cap = _amount(config.trial_spend_cap_usd)
         key_cap = _amount(config.key_spend_cap_usd)
         if trial_cap is None or key_cap is None:
             raise SetupFailure("native_planning_caps_must_be_finite")
-        if split:
-            raise SetupFailure("split_mode_does_not_support_combined_planning_caps")
+        if split or shared_roles:
+            raise SetupFailure("strict_role_mode_does_not_support_combined_planning_caps")
         if trial_cap > runtime_delta or trial_cap < agent_cost + world_cost:
             raise SetupFailure("native_trial_planning_cap_conflicts_with_runtime_guard")
         if key_cap > KEY_CEILING or config.trials * trial_cap > key_cap:
@@ -838,16 +874,27 @@ def _native_effective_parameters(
             "agent_key_ceiling_usd": 50,
             "world_key_ceiling_usd": 100,
         })
+    elif shared_roles:
+        effective.update({
+            "openrouter_key_mode": "shared_roles",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
+        })
     return effective
 
 
 _WORLD_ENVIRONMENT_FIELDS = {
     "WORLD_COST_LIMIT",
     "WORLD_STRICT_BUDGET",
+    "WORLD_SCENARIO",
     "WORLD_SIMULATOR_MODEL",
     "WORLD_GRADER_MODEL",
     "WORLD_SIM_WEEKS",
     "WORLD_MAX_TURNS",
+    "REFUND_EVAL_SHARED_ROLE_MODE",
+    "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG",
 }
 
 
@@ -947,7 +994,7 @@ def _world_environment(
 
 
 def _saved_effective_parameters(
-    config: JobConfig, thresholds: Thresholds | SplitThresholds
+    config: JobConfig, thresholds: Thresholds | SplitThresholds | SharedRoleThresholds
 ) -> dict[str, Any]:
     if len(config.agents) != 1 or len(config.tasks) != 1 or not config.tasks[0].path:
         raise SetupFailure("saved_native_values_unavailable")
@@ -968,9 +1015,26 @@ def _saved_effective_parameters(
     if not isinstance(task_environment, dict) or not isinstance(config.environment.env, dict):
         raise SetupFailure("saved_world_environment_unresolvable")
     world_env = _world_environment(task_path, config, task_environment)
-    split = (config.agents[0].env or {}).get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
-    if split != isinstance(thresholds, SplitThresholds):
+    agent_env = config.agents[0].env or {}
+    split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+    shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
+    if (split != isinstance(thresholds, SplitThresholds)
+            or shared_roles != isinstance(thresholds, SharedRoleThresholds)):
         raise SetupFailure("saved_key_mode_does_not_match_runtime_guard")
+    shared_config: SharedRoleBudgetConfig | None = None
+    if shared_roles:
+        raw_shared_config = agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+        if (not isinstance(raw_shared_config, str)
+                or raw_shared_config != world_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                or world_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
+                or task_metadata.get("openrouter_key_mode") != "shared_roles"):
+            raise SetupFailure("saved_shared_role_routing_or_config_mismatch")
+        try:
+            shared_config = SharedRoleBudgetConfig.from_json(raw_shared_config)
+        except SharedRoleSpendLedgerError:
+            raise SetupFailure("saved_shared_role_config_invalid") from None
+    if shared_roles and world_env.get("WORLD_STRICT_BUDGET") != "true":
+        raise SetupFailure("saved_shared_role_strict_world_budget_missing")
     if split and (
         world_env.get("WORLD_STRICT_BUDGET") != "true"
     ):
@@ -1035,6 +1099,22 @@ def _saved_effective_parameters(
     agent_amount = _amount(agent_cap_raw)
     world_amount = _amount(world_cap_raw)
     agent_output_tokens: int | None = None
+    if shared_roles:
+        assert shared_config is not None and isinstance(thresholds, SharedRoleThresholds)
+        declared_agent = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
+        raw_output = agent_env.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
+        if isinstance(raw_output, str) and raw_output.isdecimal():
+            agent_output_tokens = int(raw_output)
+        if (shared_config.scenario != task_metadata.get("scenario")
+                or shared_config.scenario != world_env.get("WORLD_SCENARIO", shared_config.scenario)
+                or shared_config.models != {"target": target, "simulator": simulator, "grader": grader}
+                or agent_amount is None or world_amount is None or declared_agent != agent_amount
+                or shared_config.role_limits_usd["target"] != agent_amount
+                or shared_config.role_limits_usd["world"] != world_amount
+                or shared_config.allowance_usd != thresholds.shared_allowance_usd
+                or _amount(task_metadata.get("shared_allowance_usd")) != shared_config.allowance_usd
+                or agent_output_tokens is None or agent_output_tokens <= 0):
+            raise SetupFailure("saved_shared_role_scope_or_caps_mismatch")
     if split:
         agent_env = config.agents[0].env or {}
         declared_agent_amount = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
@@ -1047,7 +1127,7 @@ def _saved_effective_parameters(
             or agent_amount > thresholds.agent_trial_delta or world_amount > thresholds.world_trial_delta
         ):
             raise SetupFailure("saved_split_role_caps_or_output_bound_invalid")
-    elif agent_amount is not None and world_amount is not None:
+    elif not shared_roles and agent_amount is not None and world_amount is not None:
         assert isinstance(thresholds, Thresholds)
         if agent_amount + world_amount > thresholds.openrouter_trial_delta:
             raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
@@ -1092,6 +1172,14 @@ def _saved_effective_parameters(
             "agent_max_output_tokens": agent_output_tokens,
             "agent_key_ceiling_usd": 50,
             "world_key_ceiling_usd": 100,
+        })
+    elif shared_roles:
+        effective.update({
+            "openrouter_key_mode": "shared_roles",
+            "agent_max_output_tokens": agent_output_tokens,
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
         })
     return effective
 
@@ -1168,9 +1256,17 @@ def main(argv: list[str] | None = None) -> int:
                 raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
             total_time_limit = None
             config = prepare_fresh_job(args.manifest, args.job_name)
-            split = (config.agents[0].env or {}).get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+            agent_env = config.agents[0].env or {}
+            split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+            shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
             if split:
                 thresholds = _split_thresholds(args, *_saved_split_caps(config))
+            elif shared_roles:
+                try:
+                    role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
+                except (KeyError, SharedRoleSpendLedgerError):
+                    raise SetupFailure("saved_shared_role_config_invalid") from None
+                thresholds = _shared_role_thresholds(args, role_config.allowance_usd)
             else:
                 thresholds = _shared_thresholds(args)
             parameters = _saved_effective_parameters(config, thresholds)
@@ -1186,6 +1282,8 @@ def main(argv: list[str] | None = None) -> int:
                 targets = _native_targets(native_config)
                 costs = resolve_cost_limits(native_config.cost_limit, targets, scenario=native_config.scenario)
                 thresholds = _split_thresholds(args, costs[targets[0]], native_config.world_cost_limit)
+            elif native_config.openrouter_key_mode == "shared_roles":
+                thresholds = _shared_role_thresholds(args, native_config.shared_allowance_usd)
             else:
                 thresholds = _shared_thresholds(args)
             parameters = _native_effective_parameters(native_config, thresholds)
@@ -1208,12 +1306,15 @@ def main(argv: list[str] | None = None) -> int:
 
     effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
+    effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
+    on_guard_ready = effective_parameters.update if isinstance(thresholds, SharedRoleThresholds) else None
     return guarded_harbor.run_guarded_config(
         config,
         thresholds,
         on_job_created=_print_local_job_log,
         on_sandbox_created=_print_modal_dashboard,
         before_job_run=lambda job: _record_effective_parameters(job, config, effective_parameters),
+        on_guard_ready=on_guard_ready,
         total_time_limit_seconds=total_time_limit,
     )
 

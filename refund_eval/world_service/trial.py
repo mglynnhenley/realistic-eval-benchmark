@@ -34,6 +34,7 @@ import os
 import tempfile
 import uuid
 from contextlib import AsyncExitStack
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import Any, Self
@@ -55,6 +56,11 @@ from refund_eval.models.replay import RecordingModelClient
 from refund_eval.models.world_spend_ledger import (
     WorldSpendLedger,
     WorldSpendLedgerError,
+)
+from refund_eval.models.shared_role_spend_ledger import (
+    LEDGER_DIRECTORY as SHARED_ROLE_LEDGER_DIRECTORY,
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedger,
 )
 from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import AUDIT_KEY, MCPService, audit, fingerprint
@@ -172,7 +178,21 @@ class WorldTrial:
                              if self._model_client is None else
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
-            self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
+            shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+            if shared_role_mode == "shared_roles":
+                shared_config = SharedRoleBudgetConfig.from_environment()
+                if (shared_config.scenario != settings.scenario
+                        or shared_config.models["simulator"] != model_mapping["simulator"]
+                        or shared_config.models["grader"] != model_mapping["grader"]
+                        or settings.world_cost_limit is None
+                        or shared_config.role_limits_usd["world"] != Decimal(str(settings.world_cost_limit))):
+                    raise WorldSpendLedgerError("World shared-role budget scope does not match the prepared run")
+                self._spend_ledger = SharedRoleSpendLedger(SHARED_ROLE_LEDGER_DIRECTORY, shared_config).view("world")
+                self._spend_scope = shared_config.scope
+            elif shared_role_mode in (None, "", "disabled"):
+                self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
+            else:
+                raise WorldSpendLedgerError("World shared-role budget mode is invalid")
             if self._spend_ledger.has_unresolved():
                 raise WorldSpendLedgerError(
                     f"World-spend ledger in {self._spend_ledger.path} has an unresolved reservation; "

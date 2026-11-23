@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.13 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 0000000000000000000000000000000000000000000000000000000000000000
+- Trial round: none; offline validation only.
+- Changes: add one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance.
+
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 31166ceac245c81e66af123c40d8e3023f23362c51317fdcc90baa0cd24c057c
