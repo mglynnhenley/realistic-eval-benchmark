@@ -696,16 +696,18 @@ def _amount_text(value: Any) -> str | None:
 def _guard_parameters(parameters: dict[str, Any], thresholds: Thresholds, total: int | None) -> dict[str, Any]:
     return {
         **parameters,
-        "total_time_limit_seconds": total,
+        "requested_total_time_limit_seconds": total,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested" if total is None else "unavailable",
         "openrouter_trial_delta_usd": str(thresholds.openrouter_trial_delta),
         "openrouter_key_ceiling_usd": str(thresholds.openrouter_key_ceiling),
         "cleanup_timeout_seconds": thresholds.cleanup_timeout,
     }
 
 
-def _validate_total_limit(total: int | None, thresholds: Thresholds) -> None:
-    if total is not None and (type(total) is not int or total <= thresholds.cleanup_timeout):
-        raise SetupFailure("total_deadline_must_exceed_cleanup_timeout")
+def _reject_total_limit(total: int | None) -> None:
+    if total is not None:
+        raise SetupFailure("strict_total_deadline_unsupported_by_modal")
 
 
 def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
@@ -748,8 +750,6 @@ def _native_effective_parameters(
             raise SetupFailure("native_key_planning_cap_exceeds_supported_guard")
 
     worker_time_limit = config.time_limit
-    if config.total_time_limit_seconds is not None:
-        worker_time_limit = min(worker_time_limit, config.total_time_limit_seconds)
     return {
         "target_model": targets[0],
         "models": targets,
@@ -1054,26 +1054,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        _reject_total_limit(args.total_time_limit_seconds)
         if args.manifest is not None:
             if args.prepared_dir is not None:
                 raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
-            total_time_limit = args.total_time_limit_seconds
-            _validate_total_limit(total_time_limit, thresholds)
+            total_time_limit = None
             config = prepare_fresh_job(args.manifest, args.job_name)
             parameters = _saved_effective_parameters(config, thresholds)
         else:
-            if args.prepared_dir is None:
-                raise SetupFailure("prepared_dir_required_for_run_config")
             native_config = batch.NativeBatchConfig.model_validate_json(
                 args.run_config.read_bytes()
             )
-            if (
-                args.total_time_limit_seconds is not None
-                and args.total_time_limit_seconds != native_config.total_time_limit_seconds
-            ):
-                raise SetupFailure("conflicting_total_time_limits")
-            total_time_limit = native_config.total_time_limit_seconds
-            _validate_total_limit(total_time_limit, thresholds)
+            _reject_total_limit(native_config.total_time_limit_seconds)
+            if args.prepared_dir is None:
+                raise SetupFailure("prepared_dir_required_for_run_config")
+            total_time_limit = None
             parameters = _native_effective_parameters(native_config, thresholds)
             run_record_path = batch.prepare(args.prepared_dir, native_config)
             effective = _guard_parameters(parameters, thresholds, total_time_limit)

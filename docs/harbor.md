@@ -266,7 +266,6 @@ staged wheel):
   "max_turns": 1000,
   "token_budget": 40000000,
   "time_limit": 36000,
-  "total_time_limit_seconds": 900,
   "cost_limit": 10,
   "world_cost_limit": 10,
   "trials": 1,
@@ -288,21 +287,19 @@ The native command prepares and saves the exact fresh bundle through the same
 public-only wheel/scenario validation gate, then runs it without rewriting an
 arbitrary saved JobConfig. Its `run.json` and the job result directory's
 `effective_parameters.json` record resolved roles, simulated weeks, turns,
-agent/world caps, worker limit, total cap, guard delta/key ceiling, and cleanup
-timeout. Here the 900-second total includes guard preflight, Harbor job and
-environment creation, execution and verifier; the worker limit is clamped to
-900 seconds. The 10-second cleanup reservation is inside that total, so work
-stops by second 890 and cleanup/reconciliation must finish by second 900.
-Modal sandbox lifetime is clamped to the remaining total lifetime and SDK execs
-to the work deadline. The provider timeout is relative to sandbox creation;
-host/provider/network failures or delayed creation can still leave cleanup
-uncertain. This is not a perfect distributed shutdown or invoice guarantee.
-
-Saved manifests do not persist a per-run total deadline. Pass
-`--total-time-limit-seconds` on every saved-manifest launch; doing so does not
-change the attested setup identity. For `--run-config`, the config is the source
-of truth and any explicit CLI value must match it. Omitted totals preserve the
-existing worker and Harbor timeout behavior.
+agent/world caps, worker limit, requested/enforced total-cap status, guard
+delta/key ceiling, and cleanup timeout. Total-cap fields are recorded as not
+requested and not enforced for successful launches. The pinned Modal interface
+does not expose an absolute
+sandbox lifetime: `Sandbox.create(timeout=...)` is relative to creation and
+expiry is approximate. Therefore the guarded launcher rejects any explicit
+`total_time_limit_seconds` in a native config or
+`--total-time-limit-seconds` for a saved manifest with
+`strict_total_deadline_unsupported_by_modal`, before preparation or spending.
+`NativeBatchConfig` retains the field for clear validation, but `batch.prepare`
+also rejects it before creating output; worker and Harbor task timeouts are not
+end-to-end total-cap enforcement. Omitted totals preserve existing launch
+behavior. See <https://modal.com/docs/examples/sandbox_pool.md>.
 
 #### Optional batch spend planning
 

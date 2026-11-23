@@ -768,7 +768,7 @@ def test_batch_freezes_spend_caps_and_horizons(tmp_path, approved_wheel):
     assert world["WORLD_MAX_TURNS"] == "40"
 
 
-def test_total_time_limit_clamps_outer_agent_and_inner_worker_without_omitted_headroom(
+def test_explicit_total_time_limit_is_rejected_and_omitted_behavior_is_unchanged(
     tmp_path, approved_wheel
 ):
     values = {
@@ -785,15 +785,9 @@ def test_total_time_limit_clamps_outer_agent_and_inner_worker_without_omitted_he
         **_wheel_config(approved_wheel),
     }
     out = tmp_path / "explicit-total"
-    record = json.loads(
-        batch.prepare(out, batch.NativeBatchConfig(**values)).read_text(encoding="utf-8")
-    )
-    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
-    task = Task(out / "train_refund_late")
-    assert job.agents[0].kwargs["time_limit"] == 30
-    assert task.config.agent.timeout_sec == 30
-    assert record["effective_parameters"]["worker_time_limit_seconds"] == 30
-    assert record["effective_parameters"]["total_time_limit_seconds"] == 30
+    with pytest.raises(ValueError, match="strict_total_deadline_unsupported_by_modal"):
+        batch.prepare(out, batch.NativeBatchConfig(**values))
+    assert not out.exists()
 
     omitted = {**values, "total_time_limit_seconds": None}
     omitted_out = tmp_path / "omitted-total"
@@ -805,7 +799,9 @@ def test_total_time_limit_clamps_outer_agent_and_inner_worker_without_omitted_he
     assert omitted_job.agents[0].kwargs["time_limit"] == 120
     assert omitted_task.config.agent.timeout_sec == 132
     assert omitted_record["effective_parameters"]["worker_time_limit_seconds"] == 120
-    assert omitted_record["effective_parameters"]["total_time_limit_seconds"] is None
+    assert omitted_record["effective_parameters"]["requested_total_time_limit_seconds"] is None
+    assert omitted_record["effective_parameters"]["effective_enforced_total_time_limit_seconds"] is None
+    assert omitted_record["effective_parameters"]["total_time_limit_enforcement"] == "not_requested"
 
 
 def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path, approved_wheel):

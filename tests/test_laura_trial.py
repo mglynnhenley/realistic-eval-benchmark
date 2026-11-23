@@ -324,8 +324,6 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
 ):
     _source_repo(tmp_path / "source-root", monkeypatch)
     native = _native_run_input(tmp_path)
-    native.values["total_time_limit_seconds"] = 20
-    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
     original_input = native.input_path.read_bytes()
     captured = {}
 
@@ -348,12 +346,12 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
 
     assert native.input_path.read_bytes() == original_input
     config = captured["config"]
-    assert captured["total"] == 20
+    assert captured["total"] is None
     assert config.agents[0].model_name == "openrouter/target-test"
-    assert config.agents[0].kwargs["time_limit"] == 20
+    assert config.agents[0].kwargs["time_limit"] == 120
     task_path = Path(config.tasks[0].path)
     task = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
-    assert task["agent"]["timeout_sec"] == 20
+    assert task["agent"]["timeout_sec"] == 132
     assert task["metadata"]["simulator_model"] == "openrouter/simulator-test"
     assert task["metadata"]["grader_model"] == "openrouter/grader-test"
     expected = {
@@ -365,8 +363,10 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
         "max_turns": 50,
         "agent_cost_limit_usd": "10.0",
         "world_cost_limit_usd": "10.0",
-        "worker_time_limit_seconds": 20,
-        "total_time_limit_seconds": 20,
+        "worker_time_limit_seconds": 120,
+        "requested_total_time_limit_seconds": None,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested",
         "openrouter_trial_delta_usd": "25",
         "openrouter_key_ceiling_usd": "50",
         "cleanup_timeout_seconds": 10.0,
@@ -416,7 +416,9 @@ def test_native_run_without_optional_inputs_records_resolved_defaults(
         "worker_time_limit_seconds": defaults.time_limit,
         "effective_parameters_complete": True,
         "unavailable_fields": [],
-        "total_time_limit_seconds": None,
+        "requested_total_time_limit_seconds": None,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested",
         "openrouter_trial_delta_usd": "25",
         "openrouter_key_ceiling_usd": "50",
         "cleanup_timeout_seconds": 10.0,
@@ -485,7 +487,6 @@ def test_native_run_records_730_day_simulation_horizon(tmp_path, monkeypatch):
          "native_trial_planning_cap_conflicts_with_runtime_guard"),
         ({"trial_spend_cap_usd": 20, "key_spend_cap_usd": 51},
          "native_key_planning_cap_exceeds_supported_guard"),
-        ({"total_time_limit_seconds": 10}, "total_deadline_must_exceed_cleanup_timeout"),
     ],
 )
 def test_native_config_rejections_precede_preparation_and_guard(
@@ -592,47 +593,73 @@ def test_saved_native_compatibility_is_checked_before_guard(
     assert f"laura_setup_failed={reason}" in capsys.readouterr().err
 
 
-def test_native_total_cli_conflict_is_rejected_before_preparation(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("config_total", "cli_total"),
+    [(20, None), (None, "30"), (20, "30")],
+)
+def test_native_total_limit_refuses_before_preparation_and_guard(
+    tmp_path, monkeypatch, capsys, config_total, cli_total
+):
     native = _native_run_input(tmp_path)
-    native.values["total_time_limit_seconds"] = 20
+    if config_total is not None:
+        native.values["total_time_limit_seconds"] = config_total
     native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
-    assert laura_trial.main([
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.batch, "prepare", lambda *args, **kwargs: prepare_calls.append(True)
+    )
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+    args = [
         "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
         "--job-name", "native-fresh", "--openrouter-key-ceiling", "50",
-        "--openrouter-trial-delta", "25", "--total-time-limit-seconds", "30",
-    ]) == 2
+        "--openrouter-trial-delta", "25",
+    ]
+    if cli_total is not None:
+        args.extend(["--total-time-limit-seconds", cli_total])
+    assert laura_trial.main(args) == 2
+    assert prepare_calls == []
+    assert guard_calls == []
     assert not native.prepared_dir.exists()
-    assert capsys.readouterr().err == "laura_setup_failed=conflicting_total_time_limits\n"
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=strict_total_deadline_unsupported_by_modal\n"
+    )
 
 
-def test_saved_manifest_total_limit_is_recorded_without_changing_setup_identity(
+def test_saved_manifest_total_limit_refuses_before_preparation_and_guard(
     tmp_path, monkeypatch, capsys
 ):
     bundle = _native_setup(tmp_path, monkeypatch)
     _save(bundle)
     manifest_before = bundle.manifest_path.read_bytes()
     source_before = bundle.config_path.read_bytes()
-    observed = {}
-
-    def guarded_run(config, thresholds, **hooks):
-        observed["total"] = hooks["total_time_limit_seconds"]
-        observed["worker"] = config.agents[0].kwargs["time_limit"]
-        hooks["before_job_run"](SimpleNamespace())
-        return 0
-
-    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial,
+        "prepare_fresh_job",
+        lambda *args, **kwargs: prepare_calls.append(True),
+    )
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
     assert laura_trial.main([
         *_run_args(bundle), "--total-time-limit-seconds", "20",
-    ]) == 0
-    assert observed == {"total": 20, "worker": 120}
+    ]) == 2
+    assert prepare_calls == []
+    assert guard_calls == []
     assert bundle.manifest_path.read_bytes() == manifest_before
     assert bundle.config_path.read_bytes() == source_before
-    effective = json.loads(
-        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    assert not (bundle.jobs_dir / "laura-fresh").exists()
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=strict_total_deadline_unsupported_by_modal\n"
     )
-    assert effective["total_time_limit_seconds"] == 20
-    assert effective["worker_time_limit_seconds"] == 120
-    assert capsys.readouterr().err == ""
 
 
 def test_saved_result_record_uses_effective_world_horizon_values(tmp_path, monkeypatch):

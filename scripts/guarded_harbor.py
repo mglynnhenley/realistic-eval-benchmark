@@ -177,18 +177,11 @@ async def run_guarded_job(
     before_job_run: Callable[[Any], None] | None = None,
     total_time_limit_seconds: int | None = None,
 ) -> JobResult:
+    if total_time_limit_seconds is not None:
+        raise LauncherFailure("strict_total_deadline_unsupported_by_modal")
     require_pinned_harbor()
     validate_job_config(config)
     controller = guard or SpendGuard(thresholds)
-    deadline_task = None
-    if total_time_limit_seconds is not None:
-        if type(total_time_limit_seconds) is not int or total_time_limit_seconds <= thresholds.cleanup_timeout:
-            raise LauncherFailure("total time limit must exceed the cleanup timeout")
-        try:
-            controller.start_total_deadline(total_time_limit_seconds)
-        except ValueError:
-            raise LauncherFailure("invalid total time limit") from None
-        deadline_task = asyncio.create_task(controller.enforce_total_deadline())
     try:
         await controller.start()
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
@@ -244,11 +237,6 @@ async def run_guarded_job(
         await controller.cleanup_bound()
         raise
     finally:
-        if deadline_task is not None:
-            if not deadline_task.done() and controller.failure_reason != "total run deadline exceeded":
-                deadline_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await deadline_task
         await asyncio.shield(controller.close())
 
 
@@ -274,17 +262,17 @@ def run_guarded_config(
     before_job_run: Callable[[Any], None] | None = None,
     total_time_limit_seconds: int | None = None,
 ) -> int:
+    if total_time_limit_seconds is not None:
+        print(
+            "guard_failed=strict_total_deadline_unsupported_by_modal cleanup_uncertain=false",
+            file=sys.stderr,
+        )
+        return 2
     if thresholds.openrouter_key_ceiling != KEY_CEILING:
         print("guard_failed=OpenRouter key ceiling must be exactly $50 cleanup_uncertain=false", file=sys.stderr)
         return 2
     if not math.isfinite(thresholds.probe_timeout):
         print("guard_failed=invalid timeout cleanup_uncertain=false", file=sys.stderr)
-        return 2
-    if total_time_limit_seconds is not None and (
-        type(total_time_limit_seconds) is not int
-        or total_time_limit_seconds <= thresholds.cleanup_timeout
-    ):
-        print("guard_failed=total time limit must exceed cleanup timeout cleanup_uncertain=false", file=sys.stderr)
         return 2
     try:
         require_pinned_harbor()
@@ -296,8 +284,6 @@ def run_guarded_config(
             hooks["on_sandbox_created"] = on_sandbox_created
         if before_job_run is not None:
             hooks["before_job_run"] = before_job_run
-        if total_time_limit_seconds is not None:
-            hooks["total_time_limit_seconds"] = total_time_limit_seconds
         trial_failure = _trial_failure_reason(
             asyncio.run(run_guarded_job(config, thresholds, **hooks))
         )

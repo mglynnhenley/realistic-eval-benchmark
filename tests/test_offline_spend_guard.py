@@ -137,7 +137,6 @@ def make_environment(session_id="session-owned"):
     environment.environment_name = "offline-environment"
     environment.session_id = session_id
     environment._sandbox = None
-    environment._sandbox_timeout = 86400
     return environment
 
 
@@ -327,67 +326,6 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
     assert guard.monitor_task is not None and guard.monitor_task.cancelled()
 
 
-def test_explicit_total_clamps_modal_lifetime_and_sdk_exec_timeout(tmp_path, monkeypatch):
-    sandbox = FakeSandbox()
-    sandbox_timeouts = []
-    exec_timeouts = []
-
-    async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
-        sandbox_timeouts.append(self._sandbox_timeout)
-        return sandbox
-
-    install_fake_harbor_methods(monkeypatch, create)
-
-    async def capture_exec(
-        self, command, cwd=None, env=None, timeout_sec=None, shell="bash", login=False
-    ):
-        exec_timeouts.append(timeout_sec)
-        return "executed"
-
-    monkeypatch.setattr(ModalEnvironment, "_sdk_exec", capture_exec)
-    config = valid_config(tmp_path)
-    guard, _ = stable_guard()
-
-    class ImmediateJob:
-        async def run(self):
-            environment = make_environment()
-            environment._sandbox = await environment._create_sandbox()
-            await environment._sdk_exec("bounded", timeout_sec=36000)
-            assert environment._sandbox_timeout == 86400
-            await environment._terminate_sandbox()
-            environment._sandbox = None
-            return "done"
-
-    async def factory(_):
-        return ImmediateJob()
-
-    result = asyncio.run(
-        run_guarded_job(
-            config,
-            make_thresholds(),
-            guard=guard,
-            job_factory=factory,
-            total_time_limit_seconds=5,
-        )
-    )
-    assert result == "done"
-    assert len(sandbox_timeouts) == len(exec_timeouts) == 1
-    assert 1 <= sandbox_timeouts[0] <= 5
-    assert 1 <= exec_timeouts[0] <= 4
-    assert sandbox.terminate_calls == 1
-
-
-def test_modal_lifetime_uses_floor_and_retains_a_stricter_existing_timeout():
-    now = [100.0]
-    guard = SpendGuard(make_thresholds(), openrouter_probe=ProbeSequence([openrouter()]), clock=lambda: now[0])
-    guard.start_total_deadline(5)
-    assert guard.sandbox_lifetime_timeout(2) == 2
-    assert guard.sandbox_lifetime_timeout(86400) == 5
-    now[0] = 104.1
-    with pytest.raises(GuardFailure, match="no whole second"):
-        guard.sandbox_lifetime_timeout(86400)
-
-
 def test_required_effective_parameter_record_failure_prevents_job_run(tmp_path):
     config = valid_config(tmp_path)
     guard, _ = stable_guard()
@@ -416,139 +354,47 @@ def test_required_effective_parameter_record_failure_prevents_job_run(tmp_path):
     assert run_calls == []
 
 
-def test_total_deadline_bounds_late_sandbox_reconciliation(tmp_path, monkeypatch):
-    create_started = asyncio.Event()
-    create_cancelled = []
-
-    async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
-        create_started.set()
-        try:
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            create_cancelled.append(True)
-            raise
-
-    install_fake_harbor_methods(monkeypatch, create)
-    config = valid_config(tmp_path)
-    thresholds = make_thresholds(cleanup_timeout=1.2)
-    guard = SpendGuard(thresholds, openrouter_probe=ProbeSequence([openrouter()]))
-
-    class CreatingJob:
-        async def run(self):
-            environment = make_environment()
-            environment._sandbox = await environment._create_sandbox()
-
-    async def factory(_):
-        return CreatingJob()
-
-    started = time.monotonic()
-    with pytest.raises(GuardFailure, match="total run deadline exceeded"):
-        asyncio.run(
-            run_guarded_job(
-                config,
-                thresholds,
-                guard=guard,
-                job_factory=factory,
-                total_time_limit_seconds=2,
-            )
-        )
-    assert create_started.is_set()
-    assert create_cancelled == [True]
-    assert guard.cleanup_uncertain is True
-    assert time.monotonic() - started <= 2.2
-
-
-@pytest.mark.parametrize("stage", ["startup", "job_creation", "execution"])
-def test_total_deadline_interrupts_startup_creation_and_execution_and_bounds_cleanup(
-    tmp_path, monkeypatch, stage
+def test_guarded_entry_points_refuse_total_limit_before_provider_or_guard(
+    tmp_path, monkeypatch, capsys
 ):
-    cleanup_timeout = 0.8
-    thresholds = make_thresholds(
-        probe_timeout=5.0 if stage == "startup" else 0.03,
-        poll_interval=0.01,
-        max_sample_age=6.0 if stage == "startup" else 0.2,
-        cleanup_timeout=cleanup_timeout,
-    )
-    total = 2 if stage == "execution" else 1
-    guard = None
-    probe_entered = asyncio.Event()
-    if stage == "startup":
-        async def blocked_probe():
-            probe_entered.set()
-            await asyncio.Future()
-
-        guard = SpendGuard(thresholds, openrouter_probe=blocked_probe)
-    else:
-        guard = SpendGuard(thresholds, openrouter_probe=ProbeSequence([openrouter()]))
-
     config = valid_config(tmp_path)
-    factory_cancelled = []
-    job_cancelled = []
-    sandbox = FakeSandbox()
-    sandbox_timeouts = []
-    exec_timeouts = []
-    if stage == "execution":
-        async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
-            sandbox_timeouts.append(self._sandbox_timeout)
-            return sandbox
+    guard, probe = stable_guard()
+    harbor_calls = []
+    guard_constructions = []
+    monkeypatch.setattr(
+        guarded_harbor,
+        "require_pinned_harbor",
+        lambda: harbor_calls.append("require_harbor"),
+    )
 
-        install_fake_harbor_methods(monkeypatch, create)
+    class TrackedGuard:
+        def __init__(self, *args, **kwargs):
+            guard_constructions.append(True)
 
-        async def capture_exec(
-            self, command, cwd=None, env=None, timeout_sec=None, shell="bash", login=False
-        ):
-            exec_timeouts.append(timeout_sec)
-            return "executed"
-
-        monkeypatch.setattr(ModalEnvironment, "_sdk_exec", capture_exec)
-
-    class BlockingJob:
-        async def run(self):
-            if stage == "execution":
-                environment = make_environment()
-                environment._sandbox = await environment._create_sandbox()
-                await environment._sdk_exec("bounded", timeout_sec=36000)
-                try:
-                    await asyncio.Future()
-                except asyncio.CancelledError:
-                    job_cancelled.append(True)
-                    raise
-            raise AssertionError("unreachable")
-
-    async def factory(_):
-        if stage == "job_creation":
-            try:
-                await asyncio.Future()
-            except asyncio.CancelledError:
-                factory_cancelled.append(True)
-                raise
-        if stage == "execution":
-            return BlockingJob()
-        raise AssertionError("startup deadline must prevent job creation")
-
-    started = time.monotonic()
-    with pytest.raises(GuardFailure, match="total run deadline exceeded"):
+    monkeypatch.setattr(guarded_harbor, "SpendGuard", TrackedGuard)
+    with pytest.raises(
+        LauncherFailure, match="strict_total_deadline_unsupported_by_modal"
+    ):
         asyncio.run(
             run_guarded_job(
                 config,
-                thresholds,
+                make_thresholds(),
                 guard=guard,
-                job_factory=factory,
-                total_time_limit_seconds=total,
+                total_time_limit_seconds=30,
             )
         )
-    elapsed = time.monotonic() - started
-    assert elapsed <= total + 0.2
-    if stage == "startup":
-        assert probe_entered.is_set()
-        assert factory_cancelled == []
-    elif stage == "job_creation":
-        assert factory_cancelled == [True]
-    else:
-        assert job_cancelled == [True]
-        assert sandbox.terminate_calls == 1
-        assert 1 <= sandbox_timeouts[0] <= total
-        assert 1 <= exec_timeouts[0] < 36000
+    assert guard._start_attempted is False
+    assert probe.calls == 0
+    assert harbor_calls == []
+
+    assert guarded_harbor.run_guarded_config(
+        config, make_thresholds(), total_time_limit_seconds=30
+    ) == 2
+    assert capsys.readouterr().err == (
+        "guard_failed=strict_total_deadline_unsupported_by_modal cleanup_uncertain=false\n"
+    )
+    assert guard_constructions == []
+    assert harbor_calls == []
 
 
 def test_progress_links_are_emitted_after_guarded_job_and_sandbox_creation(

@@ -45,6 +45,8 @@ class NativeBatchConfig(RunConfig):
 
 
 def prepare(out: Path, config: NativeBatchConfig) -> Path:
+    if config.total_time_limit_seconds is not None:
+        raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
@@ -57,9 +59,6 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     caps = resolve_cost_limits(config.cost_limit, targets, scenario=config.scenario)
     worker_time_limit = config.time_limit
     agent_timeout = 1.1 * config.time_limit
-    if config.total_time_limit_seconds is not None:
-        worker_time_limit = min(worker_time_limit, config.total_time_limit_seconds)
-        agent_timeout = min(agent_timeout, config.total_time_limit_seconds)
     limits = None
     if config.trial_spend_cap_usd is not None:
         trial_cap = Decimal(str(config.trial_spend_cap_usd))
@@ -130,7 +129,9 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
             "agent_cost_limits_usd": caps,
             "world_cost_limit_usd": config.world_cost_limit,
             "worker_time_limit_seconds": worker_time_limit,
-            "total_time_limit_seconds": config.total_time_limit_seconds,
+            "requested_total_time_limit_seconds": None,
+            "effective_enforced_total_time_limit_seconds": None,
+            "total_time_limit_enforcement": "not_requested",
         },
         **({"limits": limits} if limits is not None else {}),
     }, indent=2) + "\n", encoding="utf-8")
