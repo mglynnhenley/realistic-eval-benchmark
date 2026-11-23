@@ -434,6 +434,38 @@ def test_native_run_without_optional_inputs_records_resolved_defaults(
     ) == effective
 
 
+def test_native_run_records_730_day_simulation_horizon(tmp_path, monkeypatch):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    horizon = 730 / 7
+    native.values["sim_weeks"] = horizon
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-long-horizon", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 0
+
+    run_record = json.loads((native.prepared_dir / "run.json").read_text(encoding="utf-8"))
+    effective_record = json.loads(
+        (native.prepared_dir / "jobs" / "native-long-horizon" / "effective_parameters.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    task_metadata = tomllib.loads(
+        (native.prepared_dir / "train_refund_late" / "task.toml").read_text(encoding="utf-8")
+    )["metadata"]
+    assert run_record["effective_parameters"]["sim_weeks"] == horizon
+    assert effective_record["sim_weeks"] == horizon
+    assert task_metadata["sim_weeks"] == horizon
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
