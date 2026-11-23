@@ -848,15 +848,21 @@ def _world_environment(
             value = configured_value(name)
         elif isinstance(value, str) and "$" in value:
             match = re.fullmatch(
-                r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)",
+                r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-)([^${}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)",
                 value,
             )
             if match is None:
                 raise SetupFailure("saved_world_environment_unresolvable")
-            reference = match.group(1) or match.group(2)
+            reference = match.group(1) or match.group(4)
             if reference not in _WORLD_ENVIRONMENT_FIELDS:
                 raise SetupFailure("saved_world_environment_unresolvable")
-            value = configured_value(reference)
+            configured = configured_value(reference)
+            if configured is None:
+                raise SetupFailure("saved_world_environment_unresolvable")
+            if match.group(2) == ":-" and configured == "":
+                value = match.group(3)
+            else:
+                value = configured
         if value is None:
             raise SetupFailure("saved_world_environment_unresolvable")
         effective[name] = value
@@ -912,6 +918,18 @@ def _saved_effective_parameters(
             return None
         return int(amount)
 
+    def positive_world_turn_limit(value: Any) -> int | None:
+        if type(value) is int:
+            amount = value
+        elif isinstance(value, str):
+            try:
+                amount = int(value.strip())
+            except ValueError:
+                return None
+        else:
+            return None
+        return amount if amount > 0 else None
+
     sim_weeks_raw = world_env.get("WORLD_SIM_WEEKS")
     if sim_weeks_raw is None:
         sim_weeks_raw = task_metadata.get("sim_weeks")
@@ -919,7 +937,7 @@ def _saved_effective_parameters(
     if max_turns_raw is None:
         max_turns_raw = task_metadata.get("max_turns")
     sim_weeks = positive_number(sim_weeks_raw)
-    max_turns = positive_integer(max_turns_raw)
+    max_turns = positive_world_turn_limit(max_turns_raw)
     if sim_weeks_raw is not None and sim_weeks is None:
         raise SetupFailure("saved_sim_weeks_invalid")
     if max_turns_raw is not None and max_turns is None:
