@@ -98,7 +98,6 @@ from refund_eval.scenario.schema import Scenario, load_agent_scenario, load_scen
 from refund_eval.world import event_log
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
-    SESSION_END_KEY,
     current_tool_call_id,
     enforce_session_end,
 )
@@ -109,6 +108,7 @@ from refund_eval.world.state import (
     load_world,
     world_tx,
 )
+from refund_eval.world.store import SESSION_END_KEY
 
 logger = logging.getLogger(__name__)
 

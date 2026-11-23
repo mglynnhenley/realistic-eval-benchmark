@@ -9,10 +9,13 @@ state is first touched.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import anyio
+
+SESSION_END_KEY = "harness_session_end"
 
 
 class WorldStore(Protocol):
@@ -57,6 +60,11 @@ def trial() -> TrialContext:
 
 def world_store() -> WorldStore:
     return trial().store()
+
+
+def session_end() -> datetime | None:
+    end = world_store().get(SESSION_END_KEY)
+    return datetime.fromisoformat(end) if end is not None else None
 
 
 def scenario_id() -> str | None:

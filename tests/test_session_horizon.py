@@ -24,7 +24,7 @@ from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
-from refund_eval.world.interception import SESSION_END_KEY, ToolContext
+from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import FixtureMailSource, Mailbox
 from refund_eval.world.state import (
     Email,
@@ -34,6 +34,7 @@ from refund_eval.world.state import (
     save_world,
     world_tx,
 )
+from refund_eval.world.store import SESSION_END_KEY
 
 
 @pytest.mark.parametrize("minutes_past", [0, 1])
