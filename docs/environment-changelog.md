@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 7.10 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: def6140ad94bcdcd4a3c7c17ba489c342bfdc0f09e368dee9d75f5447544dfec
+- Fingerprint: 407f72faf66045b3d36f61accf141b960c87ec67528b68ce730f9b8f14fe566a
 - Trial round: none; offline validation only.
-- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon.
+- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon and frozen claim evidence.
 
 ## 7.9 — 2026-11-20
 - Kind: trivial batch
