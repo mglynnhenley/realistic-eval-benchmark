@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.3 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 37e04cc42d265670b894b66409799227c55ebed752773f838777535c04129e7f
+- Trial round: none; offline validation only.
+- Changes: include local requested-deadline overrides in scenario fingerprints so identity locks reject a different effective agent deadline (MAT-64).
+
 ## 8.2 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 12ca8f7dfe905cc2337742e4a71050bca5c5738bc29f2fac70ad3c28039bc658

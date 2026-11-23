@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
-from refund_eval.scenario.schema import load_scenario
+from refund_eval.scenario.schema import Scenario, load_scenario
 
 LOCK_SCHEMA_VERSION = 1
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,9 +27,9 @@ class IdentityLockError(ValueError):
     """A locked run cannot use the current environment or runtime."""
 
 
-def scenario_fingerprint(scenario: str) -> str:
+def scenario_fingerprint(scenario: str | Scenario) -> str:
     """Hash the resolved scenario values; the environment hash covers its source assets."""
-    resolved = load_scenario(scenario)
+    resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
     value = json.dumps(resolved.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
                        ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(value).hexdigest()
@@ -68,7 +68,7 @@ def create_identity_lock(
     }
 
 
-def current_run_identity(scenario: str, *, browser_runtime: str) -> dict[str, Any]:
+def current_run_identity(scenario: str | Scenario, *, browser_runtime: str) -> dict[str, Any]:
     """Record current inputs when no expected-identity lock was requested."""
     if browser_runtime == "docker":
         runtime_identity = _default_image()
@@ -78,12 +78,12 @@ def current_run_identity(scenario: str, *, browser_runtime: str) -> dict[str, An
         runtime_identity_kind = "artifact_unlocked"
     else:
         raise IdentityLockError(f"Unknown browser runtime: {browser_runtime}")
-    resolved = load_scenario(scenario)
+    resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
     return {
         "environment_version": ENVIRONMENT_VERSION,
         "environment_fingerprint": environment_fingerprint(),
         "scenario": resolved.id,
-        "scenario_fingerprint": scenario_fingerprint(scenario),
+        "scenario_fingerprint": scenario_fingerprint(resolved),
         "browser_runtime": browser_runtime,
         "runtime_identity_kind": runtime_identity_kind,
         "runtime_identity": runtime_identity,
@@ -130,7 +130,7 @@ def load_identity_lock(value: str | dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_identity_lock(
-    value: str | dict[str, Any], scenario: str, *, browser_runtime: str,
+    value: str | dict[str, Any], scenario: str | Scenario, *, browser_runtime: str,
 ) -> tuple[dict[str, Any], str | None]:
     """Validate before target/model setup and return the exact local image ID, if applicable."""
     if browser_runtime == "subprocess":
@@ -145,12 +145,12 @@ def validate_identity_lock(
     )
 
     lock = load_identity_lock(value)
-    resolved = load_scenario(scenario)
+    resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
     current = {
         "environment_version": ENVIRONMENT_VERSION,
         "environment_fingerprint": environment_fingerprint(),
         "scenario": resolved.id,
-        "scenario_fingerprint": scenario_fingerprint(scenario),
+        "scenario_fingerprint": scenario_fingerprint(resolved),
         "browser_runtime": browser_runtime,
         "runtime_identity_kind": "docker_image_id" if browser_runtime == "docker" else "build_inputs_sha256",
     }

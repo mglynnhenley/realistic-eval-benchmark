@@ -204,3 +204,55 @@ def test_source_mismatch_rejects_task_before_cost_setup(monkeypatch):
 
     with pytest.raises(IdentityLockError, match="environment_fingerprint"):
         task.impossible_refund(identity_lock=expected, scenario="train_refund_late", cost_limit=150)
+
+
+def test_requested_deadline_is_in_unlocked_run_identity(monkeypatch):
+    from datetime import date
+
+    from refund_eval import task
+    from refund_eval.agent.prompt import with_requested_deadline
+    from refund_eval.published import profile
+    from refund_eval.scenario.schema import load_scenario
+
+    monkeypatch.setattr(run_identity, "environment_fingerprint", lambda: "environment")
+    monkeypatch.setattr(task, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task, "default_model_roles", lambda _: {})
+    monkeypatch.setattr(task, "_given_role_models", lambda *args, **kwargs: [])
+    monkeypatch.setattr(task, "_eval_model_name", lambda: "mockllm/model")
+    monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: {"configured": True, "reason": None})
+    requested_deadline = date(2027, 2, 4)
+
+    result = task.impossible_refund(
+        scenario="train_refund_late", requested_deadline=requested_deadline, cost_limit=50,
+        published_data="fixture", research_mode="saved",
+    )
+
+    effective_scenario = with_requested_deadline(load_scenario("train_refund_late"), requested_deadline)
+    assert result.dataset[0].metadata["scenario_fingerprint"] == run_identity.scenario_fingerprint(
+        effective_scenario
+    )
+    assert result.dataset[0].metadata["requested_deadline"] == "2027-02-04"
+
+
+def test_requested_deadline_mismatch_rejects_locked_run_before_cost_setup(monkeypatch):
+    from datetime import date
+
+    from refund_eval import task
+
+    monkeypatch.setattr(run_identity, "environment_fingerprint", lambda: "environment")
+    monkeypatch.setattr(browser_runtimes, "resolve_local_image_id", lambda _: IMAGE_ID)
+    expected = run_identity.create_identity_lock("train_refund_late", browser_image=IMAGE_ID)
+    monkeypatch.setattr(
+        browser_runtimes, "resolve_local_image_id",
+        lambda _: pytest.fail("scenario mismatch must be rejected before image lookup"),
+    )
+    monkeypatch.setattr(
+        task, "register_default_costs",
+        lambda *args, **kwargs: pytest.fail("scenario mismatch must precede cost setup"),
+    )
+
+    with pytest.raises(IdentityLockError, match="scenario_fingerprint"):
+        task.impossible_refund(
+            identity_lock=expected, scenario="train_refund_late", requested_deadline=date(2027, 2, 4),
+            cost_limit=50, published_data="fixture", research_mode="saved",
+        )
