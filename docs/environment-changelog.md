@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.14 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 0bf216587ab0d34d8cfa8a63c9ae68ac02831d0c588c29e5ce2fece841daea80
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Secure private correspondence outputs and correct read-marker direction, immediate form timing, saved browser-body decoding, silent interaction provenance, and JSONL Unicode separator handling.
+
 ## 7.13 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 6d7d013fb224e8d6e38adff14cb86cb7654302cd0478a249ac56c34e10baa90e
