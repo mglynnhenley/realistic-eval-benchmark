@@ -117,6 +117,10 @@ def _validate_local_task_envs(task_path: Path, *, split: bool = False) -> None:
         )
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise LauncherFailure("local task configuration is invalid") from None
+    if split:
+        environment = task_config.get("environment")
+        if not isinstance(environment, dict) or environment.get("docker_image") is not None:
+            raise LauncherFailure("split task may not use a prebuilt docker_image")
 
     def validate_env_maps(value: object) -> None:
         if isinstance(value, dict):

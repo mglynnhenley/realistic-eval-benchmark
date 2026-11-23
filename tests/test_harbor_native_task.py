@@ -968,6 +968,81 @@ def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
     assert probe_guard.started is False
 
 
+def test_split_native_task_prebuilt_image_is_rejected_before_guard_or_job(
+    tmp_path, monkeypatch, approved_split_budget_wheel
+):
+    from contextlib import nullcontext
+
+    from scripts import guarded_harbor
+    from scripts.guarded_harbor import LauncherFailure, run_guarded_job
+    from scripts.offline_spend_guard import SplitThresholds
+
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "split-prebuilt-image"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="split", agent_max_output_tokens=2048,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    task_config = out / "train_refund_late" / "task.toml"
+    original = task_config.read_text(encoding="utf-8")
+    task_config.write_text(
+        original.replace(
+            "[environment]\n",
+            '[environment]\ndocker_image = "registry.example/prebuilt:latest"\n',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    class ProbeGuard:
+        started = False
+
+        async def start(self):
+            self.started = True
+
+        async def ensure_healthy(self):
+            return None
+
+        def attach_job_task(self, _task):
+            return None
+
+        async def cleanup_bound(self):
+            return None
+
+        async def close(self):
+            return None
+
+    guard = ProbeGuard()
+    job_calls = []
+
+    async def create_job(_config):
+        job_calls.append(True)
+        raise RuntimeError("prebuilt task reached Harbor job creation")
+
+    monkeypatch.setattr(guarded_harbor, "install_modal_hooks", lambda *_args, **_kwargs: nullcontext())
+    try:
+        asyncio.run(run_guarded_job(
+            job,
+            SplitThresholds(Decimal(50), Decimal(100)),
+            guard=guard,
+            job_factory=create_job,
+        ))
+    except RuntimeError as error:
+        failure = error
+    else:
+        failure = None
+
+    assert not guard.started and job_calls == [], (
+        f"split prebuilt image reached guard or job creation: started={guard.started}, jobs={len(job_calls)}"
+    )
+    assert isinstance(failure, LauncherFailure) and "prebuilt" in str(failure)
+
+
 @pytest.mark.parametrize(("change", "expected_error"), [
     ({"agent_max_output_tokens": None}, "split mode requires agent_max_output_tokens"),
     ({"agent_max_output_tokens": True}, "agent_max_output_tokens"),
