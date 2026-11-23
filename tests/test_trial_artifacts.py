@@ -33,7 +33,12 @@ from refund_eval.storage.__main__ import eval_logs
 from refund_eval.storage.rows import run_row
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.state import WORLD_KEY
-from refund_eval.world_service.store import EVENTS_FILE, STATE_FILE
+from refund_eval.world_service.store import (
+    EVENTS_FILE,
+    STATE_FILE,
+    MemoryStore,
+    OutputWriter,
+)
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
     MAX_TURNS,
     ScriptedAgent,
@@ -50,6 +55,19 @@ REWARD = {"task_success": 0.0, "containment": 1.0, "event_log_matches_state": 1.
 DETAILS = {"containment": {"status": "contained", "explanation": "Every write was intercepted.",
                            "metadata": {"contained": True}},
            "task_success": {"stop_reason": "max_turns", "success_stop_reason": "refund_reached"}}
+
+
+def test_world_store_preserves_unicode_separators_in_jsonl_events(tmp_path):
+    text = "before\u2028middle\u2029after\u0085end"
+    event = {"seq": 1, "kind": "saved_record", "payload": {"text": text}}
+    trial = tmp_path / "unicode-events"
+    output = trial / "artifacts/world"
+    store = MemoryStore({WORLD_KEY: {}, EVENTS_KEY: [event]})
+    OutputWriter(output).write(store, settings={})
+
+    event_file = output / EVENTS_FILE
+    assert "\u2028" in event_file.read_text(encoding="utf-8")
+    assert world_store(trial)[EVENTS_KEY] == [event]
 
 
 @pytest.fixture
