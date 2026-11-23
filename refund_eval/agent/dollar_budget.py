@@ -284,9 +284,9 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     cap_raw = os.environ.get("REFUND_EVAL_AGENT_DOLLAR_CAP")
     tokens_raw = os.environ.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
     shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
-    if shared_role_mode not in (None, "", "disabled", "shared_roles"):
+    if shared_role_mode not in (None, "", "disabled", "shared_roles", "shared_caps"):
         raise WorldSpendLedgerError("Target shared-role budget mode is invalid")
-    if cap_raw is None and tokens_raw is None and shared_role_mode != "shared_roles":
+    if cap_raw is None and tokens_raw is None and shared_role_mode not in {"shared_roles", "shared_caps"}:
         yield
         return
     cap = _money(cap_raw)
@@ -308,7 +308,7 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     scenario = os.environ.get("WORLD_SCENARIO")
     if not scenario:
         raise WorldSpendLedgerError("Target dollar budget requires the active scenario identity")
-    if shared_role_mode == "shared_roles":
+    if shared_role_mode in {"shared_roles", "shared_caps"}:
         shared_config = SharedRoleBudgetConfig.from_environment()
         if (shared_config.scenario != scenario or shared_config.models["target"] != model_id
                 or shared_config.role_limits_usd["target"] != cap

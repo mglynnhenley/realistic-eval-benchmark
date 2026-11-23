@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.2 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 889463e8c2152b17f7e56a07cd790698c46436bf23d6d4d61dfead271b778d27
+- Trial round: none; offline validation only.
+- Changes: add the opt-in `shared_caps` guarded mode, deriving a fixed per-run aggregate allowance from verified finite key/budget headroom while preserving the saved manifest and existing shared-role ledger; allow the independent requested deadline in this mode.
+
 ## 8.1 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: f18ee32428609b89d2fc2bcc16b4801834335a905f24886fc464da96df7a5408

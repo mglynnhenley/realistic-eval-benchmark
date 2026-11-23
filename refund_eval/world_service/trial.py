@@ -180,7 +180,7 @@ class WorldTrial:
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
             shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
-            if shared_role_mode == "shared_roles":
+            if shared_role_mode in {"shared_roles", "shared_caps"}:
                 shared_config = SharedRoleBudgetConfig.from_environment()
                 if (shared_config.scenario != settings.scenario
                         or shared_config.models["simulator"] != model_mapping["simulator"]

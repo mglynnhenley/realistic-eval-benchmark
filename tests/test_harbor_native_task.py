@@ -698,7 +698,7 @@ def test_split_budget_wheel_attests_deadline_task_sources(
 
 
 @pytest.mark.parametrize("mode", ["shared", "split"])
-def test_requested_deadline_is_restricted_to_shared_roles(mode, approved_wheel):
+def test_requested_deadline_requires_guarded_shared_key_mode(mode, approved_wheel):
     wheel, digest = approved_wheel
     options = {
         "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture", "research_mode": "saved",
@@ -708,7 +708,7 @@ def test_requested_deadline_is_restricted_to_shared_roles(mode, approved_wheel):
     }
     if mode == "split":
         options["agent_max_output_tokens"] = 2048
-    with pytest.raises(ValueError, match="requested_deadline is only valid in shared_roles mode"):
+    with pytest.raises(ValueError, match="requested_deadline is only valid in a guarded shared-key mode"):
         batch.NativeBatchConfig(**options)
 
 
