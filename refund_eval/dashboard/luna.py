@@ -8,7 +8,7 @@ import argparse
 import json
 import math
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,8 +24,8 @@ STAGES = {"preparation", "running", "paused", "completed", "failed", "stopped"}
 
 def timestamp(value):
     if not isinstance(value, str):
-        raise ValueError("timestamp required")
-    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        raise TypeError("timestamp required")
+    result = datetime.fromisoformat(value)
     if result.tzinfo is None:
         raise ValueError("timezone required")
     return result
@@ -55,12 +55,16 @@ def validate(value, now, run_id=None):
         item = value[key]
         if item is not None and (type(item) not in (int, float) or not math.isfinite(item) or item < 0):
             raise ValueError("invalid spend")
+    result = dict(value)
     for key in ("source_updated_at", "heartbeat_at"):
         if key == "source_updated_at" and value[key] is None:
             continue
-        if (timestamp(value[key]) - now).total_seconds() > 30:
+        parsed = timestamp(value[key])
+        if (parsed - now).total_seconds() > 30:
             raise ValueError("future timestamp")
-    return dict(value)
+        # Python accepts ISO forms (e.g. decimal commas) that browsers do not.
+        result[key] = parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return result
 
 
 class Feed:
@@ -71,7 +75,7 @@ class Feed:
         self.lock = threading.Lock()
 
     def read(self, now=None):
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         with self.lock:
             error = None
             try:

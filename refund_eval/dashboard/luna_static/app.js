@@ -48,6 +48,6 @@ async function refresh() {
     failed = true;
     if (!latest) { text('connection', 'Dashboard connection lost'); text('feed-note', 'Unable to reach the status server. Retrying automatically; all values remain unknown.'); }
   }
-  render(); setTimeout(refresh, 5000);
+  try { render(); } finally { setTimeout(refresh, 5000); }
 }
 refresh(); setInterval(render, 1000);
