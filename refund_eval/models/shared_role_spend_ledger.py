@@ -11,9 +11,13 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock, Timeout as FileLockTimeout
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
-from refund_eval.models.world_spend_ledger import WorldSpendBudgetExhausted, WorldSpendLedgerError
+from refund_eval.models.world_spend_ledger import (
+    WorldSpendBudgetExhausted,
+    WorldSpendLedgerError,
+)
 
 LEDGER_DIRECTORY = Path("/var/lib/refund-eval/role-budget")
 LEDGER_FILE = "role-spend-ledger.json"
@@ -40,6 +44,12 @@ def _amount(value: Any, name: str) -> Decimal:
     if not result.is_finite() or result < 0:
         raise SharedRoleSpendLedgerError(f"Invalid {name} in shared-role ledger")
     return result
+
+
+def _serialized_amount(value: Any, name: str) -> Decimal:
+    if not isinstance(value, str):
+        raise SharedRoleSpendLedgerError(f"Invalid serialized {name} in shared-role ledger")
+    return _amount(value, name)
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -145,18 +155,21 @@ class SharedRoleSpendLedger:
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise SharedRoleSpendLedgerError("Invalid shared-role attempt ID") from None
-            if not isinstance(item, dict) or set(item) != required or item["role"] not in ROLES:
+            if (not isinstance(item, dict) or set(item) != required
+                    or not isinstance(item["role"], str) or item["role"] not in ROLES):
                 raise SharedRoleSpendLedgerError("Malformed shared-role attempt")
             if (not isinstance(item["request_hash"], str) or len(item["request_hash"]) != 64
                     or any(char not in "0123456789abcdef" for char in item["request_hash"])):
                 raise SharedRoleSpendLedgerError("Invalid shared-role request hash")
-            _amount(item["reserved_usd"], "reservation")
+            reserved = _serialized_amount(item["reserved_usd"], "reservation")
+            if reserved > self.config.role_limits_usd[item["role"]] or reserved > self.config.allowance_usd:
+                raise SharedRoleSpendLedgerError("Shared-role reservation exceeds its configured cap")
             status = item["status"]
-            if status not in {"reserved", "unknown", "settlement_pending", "settled"}:
+            if not isinstance(status, str) or status not in {"reserved", "unknown", "settlement_pending", "settled"}:
                 raise SharedRoleSpendLedgerError("Invalid shared-role attempt status")
             if status in {"settlement_pending", "settled"} or (status == "unknown" and item["charged_usd"] is not None):
-                _amount(item["charged_usd"], "charge")
-                if not isinstance(item["provenance"], str) or not item["provenance"]:
+                _serialized_amount(item["charged_usd"], "charge")
+                if not isinstance(item["provenance"], str) or not item["provenance"].strip():
                     raise SharedRoleSpendLedgerError("Invalid shared-role settlement provenance")
             elif item["charged_usd"] is not None or item["provenance"] is not None:
                 raise SharedRoleSpendLedgerError("Unexpected shared-role settlement")
@@ -214,6 +227,9 @@ class SharedRoleSpendLedger:
                 state = self._read_state()
         except FileLockTimeout as error:
             raise SharedRoleSpendLedgerError("Timed out reading shared-role spend ledger") from error
+        return self._snapshot_from_state(state, role)
+
+    def _snapshot_from_state(self, state: dict[str, Any], role: str | None = None) -> dict[str, Any]:
         totals = self._totals(state)
         aggregate_spent = sum((value["spent_usd"] for value in totals.values()), Decimal(0))
         aggregate_reserved = sum((value["reserved_usd"] for value in totals.values()), Decimal(0))
@@ -307,17 +323,33 @@ class SharedRoleSpendLedger:
                     if record["charged_usd"] == str(charge) and record["provenance"] == provenance:
                         return self.snapshot(record["role"])
                     raise SharedRoleSpendLedgerError("Conflicting shared-role settlement")
-                if record["status"] == "unknown" and record["charged_usd"] is not None:
-                    if record["charged_usd"] != str(charge) or record["provenance"] != provenance:
-                        raise SharedRoleSpendLedgerError("Conflicting shared-role settlement")
+                if (record["status"] in {"unknown", "settlement_pending"}
+                        and record["charged_usd"] is not None
+                        and (record["charged_usd"] != str(charge) or record["provenance"] != provenance)):
+                    raise SharedRoleSpendLedgerError("Conflicting shared-role settlement")
                 if charge > _amount(record["reserved_usd"], "reservation"):
                     record.update(status="unknown", charged_usd=str(charge), provenance=provenance)
                     self._write_state(state)
                     raise SharedRoleSpendLedgerError("Shared-role charge exceeded its reservation; hold retained")
                 role = record["role"]
-                record.update(status="settled", charged_usd=str(charge), provenance=provenance)
+                record.update(status="settlement_pending", charged_usd=str(charge), provenance=provenance)
                 self._write_state(state)
-                return self.snapshot(role)
+                pending = {"version": state["version"], "scope": state["scope"],
+                           "attempts": {key: dict(value) for key, value in state["attempts"].items()}}
+                record["status"] = "settled"
+                try:
+                    self._write_state(state)
+                except BaseException as error:
+                    try:
+                        self._write_state(pending)
+                    except BaseException as restore_error:
+                        raise SharedRoleSpendLedgerError(
+                            f"Settlement for attempt {attempt_id} could not be finalized; evidence remains at {self.path}"
+                        ) from restore_error
+                    raise SharedRoleSpendLedgerError(
+                        f"Settlement for attempt {attempt_id} failed; its reservation remains held"
+                    ) from error
+                return self._snapshot_from_state(state, role)
         except FileLockTimeout as error:
             raise SharedRoleSpendLedgerError("Timed out settling shared-role spend") from error
 

@@ -182,7 +182,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested",
     }
-    if config.openrouter_key_mode in {"split", "shared_roles"}:
+    if config.openrouter_key_mode == "split":
         effective_parameters.update({
             "openrouter_key_mode": "split",
             "agent_max_output_tokens": config.agent_max_output_tokens,

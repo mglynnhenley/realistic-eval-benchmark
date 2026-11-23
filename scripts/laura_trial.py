@@ -33,11 +33,19 @@ from pydantic import ValidationError
 
 from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor import batch
-from refund_eval.models.shared_role_spend_ledger import SharedRoleBudgetConfig, SharedRoleSpendLedgerError
+from refund_eval.models.shared_role_spend_ledger import (
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedgerError,
+)
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
-from scripts.offline_spend_guard import KEY_CEILING, SharedRoleThresholds, SplitThresholds, Thresholds
+from scripts.offline_spend_guard import (
+    KEY_CEILING,
+    SharedRoleThresholds,
+    SplitThresholds,
+    Thresholds,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
@@ -1306,7 +1314,6 @@ def main(argv: list[str] | None = None) -> int:
 
     effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
-    effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     on_guard_ready = effective_parameters.update if isinstance(thresholds, SharedRoleThresholds) else None
     return guarded_harbor.run_guarded_config(
         config,

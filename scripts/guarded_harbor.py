@@ -43,11 +43,14 @@ from harbor.models.job.result import JobResult
 from pydantic import ValidationError
 
 from refund_eval.harbor import adapter
-from refund_eval.models.shared_role_spend_ledger import SharedRoleBudgetConfig, SharedRoleSpendLedgerError
 from refund_eval.harbor.adapter import (
     AGENT_IMPORT_PATH,
     verify_split_budget_task_sources,
     verify_split_budget_wheel,
+)
+from refund_eval.models.shared_role_spend_ledger import (
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedgerError,
 )
 from scripts.offline_spend_guard import (
     KEY_CEILING,
@@ -248,7 +251,7 @@ def _shared_roles_compose_values(task_path: Path) -> tuple[dict[str, Any], dict[
         task_env = task_environment.get("env") if isinstance(task_environment, dict) else None
         metadata = task.get("metadata")
         if not isinstance(task_env, dict) or not isinstance(metadata, dict):
-            raise ValueError
+            raise TypeError
         if (metadata.get("openrouter_key_mode") != "shared_roles"
                 or world.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
                 or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"

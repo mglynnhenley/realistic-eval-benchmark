@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.13 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 0000000000000000000000000000000000000000000000000000000000000000
+- Fingerprint: 47192e344cfc2f167025c27a195f0b2348cae7aab7cc3ae47190d663665e7039
 - Trial round: none; offline validation only.
 - Changes: add one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance.
 
