@@ -15,9 +15,11 @@ from typing import Any
 import anyio
 from inspect_ai.model._providers.openrouter import SESSION_ID_HEADER, OpenRouterAPI
 from inspect_ai.model._providers.util.hooks import HttpxHooks
+from inspect_ai.util import LimitExceededError
 
 from refund_eval.model_pricing import openrouter_tariffs
 from refund_eval.models.world_spend_ledger import (
+    WorldSpendBudgetExhausted,
     WorldSpendLedger,
     WorldSpendLedgerError,
 )
@@ -319,12 +321,16 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
         extra["provider"] = {"max_price": {"prompt": prompt_price, "completion": output_price,
                                              "request": prices["request"]}, "require_parameters": True}
         bound = charge_bound(request, prices)
-        if bound is None or bound > cap:
+        if bound is None:
             raise WorldSpendLedgerError("Target request has no affordable defensible charge bound")
+        if bound > cap:
+            raise LimitExceededError("cost", value=float(bound), limit=float(cap))
         attempt_id = str(uuid.uuid4())
         digest = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
         try:
             ledger.reserve(attempt_id, digest, bound)
+        except WorldSpendBudgetExhausted as error:
+            raise LimitExceededError("cost", value=float(cap), limit=float(cap)) from error
         except WorldSpendLedgerError:
             raise WorldSpendLedgerError("Target dollar budget cannot reserve this attempt") from None
         try:

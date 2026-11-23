@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from inspect_ai.util import LimitExceededError
 
 from refund_eval.agent import dollar_budget
 from refund_eval.harbor import adapter
@@ -303,7 +304,7 @@ def test_target_hook_rejects_over_budget_and_unbounded_requests_before_send(monk
         async with dollar_budget.target_dollar_budget(model):
             await model.api._generate_completion(request, {})
 
-    with pytest.raises(WorldSpendLedgerError, match="no affordable"):
+    with pytest.raises(LimitExceededError, match="Exceeded cost limit"):
         asyncio.run(too_expensive())
     assert events == []
     assert FakeLedger.instances[0].events == []
