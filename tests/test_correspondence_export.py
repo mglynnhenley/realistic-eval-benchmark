@@ -7,6 +7,7 @@ import stat
 from copy import deepcopy
 from datetime import datetime, timedelta
 
+from markdown_it import MarkdownIt
 import pytest
 
 from refund_eval.companies.models import CompanyAction, CompanyEvent
@@ -363,8 +364,13 @@ def test_web_action_decodes_text_but_preserves_raw_and_nontext_payloads():
     assert f"```\n{markup}\n```" in render_markdown(export)
 
 
-def test_markdown_escapes_untrusted_body_encoding_and_preserves_raw_header():
-    content_type = "text/plain; charset=utf-8`\n## Injected heading\n- forged metadata"
+@pytest.mark.parametrize("charset", [
+    "`![x](https://example.invalid/x)`",
+    "`![x](https://example.invalid/x)",
+    "![x](https://example.invalid/x)`",
+])
+def test_markdown_escapes_untrusted_body_encoding_and_preserves_raw_header(charset):
+    content_type = f"text/plain; charset={charset}"
     export = build_correspondence({WORLD_KEY: {"interceptions": [
         _interception("injected-charset", "web_action", "2026-10-30T12:00:00Z", {
             "body_base64": base64.b64encode(b"Saved body").decode(),
@@ -373,10 +379,12 @@ def test_markdown_escapes_untrusted_body_encoding_and_preserves_raw_header():
     ]}})
     row = next(row for row in export["records"] if row.get("interception_id") == "injected-charset")
     markdown = render_markdown(export)
+    rendered = MarkdownIt().render(markdown)
 
     assert row["body"] is None
     assert row["raw_payload"]["headers"]["content-type"] == content_type
-    assert "\n## Injected heading\n" not in markdown
+    assert "<img" not in rendered
+    assert f"<code>{charset}</code>" in rendered
 
 
 def test_web_action_decodes_text_only_multipart_but_not_binary_uploads():

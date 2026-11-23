@@ -825,7 +825,7 @@ def _inline(value: Any) -> str:
     text = re.sub(r"[\r\n\u0085\u2028\u2029]+", " ", str(value))
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     fence = "`" * (longest + 1)
-    return f"{fence}{text}{fence}"
+    return f"{fence} {text} {fence}"
 
 
 def _fenced(value: str, *, language: str = "") -> list[str]:
