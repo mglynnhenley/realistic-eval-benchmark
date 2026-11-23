@@ -341,6 +341,11 @@ class OpenRouterClient:
                     return None, True, True
                 if require_non_byok and is_byok is not False:
                     continue
+                if require_non_byok and (
+                    data.get("id") != generation_id or expected_model is None
+                    or data.get("model") != expected_model or data.get("cancelled") is not False
+                ):
+                    continue
                 if data.get("cancelled") is True:
                     continue
                 cost = data.get("total_cost")
@@ -348,11 +353,7 @@ class OpenRouterClient:
                 prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
                 completion = data.get("tokens_completion") or data.get("native_tokens_completion")
                 terminal = bool(finished and _token_count(prompt) and _token_count(completion))
-                trusted_zero = (
-                    require_non_byok and allow_zero and cost == 0
-                    and data.get("id") == generation_id and expected_model is not None
-                    and data.get("model") == expected_model and data.get("cancelled") is False and terminal
-                )
+                trusted_zero = require_non_byok and allow_zero and cost == 0
                 if _valid_cost(cost) and (cost > 0 or trusted_zero) and terminal:
                     return float(cost), True, is_byok
             except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):

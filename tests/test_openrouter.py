@@ -157,8 +157,32 @@ async def test_strict_world_does_not_trust_byok_credit_charge(
         "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0,
         "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
     }, None, None, 3, id="nonzero-tariff-generation-zero"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, "generation_lookup", 0.000001, 1, id="matching-positive-generation-charge"),
+    pytest.param(1, None, None, {
+        "id": "another-generation", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="mismatched-positive-generation-id"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "another-model", "is_byok": False, "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="mismatched-positive-generation-model"),
+    pytest.param(1, None, None, {
+        "model": "test-model", "is_byok": False, "total_cost": 0.000001, "cancelled": False,
+        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="missing-positive-generation-id"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "is_byok": False, "total_cost": 0.000001, "cancelled": False,
+        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="missing-positive-generation-model"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="missing-positive-cancellation-state"),
 ])
-async def test_strict_world_zero_charge_requires_all_zero_tariff(
+async def test_strict_world_generation_charge_requires_trusted_evidence(
     monkeypatch, tariff_rate, inline_cost, inline_byok, generation_data, expected_method, expected_cost,
     generation_calls
 ):
