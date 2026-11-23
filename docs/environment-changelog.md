@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 31166ceac245c81e66af123c40d8e3023f23362c51317fdcc90baa0cd24c057c
+- Fingerprint: 919e786b88c7110186250fe6d3db7b3bb734ed94de90fbd17f59d4f9bc31f89b
 - Trial round: none; offline validation only.
-- Changes: add split-key $50/$100 routing and monitoring, strict local agent/world reservations and settlement, public-only wheel/world-source attestation, native role validation, and monitored split-launch guidance.
+- Changes: add split-key routing and strict local budgets; attest role-specific sources, reject encrypted reasoning without a documented token bound, limit split batches to Laura, and print monitored split-launch guidance.
 
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
