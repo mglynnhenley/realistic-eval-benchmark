@@ -248,7 +248,9 @@ def impossible_refund(
     elif lock_value is None:
         from refund_eval.run_identity import current_run_identity
 
-        run_identity = current_run_identity(sc, browser_runtime=browser_runtime)
+        run_identity = current_run_identity(
+            scenario, browser_runtime=browser_runtime, requested_deadline=requested_deadline,
+        )
         browser_image = None
         environment_version_metadata = sample_environment_version_metadata
         realism_metadata = {"realism_version": realism_version(sc.id)}
@@ -262,7 +264,7 @@ def impossible_refund(
         from refund_eval.run_identity import validate_identity_lock
 
         run_identity, browser_image = validate_identity_lock(
-            lock_value, sc, browser_runtime=browser_runtime,
+            lock_value, scenario, browser_runtime=browser_runtime, requested_deadline=requested_deadline,
         )
         environment_version_metadata = sample_environment_version_metadata
         realism_metadata = {"realism_version": realism_version(sc.id)}

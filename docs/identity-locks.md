@@ -6,6 +6,7 @@ the browser image ID already present on this host:
 
     uv run python -m refund_eval.run_identity \
       --scenario train_refund_late \
+      --requested-deadline 2027-02-04 \
       --output .context/identity-locks/train-refund-late.json
 
 The default Docker runtime must already have the requested browser image in the
@@ -16,9 +17,11 @@ or set identity_lock in a dashboard RunConfig.
 
 The update workflow is deliberately explicit. Recreate a manifest at a new
 path, or pass --update to replace one after reviewing the change. A mismatch
-in source/environment, scenario, runtime, or unavailable local Docker image
-fails closed before model-cost setup; no newer tag is substituted. Docker
-launches use the recorded image ID, not the mutable tag.
+in source/environment, resolved scenario (including a requested-deadline
+override), runtime, or unavailable local Docker image fails closed before
+model-cost setup; no newer tag is substituted. Create the manifest with the
+same --requested-deadline value used by the Inspect task. Docker launches use
+the recorded image ID, not the mutable tag.
 
 The Docker image ID is an identity check for the active host's local artifact,
 not a distribution mechanism. A different host must already have that exact

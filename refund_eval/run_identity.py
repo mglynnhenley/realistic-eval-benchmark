@@ -7,9 +7,11 @@ import hashlib
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+from refund_eval.agent.prompt import with_requested_deadline
 from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
 from refund_eval.scenario.schema import Scenario, load_scenario
 
@@ -27,18 +29,29 @@ class IdentityLockError(ValueError):
     """A locked run cannot use the current environment or runtime."""
 
 
-def scenario_fingerprint(scenario: str | Scenario) -> str:
-    """Hash the resolved scenario values; the environment hash covers its source assets."""
+def _resolved_scenario(scenario: str | Scenario, requested_deadline: date | None) -> Scenario:
     resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
+    return with_requested_deadline(resolved, requested_deadline)
+
+
+def _scenario_fingerprint(resolved: Scenario) -> str:
     value = json.dumps(resolved.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
                        ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(value).hexdigest()
 
 
+def scenario_fingerprint(
+    scenario: str | Scenario, *, requested_deadline: date | None = None,
+) -> str:
+    """Hash the resolved scenario values; the environment hash covers its source assets."""
+    return _scenario_fingerprint(_resolved_scenario(scenario, requested_deadline))
+
+
 def create_identity_lock(
     scenario: str, *, browser_runtime: str = "docker", browser_image: str | None = None,
+    requested_deadline: date | None = None,
 ) -> dict[str, Any]:
-    resolved = load_scenario(scenario)
+    resolved = _resolved_scenario(scenario, requested_deadline)
     if browser_runtime != "docker":
         raise IdentityLockError(
             "Exact browser artifact locks are supported only for a local Docker image ID; "
@@ -60,7 +73,7 @@ def create_identity_lock(
         "environment_version": ENVIRONMENT_VERSION,
         "environment_fingerprint": environment_fingerprint(),
         "scenario": resolved.id,
-        "scenario_fingerprint": scenario_fingerprint(scenario),
+        "scenario_fingerprint": scenario_fingerprint(resolved),
         "browser_runtime": browser_runtime,
         "runtime_identity_kind": runtime_identity_kind,
         "runtime_identity": runtime_identity,
@@ -68,7 +81,9 @@ def create_identity_lock(
     }
 
 
-def current_run_identity(scenario: str | Scenario, *, browser_runtime: str) -> dict[str, Any]:
+def current_run_identity(
+    scenario: str, *, browser_runtime: str, requested_deadline: date | None = None,
+) -> dict[str, Any]:
     """Record current inputs when no expected-identity lock was requested."""
     if browser_runtime == "docker":
         runtime_identity = _default_image()
@@ -78,7 +93,7 @@ def current_run_identity(scenario: str | Scenario, *, browser_runtime: str) -> d
         runtime_identity_kind = "artifact_unlocked"
     else:
         raise IdentityLockError(f"Unknown browser runtime: {browser_runtime}")
-    resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
+    resolved = _resolved_scenario(scenario, requested_deadline)
     return {
         "environment_version": ENVIRONMENT_VERSION,
         "environment_fingerprint": environment_fingerprint(),
@@ -130,7 +145,8 @@ def load_identity_lock(value: str | dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_identity_lock(
-    value: str | dict[str, Any], scenario: str | Scenario, *, browser_runtime: str,
+    value: str | dict[str, Any], scenario: str, *, browser_runtime: str,
+    requested_deadline: date | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Validate before target/model setup and return the exact local image ID, if applicable."""
     if browser_runtime == "subprocess":
@@ -145,7 +161,7 @@ def validate_identity_lock(
     )
 
     lock = load_identity_lock(value)
-    resolved = scenario if isinstance(scenario, Scenario) else load_scenario(scenario)
+    resolved = _resolved_scenario(scenario, requested_deadline)
     current = {
         "environment_version": ENVIRONMENT_VERSION,
         "environment_fingerprint": environment_fingerprint(),
@@ -185,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--browser-runtime", choices=("docker", "subprocess"), default="docker")
     parser.add_argument("--browser-image")
+    parser.add_argument("--requested-deadline", type=date.fromisoformat)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--update", action="store_true", help="Replace an existing lock explicitly")
     args = parser.parse_args(argv)
@@ -192,7 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.output.exists() and not args.update:
             raise IdentityLockError(f"{args.output} exists; pass --update to replace it")
         lock = create_identity_lock(args.scenario, browser_runtime=args.browser_runtime,
-                                    browser_image=args.browser_image)
+                                    browser_image=args.browser_image,
+                                    requested_deadline=args.requested_deadline)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     except (OSError, ValueError) as error:

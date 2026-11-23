@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 
@@ -234,14 +235,48 @@ def test_requested_deadline_is_in_unlocked_run_identity(monkeypatch):
     assert result.dataset[0].metadata["requested_deadline"] == "2027-02-04"
 
 
-def test_requested_deadline_mismatch_rejects_locked_run_before_cost_setup(monkeypatch):
-    from datetime import date
-
+@pytest.mark.parametrize(
+    "requested_deadline", [None, date(2027, 2, 4)], ids=["default", "override"],
+)
+def test_cli_created_lock_validates_matching_requested_deadline(monkeypatch, tmp_path, requested_deadline):
     from refund_eval import task
+    from refund_eval.published import profile
 
     monkeypatch.setattr(run_identity, "environment_fingerprint", lambda: "environment")
     monkeypatch.setattr(browser_runtimes, "resolve_local_image_id", lambda _: IMAGE_ID)
-    expected = run_identity.create_identity_lock("train_refund_late", browser_image=IMAGE_ID)
+    monkeypatch.setattr(task, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task, "default_model_roles", lambda _: {})
+    monkeypatch.setattr(task, "_given_role_models", lambda *args, **kwargs: [])
+    monkeypatch.setattr(task, "_eval_model_name", lambda: "mockllm/model")
+    monkeypatch.setattr(profile, "fixture_readiness", lambda **kwargs: {"configured": True, "reason": None})
+    lock_path = tmp_path / "identity-lock.json"
+    args = [
+        "--scenario", "train_refund_late", "--browser-image", IMAGE_ID,
+        "--output", str(lock_path),
+    ]
+    task_kwargs = {}
+    if requested_deadline is not None:
+        args.extend(["--requested-deadline", requested_deadline.isoformat()])
+        task_kwargs["requested_deadline"] = requested_deadline
+    assert run_identity.main(args) == 0
+    expected = json.loads(lock_path.read_text(encoding="utf-8"))
+
+    result = task.impossible_refund(
+        identity_lock=str(lock_path), scenario="train_refund_late", cost_limit=50,
+        published_data="fixture", research_mode="saved", **task_kwargs,
+    )
+    assert result.dataset[0].metadata["scenario_fingerprint"] == expected["scenario_fingerprint"]
+
+
+def test_changed_requested_deadline_rejects_created_lock_before_cost_setup(monkeypatch):
+    from refund_eval import task
+
+    locked_deadline = date(2027, 2, 4)
+    monkeypatch.setattr(run_identity, "environment_fingerprint", lambda: "environment")
+    monkeypatch.setattr(browser_runtimes, "resolve_local_image_id", lambda _: IMAGE_ID)
+    expected = run_identity.create_identity_lock(
+        "train_refund_late", browser_image=IMAGE_ID, requested_deadline=locked_deadline,
+    )
     monkeypatch.setattr(
         browser_runtimes, "resolve_local_image_id",
         lambda _: pytest.fail("scenario mismatch must be rejected before image lookup"),
@@ -253,6 +288,6 @@ def test_requested_deadline_mismatch_rejects_locked_run_before_cost_setup(monkey
 
     with pytest.raises(IdentityLockError, match="scenario_fingerprint"):
         task.impossible_refund(
-            identity_lock=expected, scenario="train_refund_late", requested_deadline=date(2027, 2, 4),
+            identity_lock=expected, scenario="train_refund_late", requested_deadline=date(2027, 2, 5),
             cost_limit=50, published_data="fixture", research_mode="saved",
         )
