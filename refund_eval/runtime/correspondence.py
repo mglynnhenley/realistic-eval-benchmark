@@ -347,8 +347,11 @@ class _Correspondence:
             org = interaction.get("org")
             self._merge_field(row, "organization", org)
             row["organization_status"] = "known" if _known(row["organization"]) else "unknown"
-            self._set_time(row, interaction.get("effective_at") or interaction.get("time"),
-                           "interaction.effective_at" if interaction.get("effective_at") else "interaction.time")
+            time_value = interaction.get("time") if body_field == "page_body" else (
+                interaction.get("effective_at") or interaction.get("time"))
+            time_basis = "interaction.time" if body_field == "page_body" or not interaction.get("effective_at") else (
+                "interaction.effective_at")
+            self._set_time(row, time_value, time_basis)
             row["interaction_response"] = interaction_source["action"]
             row["response_status"] = "response_recorded_in_interaction"
             self._link_interaction(row, interaction_id, interaction_source, source, event_refs)

@@ -59,14 +59,15 @@ def _interception(interception_id, channel, time, payload, *, org="company"):
 
 
 def _interaction(interception_id, mode, time, *, org="company", body="Reply body", subject="Reply subject",
-                 page_body="", effects=()):
+                 page_body="", effects=(), effective_at=None):
     event = CompanyEvent(kind="contact", incoming="Full validated incoming event", mode=mode)
     action = CompanyAction(
         decision="reply", reply=True, reply_after_hours=0, subject=subject, body=body, page_body=page_body,
     )
     record = InteractionRecord(
         id=f"{interception_id}:{org}:{event.kind}", time=time, org=org, event=event, status="applied",
-        action=action, effects=[InteractionEffect(id=effect_id, kind="email", delivery_at=time)
+        action=action, effective_at=effective_at,
+        effects=[InteractionEffect(id=effect_id, kind="email", delivery_at=effective_at or time)
                                 for effect_id in effects],
     )
     return record.model_dump(mode="json")
@@ -152,6 +153,7 @@ def _full_store():
     form_interaction = _interaction(
         "form-submit", "form", "2026-10-30T13:30:00Z", body="Form email reply body.",
         subject="Form reply", page_body="Form confirmation page.", effects=("form-reply-1",),
+        effective_at="2026-10-31T13:40:00Z",
     )
     events = [
         {"seq": 10, "sim_time": "2026-10-30T10:00:00Z", "kind": "mail_queued",
@@ -277,7 +279,10 @@ def test_builder_preserves_both_directions_and_delivery_evidence_without_mutatio
     assert rows["inbound:interaction:out-phone:company:contact:body"]["body"] == "Complete phone transcript."
     assert rows["inbound:form-reply-1"]["body"] == "Saved canonical form reply body."
     assert rows["inbound:form-reply-1"]["thread_id"] == "form-thread"
-    assert rows["inbound:interaction:form-submit:company:contact:page_body"]["body"] == "Form confirmation page."
+    form_page = rows["inbound:interaction:form-submit:company:contact:page_body"]
+    assert form_page["body"] == "Form confirmation page."
+    assert form_page["simulated_time"] == "2026-10-30T13:30:00Z"
+    assert form_page["simulated_time_basis"] == "interaction.time"
     assert not any(row.get("interception_id") in {"payment", "inbox-change"} for row in export["records"])
     assert rows["inbound:form-reply-1"]["organization"] == "company"
 
