@@ -127,7 +127,7 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
             _, content, part_charset = charset_field
             try:
                 default_charset = content.decode(part_charset or "ascii", errors="strict").strip()
-            except (LookupError, UnicodeDecodeError):
+            except (LookupError, ValueError):
                 return None, part_charset or "ascii", "undecodable"
 
         text_parts = []
@@ -135,7 +135,7 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
             effective_charset = part_charset or ("ascii" if name == "_charset_" else default_charset)
             try:
                 text = content.decode(effective_charset, errors="strict")
-            except (LookupError, UnicodeDecodeError):
+            except (LookupError, ValueError):
                 return None, effective_charset, "undecodable"
             text_parts.append(f"{name}: {text}" if isinstance(name, str) and name else text)
         return "\n".join(text_parts), default_charset, "decoded_text"
@@ -143,7 +143,7 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
         return None, "base64", "nontext"
     try:
         text = body.decode(charset, errors="strict")
-    except (LookupError, UnicodeDecodeError):
+    except (LookupError, ValueError):
         return None, charset, "undecodable" if text_media_type else "nontext"
     if not media_type and any(ord(character) < 32 and character not in "\t\n\r" for character in text):
         return None, "base64", "nontext"

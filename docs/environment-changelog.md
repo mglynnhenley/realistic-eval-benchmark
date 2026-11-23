@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.17 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 531ec81288488128c28631fb1e5cc9d846050d45b9cd2d5074a6b1256b0837cc
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Mark invalid multipart charset declarations as undecodable, including NUL-containing defaults and part headers, while preserving raw payloads.
+
 ## 7.16 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 6e665b5a1a143f3718fa71fd5e3b47ddc2f521cec59cc29d013a77300d3966a9
