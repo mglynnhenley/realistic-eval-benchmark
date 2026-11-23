@@ -43,7 +43,7 @@ class WheelFixture:
     sha256: str
 
 
-def _build_wheel(directory: Path) -> WheelFixture:
+def _build_wheel(directory: Path, *, task_source: str | None = None) -> WheelFixture:
     directory.mkdir(parents=True)
     wheel = directory / "refund_eval_wheel_fixture-0.0.1-py3-none-any.whl"
     task = '''from importlib.resources import files
@@ -72,6 +72,8 @@ def main():
 if __name__ == "__main__":
     main()
 '''
+    if task_source is not None:
+        task = task_source
     members = {
         "refund_eval/__init__.py": b'"""Inert test-only wheel package."""\n',
         "refund_eval/task.py": task.encode(),
@@ -305,6 +307,8 @@ def test_prepare_stages_and_installs_approved_wheel_offline(tmp_path, monkeypatc
     staged_wheel = agent_dir / "wheels" / wheel.path.name
     manifest = json.loads((agent_dir / "agent-wheel.json").read_text(encoding="utf-8"))
     record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert "forward_task_instruction" not in (out / "job.yaml").read_text(encoding="utf-8")
+    assert tomllib.loads((task / "task.toml").read_text(encoding="utf-8"))["environment"]["env"]["WORLD_TASK_ID"] == ""
     assert identity_seen_before_hash == [(wheel.path.name, wheel.sha256)]
     assert manifest == {"filename": wheel.path.name, "sha256": wheel.sha256}
     assert staged_wheel.read_bytes() == wheel.contents
@@ -378,6 +382,42 @@ def test_prepare_rejects_wrong_wheel_digest_before_staging_or_output_creation(tm
     with pytest.raises(ValueError, match="(?i)(wheel|sha256|digest)"):
         batch.prepare(out, _config(wheel, digest=wrong_digest))
     assert stage_calls == []
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "task_source",
+    [
+        "def impossible_refund(*, task_text=None):\n    return None\n",
+        "def impossible_refund(*, task_id=None):\n    return None\n",
+    ],
+)
+def test_prepare_rejects_suite_wheel_missing_task_override_support(tmp_path, task_source):
+    wheel = _build_wheel(tmp_path / "legacy", task_source=task_source)
+    config_data = _config(wheel).model_dump(mode="python", exclude_none=True)
+    config_data["suite"] = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    config = batch.NativeBatchConfig.model_validate(config_data)
+    out = tmp_path / "must-not-exist"
+
+    with pytest.raises(ValueError, match="optional task_text and task_id"):
+        batch.prepare(out, config)
+    assert not out.exists()
+
+
+def test_prepare_rejects_suite_wheel_missing_bill_agent_scenario(tmp_path):
+    wheel = _build_wheel(
+        tmp_path / "rail-only",
+        task_source="def impossible_refund(*, task_text=None, task_id=None):\n    return None\n",
+    )
+    config_data = _config(wheel).model_dump(mode="python", exclude_none=True)
+    config_data["suite"] = json.loads(
+        (adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text()
+    )["suite"]
+    config = batch.NativeBatchConfig.model_validate(config_data)
+    out = tmp_path / "must-not-exist"
+
+    with pytest.raises(ValueError, match="agent scenario descriptors: bills_price_rise"):
+        batch.prepare(out, config)
     assert not out.exists()
 
 

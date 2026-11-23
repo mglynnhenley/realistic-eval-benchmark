@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from refund_eval.config import CostCap, RunConfig, resolve_cost_limits
 from refund_eval.harbor.adapter import (
@@ -21,9 +21,20 @@ from refund_eval.harbor.adapter import (
     validate_and_index,
     verify_split_budget_task_sources,
     verify_split_budget_wheel,
+    verify_suite_task_wheel,
     write_task,
 )
 from refund_eval.output_paths import validate_private_output
+from refund_eval.scenario.schema import scenario_names
+
+
+class NativeSuiteEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    task_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    scenario: str
+    task_text: str = Field(min_length=1, max_length=4000)
+    sim_weeks: float | None = Field(default=None, gt=0)
 
 
 class NativeBatchConfig(RunConfig):
@@ -37,15 +48,42 @@ class NativeBatchConfig(RunConfig):
     shared_allowance_usd: CostCap | None = None
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
+    suite: list[NativeSuiteEntry] | None = Field(default=None, min_length=10, max_length=10)
 
     @model_validator(mode="after")
     def _validate_spend_caps(self) -> NativeBatchConfig:
+        if self.suite is not None:
+            task_ids = [entry.task_id for entry in self.suite]
+            task_texts = [entry.task_text.strip() for entry in self.suite]
+            scenarios = {entry.scenario for entry in self.suite}
+            if len(set(task_ids)) != len(task_ids):
+                raise ValueError("Native suite task_id values must be unique")
+            if any(not task_text for task_text in task_texts):
+                raise ValueError("Native suite task_text values must not be blank")
+            if len(set(task_texts)) != len(task_texts):
+                raise ValueError("Native suite task_text values must be unique")
+            unknown = scenarios - set(scenario_names())
+            if unknown:
+                raise ValueError(f"Unknown suite scenarios: {', '.join(sorted(unknown))}")
+            if self.scenario not in scenarios:
+                raise ValueError("Native suite must include the configured scenario")
+            if self.openrouter_key_mode in {"split", "shared_roles"}:
+                raise ValueError("Native task suites do not support split or shared_roles key modes")
+            if "train_refund_late" in scenarios and "cost_limit" not in self.model_fields_set:
+                raise ValueError("A suite containing train_refund_late requires an explicit cost_limit")
+            if "train_refund_late" in scenarios and self.research_mode not in {"saved", "auto"}:
+                raise ValueError(
+                    "train_refund_late suite entries require research_mode 'saved' or 'auto' (saved dossiers)"
+                )
+            targets = self.models or [self.model]
+            for scenario in scenarios:
+                resolve_cost_limits(self.cost_limit, targets, scenario=scenario)
         if (self.trial_spend_cap_usd is None) != (self.key_spend_cap_usd is None):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
         if self.openrouter_key_mode in {"split", "shared_roles"}:
             mode = self.openrouter_key_mode
             if self.scenario != "train_refund_late":
-                raise ValueError(f"{mode} mode only supports train_refund_late")
+                raise ValueError(f"{mode} mode supports only train_refund_late")
             if self.execution != "modal":
                 raise ValueError(f"{mode} mode requires Modal execution")
             if self.agent_max_output_tokens is None:
@@ -86,6 +124,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     if config.total_time_limit_seconds is not None:
         raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
+    if config.suite is not None:
+        verify_suite_task_wheel(verified_wheel, {entry.scenario for entry in config.suite})
     if config.openrouter_key_mode in {"split", "shared_roles"}:
         verify_split_budget_wheel(config.agent_wheel)
     targets = config.models or [config.model]
@@ -93,10 +133,23 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         raise ValueError("Native batches require execution='docker' or execution='modal'")
     if config.inbox_snapshot or config.resume_log:
         raise ValueError("Native batch preparation does not support an inbox snapshot or a resume log")
-    total = config.trials * len(targets)
+    task_specs = ([
+        {"task_id": entry.task_id, "scenario": entry.scenario, "task_text": entry.task_text,
+         "sim_weeks": entry.sim_weeks if entry.sim_weeks is not None else config.sim_weeks,
+         "suite_task": True}
+        for entry in config.suite
+    ] if config.suite is not None else [{
+        "task_id": config.scenario, "scenario": config.scenario, "task_text": None,
+        "sim_weeks": config.sim_weeks, "suite_task": False,
+    }])
+    total = config.trials * len(targets) * len(task_specs)
     if total > 100 or config.concurrency > total:
         raise ValueError("A batch allows at most 100 trials and concurrency cannot exceed the trial count")
-    caps = resolve_cost_limits(config.cost_limit, targets, scenario=config.scenario)
+    caps_by_scenario = {
+        scenario: resolve_cost_limits(config.cost_limit, targets, scenario=scenario)
+        for scenario in {spec["scenario"] for spec in task_specs}
+    }
+    caps = caps_by_scenario[config.scenario]
     shared_role_budget_config = None
     if config.openrouter_key_mode == "shared_roles":
         shared_role_budget_config = json.dumps({
@@ -126,28 +179,33 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         raise FileExistsError(f"Native batches require an empty output directory: {out}")
     out.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    task = write_task(
-        out, scenario=config.scenario, data_mode=config.data_mode, sim_weeks=config.sim_weeks,
-        max_turns=config.max_turns, research_mode=config.research_mode, simulator_model=config.simulator_model,
+    tasks = [write_task(
+        out, scenario=spec["scenario"], task_id=spec["task_id"], task_text=spec["task_text"],
+        data_mode=config.data_mode, sim_weeks=spec["sim_weeks"], max_turns=config.max_turns,
+        research_mode=config.research_mode, simulator_model=config.simulator_model,
         grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=agent_timeout,
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
         shared_allowance_usd=config.shared_allowance_usd, shared_role_budget_config=shared_role_budget_config,
-    )
+        suite_task=spec["suite_task"],
+    ) for spec in task_specs]
     if config.openrouter_key_mode in {"split", "shared_roles"}:
-        verify_split_budget_task_sources(task)
+        for task in tasks:
+            verify_split_budget_task_sources(task)
     options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice"}, exclude_none=True)
     options["time_limit"] = worker_time_limit
     job = {
-        "job_name": f"refund-native-{config.scenario}",
+        "job_name": (f"refund-native-{config.scenario}" if config.suite is None else "refund-native-long-horizon-10"),
         "jobs_dir": str(out / "jobs"),
         "n_attempts": config.trials,
         "n_concurrent_trials": config.concurrency,
         "retry": {"max_retries": 0},
         "environment": {"type": config.execution, "delete": True},
         "agents": [
-            {"import_path": AGENT_IMPORT_PATH, "model_name": model, "kwargs": {**options, "cost_limit": caps[model]},
+            {"import_path": AGENT_IMPORT_PATH, "model_name": model,
+             "kwargs": {**options, "cost_limit": caps[model],
+                        **({"forward_task_instruction": True} if config.suite is not None else {})},
              "env": ({"OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
                       "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens)}
@@ -161,9 +219,30 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
                      {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
             for model in targets
         ],
-        "tasks": [{"path": str(task)}],
+        "tasks": [{"path": str(task)} for task in tasks],
     }
-    task_digest = validate_and_index(out, task, job)
+    task_digest = validate_and_index(out, tasks[0], job)
+    from harbor.publisher.packager import Packager
+
+    task_records = []
+    for task in tasks:
+        metadata = tomllib.loads((task / "task.toml").read_text(encoding="utf-8"))["metadata"]
+        digest, _ = Packager.compute_content_hash(task)
+        task_records.append({
+            "path": task.name,
+            "digest": f"sha256:{digest}",
+            "version": metadata["task_version"],
+            "environment_version": metadata["environment_version"],
+            "environment_fingerprint": metadata["environment_fingerprint"],
+            "source_sha256": metadata["source_sha256"],
+            "rules_sha256": metadata["rules_sha256"],
+            "agent_wheel_filename": metadata["agent_wheel_filename"],
+            "agent_wheel_sha256": metadata["agent_wheel_sha256"],
+            **({"task_id": metadata["task_id"], "scenario": metadata["scenario"]}
+               if config.suite is not None else {}),
+        })
+    if task_records[0]["digest"] != task_digest:
+        raise ValueError("Native task digest changed during Harbor indexing")
     job_path = out / "job.yaml"
     job_bytes = yaml.safe_dump(job, sort_keys=False).encode()
     job_path.write_bytes(job_bytes)
@@ -197,22 +276,22 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
             "role_caps_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
             "shared_allowance_is_operator_attested": True,
         })
-    record.write_text(json.dumps({
+    record_data = {
         "schema_version": 1,
         "config": config.model_dump(mode="json"),
-        "task": {"path": task.name, "digest": task_digest, "version": metadata["task_version"],
-                 "environment_version": metadata["environment_version"], "environment_fingerprint": metadata["environment_fingerprint"],
-                 "source_sha256": metadata["source_sha256"], "rules_sha256": metadata["rules_sha256"],
-                 "agent_wheel_filename": metadata["agent_wheel_filename"],
-                 "agent_wheel_sha256": metadata["agent_wheel_sha256"]},
+        **({"task": task_records[0]} if config.suite is None else {"tasks": task_records}),
         "job": {"path": job_path.name, "sha256": hashlib.sha256(job_bytes).hexdigest(), "max_retries": 0},
-        "seed_policy": metadata["seed_policy"],
+        "seed_policy": tomllib.loads((tasks[0] / "task.toml").read_text(encoding="utf-8"))["metadata"]["seed_policy"],
         "total_trials": total,
         "target_cost_limits_usd": caps,
         "world_cost_limit_usd_per_trial": config.world_cost_limit,
         "effective_parameters": effective_parameters,
         **({"limits": limits} if limits is not None else {}),
-    }, indent=2) + "\n", encoding="utf-8")
+    }
+    if config.suite is not None:
+        record_data["effective_parameters"]["task_count"] = len(tasks)
+        record_data["effective_parameters"]["attempts_per_task"] = config.trials * len(targets)
+    record.write_text(json.dumps(record_data, indent=2) + "\n", encoding="utf-8")
     return record
 
 
