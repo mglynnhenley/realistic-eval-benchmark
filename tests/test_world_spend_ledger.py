@@ -255,17 +255,29 @@ async def test_strict_mode_retains_byok_credit_charge(installed_world_store, tmp
     assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
 
 
-async def test_strict_failed_attempt_consumes_its_bound_before_retry(installed_world_store, tmp_path):
+async def test_strict_failed_attempt_is_not_retried_but_new_calls_reserve_again(
+    installed_world_store, tmp_path
+):
     bound = request_bound()
     ledger = WorldSpendLedger(tmp_path, bound * 4, SCOPE)
     client = ScriptedModels(completion(cost=float(bound) / 2, failed=True),
                             completion(cost=float(bound) / 2))
+    client.ledger = ledger
     budget = make_budget(client, bound * 4, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    assert Decimal(client.ledger_observed[0]["reserved_usd"]) == bound
+    assert Decimal(ledger.snapshot()["spent_usd"]) == bound
 
     await budget.complete("simulator", MESSAGES, **SETTINGS)
 
     snapshot = ledger.snapshot()
     assert client.calls == 2
+    assert Decimal(client.ledger_observed[1]["reserved_usd"]) == bound
+    assert Decimal(client.ledger_observed[1]["spent_usd"]) == bound
     assert Decimal(snapshot["spent_usd"]) == bound + Decimal(str(float(bound) / 2))
     assert snapshot["unresolved_attempts"] == 0 and snapshot["reserved_usd"] == "0"
 
@@ -281,7 +293,7 @@ async def test_strict_failed_attempt_blocks_retry_when_its_bound_uses_remaining_
     )
     budget = make_budget(client, bound, ledger=ledger, strict_budget=True)
 
-    with pytest.raises(ModelLimitExceeded, match="cannot cover another attempt"):
+    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
         await budget.complete("simulator", MESSAGES, **SETTINGS)
 
     assert client.calls == 1

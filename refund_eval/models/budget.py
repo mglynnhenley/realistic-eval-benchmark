@@ -275,6 +275,8 @@ class BudgetedWorldModels:
                 self._reject_request()
             if not completion.failed:
                 return completion
+            if self.strict_budget:
+                raise ModelLimitExceeded("Strict world model request failed; automatic retries are disabled")
             if attempt == 2:
                 self._mark("failed")
                 self.persist()
