@@ -425,6 +425,54 @@ async def test_real_inspect_openrouter_replays_bounded_reasoning_details_with_to
     assert len(requests) == 2
 
 
+async def test_real_inspect_refuses_opaque_encrypted_reasoning_before_replay_send(tmp_path, monkeypatch):
+    model_id = "openrouter/google/gemini-4-argon"
+    _install_real_target_budget(monkeypatch, tmp_path, model_id)
+    encrypted_reasoning = [{
+        "type": "reasoning.encrypted",
+        "id": "gemini-continuation",
+        "format": "google-gemini-v1",
+        "data": "opaque-continuation-token",
+    }]
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return _chat_response(
+            request,
+            tool_call=len(requests) == 1,
+            reasoning_details=encrypted_reasoning if len(requests) == 1 else None,
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            model_id,
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=32, max_retries=0, cache_prompt=False),
+            stream=False,
+        )
+        async with dollar_budget.target_dollar_budget(model):
+            tool_output = await model.generate(
+                "Continue the answer.",
+                tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+            )
+            assistant_message = tool_output.choices[0].message
+            call = assistant_message.tool_calls[0]
+            with pytest.raises(WorldSpendLedgerError, match="text-only messages"):
+                await model.generate(
+                    [
+                        ChatMessageUser(content="Continue the answer."),
+                        assistant_message,
+                        ChatMessageTool(content="Lookup complete.", tool_call_id=call.id, function=call.function),
+                        ChatMessageUser(content="Summarize the result."),
+                    ],
+                    tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+                )
+
+    assert len(requests) == 1
+
+
 async def test_real_inspect_retry_hits_unresolved_target_hold_before_second_send(
     tmp_path, monkeypatch
 ):

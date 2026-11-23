@@ -464,4 +464,8 @@ when any tariff is nonzero; the hold remains unless a positive usage or generati
 Strict settlement also requires explicit non-BYOK billing metadata (`is_byok: false`) from usage or
 generation data; BYOK or ambiguous billing retains the reservation rather than treating OpenRouter
 credits as the upstream charge. Shared-key behavior is unchanged. This accounting scope is local and does
-not verify invoices, provider-side discounts or billing changes.
+not verify invoices, provider-side discounts or billing changes. Opaque encrypted reasoning continuations
+such as `reasoning.encrypted` are refused: OpenRouter documents them as opaque and bills resumed prompts
+using provider-native token counts, but does not document a token-count upper bound from ciphertext bytes.
+Known text, summary and signature reasoning metadata remains replayable and is included in the serialized
+request bound.

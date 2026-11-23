@@ -101,7 +101,6 @@ def _valid_reasoning_details(value: Any) -> bool:
         return False
     fields_by_type = {
         "reasoning.summary": {"type", "id", "format", "index", "summary"},
-        "reasoning.encrypted": {"type", "id", "format", "index", "data"},
         "reasoning.text": {"type", "id", "format", "index", "text", "signature"},
     }
     for detail in value:
@@ -118,9 +117,6 @@ def _valid_reasoning_details(value: Any) -> bool:
             return False
         if kind == "reasoning.summary":
             if not isinstance(detail.get("summary"), str):
-                return False
-        elif kind == "reasoning.encrypted":
-            if not isinstance(detail.get("data"), str):
                 return False
         elif any(
             field in detail and detail[field] is not None and not isinstance(detail[field], str)
