@@ -44,6 +44,8 @@ _SCHEMA_KEYS = {"type", "format", "description", "default", "enum", "items", "pr
                 "anyOf", "required", "pattern", "minLength", "maxLength", "minimum", "maximum", "examples"}
 _STOP: dict[str, StopReason] = {"stop": "stop", "length": "max_tokens", "tool_calls": "tool_calls",
                                 "function_call": "tool_calls", "content_filter": "content_filter"}
+_TARIFF_KEYS = {"input", "output", "input_cache_read", "input_cache_write", "input_cache_write_1h",
+                "internal_reasoning", "request"}
 
 
 def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
@@ -209,6 +211,14 @@ def _usage(raw: Any, prices: Mapping[str, float] | None) -> Usage | None:
 
 def _valid_cost(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
+def _all_zero_tariff(prices: Mapping[str, Any] | None) -> bool:
+    return (
+        isinstance(prices, Mapping)
+        and set(prices) == _TARIFF_KEYS
+        and all(_valid_cost(value) and value == 0 for value in prices.values())
+    )
 
 
 def _token_count(value: Any, *, minimum: int = 1) -> bool:
@@ -440,7 +450,8 @@ class OpenRouterClient:
         usage = _usage(result.usage, None)
         if self.strict_budget:
             usage_is_byok = getattr(result.usage, "is_byok", None)
-            if usage_is_byok is False and usage is not None and _valid_cost(usage.cost) and usage.cost > 0:
+            if (usage_is_byok is False and usage is not None and _valid_cost(usage.cost)
+                    and (usage.cost > 0 or _all_zero_tariff(self.tariffs.get(name)))):
                 cost = usage.cost
                 cost_method = "actual"
             elif usage_is_byok is True:

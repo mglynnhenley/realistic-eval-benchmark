@@ -143,6 +143,84 @@ async def test_strict_world_does_not_trust_byok_credit_charge(
     assert client.generation_requests == generation_calls
 
 
+@pytest.mark.parametrize(("tariff_rate", "expected_method", "expected_cost", "generation_calls"), [
+    pytest.param(0, "actual", 0, 0, id="all-zero-tariff"),
+    pytest.param(1, None, None, 3, id="nonzero-tariff"),
+])
+async def test_strict_world_zero_charge_requires_all_zero_tariff(
+    monkeypatch, tariff_rate, expected_method, expected_cost, generation_calls
+):
+    from refund_eval.models import openrouter as openrouter_module
+
+    async def no_sleep(_duration):
+        return None
+
+    monkeypatch.setattr(openrouter_module.anyio, "sleep", no_sleep)
+
+    class FakeRawMessage:
+        content = "free reply"
+        tool_calls = None
+
+        def model_dump(self, **_):
+            return {"role": "assistant", "content": self.content}
+
+    class FakeResponse:
+        status_code = 200
+
+        def parse(self):
+            usage = SimpleNamespace(
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                cost=0,
+                is_byok=False,
+            )
+            choice = SimpleNamespace(message=FakeRawMessage(), finish_reason="stop", error=None)
+            return SimpleNamespace(choices=[choice], usage=usage, error=None, id="verified-zero-charge")
+
+    class FakeCompletions:
+        with_raw_response = None
+
+        async def create(self, **_):
+            return FakeResponse()
+
+    class FakeClient:
+        def __init__(self):
+            self.completions = FakeCompletions()
+            self.completions.with_raw_response = self.completions
+            self.chat = SimpleNamespace(completions=self.completions)
+            self.generation_requests = 0
+
+        def with_options(self, **_):
+            return self
+
+        async def get(self, *_args, **_kwargs):
+            self.generation_requests += 1
+            return {"data": {}}
+
+    tariff = {
+        "input": tariff_rate, "output": tariff_rate, "input_cache_read": tariff_rate,
+        "input_cache_write": tariff_rate, "input_cache_write_1h": tariff_rate,
+        "internal_reasoning": tariff_rate, "request": tariff_rate,
+    }
+    client = FakeClient()
+    models = OpenRouterClient(
+        {"simulator": "openrouter/test-model"},
+        client=client,
+        prices={"openrouter/test-model": tariff},
+        tariffs={"openrouter/test-model": tariff},
+        require_reported_cost=True,
+        pin_prices=True,
+        strict_budget=True,
+    )
+
+    result = await models.complete("simulator", [Message("user", "hello")], max_tokens=8)
+
+    assert result.cost_method == expected_method
+    assert result.usage is not None and result.usage.cost == expected_cost
+    assert client.generation_requests == generation_calls
+
+
 def _install_real_target_budget(monkeypatch, tmp_path, model_id):
     tariff = {
         "input": 1.0,

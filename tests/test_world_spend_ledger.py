@@ -255,6 +255,39 @@ async def test_strict_mode_retains_byok_credit_charge(installed_world_store, tmp
     assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
 
 
+async def test_strict_world_zero_charge_for_all_zero_tariff_settles_without_lookup(installed_world_store, tmp_path):
+    zero_tariff = {key: 0 for key in TARIFF}
+    zero_prices = {"fake/simulator": zero_tariff, "fake/grader": zero_tariff}
+    ledger = WorldSpendLedger(tmp_path, 1, SCOPE)
+    client = ScriptedModels(completion(cost=0, method="actual"))
+    client.ledger = ledger
+    budget = make_budget(client, 1, ledger=ledger, prices=zero_prices, strict_budget=True)
+
+    result = await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert result.usage is not None and result.usage.cost == 0
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert snapshot["spent_usd"] == "0"
+    assert snapshot["reserved_usd"] == "0" and snapshot["unresolved_attempts"] == 0
+
+
+async def test_strict_world_zero_charge_with_nonzero_tariff_keeps_hold(installed_world_store, tmp_path):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 2, SCOPE)
+    client = ScriptedModels(completion(cost=0, method="actual"))
+    client.ledger = ledger
+    budget = make_budget(client, bound * 2, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="zero charge"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert Decimal(snapshot["spent_usd"]) == 0
+    assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
+
+
 async def test_strict_failed_attempt_is_not_retried_but_new_calls_reserve_again(
     installed_world_store, tmp_path
 ):

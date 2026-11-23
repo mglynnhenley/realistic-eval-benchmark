@@ -225,6 +225,13 @@ class BudgetedWorldModels:
                 self._sync_ledger("unknown", snapshot)
                 self.persist()
                 raise ModelLimitExceeded("Strict world request lacks an actual provider charge; reservation retained")
+            if self.strict_budget and reported == 0 and bound > 0:
+                snapshot = self.ledger.mark_unknown(attempt_id)
+                self._sync_ledger("unknown", snapshot)
+                self.persist()
+                raise ModelLimitExceeded(
+                    "Strict world zero charge is ambiguous with a nonzero tariff; reservation retained"
+                )
             if completion.failed:
                 if reported is None and worst_case is None and not request_exception:
                     snapshot = self.ledger.mark_unknown(attempt_id)
