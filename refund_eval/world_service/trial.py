@@ -86,7 +86,6 @@ from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
-    SESSION_END_KEY,
     ToolContext,
     active_tool_call,
     current_tool_call_id,
@@ -101,7 +100,7 @@ from refund_eval.world.state import (
     load_world,
     world_tx,
 )
-from refund_eval.world.store import world_store
+from refund_eval.world.store import SESSION_END_KEY, world_store
 from refund_eval.world_service.settings import WorldSettings
 from refund_eval.world_service.store import ACTIVITY_KEY, MemoryTrial, OutputWriter
 from refund_eval.world_service.tools import (

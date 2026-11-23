@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.0 — 2026-11-23
+- Kind: behaviour round
+- Fingerprint: 759b2e143a73f5d9afb50a84391209d66ead196d5ed7362ca0fa0d5e32c2ba12
+- Trial round: not run; synthetic verification only. Any native round requires separate authorization.
+- Changes: reject wake-up requests at or after the simulated session cutoff instead of confirming a time when the agent cannot resume. Earlier mail and valid wake-up requests retain their existing behaviour (MAT-117).
+
 ## 7.13 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd
