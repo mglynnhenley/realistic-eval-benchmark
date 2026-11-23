@@ -43,8 +43,8 @@ def validate(value, now, run_id=None):
         item = value[key]
         if item is not None and (not isinstance(item, str) or len(item) > limit):
             raise ValueError("invalid text")
-    if not value["run_id"] or not value["model"]:
-        raise ValueError("operator identity required")
+    if not value["model"] or (value["launch_confirmed"] and not value["run_id"]):
+        raise ValueError("model and launched trial identity required")
     if run_id and value["run_id"] != run_id:
         raise ValueError("different trial")
     if not value["launch_confirmed"] and value["stage"] != "preparation":
@@ -68,11 +68,15 @@ def validate(value, now, run_id=None):
 
 
 class Feed:
-    def __init__(self, path, run_id=None):
+    def __init__(self, path, run_id=None, preparation_note=None, preparation_note_at=None):
         self.path = path
         self.run_id = run_id
         self.last = None
         self.lock = threading.Lock()
+        self.preparation_note = preparation_note
+        self.preparation_note_at = preparation_note_at
+        if preparation_note_at:
+            timestamp(preparation_note_at)
 
     def read(self, now=None):
         now = now or datetime.now(UTC)
@@ -107,6 +111,8 @@ class Feed:
                 "stale": error is not None or heartbeat_age is None or heartbeat_age > 90,
                 "source_stale": source_age is None or source_age > 90,
                 "server_time": now.isoformat(), "agent_cap_usd": 50, "world_cap_usd": 100,
+                "preparation_note": self.preparation_note if not payload["launch_confirmed"] else None,
+                "preparation_note_at": self.preparation_note_at if not payload["launch_confirmed"] else None,
             }
 
 
@@ -147,8 +153,12 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--feed-file", type=Path, required=True)
     parser.add_argument("--run-id")
+    parser.add_argument("--preparation-note")
+    parser.add_argument("--preparation-note-at")
     args = parser.parse_args()
-    server = make_server(args.host, args.port, Feed(args.feed_file, args.run_id))
+    server = make_server(args.host, args.port, Feed(
+        args.feed_file, args.run_id, args.preparation_note, args.preparation_note_at,
+    ))
     print(f"Luna read-only status viewer listening on {args.port}", flush=True)
     server.serve_forever()
 

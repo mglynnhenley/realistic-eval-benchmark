@@ -47,6 +47,22 @@ def test_timestamps_are_canonical_browser_compatible_utc():
     assert value["heartbeat_at"] == "2026-11-23T12:43:00.123Z"
 
 
+def test_prelaunch_no_run_id_and_separate_operator_note(tmp_path):
+    path = tmp_path / "feed.json"
+    feed = Feed(path, preparation_note="Operator-confirmed preparation blocker", preparation_note_at=NOW.isoformat())
+    status = feed.read(NOW)
+    assert status["preparation_note"] and status["heartbeat_at"] is None
+    assert not status["connected"]
+    path.write_text(json.dumps(snapshot(run_id=None)))
+    assert feed.read(NOW)["run_id"] is None
+    path.write_text(json.dumps(snapshot(run_id="actual-run", stage="running", launch_confirmed=True)))
+    status = feed.read(NOW)
+    assert status["connected"] and status["run_id"] == "actual-run"
+    assert status["preparation_note"] is None
+    with pytest.raises(ValueError):
+        validate(snapshot(run_id=None, stage="running", launch_confirmed=True), NOW)
+
+
 def test_refresh_staleness_and_last_good_survive_failure(tmp_path):
     path = tmp_path / "feed.json"
     feed = Feed(path)

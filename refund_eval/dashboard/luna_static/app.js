@@ -10,7 +10,7 @@ function stamp(id, value, seconds) {
   node.replaceChildren(document.createTextNode(age(seconds)));
   if (value) {
     const detail = document.createElement('small');
-    detail.textContent = new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+    detail.textContent = new Date(value).toISOString().replace('T', ' ').replace('Z', ' UTC');
     node.append(detail);
   }
 }
@@ -26,6 +26,9 @@ function render() {
   text('stage', s.stage[0].toUpperCase() + s.stage.slice(1));
   text('stage-note', !s.launch_confirmed ? 'Waiting for operator-confirmed launch. No trial activity is inferred.' : stale ? 'Last reported stage. The feed is delayed or unavailable.' : 'Launch confirmed by the operator. Progress comes from recorded run evidence.');
   text('run-id', s.run_id); text('model', s.model);
+  el('preparation-blocker').hidden = !s.preparation_note;
+  text('preparation-note', s.preparation_note);
+  text('preparation-note-at', s.preparation_note_at);
   text('simulated-date', s.simulated_date); text('turns', s.turns == null ? null : s.turns.toLocaleString());
   text('agent-spend', money(s.agent_spend_usd)); text('world-spend', money(s.world_spend_usd));
   for (const name of ['agent', 'world']) {
