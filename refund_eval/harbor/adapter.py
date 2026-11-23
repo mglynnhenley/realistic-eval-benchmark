@@ -125,14 +125,16 @@ def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgent
     return VerifiedAgentWheel(path, filename, actual_sha256, content)
 
 
-def verify_suite_task_wheel(wheel: VerifiedAgentWheel) -> None:
+def verify_suite_task_wheel(wheel: VerifiedAgentWheel, scenarios: set[str]) -> None:
     error = (
         "Native task suites require a verified wheel whose "
-        "refund_eval.task.impossible_refund has optional task_text and task_id parameters"
+        "refund_eval.task.impossible_refund has optional task_text and task_id parameters "
+        "and embedded agent scenario descriptors"
     )
     try:
         with zipfile.ZipFile(io.BytesIO(wheel.content)) as archive:
             source = archive.read("refund_eval/task.py")
+            members = set(archive.namelist())
         module = ast.parse(source)
     except (OSError, KeyError, zipfile.BadZipFile, SyntaxError, UnicodeDecodeError):
         raise ValueError(error) from None
@@ -147,6 +149,14 @@ def verify_suite_task_wheel(wheel: VerifiedAgentWheel) -> None:
                     if default is not None)
     if not {"task_text", "task_id"} <= optional:
         raise ValueError(error)
+    missing = sorted(
+        scenario for scenario in scenarios
+        if f"refund_eval/scenario/{scenario}.yaml" not in members
+    )
+    if missing:
+        raise ValueError(
+            "Native task suite wheel is missing agent scenario descriptors: " + ", ".join(missing)
+        )
 
 
 def verify_split_budget_wheel(path: Path) -> dict[str, str]:

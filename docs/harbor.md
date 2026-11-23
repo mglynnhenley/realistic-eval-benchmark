@@ -583,9 +583,10 @@ claims of current scanner capability.
 Suite jobs explicitly opt into forwarding each Harbor instruction and task ID to Inspect. Default and
 previously prepared single-task jobs omit both arguments, so an approved older wheel remains usable there.
 Before creating suite output, free preparation inspects the verified wheel for `task_text` and `task_id`
-support and rejects a wheel that lacks either. Rebuild and review a fresh wheel from this source before
-suite preparation, then pass its exact SHA-256. This remains wheel-only; the adapter does not stage loose
-agent source into a task image.
+support and for an embedded agent scenario descriptor for every scenario in the suite, rejecting a wheel
+that lacks any. Rebuild and review a fresh multi-scenario wheel from this source before suite preparation,
+then pass its exact SHA-256. This remains wheel-only; the adapter does not stage loose agent source into a
+task image.
 
 Preparation and checks are free and launch no trials:
 

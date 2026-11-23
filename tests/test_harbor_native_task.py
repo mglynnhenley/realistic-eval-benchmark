@@ -70,16 +70,17 @@ def _write_inert_wheel(directory):
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
-def _write_split_budget_wheel(directory):
+def _write_split_budget_wheel(directory, scenarios=("train_refund_late",)):
     source = directory / "source"
     public_source = directory / "public-source"
     adapter.copy_source(source)
-    adapter.stage_agent(
-        source,
-        public_source,
-        load_scenario("train_refund_late"),
-        scenario_name="train_refund_late",
-    )
+    for scenario in scenarios:
+        adapter.stage_agent(
+            source,
+            public_source,
+            load_scenario(scenario),
+            scenario_name=scenario,
+        )
     build_dir = directory / "built-wheel"
     subprocess.run(
         ["uv", "build", "--offline", "--wheel", "--out-dir", str(build_dir)],
@@ -95,6 +96,13 @@ def _write_split_budget_wheel(directory):
 @pytest.fixture(scope="module")
 def approved_split_budget_wheel(tmp_path_factory):
     return _write_split_budget_wheel(tmp_path_factory.mktemp("public-split-wheel"))
+
+
+@pytest.fixture(scope="module")
+def approved_suite_wheel(tmp_path_factory):
+    return _write_split_budget_wheel(
+        tmp_path_factory.mktemp("public-suite-wheel"), scenarios=("train_refund_late", "bills_price_rise")
+    )
 
 
 @pytest.fixture(scope="module")
@@ -768,9 +776,9 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
         batch.prepare(out, batch.NativeBatchConfig.model_validate_json(config.read_bytes()))
 
 
-def test_native_suite_prepares_ten_distinct_tasks(tmp_path, approved_split_budget_wheel):
+def test_native_suite_prepares_ten_distinct_tasks(tmp_path, approved_suite_wheel):
     suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
-    config = _native_suite_config(suite, approved_split_budget_wheel)
+    config = _native_suite_config(suite, approved_suite_wheel)
     baseline = next(entry for entry in suite if entry["task_id"] == "rail_original_baseline")
     assert baseline["task_text"] == task_message(load_scenario("train_refund_late"), 12)
 

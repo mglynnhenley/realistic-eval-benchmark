@@ -404,6 +404,23 @@ def test_prepare_rejects_suite_wheel_missing_task_override_support(tmp_path, tas
     assert not out.exists()
 
 
+def test_prepare_rejects_suite_wheel_missing_bill_agent_scenario(tmp_path):
+    wheel = _build_wheel(
+        tmp_path / "rail-only",
+        task_source="def impossible_refund(*, task_text=None, task_id=None):\n    return None\n",
+    )
+    config_data = _config(wheel).model_dump(mode="python", exclude_none=True)
+    config_data["suite"] = json.loads(
+        (adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text()
+    )["suite"]
+    config = batch.NativeBatchConfig.model_validate(config_data)
+    out = tmp_path / "must-not-exist"
+
+    with pytest.raises(ValueError, match="agent scenario descriptors: bills_price_rise"):
+        batch.prepare(out, config)
+    assert not out.exists()
+
+
 def test_installer_rejects_tampered_staged_wheel_before_uv_install(tmp_path):
     wheel = _build_wheel(tmp_path / "input")
     out = tmp_path / "prepared"

@@ -121,7 +121,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
     if config.suite is not None:
-        verify_suite_task_wheel(verified_wheel)
+        verify_suite_task_wheel(verified_wheel, {entry.scenario for entry in config.suite})
     if config.openrouter_key_mode in {"split", "shared_roles"}:
         verify_split_budget_wheel(config.agent_wheel)
     targets = config.models or [config.model]
