@@ -45,7 +45,7 @@ def validate(value, now, run_id=None):
             raise ValueError("invalid text")
     if not value["model"] or (value["launch_confirmed"] and not value["run_id"]):
         raise ValueError("model and launched trial identity required")
-    if run_id and value["run_id"] != run_id:
+    if run_id and value["run_id"] not in (None, run_id):
         raise ValueError("different trial")
     if not value["launch_confirmed"] and value["stage"] != "preparation":
         raise ValueError("launch not confirmed")
@@ -88,10 +88,12 @@ class Feed:
                 if len(raw) > 8192:
                     raise ValueError("oversized feed")
                 candidate = validate(json.loads(raw), now, self.run_id)
+                if self.last and self.last["launch_confirmed"] and not candidate["launch_confirmed"]:
+                    raise ValueError("launch state regression")
                 if self.last and timestamp(candidate["heartbeat_at"]) < timestamp(self.last["heartbeat_at"]):
                     raise ValueError("older heartbeat")
                 self.last = candidate
-                self.run_id = candidate["run_id"]
+                self.run_id = self.run_id or candidate["run_id"]
             except FileNotFoundError:
                 error = "Feed unconnected" if self.last is None else "Feed unavailable"
             except (OSError, ValueError, TypeError):

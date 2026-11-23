@@ -63,6 +63,21 @@ def test_prelaunch_no_run_id_and_separate_operator_note(tmp_path):
         validate(snapshot(run_id=None, stage="running", launch_confirmed=True), NOW)
 
 
+def test_configured_trial_pin_survives_preparation_heartbeat(tmp_path):
+    path = tmp_path / "feed.json"
+    feed = Feed(path, run_id="expected-run")
+    path.write_text(json.dumps(snapshot(run_id=None)))
+    assert feed.read(NOW)["connected"]
+    assert feed.run_id == "expected-run"
+    path.write_text(json.dumps(snapshot(run_id="other-run", launch_confirmed=True, stage="running")))
+    assert feed.read(NOW)["feed_error"]
+    path.write_text(json.dumps(snapshot(run_id="expected-run", launch_confirmed=True, stage="running")))
+    assert feed.read(NOW)["launch_confirmed"]
+    path.write_text(json.dumps(snapshot(run_id=None)))
+    status = feed.read(NOW)
+    assert status["feed_error"] and status["launch_confirmed"]
+
+
 def test_refresh_staleness_and_last_good_survive_failure(tmp_path):
     path = tmp_path / "feed.json"
     feed = Feed(path)
