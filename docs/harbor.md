@@ -513,6 +513,11 @@ headroom refuses the run; `$150` is only a ceiling, not evidence of available fu
 `H` is bound to a run-only copy of the task, leaving the saved setup manifest unchanged. The
 existing atomic target/world reservation ledger and strict pre-call paths enforce the role and
 aggregate caps. `requested_deadline` may be set independently for this mode as for `shared_roles`.
+The prepared target and world environments are explicitly unbound; direct Harbor execution refuses
+before provider requests until the guarded launcher binds `H`. The `/api/v1/key` response must
+explicitly include valid `budgets` and `effective_budget` fields; the current parser accepts an empty
+`budgets` list and null `effective_budget` only when those fields are present. Omitted fields are
+treated as unknown and refuse this mode.
 
 This mode uses only the current-key `/api/v1/key` metadata; it does not query account credits or
 fall back to the operator-attested `shared_roles` mode. Its ledger coordinates only the target

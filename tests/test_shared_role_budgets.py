@@ -202,6 +202,13 @@ def _key_metadata(
     return {"data": data}
 
 
+def _shared_caps_key_metadata(**kwargs):
+    payload = _key_metadata(**kwargs)
+    payload["data"].setdefault("budgets", [])
+    payload["data"].setdefault("effective_budget", None)
+    return payload
+
+
 def test_shared_role_snapshot_accepts_empty_budgets_and_explicit_null_effective_budget():
     payload = _key_metadata()
     payload["data"].update(budgets=[], effective_budget=None)
@@ -408,7 +415,7 @@ def test_shared_role_guard_requires_exact_key_and_budget_headroom(headroom_field
 
 def test_shared_caps_uses_smallest_verified_finite_headroom():
     async def probe():
-        return _key_metadata(limit=80, remaining=70, budget_remaining=45)
+        return _shared_caps_key_metadata(limit=80, remaining=70, budget_remaining=45)
 
     guard = SharedCapsSpendGuard(
         SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
@@ -429,7 +436,7 @@ def test_shared_caps_uses_smallest_verified_finite_headroom():
 
 @pytest.mark.parametrize("headroom", ["zero", "missing", "unlimited"])
 def test_shared_caps_refuses_unverified_or_exhausted_headroom(headroom):
-    payload = _key_metadata()
+    payload = _shared_caps_key_metadata()
     if headroom == "zero":
         payload["data"]["limit_remaining"] = 0
     elif headroom == "missing":
@@ -453,6 +460,44 @@ def test_shared_caps_refuses_unverified_or_exhausted_headroom(headroom):
             await guard.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("missing_field", ["budgets", "effective_budget"])
+def test_shared_caps_requires_explicit_budget_metadata(missing_field):
+    payload = _shared_caps_key_metadata()
+    del payload["data"][missing_field]
+
+    async def probe():
+        return payload
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        with pytest.raises(GuardFailure, match="explicit OpenRouter budget metadata"):
+            await guard.start()
+        with pytest.raises(GuardFailure):
+            await guard.close()
+
+    asyncio.run(run())
+
+
+def test_shared_caps_rejects_cent_of_headroom_erosion_without_slack():
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1)
+    )
+    baseline = SharedRoleOpenRouterSnapshot.parse(
+        _shared_caps_key_metadata(limit=80, remaining=60)
+    )
+    eroded = SharedRoleOpenRouterSnapshot.parse(
+        _shared_caps_key_metadata(limit=80, remaining=Decimal("59.99"))
+    )
+
+    guard._check_headroom(baseline)
+    with pytest.raises(GuardFailure, match="limit_remaining is below shared_allowance_usd"):
+        guard._check_headroom(eroded, baseline)
 
 
 def test_shared_caps_concurrency_and_unknown_retry_preserve_derived_hold(tmp_path):

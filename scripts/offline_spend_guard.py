@@ -748,6 +748,8 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
     def _check_headroom(
         self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
     ) -> None:
+        if not snapshot.budgets_present or not snapshot.effective_budget_present:
+            raise GuardFailure("shared_caps requires explicit OpenRouter budget metadata")
         if self.effective_allowance_usd is None and baseline is None:
             if (not snapshot.limit_reset_present or snapshot.limit_reset is not None
                     or snapshot.is_management_key is not False or snapshot.is_provisioning_key is not False
