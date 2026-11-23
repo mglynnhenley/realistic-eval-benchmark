@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -741,11 +742,11 @@ def export_saved_trial(input_path: str | Path, out_dir: str | Path) -> dict[str,
     )
     json_text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     markdown_text = render_markdown(result)
-    destination.mkdir(parents=True, exist_ok=False)
-    with (destination / JSON_NAME).open("x", encoding="utf-8") as output:
-        output.write(json_text)
-    with (destination / MARKDOWN_NAME).open("x", encoding="utf-8") as output:
-        output.write(markdown_text)
+    destination.mkdir(parents=True, exist_ok=False, mode=0o700)
+    for name, content in ((JSON_NAME, json_text), (MARKDOWN_NAME, markdown_text)):
+        descriptor = os.open(destination / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(content)
     return result
 
 

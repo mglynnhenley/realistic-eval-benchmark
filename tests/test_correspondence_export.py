@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from copy import deepcopy
 from datetime import datetime, timedelta
 
@@ -378,10 +380,16 @@ def test_eval_export_uses_saved_store_and_never_overwrites_input_or_existing_out
     original_bytes = source.read_bytes()
     destination = tmp_path / "new-private-export"
 
-    export_saved_trial(source, destination)
+    previous_umask = os.umask(0o022)
+    try:
+        export_saved_trial(source, destination)
+    finally:
+        os.umask(previous_umask)
 
     assert source.read_bytes() == original_bytes
     assert {JSON_NAME, MARKDOWN_NAME} == {path.name for path in destination.iterdir()}
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o700
+    assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in destination.iterdir())
     private_json = (destination / JSON_NAME).read_text(encoding="utf-8")
     markdown = (destination / MARKDOWN_NAME).read_text(encoding="utf-8")
     assert "Complete outbound email body." in private_json
