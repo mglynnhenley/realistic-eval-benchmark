@@ -348,6 +348,12 @@ def test_target_hook_rejects_auth_and_route_headers_before_reservation(monkeypat
     [
         ({"messages": [{"role": "user", "content": "hello", "audio": {"data": "payload"}}]}, "text-only"),
         ({"messages": [{"role": "user", "content": "hello", "image_url": {"url": "payload"}}]}, "text-only"),
+        ({"messages": [{"role": "assistant", "content": "hello", "reasoning_details": [
+            {"type": "reasoning.unknown", "data": "opaque"},
+        ]}]}, "text-only"),
+        ({"messages": [{"role": "assistant", "content": "hello", "reasoning_details": [
+            {"type": "reasoning.encrypted", "data": {"opaque": "value"}},
+        ]}]}, "text-only"),
         ({"extra_body": {"max_tokens": 1000}}, "unbounded OpenRouter parameters"),
         ({"extra_query": {"provider": "untrusted-route"}}, "single non-streaming route"),
     ],

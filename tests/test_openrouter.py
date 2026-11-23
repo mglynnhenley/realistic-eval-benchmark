@@ -1,6 +1,7 @@
 """Exercise the actual provider and SDK through an offline HTTP transport."""
 
 import json
+from copy import deepcopy
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -174,7 +175,7 @@ def _install_real_target_budget(monkeypatch, tmp_path, model_id):
     return ledger, reserve_attempts
 
 
-def _chat_response(request, *, tool_call=False):
+def _chat_response(request, *, tool_call=False, reasoning_details=None):
     if tool_call:
         message = {
             "role": "assistant",
@@ -185,6 +186,8 @@ def _chat_response(request, *, tool_call=False):
                 "function": {"name": "lookup", "arguments": "{}"},
             }],
         }
+        if reasoning_details is not None:
+            message["reasoning_details"] = reasoning_details
         finish_reason = "tool_calls"
     else:
         message = {"role": "assistant", "content": "Offline bounded response."}
@@ -261,6 +264,87 @@ async def test_real_inspect_openrouter_hook_reserves_before_text_and_tool_calls(
     assert text_output.completion == "Offline bounded response."
     assert Decimal(ledger.snapshot()["spent_usd"]) == Decimal("0.0002")
     assert ledger.snapshot()["reserved_usd"] == "0"
+
+
+async def test_real_inspect_openrouter_replays_bounded_reasoning_details_with_tool_call(
+    tmp_path, monkeypatch
+):
+    model_id = "openrouter/anthropic/claude-opus-5"
+    ledger, _ = _install_real_target_budget(monkeypatch, tmp_path, model_id)
+    reasoning_details = [{
+        "type": "reasoning.text",
+        "text": "Check the message history before using the lookup tool.",
+        "signature": "offline-anthropic-signature",
+        "format": "anthropic-claude-v1",
+    }]
+    requests = []
+    reservations_at_send = []
+    bounded_requests = []
+    original_charge_bound = dollar_budget.charge_bound
+
+    def capture_charge_bound(request, prices):
+        saved = deepcopy(request)
+        bound = original_charge_bound(request, prices)
+        bounded_requests.append((saved, bound))
+        return bound
+
+    monkeypatch.setattr(dollar_budget, "charge_bound", capture_charge_bound)
+
+    def transport(request):
+        reservations_at_send.append(Decimal(ledger.snapshot()["reserved_usd"]))
+        requests.append(request)
+        return _chat_response(
+            request,
+            tool_call=len(requests) == 1,
+            reasoning_details=reasoning_details if len(requests) == 1 else None,
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            model_id,
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=32, max_retries=0, cache_prompt=False),
+            stream=False,
+        )
+        async with dollar_budget.target_dollar_budget(model):
+            tool_output = await model.generate(
+                "Look up the status.",
+                tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+            )
+            assistant_message = tool_output.choices[0].message
+            call = assistant_message.tool_calls[0]
+            await model.generate(
+                [
+                    ChatMessageUser(content="Look up the status."),
+                    assistant_message,
+                    ChatMessageTool(
+                        content="Status: delayed.", tool_call_id=call.id, function=call.function
+                    ),
+                    ChatMessageUser(content="Summarize the result."),
+                ],
+                tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+            )
+
+    replayed = json.loads(requests[1].content)["messages"][1]["reasoning_details"]
+    assert replayed == reasoning_details
+    bounded_request, bound = bounded_requests[1]
+    assert bounded_request["messages"][1]["reasoning_details"] == reasoning_details
+    without_reasoning = deepcopy(bounded_request)
+    without_reasoning["messages"][1].pop("reasoning_details")
+    tariff = {
+        "input": 1.0,
+        "output": 5.0,
+        "input_cache_read": 1.0,
+        "input_cache_write": 1.0,
+        "input_cache_write_1h": 1.0,
+        "internal_reasoning": 0.0,
+        "request": 0.0,
+    }
+    assert bound == original_charge_bound(bounded_request, tariff)
+    assert bound > original_charge_bound(without_reasoning, tariff)
+    assert reservations_at_send[1] == bound
+    assert len(requests) == 2
 
 
 async def test_real_inspect_retry_hits_unresolved_target_hold_before_second_send(

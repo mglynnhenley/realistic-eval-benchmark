@@ -94,6 +94,40 @@ def _valid_function_call(value: Any) -> bool:
     )
 
 
+def _valid_reasoning_details(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    fields_by_type = {
+        "reasoning.summary": {"type", "id", "format", "index", "summary"},
+        "reasoning.encrypted": {"type", "id", "format", "index", "data"},
+        "reasoning.text": {"type", "id", "format", "index", "text", "signature"},
+    }
+    for detail in value:
+        if not isinstance(detail, Mapping):
+            return False
+        kind = detail.get("type")
+        allowed_fields = fields_by_type.get(kind)
+        if allowed_fields is None or set(detail) - allowed_fields:
+            return False
+        for field in ("id", "format"):
+            if field in detail and detail[field] is not None and not isinstance(detail[field], str):
+                return False
+        if "index" in detail and detail["index"] is not None and type(detail["index"]) is not int:
+            return False
+        if kind == "reasoning.summary":
+            if not isinstance(detail.get("summary"), str):
+                return False
+        elif kind == "reasoning.encrypted":
+            if not isinstance(detail.get("data"), str):
+                return False
+        elif any(
+            field in detail and detail[field] is not None and not isinstance(detail[field], str)
+            for field in ("text", "signature")
+        ):
+            return False
+    return True
+
+
 def _text_only_message(message: Mapping[str, Any]) -> bool:
     role = message.get("role")
     if not isinstance(role, str):
@@ -102,7 +136,10 @@ def _text_only_message(message: Mapping[str, Any]) -> bool:
         "system": {"role", "content", "name"},
         "developer": {"role", "content", "name"},
         "user": {"role", "content", "name"},
-        "assistant": {"role", "content", "name", "tool_calls", "function_call", "refusal"},
+        "assistant": {
+            "role", "content", "name", "tool_calls", "function_call", "refusal",
+            "reasoning", "reasoning_content", "reasoning_details",
+        },
         "tool": {"role", "content", "name", "tool_call_id"},
     }.get(role)
     if allowed_fields is None or set(message) - allowed_fields:
@@ -129,6 +166,17 @@ def _text_only_message(message: Mapping[str, Any]) -> bool:
     if function_call is not None and (role != "assistant" or not _valid_function_call(function_call)):
         return False
     if "refusal" in message and message["refusal"] is not None and not isinstance(message["refusal"], str):
+        return False
+    if any(
+        field in message and message[field] is not None and not isinstance(message[field], str)
+        for field in ("reasoning", "reasoning_content")
+    ):
+        return False
+    if (
+        "reasoning_details" in message
+        and message["reasoning_details"] is not None
+        and not _valid_reasoning_details(message["reasoning_details"])
+    ):
         return False
     content = message.get("content")
     if _text_only(content):
