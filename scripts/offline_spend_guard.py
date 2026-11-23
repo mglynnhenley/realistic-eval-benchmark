@@ -649,13 +649,10 @@ class SharedRoleSpendGuard(SpendGuard):
                 or snapshot.usage + snapshot.remaining > snapshot.limit + _MONEY_EPSILON):
             raise GuardFailure("OpenRouter key headroom metadata is malformed")
         allowance = self.thresholds.shared_allowance_usd
-        key_spend = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
-        key_minimum = allowance if baseline is None else max(Decimal(0), allowance - key_spend)
-        if snapshot.remaining + _MONEY_EPSILON < key_minimum:
+        key_usage_delta = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
+        minimum = max(Decimal(0), allowance - key_usage_delta)
+        if snapshot.remaining + _MONEY_EPSILON < minimum:
             raise GuardFailure("OpenRouter limit_remaining is below shared_allowance_usd")
-        baseline_budgets = {} if baseline is None else {budget.identity: budget for budget in baseline.budgets}
-        if baseline is not None and baseline.effective_budget is not None:
-            baseline_budgets[baseline.effective_budget.identity] = baseline.effective_budget
         budgets = list(snapshot.budgets)
         if snapshot.effective_budget is not None:
             budgets.append(snapshot.effective_budget)
@@ -665,9 +662,6 @@ class SharedRoleSpendGuard(SpendGuard):
             if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
                     or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
                 raise GuardFailure("OpenRouter budget metadata is malformed")
-            previous_budget = baseline_budgets.get(budget.identity)
-            spend_delta = Decimal(0) if previous_budget is None else budget.spend - previous_budget.spend
-            minimum = allowance if baseline is None else max(Decimal(0), allowance - spend_delta)
             if budget.remaining + _MONEY_EPSILON < minimum:
                 raise GuardFailure("OpenRouter budget remaining is below shared_allowance_usd")
 
@@ -694,11 +688,10 @@ class SharedRoleSpendGuard(SpendGuard):
             if openrouter.remaining > previous.remaining + _MONEY_EPSILON:
                 raise GuardFailure("OpenRouter remaining counter increased")
             self._check_headroom(openrouter, baseline)
-            usage_deltas = [openrouter.usage - baseline.usage]
-            for baseline_budget, before, current in zip(baseline.budgets, previous.budgets, openrouter.budgets, strict=True):
+            key_usage_delta = openrouter.usage - baseline.usage
+            for before, current in zip(previous.budgets, openrouter.budgets, strict=True):
                 if current.spend < before.spend or current.remaining > before.remaining + _MONEY_EPSILON:
                     raise GuardFailure("OpenRouter budget counters moved nonmonotonically")
-                usage_deltas.append(current.spend - baseline_budget.spend)
             if baseline.effective_budget is not None:
                 previous_effective, current_effective = previous.effective_budget, openrouter.effective_budget
                 if previous_effective is None or current_effective is None:
@@ -706,8 +699,7 @@ class SharedRoleSpendGuard(SpendGuard):
                 if (current_effective.spend < previous_effective.spend
                         or current_effective.remaining > previous_effective.remaining + _MONEY_EPSILON):
                     raise GuardFailure("OpenRouter effective budget counters moved nonmonotonically")
-                usage_deltas.append(current_effective.spend - baseline.effective_budget.spend)
-            if any(delta >= self.thresholds.shared_allowance_usd for delta in usage_deltas):
+            if key_usage_delta >= self.thresholds.shared_allowance_usd:
                 raise GuardFailure("OpenRouter shared allowance reached")
         self._previous_openrouter = openrouter
         self._last_sample_at = self._clock()

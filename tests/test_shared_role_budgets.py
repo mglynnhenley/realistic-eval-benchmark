@@ -178,7 +178,10 @@ def test_legacy_openrouter_snapshot_ignores_new_metadata_fields():
     assert (snapshot.usage, snapshot.limit, snapshot.remaining) == (Decimal(1), Decimal(10), Decimal(9))
 
 
-def _key_metadata(*, usage=0, limit=80, remaining=80, reset=None, budget_remaining=None):
+def _key_metadata(
+    *, usage=0, limit=80, remaining=80, reset=None, budget_remaining=None, budget_limit=100,
+    budget_scope="key_limit",
+):
     data = {
         "usage": usage,
         "limit": limit,
@@ -190,7 +193,7 @@ def _key_metadata(*, usage=0, limit=80, remaining=80, reset=None, budget_remaini
     }
     if budget_remaining is not None:
         data["budgets"] = [{
-            "scope": "key_limit", "limit_usd": 100, "spend_usd": 100 - budget_remaining,
+            "scope": budget_scope, "limit_usd": budget_limit, "spend_usd": budget_limit - budget_remaining,
             "remaining_usd": budget_remaining, "reset_interval": None, "resets_at": None,
             "include_byok": True,
         }]
@@ -321,3 +324,39 @@ def test_exact_headroom_allows_measured_normal_spend_without_rebasing():
         await guard.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("budget_field", ["budgets", "effective_budget"])
+def test_shared_role_guard_does_not_count_other_key_workspace_spend(budget_field):
+    def sample(remaining):
+        payload = _key_metadata()
+        record = {
+            "scope": "workspace", "limit_usd": 2000, "spend_usd": 2000 - remaining,
+            "remaining_usd": remaining, "reset_interval": None, "resets_at": None,
+            "include_byok": True,
+        }
+        payload["data"][budget_field] = [record] if budget_field == "budgets" else record
+        return SharedRoleOpenRouterSnapshot.parse(payload)
+
+    guard = SharedRoleSpendGuard(SharedRoleThresholds(Decimal(10)))
+    guard._accept_sample(sample(1000), initial=True)
+    guard._accept_sample(sample(990))
+
+
+@pytest.mark.parametrize("budget_field", ["budgets", "effective_budget"])
+def test_shared_role_guard_rejects_external_budget_erosion_below_required_headroom(budget_field):
+    def sample(remaining):
+        payload = _key_metadata()
+        record = {
+            "scope": "workspace", "limit_usd": 2000, "spend_usd": 2000 - remaining,
+            "remaining_usd": remaining, "reset_interval": None, "resets_at": None,
+            "include_byok": True,
+        }
+        payload["data"][budget_field] = [record] if budget_field == "budgets" else record
+        return SharedRoleOpenRouterSnapshot.parse(payload)
+
+    guard = SharedRoleSpendGuard(SharedRoleThresholds(Decimal(10)))
+    guard._accept_sample(sample(1000), initial=True)
+
+    with pytest.raises(GuardFailure, match="budget remaining is below"):
+        guard._accept_sample(sample(9))
