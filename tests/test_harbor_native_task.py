@@ -1304,7 +1304,8 @@ def test_inspect_command(tmp_path):
                           '/app/.venv/bin/inspect eval '
                           '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
                           'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
-    for part in ("--model openrouter/anthropic/claude-opus-5.5", "-M strict_tools=false", "-M reasoning_enabled=true",
+    for part in ("--model openrouter/anthropic/claude-opus-5.5", "--max-retries 0", "-M max_retries=0",
+                 "-M strict_tools=false", "-M reasoning_enabled=true",
                  "-T world_url=http://world:8000", '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"', "-T history_tokens=60000", "-T token_budget=40000000",
                  "-T cost_limit=150.0", "-T time_limit=36000", "--log-dir /logs/agent/inspect",

@@ -92,6 +92,8 @@ class RefundInstalledAgent(BaseInstalledAgent):
             raise ValueError("Choose the target model (model_name)")
         logs = self.environment_logs_dir.as_posix()
         model_args = {**published_model_args(model), **({"reasoning_enabled": True} if options.reasoning else {})}
+        if model.startswith("openrouter/"):
+            model_args["max_retries"] = 0
         task_args = {"world_url": self.world_url(), "history_tokens": options.history_tokens,
                      "budget_notice": options.budget_notice}
         suite_instruction = None
@@ -108,6 +110,7 @@ class RefundInstalledAgent(BaseInstalledAgent):
                      'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')
         parts = [f"REFUND_EVAL_KILL_FILE={shlex.quote(f'{APP}/.context/KILL')}",
                  INSPECT, "eval", task_file, "--model", shlex.quote(model),
+                 "--max-retries", "0",
                  *(f"-M {key}={json.dumps(value)}" for key, value in model_args.items()),
                  *(['-T task_id="$WORLD_TASK_ID"'] if suite_instruction is not None else []),
                  '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
