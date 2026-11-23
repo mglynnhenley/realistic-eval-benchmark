@@ -3,7 +3,9 @@ import math
 import os
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -140,6 +142,63 @@ def test_metrics_include_unknown_and_null_precision_when_no_positive_predictions
     assert result["precision_unsupported"] is None
     assert result["recall_unsupported"] is None
     assert result["accuracy_known"] == 1.0
+
+
+def test_experiment_skips_unknown_train_activations_and_extracts_all_eval(monkeypatch, tmp_path):
+    import refund_eval.activation_monitor.__main__ as experiment
+
+    examples_path = tmp_path / "examples.jsonl"
+    write_synthetic_examples(examples_path)
+    rows = [json.loads(line) for line in examples_path.read_text(encoding="utf-8").splitlines()]
+    training_row = next(row for row in rows if row["split"] == "train")
+    unknown = {
+        **training_row,
+        "id": "train-unknown-overflow",
+        "evidence_context": "overlong " * 100,
+        "label": "unknown",
+    }
+    rows.append(unknown)
+    examples_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    local = SimpleNamespace(
+        identity={"name": "test-local", "revision": None, "local_path": str(tmp_path)},
+        hidden_dim=2,
+        num_layers=2,
+    )
+    monkeypatch.setattr(experiment, "load_local_model", lambda _: local)
+    calls = []
+    overlong_eval_id = None
+
+    def extract_vector(_, row, _layer_index):
+        nonlocal overlong_eval_id
+        if row["id"] == unknown["id"]:
+            raise AssertionError("unknown training row must not be forwarded")
+        if row["id"] == overlong_eval_id:
+            assert len(row["evidence_context"].split()) > 64
+            raise ValueError("over model context; refusing truncation")
+        calls.append(row["id"])
+        if not row["evidence_context"]:
+            claim_value = sum(map(ord, row["claim"])) % 17 / 17
+            return [claim_value, 1 - claim_value]
+        return [0.0, 0.0] if row["label"] == "supported" else [1.0, 1.0]
+
+    monkeypatch.setattr(experiment, "extract_claim_vector", extract_vector)
+    payload = experiment.run_experiment(str(tmp_path), str(examples_path), str(tmp_path / "private-output"))
+
+    extracted_rows = [
+        row for row in rows
+        if row["split"] == "eval" or (row["split"] == "train" and row["label"] != "unknown")
+    ]
+    assert Counter(calls) == Counter({row["id"]: 2 for row in extracted_rows})
+    assert payload["label_provenance"] == "agent-authored synthetic fixture"
+    assert payload["probe"]["training_label_counts"] == {"supported": 12, "unsupported": 12}
+
+    overlong_eval = next(row for row in rows if row["split"] == "eval" and row["label"] == "supported")
+    overlong_eval["evidence_context"] = "overlong " * 100
+    overlong_eval_id = overlong_eval["id"]
+    examples_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="refusing truncation"):
+        experiment.run_experiment(str(tmp_path), str(examples_path), str(tmp_path / "overlong-eval-output"))
 
 
 def test_package_import_does_not_import_torch_or_transformers():

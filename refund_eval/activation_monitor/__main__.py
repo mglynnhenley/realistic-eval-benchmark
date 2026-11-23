@@ -93,15 +93,19 @@ def run_experiment(
     output = validate_private_output(output_dir)
     examples = read_examples(examples_path)
     evaluation = [row for row in examples if row["split"] == "eval"]
+    activation_examples = [
+        row for row in examples
+        if row["split"] == "eval" or (row["split"] == "train" and row["label"] != "unknown")
+    ]
     local = load_local_model(model_dir)
     layer_index = local.num_layers // 2
-    activations = {row["id"]: extract_claim_vector(local, row, layer_index) for row in examples}
+    activations = {row["id"]: extract_claim_vector(local, row, layer_index) for row in activation_examples}
     probe = fit_probe(examples, activations, local.identity, layer_index, local.hidden_dim, local.num_layers)
     validate_probe(probe, local.identity, local.hidden_dim, local.num_layers)
     validate_eval_groups(evaluation, probe["training_group_ids"])
     evidence_removed_vectors = {
         row["id"]: extract_claim_vector(local, {**row, "evidence_context": ""}, layer_index)
-        for row in examples
+        for row in activation_examples
     }
     evidence_removed_probe = fit_probe(
         examples, evidence_removed_vectors, local.identity, layer_index, local.hidden_dim, local.num_layers
