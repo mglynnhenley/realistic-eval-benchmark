@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.15 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: cb983641e0085d92f97ec160be1adeca62d708fc928e4170d86c6b035f140f93
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Safely render untrusted correspondence metadata, decode text-only multipart submissions, and retain explicit empty outbound bodies.
+
 ## 7.14 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 0bf216587ab0d34d8cfa8a63c9ae68ac02831d0c588c29e5ce2fece841daea80

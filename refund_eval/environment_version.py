@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-ENVIRONMENT_VERSION = "7.14"
+ENVIRONMENT_VERSION = "7.15"
 ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
     "refund_eval/model_pricing.py", "refund_eval/models", "refund_eval/world", "refund_eval/world_service",
