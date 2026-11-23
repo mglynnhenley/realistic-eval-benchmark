@@ -143,12 +143,24 @@ async def test_strict_world_does_not_trust_byok_credit_charge(
     assert client.generation_requests == generation_calls
 
 
-@pytest.mark.parametrize(("tariff_rate", "expected_method", "expected_cost", "generation_calls"), [
-    pytest.param(0, "actual", 0, 0, id="all-zero-tariff"),
-    pytest.param(1, None, None, 3, id="nonzero-tariff"),
+@pytest.mark.parametrize((
+    "tariff_rate", "inline_cost", "inline_byok", "generation_data", "expected_method", "expected_cost",
+    "generation_calls",
+), [
+    pytest.param(0, 0, False, {}, "actual", 0, 0, id="all-zero-inline-charge"),
+    pytest.param(1, 0, False, {}, None, None, 3, id="nonzero-tariff-inline-zero"),
+    pytest.param(0, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, "generation_lookup", 0, 1, id="all-zero-generation-lookup"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="nonzero-tariff-generation-zero"),
 ])
 async def test_strict_world_zero_charge_requires_all_zero_tariff(
-    monkeypatch, tariff_rate, expected_method, expected_cost, generation_calls
+    monkeypatch, tariff_rate, inline_cost, inline_byok, generation_data, expected_method, expected_cost,
+    generation_calls
 ):
     from refund_eval.models import openrouter as openrouter_module
 
@@ -172,8 +184,8 @@ async def test_strict_world_zero_charge_requires_all_zero_tariff(
                 prompt_tokens=0,
                 completion_tokens=0,
                 total_tokens=0,
-                cost=0,
-                is_byok=False,
+                cost=inline_cost,
+                is_byok=inline_byok,
             )
             choice = SimpleNamespace(message=FakeRawMessage(), finish_reason="stop", error=None)
             return SimpleNamespace(choices=[choice], usage=usage, error=None, id="verified-zero-charge")
@@ -196,7 +208,7 @@ async def test_strict_world_zero_charge_requires_all_zero_tariff(
 
         async def get(self, *_args, **_kwargs):
             self.generation_requests += 1
-            return {"data": {}}
+            return {"data": generation_data}
 
     tariff = {
         "input": tariff_rate, "output": tariff_rate, "input_cache_read": tariff_rate,

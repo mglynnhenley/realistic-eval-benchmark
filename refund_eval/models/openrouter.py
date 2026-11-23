@@ -320,7 +320,8 @@ class OpenRouterClient:
         return self.roles[role]
 
     async def _generation_cost(
-        self, generation_id: str | None, *, require_non_byok: bool = False
+        self, generation_id: str | None, *, require_non_byok: bool = False, allow_zero: bool = False,
+        expected_model: str | None = None,
     ) -> tuple[float | None, bool, bool | None]:
         if not generation_id:
             return None, False, None
@@ -340,12 +341,19 @@ class OpenRouterClient:
                     return None, True, True
                 if require_non_byok and is_byok is not False:
                     continue
+                if data.get("cancelled") is True:
+                    continue
                 cost = data.get("total_cost")
                 finished = data.get("finish_reason") or data.get("native_finish_reason")
                 prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
                 completion = data.get("tokens_completion") or data.get("native_tokens_completion")
-                if (_valid_cost(cost) and cost > 0 and data.get("cancelled") is not True
-                        and finished and _token_count(prompt) and _token_count(completion)):
+                terminal = bool(finished and _token_count(prompt) and _token_count(completion))
+                trusted_zero = (
+                    require_non_byok and allow_zero and cost == 0
+                    and data.get("id") == generation_id and expected_model is not None
+                    and data.get("model") == expected_model and data.get("cancelled") is False and terminal
+                )
+                if _valid_cost(cost) and (cost > 0 or trusted_zero) and terminal:
                     return float(cost), True, is_byok
             except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):
                 continue
@@ -462,7 +470,12 @@ class OpenRouterClient:
             else:
                 if usage is not None:
                     usage.cost = None
-                cost, _, generation_is_byok = await self._generation_cost(result.id, require_non_byok=True)
+                cost, _, generation_is_byok = await self._generation_cost(
+                    result.id,
+                    require_non_byok=True,
+                    allow_zero=_all_zero_tariff(self.tariffs.get(name)),
+                    expected_model=name.removeprefix(PREFIX),
+                )
                 cost_method = "generation_lookup" if cost is not None and generation_is_byok is False else None
                 if cost is not None:
                     usage = usage or Usage()
