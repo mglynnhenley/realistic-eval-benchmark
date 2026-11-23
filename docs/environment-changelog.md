@@ -13,8 +13,8 @@ environment file names and contents, excluding Git-ignored files and Python
 caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
 Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
-source tree validates its source manifest file allowlist before hashing it. The changelog test checks the version,
-fingerprint and bump kind.
+source tree validates its source manifest file allowlist before hashing it.
+The changelog test checks the version, fingerprint and bump kind.
 
 Run the CI changelog check locally with
 `uv run --frozen pytest -q tests/test_environment_version.py`. Native task
@@ -24,17 +24,15 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 8.4 — 2026-11-23
-- Kind: trivial batch
-- Fingerprint: 8e971c9d50e7c2e39125c116b4156e6b14c206c18271a2979663f8bebb7e11bb
-- Trial round: none; offline validation only.
-- Changes: include requested-deadline overrides consistently in identity-lock creation and validation; expose the override in the lock CLI (MAT-64).
-
 ## 8.3 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 37e04cc42d265670b894b66409799227c55ebed752773f838777535c04129e7f
-- Trial round: none; offline validation only.
-- Changes: include local requested-deadline overrides in scenario fingerprints so identity locks reject a different effective agent deadline (MAT-64).
+- Fingerprint: c18b8a1ca1633699f38333e481b743a7a555adf8df441a3b0448139e7c405082
+- Trial round: none; offline validation only, no paid calls.
+- Changes: pin remaining Python/uv and Debian build inputs; add source,
+  resolved-scenario and immutable local browser image locks that reject
+  unavailable or mismatched identities before model-cost setup; include
+  requested-deadline overrides in lock creation and validation. Native Harbor
+  artifact locks remain unsupported (MAT-64).
 
 ## 8.2 — 2026-11-23
 - Kind: trivial batch
@@ -110,12 +108,6 @@ this was not a second version or trial round.
 
 ## 7.8 — 2026-11-20
 - Kind: trivial batch
-- Fingerprint: 98d01b89cfb177cebf82fb1dc61801215fbcee4ca0de9a03651afeafec1cde17
-- Trial round: none; offline validation only.
-- Changes: pin remaining Harbor/browser OCI inputs and the Debian package snapshot; add opt-in source, resolved-scenario and local browser image-ID locks that reject mismatches or unavailable images before model-cost setup. Native Harbor artifact locks remain unsupported (MAT-64).
-
-## 7.8 — 2026-11-20
-- Kind: trivial batch
 - Fingerprint: 52a9a403be15febd3df20be309cc107962e5354d50f750d26ef14ca4a6251b53
 - Trial round: none; offline validation only.
 - Changes: omit only the default temperature from Anthropic open-world company-action structured requests when provider routing requires support for every parameter; preserve non-default and unrelated sampling settings.
@@ -125,6 +117,7 @@ this was not a second version or trial round.
 - Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
 - Trial round: none; offline validation only.
 - Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
+
 ## 7.6 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: a363a49b11ef57c879a610e6d78a107eda5462bd775b595e2a0717990c82137b
