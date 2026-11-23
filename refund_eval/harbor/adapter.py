@@ -78,6 +78,7 @@ AGENT_MODULES = {
 SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/dollar_budget.py",
     "refund_eval/agent/harness.py",
+    "refund_eval/agent/prompt.py",
     "refund_eval/agent/world_mode.py",
     "refund_eval/model_pricing.py",
     "refund_eval/models/world_spend_ledger.py",
