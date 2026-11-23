@@ -321,7 +321,6 @@ class OpenRouterClient:
 
     async def _generation_cost(
         self, generation_id: str | None, *, require_non_byok: bool = False, allow_zero: bool = False,
-        expected_model: str | None = None,
     ) -> tuple[float | None, bool, bool | None]:
         if not generation_id:
             return None, False, None
@@ -342,8 +341,7 @@ class OpenRouterClient:
                 if require_non_byok and is_byok is not False:
                     continue
                 if require_non_byok and (
-                    data.get("id") != generation_id or expected_model is None
-                    or data.get("model") != expected_model or data.get("cancelled") is not False
+                    data.get("id") != generation_id or data.get("cancelled") is not False
                 ):
                     continue
                 if data.get("cancelled") is True:
@@ -475,7 +473,6 @@ class OpenRouterClient:
                     result.id,
                     require_non_byok=True,
                     allow_zero=_all_zero_tariff(self.tariffs.get(name)),
-                    expected_model=name.removeprefix(PREFIX),
                 )
                 cost_method = "generation_lookup" if cost is not None and generation_is_byok is False else None
                 if cost is not None:

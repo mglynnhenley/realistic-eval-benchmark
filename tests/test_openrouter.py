@@ -166,17 +166,14 @@ async def test_strict_world_does_not_trust_byok_credit_charge(
         "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
     }, None, None, 3, id="mismatched-positive-generation-id"),
     pytest.param(1, None, None, {
-        "id": "verified-zero-charge", "model": "another-model", "is_byok": False, "total_cost": 0.000001,
+        "id": "verified-zero-charge", "model": "provider/canonical-model", "is_byok": False,
+        "total_cost": 0.000001,
         "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
-    }, None, None, 3, id="mismatched-positive-generation-model"),
+    }, "generation_lookup", 0.000001, 1, id="canonical-model-alias-positive-charge"),
     pytest.param(1, None, None, {
         "model": "test-model", "is_byok": False, "total_cost": 0.000001, "cancelled": False,
         "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
     }, None, None, 3, id="missing-positive-generation-id"),
-    pytest.param(1, None, None, {
-        "id": "verified-zero-charge", "is_byok": False, "total_cost": 0.000001, "cancelled": False,
-        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
-    }, None, None, 3, id="missing-positive-generation-model"),
     pytest.param(1, None, None, {
         "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
         "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,

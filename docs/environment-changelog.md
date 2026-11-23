@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 8ce994565117e56b1ffe46a3e9b30c80379b3740c67570118eaf2d8c7ccaf2be
+- Fingerprint: 27654f1bce57fb61d41243cff8fcae0db19cf393243fec687ed55c0d525f4f73
 - Trial round: none; offline validation only.
 - Changes: add split-key routing and strict local budgets with request-matched settlement evidence; attest role-specific sources, reject encrypted reasoning without a documented token bound, limit split batches to Laura, and print monitored split-launch guidance.
 

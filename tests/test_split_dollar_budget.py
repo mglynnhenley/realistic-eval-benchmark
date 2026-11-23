@@ -432,8 +432,10 @@ def test_target_hook_retains_hold_for_nonzero_byok_charge(monkeypatch):
      "tokens_prompt": 3, "tokens_completion": 2, "cancelled": True},
     {"total_cost": 0.0001, "is_byok": False, "finish_reason": "stop",
      "tokens_prompt": 3, "tokens_completion": 2, "id": "other-completion"},
-    {"total_cost": 0.0001, "is_byok": False, "finish_reason": "stop",
-     "tokens_prompt": 3, "tokens_completion": 2, "model": "other/model"},
+    {"model": MODEL_ID, "total_cost": 0.0001, "is_byok": False, "cancelled": False,
+     "finish_reason": "stop", "tokens_prompt": 3, "tokens_completion": 2},
+    {"id": "completion-id", "model": MODEL_ID, "total_cost": 0.0001, "is_byok": False,
+     "finish_reason": "stop", "tokens_prompt": 3, "tokens_completion": 2},
 ])
 def test_target_hook_keeps_hold_for_incomplete_or_mismatched_generation_data(monkeypatch, generation_data):
     request = _request()
@@ -453,7 +455,8 @@ def test_target_hook_keeps_hold_for_incomplete_or_mismatched_generation_data(mon
     assert FakeLedger.instances[0].hold is True
 
 
-def test_target_hook_accepts_complete_matching_non_byok_generation_evidence(monkeypatch):
+@pytest.mark.parametrize("reported_model", [MODEL_ID, "provider/canonical-model"], ids=["requested-model", "canonical-alias"])
+def test_target_hook_accepts_complete_matching_non_byok_generation_evidence(monkeypatch, reported_model):
     request = _request()
     model, events, _, _ = _setup(monkeypatch, Decimal(1))
     model.api.reported_cost = None
@@ -461,7 +464,7 @@ def test_target_hook_accepts_complete_matching_non_byok_generation_evidence(monk
     model.api.client.generation_record = {
         "data": {
             "id": "completion-id",
-            "model": MODEL_ID,
+            "model": reported_model,
             "total_cost": 0.0001,
             "is_byok": False,
             "cancelled": False,
