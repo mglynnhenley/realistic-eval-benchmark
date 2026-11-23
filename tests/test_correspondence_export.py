@@ -413,7 +413,7 @@ def test_web_action_decodes_text_only_multipart_but_not_binary_uploads():
     rows = {row["interception_id"]: row for row in export["records"]}
 
     assert rows["text-multipart"]["body"] == "subject: Enquiry\nmessage: Please reply, Élodie."
-    assert rows["text-multipart"]["body_encoding"] == "multipart/form-data"
+    assert rows["text-multipart"]["body_encoding"] == "utf-8"
     assert rows["text-multipart"]["body_decoding_status"] == "decoded_text"
     assert rows["text-multipart"]["raw_payload"]["body_base64"] == text_encoded
     assert rows["binary-multipart"]["body"] is None
@@ -440,6 +440,63 @@ def test_multipart_preserves_transfer_encoded_form_values():
     assert row["body"] == "base64: SGVsbG8=\nquoted: caf=E9"
     assert row["body_decoding_status"] == "decoded_text"
     assert row["raw_payload"]["body_base64"] == encoded
+
+
+@pytest.mark.parametrize("charset_position", ["before", "after"])
+def test_multipart_charset_field_sets_default_but_explicit_part_charset_wins(charset_position):
+    charset_part = ("_charset_", b"windows-1252", b"")
+    content_parts = [
+        ("message", b"Price \xa3", b""),
+        ("explicit", b"caf\xc3\xa9", b"Content-Type: text/plain; charset=utf-8\r\n"),
+    ]
+    parts = [charset_part, *content_parts] if charset_position == "before" else [*content_parts, charset_part]
+    body_parts = []
+    for name, content, headers in parts:
+        body_parts.extend([
+            f"--SavedBoundary\r\nContent-Disposition: form-data; name=\"{name}\"\r\n".encode(),
+            headers,
+            b"\r\n",
+            content,
+            b"\r\n",
+        ])
+    body_parts.append(b"--SavedBoundary--\r\n")
+    encoded = base64.b64encode(b"".join(body_parts)).decode()
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("charset-form", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": encoded,
+            "headers": {"content-type": "multipart/form-data; boundary=SavedBoundary"},
+        }),
+    ]}})
+    row = next(row for row in export["records"] if row.get("interception_id") == "charset-form")
+
+    expected_lines = ["message: Price £", "explicit: café"]
+    if charset_position == "before":
+        expected_lines.insert(0, "_charset_: windows-1252")
+    else:
+        expected_lines.append("_charset_: windows-1252")
+    assert row["body"] == "\n".join(expected_lines)
+    assert row["body_encoding"] == "windows-1252"
+    assert row["body_decoding_status"] == "decoded_text"
+
+
+def test_multipart_invalid_charset_declaration_is_marked_undecodable():
+    body = (
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\nPrice \xa3\r\n"
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"_charset_\"\r\n\r\nunknown-codec-x\r\n"
+        b"--SavedBoundary--\r\n"
+    )
+    encoded = base64.b64encode(body).decode()
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("invalid-charset-form", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": encoded,
+            "headers": {"content-type": "multipart/form-data; boundary=SavedBoundary"},
+        }),
+    ]}})
+    row = next(row for row in export["records"] if row.get("interception_id") == "invalid-charset-form")
+
+    assert row["body"] is None
+    assert row["body_encoding"] == "unknown-codec-x"
+    assert row["body_decoding_status"] == "undecodable"
 
 
 def test_outbound_subject_only_email_preserves_explicit_empty_body():

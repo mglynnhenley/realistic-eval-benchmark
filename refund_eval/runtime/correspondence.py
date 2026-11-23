@@ -111,23 +111,34 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
         message = BytesParser(policy=email_policy.default).parsebytes(headers + body)
         if not message.is_multipart():
             return None, "base64", "nontext"
-        text_parts = []
+        raw_parts = []
         for part in message.iter_parts():
             if part.get_filename() is not None or part.get_content_maintype() != "text":
                 return None, "base64", "nontext"
             if part.get("Content-Transfer-Encoding") is not None:
                 del part["Content-Transfer-Encoding"]
             content = part.get_payload(decode=True)
-            if content is None:
-                return None, "base64", "nontext"
-            part_charset = part.get_content_charset() or "utf-8"
-            try:
-                text = content.decode(part_charset, errors="strict")
-            except (LookupError, UnicodeDecodeError):
-                return None, part_charset, "undecodable"
             name = part.get_param("name", header="content-disposition")
+            raw_parts.append((name, content or b"", part.get_content_charset()))
+
+        default_charset = charset
+        charset_field = next((part for part in raw_parts if part[0] == "_charset_"), None)
+        if charset_field is not None:
+            _, content, part_charset = charset_field
+            try:
+                default_charset = content.decode(part_charset or "ascii", errors="strict").strip()
+            except (LookupError, UnicodeDecodeError):
+                return None, part_charset or "ascii", "undecodable"
+
+        text_parts = []
+        for name, content, part_charset in raw_parts:
+            effective_charset = part_charset or ("ascii" if name == "_charset_" else default_charset)
+            try:
+                text = content.decode(effective_charset, errors="strict")
+            except (LookupError, UnicodeDecodeError):
+                return None, effective_charset, "undecodable"
             text_parts.append(f"{name}: {text}" if isinstance(name, str) and name else text)
-        return "\n".join(text_parts), "multipart/form-data", "decoded_text"
+        return "\n".join(text_parts), default_charset, "decoded_text"
     if media_type and not text_media_type:
         return None, "base64", "nontext"
     try:
