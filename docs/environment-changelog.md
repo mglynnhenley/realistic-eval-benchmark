@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.12 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 9d8d387103f2b63fa214caf6005fa8486d5bc609fb49237c48d5a4f4a2feb86c
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Add an offline private correspondence exporter for saved trial artifacts, with no behavior, budget or grading changes.
+
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb
