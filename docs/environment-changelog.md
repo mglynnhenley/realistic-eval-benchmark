@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.11 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Write allowlisted native world status and ordered action/result metadata for the host-side installed-agent timeline, without adding telemetry to agent context, tools, canonical trial records or the public wheel (MAT-168).
+
 ## 7.10 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 407f72faf66045b3d36f61accf141b960c87ec67528b68ce730f9b8f14fe566a
