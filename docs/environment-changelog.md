@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 9d8d387103f2b63fa214caf6005fa8486d5bc609fb49237c48d5a4f4a2feb86c
+- Fingerprint: 68acfcc544a45aaaadfd56e3dbf39f90fbc4b321d9265691f3bca92f34c8a6e1
 - Trial round: none; offline validation only, no paid calls.
 - Changes: Add an offline private correspondence exporter for saved trial artifacts, with no behavior, budget or grading changes.
 

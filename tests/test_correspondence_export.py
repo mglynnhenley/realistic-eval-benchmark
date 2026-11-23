@@ -221,7 +221,11 @@ def test_builder_preserves_both_directions_and_delivery_evidence_without_mutatio
     rows = {row["id"]: row for row in export["records"]}
 
     assert store == original
+    assert export["coverage"]["completeness"] == "not_verified"
     assert export["coverage"]["identities_hidden"] is False
+    omitted = export["coverage"]["omitted_noncorrespondence"]
+    assert "Full linked InteractionRecord source records" in omitted["retained_linked_interaction_provenance"]
+    assert "standalone claims" in omitted["world_fields"][1]
     assert {"payment", "inbox_change"} <= set(export["coverage"]["omitted_noncorrespondence"]["interception_channels"])
 
     seed = rows["inbound:seed-unmatched"]

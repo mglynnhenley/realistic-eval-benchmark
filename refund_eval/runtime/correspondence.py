@@ -588,7 +588,7 @@ def build_correspondence(store: Mapping[str, Any], *, source: Mapping[str, Any] 
     source_value = _object(source) or {}
     world_state_available = saved_world is not None
     source_data_available = bool(saved_world) or bool(events)
-    complete = world_state_available and events_available and bool(saved_world) and bool(events)
+    complete = bool(saved_world) and bool(events)
     available_sources = []
     if world_state_available:
         available_sources.append("saved_world")
@@ -604,7 +604,7 @@ def build_correspondence(store: Mapping[str, Any], *, source: Mapping[str, Any] 
         "schema_version": 1,
         "source": source_value,
         "coverage": {
-            "completeness": "available" if complete else "unavailable",
+            "completeness": "not_verified" if complete else "unavailable",
             "source_data_available": source_data_available,
             "available_sources": available_sources,
             "saved_world_available": world_state_available,
@@ -615,10 +615,14 @@ def build_correspondence(store: Mapping[str, Any], *, source: Mapping[str, Any] 
             "record_counts_by_direction": counts,
             "omitted_noncorrespondence": {
                 "interception_channels": omitted_channels,
+                "retained_linked_interaction_provenance": (
+                    "Full linked InteractionRecord source records, including context and action fields, "
+                    "are retained under correspondence record provenance."
+                ),
                 "world_fields": [
-                    "company case context and internal notes",
-                    "claims, offers, transfers, disclosures, and other outcomes",
-                    "follow-ups, wakeups, token ledgers, and non-correspondence state",
+                    "standalone company case collections and internal notes not linked to correspondence",
+                    "standalone claims, offers, transfers, disclosures, and other outcome collections",
+                    "standalone follow-ups, wakeups, token ledgers, and non-correspondence state",
                     "agent transcript, model calls, and tool output not represented by correspondence records",
                 ],
                 "event_data": "Non-correspondence event kinds and payload fields are not exported.",
