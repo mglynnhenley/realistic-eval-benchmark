@@ -10,6 +10,7 @@ service is contacted.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -80,6 +81,37 @@ def _known(value: Any) -> bool:
     if isinstance(value, (list, tuple, dict)):
         return bool(value)
     return True
+
+
+def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, str]:
+    encoded = payload.get("body_base64")
+    if not isinstance(encoded, str):
+        return None, "base64", "invalid_base64"
+    try:
+        body = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        return None, "base64", "invalid_base64"
+
+    headers = _object(payload.get("headers")) or {}
+    content_type = next((str(value) for key, value in headers.items()
+                         if str(key).lower() == "content-type"), "")
+    media_type, *parameters = content_type.split(";")
+    media_type = media_type.strip().lower()
+    charset = next((parameter.partition("=")[2].strip().strip('"') for parameter in parameters
+                    if parameter.partition("=")[0].strip().lower() == "charset"), "utf-8")
+    text_media_type = (media_type.startswith("text/") or media_type in {
+        "application/graphql", "application/json", "application/javascript", "application/xml",
+        "application/x-www-form-urlencoded",
+    } or media_type.endswith(("+json", "+xml")))
+    if media_type and not text_media_type:
+        return None, "base64", "nontext"
+    try:
+        text = body.decode(charset, errors="strict")
+    except (LookupError, UnicodeDecodeError):
+        return None, charset, "undecodable" if text_media_type else "nontext"
+    if not media_type and any(ord(character) < 32 and character not in "\t\n\r" for character in text):
+        return None, "base64", "nontext"
+    return text, charset, "decoded_text"
 
 
 def _stable_fallback(prefix: str, source: str, seq: Any, index: int, raw: Any) -> str:
@@ -253,7 +285,13 @@ class _Correspondence:
         self._merge_field(row, "organization", interception.get("org"))
         row["organization_status"] = "known" if _known(row["organization"]) else "unknown"
         self._merge_field(row, "subject", payload.get("subject"))
-        self._merge_field(row, "body", payload.get("body"))
+        if _known(payload.get("body")):
+            self._merge_field(row, "body", payload.get("body"))
+        elif "body_base64" in payload and (row.get("body_decoding_status") is None or self.world is None):
+            body, encoding, status = _decode_body_base64(payload)
+            row["body"] = body
+            row["body_encoding"] = encoding
+            row["body_decoding_status"] = status
         self._set_time(row, interception.get("time"), "interception.time")
         self._merge_field(row, "recipients", {key: _plain(payload.get(key, [])) for key in ("to", "cc", "bcc")})
         explicit_status = payload.get("delivery_status")
@@ -723,6 +761,8 @@ def render_markdown(export: Mapping[str, Any]) -> str:
             lines.append("- Lifecycle: " + "; ".join(events))
         body = row.get("body")
         lines.extend(["", "### Body", ""])
+        if row.get("body_decoding_status"):
+            lines.append(f"Body decoding: **{row['body_decoding_status']}** ({row['body_encoding']}).")
         if body is None:
             lines.append("Unknown or absent in saved source.")
         else:

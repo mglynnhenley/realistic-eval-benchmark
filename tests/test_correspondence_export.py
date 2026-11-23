@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import stat
@@ -323,6 +324,43 @@ def test_event_only_store_keeps_lifecycle_evidence_and_marks_completeness_unavai
     assert marker["direction"] == "unknown"
     assert marker["id"] == "unknown:marker:marker-only"
     assert "inbound:marker-only" not in {row["id"] for row in export["records"]}
+
+
+def test_web_action_decodes_text_but_preserves_raw_and_nontext_payloads():
+    markup = '<form><script>alert("saved text")</script></form>'
+    text_body = base64.b64encode(markup.encode()).decode()
+    binary_body = base64.b64encode(b"\x00\xff\x01").decode()
+    store = {WORLD_KEY: {"interceptions": [
+        _interception("text-post", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": text_body, "headers": {"content-type": "text/html; charset=utf-8"},
+        }),
+        _interception("binary-post", "web_action", "2026-10-30T12:01:00Z", {
+            "body_base64": binary_body, "headers": {"content-type": "application/octet-stream"},
+        }),
+        _interception("invalid-post", "web_action", "2026-10-30T12:02:00Z", {
+            "body_base64": "not base64!", "headers": {"content-type": "text/plain"},
+        }),
+        _interception("empty-post", "web_action", "2026-10-30T12:03:00Z", {
+            "body_base64": "", "headers": {"content-type": "text/plain"},
+        }),
+    ]}}
+
+    export = build_correspondence(store)
+    rows = {row["interception_id"]: row for row in export["records"]}
+
+    assert rows["text-post"]["body"] == markup
+    assert rows["text-post"]["body_encoding"] == "utf-8"
+    assert rows["text-post"]["body_decoding_status"] == "decoded_text"
+    assert rows["text-post"]["raw_payload"]["body_base64"] == text_body
+    assert rows["binary-post"]["body"] is None
+    assert rows["binary-post"]["body_encoding"] == "base64"
+    assert rows["binary-post"]["body_decoding_status"] == "nontext"
+    assert rows["binary-post"]["raw_payload"]["body_base64"] == binary_body
+    assert rows["invalid-post"]["body"] is None
+    assert rows["invalid-post"]["body_decoding_status"] == "invalid_base64"
+    assert rows["empty-post"]["body"] == ""
+    assert rows["empty-post"]["body_decoding_status"] == "decoded_text"
+    assert f"```\n{markup}\n```" in render_markdown(export)
 
 
 def test_saved_world_precedes_conflicting_events_and_unmatched_reply_reference_is_not_linked():
