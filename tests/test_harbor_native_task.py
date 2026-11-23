@@ -780,6 +780,39 @@ def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, 
     assert not out.exists()
 
 
+def test_split_batch_prints_guarded_capture_verify_and_launch_recipe(
+    tmp_path, capsys, approved_split_budget_wheel
+):
+    import shlex
+
+    wheel, digest = approved_split_budget_wheel
+    config_path = tmp_path / "split-config.json"
+    out = tmp_path / "split-batch"
+    config_path.write_text(json.dumps({
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture",
+        "research_mode": "saved", "model": "openrouter/target", "simulator_model": "openrouter/sim",
+        "grader_model": "openrouter/grade", "cost_limit": 50, "world_cost_limit": 100,
+        "trials": 1, "concurrency": 1, "time_limit": 120,
+        "openrouter_key_mode": "split", "agent_max_output_tokens": 2048,
+        "agent_wheel": str(wheel), "agent_wheel_sha256": digest,
+    }))
+
+    assert batch.main(["--config", str(config_path), "--out", str(out)]) == 0
+
+    manifest = out / "laura-setup.json"
+    commands = (
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "save", "--config",
+         str(out / "job.yaml"), "--manifest", str(manifest)],
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "verify", "--manifest", str(manifest)],
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "run", "--manifest", str(manifest),
+         "--job-name", "laura-native-split-batch"],
+    )
+    output = capsys.readouterr().out
+    assert all(shlex.join(command) in output for command in commands)
+    assert "OPENROUTER_AGENT_API_KEY" in output and "OPENROUTER_WORLD_API_KEY" in output
+    assert "scripts/harbor harbor run" not in output
+
+
 def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
     tmp_path, monkeypatch, approved_split_budget_wheel
 ):

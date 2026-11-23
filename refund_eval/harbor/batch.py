@@ -188,8 +188,22 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Prepared {record}")
-    command = ["scripts/harbor", "harbor", "run", "-c", str(record.with_name("job.yaml"))]
-    print(f"Paid launch (separate target and world model budgets; compute costs extra): {shlex.join(command)}")
+    if config.openrouter_key_mode == "split":
+        manifest = record.with_name("laura-setup.json")
+        job_name = f"laura-native-{record.parent.name}"
+        commands = (
+            ["scripts/harbor", "python", "-m", "scripts.laura_trial", "save", "--config",
+             str(record.with_name("job.yaml")), "--manifest", str(manifest)],
+            ["scripts/harbor", "python", "-m", "scripts.laura_trial", "verify", "--manifest", str(manifest)],
+            ["scripts/harbor", "python", "-m", "scripts.laura_trial", "run", "--manifest", str(manifest),
+             "--job-name", job_name],
+        )
+        print("Guarded split launch recipe; set OPENROUTER_AGENT_API_KEY and OPENROUTER_WORLD_API_KEY first:")
+        for command in commands:
+            print(shlex.join(command))
+    else:
+        command = ["scripts/harbor", "harbor", "run", "-c", str(record.with_name("job.yaml"))]
+        print(f"Paid launch (separate target and world model budgets; compute costs extra): {shlex.join(command)}")
     return 0
 
 
