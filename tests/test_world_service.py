@@ -1301,3 +1301,13 @@ def test_real_browser_form_in_the_world_service(tmp_path, monkeypatch):
     assert any(r["event"] == "browser_probe_end" and r["boundary_verified"] for r in records)
     assert any(r["event"] == "request" and r["request"]["method"] == "POST" and r["request"]["tool_call_id"] == click
                for r in records)
+
+
+@pytest.mark.asyncio
+async def test_shared_caps_world_refuses_unbound_before_provider_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND", "false")
+
+    with pytest.raises(WorldSpendLedgerError, match="verified headroom binding"):
+        await WorldTrial(settings(tmp_path, scenario="train_refund_late", world_cost_limit=100),
+                         model_client=object()).__aenter__()

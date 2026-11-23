@@ -24,6 +24,11 @@ pytest.importorskip("harbor.models.job.config")
 from refund_eval.harbor import adapter, batch
 from refund_eval.harbor.batch import NativeBatchConfig
 from scripts import laura_trial
+from scripts.offline_spend_guard import (
+    GuardFailure,
+    SharedCapsSpendGuard,
+    SharedCapsThresholds,
+)
 
 _PUBLIC_SCENARIO_MEMBER = "refund_eval/scenario/train_refund_late.yaml"
 _PUBLIC_SCENARIO = {
@@ -461,6 +466,93 @@ def test_split_launcher_succeeds_and_reuses_saved_setup_with_sanitized_effective
     assert [name for name, _ in guarded_calls] == ["split-fresh", "split-reused"]
     assert "fake-distinct-agent-key" not in manifest.read_text(encoding="utf-8")
     assert "fake-distinct-world-key" not in manifest.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(("remaining", "expected_result"), [(0, 2), (40, 0)])
+def test_shared_caps_refuses_before_job_and_binds_immutable_headroom(
+    tmp_path, monkeypatch, capsys, remaining, expected_result
+):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    wheel, digest = _write_public_split_wheel(tmp_path / "shared-caps-wheel")
+    native.values.update({
+        "openrouter_key_mode": "shared_caps",
+        "agent_max_output_tokens": 2048,
+        "requested_deadline": "2027-02-04",
+        "cost_limit": 50,
+        "world_cost_limit": 100,
+        "agent_wheel": str(wheel),
+        "agent_wheel_sha256": digest,
+    })
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-shared-caps-key")
+    created = []
+
+    def guarded_run(config, thresholds, **hooks):
+        assert isinstance(thresholds, SharedCapsThresholds)
+        assert config.agents[0].env["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "false"
+        manifest = native.prepared_dir / "laura-setup.json"
+        manifest_before = manifest.read_bytes()
+        original_task = Path(config.tasks[0].path)
+        original_toml = (original_task / "task.toml").read_bytes()
+        original_compose = yaml.safe_load((original_task / "environment" / "docker-compose.yaml").read_text())
+        assert original_compose["services"]["world"]["environment"][
+            "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"
+        ] == "false"
+
+        async def probe():
+            return {"data": {
+                "usage": 0, "limit": 80, "limit_remaining": remaining, "limit_reset": None,
+                "is_management_key": False, "is_provisioning_key": False, "include_byok_in_limit": True,
+                "budgets": [], "effective_budget": None,
+            }}
+
+        class FakeJob:
+            is_resuming = False
+
+            async def run(self):
+                return 0
+
+        async def factory(run_config):
+            created.append(run_config.tasks[0].path)
+            return FakeJob()
+
+        guard = SharedCapsSpendGuard(thresholds, openrouter_probe=probe)
+        try:
+            result = asyncio.run(laura_trial.guarded_harbor.run_guarded_job(
+                config, thresholds, guard=guard, job_factory=factory, **hooks
+            ))
+        except GuardFailure:
+            result = 2
+        assert manifest.read_bytes() == manifest_before
+        assert (original_task / "task.toml").read_bytes() == original_toml
+        if remaining == 0:
+            assert created == []
+            assert config.tasks[0].path == original_task
+        else:
+            assert len(created) == 1
+            runtime_task = Path(created[0])
+            assert runtime_task != original_task
+            runtime_config = tomllib.loads((runtime_task / "task.toml").read_text())
+            shared_config = json.loads(runtime_config["environment"]["env"]["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
+            assert shared_config["shared_allowance_usd"] == "40"
+            assert config.agents[0].env["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "true"
+            compose = yaml.safe_load((runtime_task / "environment" / "docker-compose.yaml").read_text())
+            assert compose["services"]["world"]["environment"]["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "true"
+            assert config.agents[0].kwargs["requested_deadline"].isoformat() == "2027-02-04"
+        return result
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    result = laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", f"shared-caps-{remaining}",
+    ])
+    capsys.readouterr()
+    assert result == expected_result
+    if remaining > 0:
+        record = json.loads((native.prepared_dir / "jobs" / f"shared-caps-{remaining}" / "effective_parameters.json").read_text())
+        assert record["shared_allowance_usd"] == "40"
+        assert record["shared_allowance_source"] == "verified_key_headroom"
 
 
 def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard(

@@ -49,12 +49,15 @@ from refund_eval.harbor.adapter import (
     verify_split_budget_wheel,
 )
 from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedgerError,
 )
 from scripts.offline_spend_guard import (
     KEY_CEILING,
     GuardFailure,
+    SharedCapsSpendGuard,
+    SharedCapsThresholds,
     SharedRoleSpendGuard,
     SharedRoleThresholds,
     SpendGuard,
@@ -116,14 +119,15 @@ def _has_role_key_reference(env: dict[str, Any]) -> bool:
     )
 
 
-def _validate_local_task_envs(task_path: Path, *, split: bool = False, shared_roles: bool = False) -> None:
+def _validate_local_task_envs(task_path: Path, *, split: bool = False, shared_roles: bool = False,
+                              shared_caps: bool = False) -> None:
     try:
         task_config = tomllib.loads(
             (task_path / "task.toml").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise LauncherFailure("local task configuration is invalid") from None
-    if split or shared_roles:
+    if split or shared_roles or shared_caps:
         environment = task_config.get("environment")
         if not isinstance(environment, dict) or environment.get("docker_image") is not None:
             raise LauncherFailure("strict role-budget task may not use a prebuilt docker_image")
@@ -134,7 +138,7 @@ def _validate_local_task_envs(task_path: Path, *, split: bool = False, shared_ro
                 env = value["env"]
                 if not isinstance(env, dict):
                     raise LauncherFailure("local task configuration is invalid")
-                if split or shared_roles:
+                if split or shared_roles or shared_caps:
                     if OPENROUTER_ROLE_KEY_NAMES.intersection(env) or _has_role_key_reference(env):
                         raise LauncherFailure("split task base environment may not inject a shared OpenRouter key")
                 else:
@@ -218,7 +222,9 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         raise LauncherFailure("split task Compose environment is invalid") from None
 
 
-def _shared_roles_compose_values(task_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _shared_roles_compose_values(
+    task_path: Path, *, expected_mode: str = "shared_roles"
+) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         environment_dir = task_path / "environment"
         if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
@@ -252,9 +258,9 @@ def _shared_roles_compose_values(task_path: Path) -> tuple[dict[str, Any], dict[
         metadata = task.get("metadata")
         if not isinstance(task_env, dict) or not isinstance(metadata, dict):
             raise TypeError
-        if (metadata.get("openrouter_key_mode") != "shared_roles"
-                or world.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
-                or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_roles"
+        if (metadata.get("openrouter_key_mode") != expected_mode
+                or world.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
+                or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
                 or world.get("WORLD_STRICT_BUDGET") != "true"
                 or world.get("OPENROUTER_API_KEY") != "${OPENROUTER_API_KEY:-}"):
             raise ValueError
@@ -273,7 +279,8 @@ def _shared_roles_compose_values(task_path: Path) -> tuple[dict[str, Any], dict[
 
 
 def validate_job_config(config: JobConfig, *, expected_split: bool | None = None,
-                        expected_shared_roles: bool | None = None) -> None:
+                        expected_shared_roles: bool | None = None, expected_shared_caps: bool | None = None,
+                        expected_shared_caps_allowance: Decimal | None = None) -> None:
     if (
         config.n_attempts != 1
         or config.n_concurrent_trials != 1
@@ -298,12 +305,15 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     agent_env = agent.env or {}
     split = agent_env.get("OPENROUTER_API_KEY") == OPENROUTER_AGENT_KEY_REFERENCE
     shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
-    if split and shared_roles:
+    shared_caps = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_caps"
+    if sum((split, shared_roles, shared_caps)) > 1:
         raise LauncherFailure("guarded key modes conflict")
     if expected_split is not None and split != expected_split:
         raise LauncherFailure("guard mode does not match the prepared role-key routing")
     if expected_shared_roles is not None and shared_roles != expected_shared_roles:
         raise LauncherFailure("guard mode does not match the prepared shared-role routing")
+    if expected_shared_caps is not None and shared_caps != expected_shared_caps:
+        raise LauncherFailure("guard mode does not match the prepared shared_caps routing")
     if not split and agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE:
         raise LauncherFailure("agent must use the host OpenRouter key without resume settings")
     if (
@@ -340,7 +350,7 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
                 or _has_role_key_reference({key: value for key, value in agent_env.items()
                                             if key != "OPENROUTER_API_KEY"})):
             raise LauncherFailure("split mode requires the native guarded agent and role-isolated key env")
-    elif shared_roles:
+    elif shared_roles or shared_caps:
         kwargs = getattr(agent, "kwargs", {}) or {}
         try:
             cap = Decimal(str(kwargs["cost_limit"]))
@@ -354,20 +364,28 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
         except (KeyError, InvalidOperation, ValueError, TypeError, SharedRoleSpendLedgerError):
             raise LauncherFailure("shared_roles agent caps or budget configuration are invalid") from None
         if (not cap.is_finite() or cap <= 0 or cap > 50 or cap != declared_cap or output_cap <= 0
-                or role_config.role_limits_usd["target"] != cap):
-            raise LauncherFailure("shared_roles target cap or output bound is invalid")
+                or role_config.role_limits_usd["target"] != cap
+                or (shared_caps and (cap != 50 or role_config.role_limits_usd["world"] != 100
+                    or not Decimal(0) < role_config.allowance_usd <= Decimal(150)))):
+            raise LauncherFailure("shared-role target cap or output bound is invalid")
+        expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
+                              "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
+                              "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+        if shared_caps:
+            expected_agent_env.add(SHARED_CAPS_HEADROOM_BOUND_ENV)
+            expected_bound_state = "true" if expected_shared_caps_allowance is not None else "false"
+            if agent_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != expected_bound_state:
+                raise LauncherFailure("shared_caps headroom binding state is invalid")
         if (agent.import_path != AGENT_IMPORT_PATH
                 or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE
-                or set(agent_env) != {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
-                    "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
-                    "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+                or set(agent_env) != expected_agent_env
                 or OPENROUTER_ROLE_KEY_NAMES.intersection(agent_env) - {"OPENROUTER_API_KEY"}
                 or _has_role_key_reference({key: value for key, value in agent_env.items()
                                             if key != "OPENROUTER_API_KEY"})):
             raise LauncherFailure("shared_roles requires the native agent and one ordinary key")
 
     environment_env = config.environment.env or {}
-    if split or shared_roles:
+    if split or shared_roles or shared_caps:
         if (OPENROUTER_ROLE_KEY_NAMES.intersection(environment_env)
                 or OPENROUTER_ROLE_KEY_NAMES.intersection(config.verifier.env or {})
                 or _has_role_key_reference(environment_env)
@@ -389,16 +407,16 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
-    _validate_local_task_envs(task_path, split=split, shared_roles=shared_roles)
+    _validate_local_task_envs(task_path, split=split, shared_roles=shared_roles, shared_caps=shared_caps)
     try:
         task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise LauncherFailure("task metadata is invalid") from None
     task_mode = task_metadata.get("openrouter_key_mode") if isinstance(task_metadata, dict) else None
-    expected_task_mode = "split" if split else "shared_roles" if shared_roles else "shared"
-    if task_mode in {"split", "shared_roles"} and task_mode != expected_task_mode:
+    expected_task_mode = "split" if split else "shared_caps" if shared_caps else "shared_roles" if shared_roles else "shared"
+    if task_mode in {"split", "shared_roles", "shared_caps"} and task_mode != expected_task_mode:
         raise LauncherFailure("task budget mode does not match guarded key routing")
-    if (split or shared_roles) and task_mode != expected_task_mode:
+    if (split or shared_roles or shared_caps) and task_mode != expected_task_mode:
         raise LauncherFailure("strict role budget task metadata is missing")
     if split:
         try:
@@ -446,10 +464,15 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             verify_split_budget_wheel(wheel_path)
         except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError):
             raise LauncherFailure("split agent wheel does not attest current budget sources") from None
-    elif shared_roles:
+    elif shared_roles or shared_caps:
         try:
             verify_split_budget_task_sources(task_path)
-            world, metadata = _shared_roles_compose_values(task_path)
+            world, metadata = _shared_roles_compose_values(
+                task_path, expected_mode="shared_caps" if shared_caps else "shared_roles"
+            )
+            if (shared_caps and world.get(SHARED_CAPS_HEADROOM_BOUND_ENV)
+                    != ("true" if expected_shared_caps_allowance is not None else "false")):
+                raise ValueError
             role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
             task_config = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
             task_env = task_config["environment"]["env"]
@@ -461,7 +484,12 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             if (not world_cap.is_finite() or world_cap <= 0 or world_cap > 100
                     or target_cap != declared_agent or target_cap != role_config.role_limits_usd["target"]
                     or world_cap != role_config.role_limits_usd["world"]
-                    or allowance != role_config.allowance_usd or allowance > min(Decimal(150), target_cap + world_cap)
+                    or (shared_roles and (allowance != role_config.allowance_usd
+                        or allowance > min(Decimal(150), target_cap + world_cap)))
+                    or (shared_caps and (allowance != Decimal(150) or target_cap != 50 or world_cap != 100
+                        or not Decimal(0) < role_config.allowance_usd <= Decimal(150)))
+                    or (shared_caps and expected_shared_caps_allowance is not None
+                        and role_config.allowance_usd != expected_shared_caps_allowance)
                     or metadata.get("scenario") != role_config.scenario or metadata.get("scenario") != "train_refund_late"
                     or role_config.models != {"target": agent.model_name,
                         "simulator": world.get("WORLD_SIMULATOR_MODEL"), "grader": world.get("WORLD_GRADER_MODEL")}
@@ -501,7 +529,7 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
 
 async def run_guarded_job(
     config: JobConfig,
-    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds,
+    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds | SharedCapsThresholds,
     *,
     guard: SpendGuard | None = None,
     job_factory: Any | None = None,
@@ -516,11 +544,19 @@ async def run_guarded_job(
     require_pinned_harbor()
     split = isinstance(thresholds, SplitThresholds)
     shared_roles = isinstance(thresholds, SharedRoleThresholds)
-    validate_job_config(config, expected_split=split, expected_shared_roles=shared_roles)
+    shared_caps = isinstance(thresholds, SharedCapsThresholds)
+    validate_job_config(config, expected_split=split, expected_shared_roles=shared_roles,
+                        expected_shared_caps=shared_caps)
     controller = guard or (SplitSpendGuard(thresholds) if split else
+                           SharedCapsSpendGuard(thresholds) if shared_caps else
                            SharedRoleSpendGuard(thresholds) if shared_roles else SpendGuard(thresholds))
+    if shared_caps and not isinstance(controller, SharedCapsSpendGuard):
+        raise LauncherFailure("shared_caps requires the verified headroom guard")
     try:
         await controller.start()
+        if isinstance(controller, SharedCapsSpendGuard) and on_guard_ready is None:
+            await controller.fail_closed("shared_caps runtime allowance was not bound", cancel_job=False)
+            raise controller._failure()
         if on_guard_ready is not None and isinstance(controller, SharedRoleSpendGuard):
             metadata = controller.sanitized_effective_parameters()
             if metadata is None:
@@ -531,6 +567,9 @@ async def run_guarded_job(
             except Exception:
                 await controller.fail_closed("shared-role runtime metadata could not be recorded", cancel_job=False)
                 raise
+            if isinstance(controller, SharedCapsSpendGuard):
+                validate_job_config(config, expected_shared_caps=True,
+                                     expected_shared_caps_allowance=controller.effective_allowance_usd)
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
             await controller.ensure_healthy()
             if job_factory is None:
@@ -602,7 +641,7 @@ def _trial_failure_reason(result: JobResult) -> str | None:
 
 def run_guarded_config(
     config: JobConfig,
-    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds,
+    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds | SharedCapsThresholds,
     *,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
@@ -625,7 +664,8 @@ def run_guarded_config(
     try:
         require_pinned_harbor()
         validate_job_config(config, expected_split=isinstance(thresholds, SplitThresholds),
-                            expected_shared_roles=isinstance(thresholds, SharedRoleThresholds))
+                            expected_shared_roles=isinstance(thresholds, SharedRoleThresholds),
+                            expected_shared_caps=isinstance(thresholds, SharedCapsThresholds))
         hooks = {}
         if on_job_created is not None:
             hooks["on_job_created"] = on_job_created

@@ -473,7 +473,7 @@ request bound.
 
 ### One-key role budgets (`shared_roles`)
 
-Native `shared_roles` preparation also accepts an optional `requested_deadline`
+Native `shared_roles` and `shared_caps` preparation accept an optional `requested_deadline`
 date (for example, `"requested_deadline": "2027-02-04"`). It is independent of
 `sim_weeks`: it changes only the agent-facing task deadline and does not change
 the canonical scenario, world facts, or company refund window. Omitting it
@@ -501,6 +501,28 @@ Modal jobs, or unrelated users of the same key. Account for those commitments wh
 guaranteed provider headroom. Launch this mode only through the guarded native launcher so the
 one-attempt, zero-retry configuration and source, wheel, task, and volume attestations are
 checked before the metadata probe.
+
+### Headroom-derived shared caps (`shared_caps`)
+
+`openrouter_key_mode: "shared_caps"` is a separate opt-in native Modal mode with fixed `$50`
+target and `$100` world role caps and a `$150` aggregate ceiling. Before creating a Harbor job,
+the guarded launcher requires a verified finite `limit_remaining` and derives one immutable
+run allowance `H = min($150, key headroom, each applicable finite budget/effective-budget
+remainder)`. Missing, null/unlimited, malformed, resettable, zero, or otherwise unverifiable
+headroom refuses the run; `$150` is only a ceiling, not evidence of available funds. The derived
+`H` is bound to a run-only copy of the task, leaving the saved setup manifest unchanged. The
+existing atomic target/world reservation ledger and strict pre-call paths enforce the role and
+aggregate caps. `requested_deadline` may be set independently for this mode as for `shared_roles`.
+The prepared target and world environments are explicitly unbound; direct Harbor execution refuses
+before provider requests until the guarded launcher binds `H`. The `/api/v1/key` response must
+explicitly include valid `budgets` and `effective_budget` fields; the current parser accepts an empty
+`budgets` list and null `effective_budget` only when those fields are present. Omitted fields are
+treated as unknown and refuse this mode.
+
+This mode uses only the current-key `/api/v1/key` metadata; it does not query account credits or
+fall back to the operator-attested `shared_roles` mode. Its ledger coordinates only the target
+and world containers in this task, not other users of the key. Launch it only through the guarded
+launcher; finite provider headroom outside this task remains subject to concurrent external use.
 
 ## Ten-task rail and bills suite
 

@@ -25,6 +25,7 @@ from refund_eval.harbor.adapter import (
     verify_suite_task_wheel,
     write_task,
 )
+from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import scenario_names
 
@@ -44,7 +45,7 @@ class NativeBatchConfig(RunConfig):
     agent_wheel_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
-    openrouter_key_mode: Literal["shared", "split", "shared_roles"] = "shared"
+    openrouter_key_mode: Literal["shared", "split", "shared_roles", "shared_caps"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
     requested_deadline: date | None = None
     shared_allowance_usd: CostCap | None = None
@@ -54,8 +55,8 @@ class NativeBatchConfig(RunConfig):
 
     @model_validator(mode="after")
     def _validate_spend_caps(self) -> NativeBatchConfig:
-        if self.requested_deadline is not None and self.openrouter_key_mode != "shared_roles":
-            raise ValueError("requested_deadline is only valid in shared_roles mode")
+        if self.requested_deadline is not None and self.openrouter_key_mode not in {"shared_roles", "shared_caps"}:
+            raise ValueError("requested_deadline is only valid in a guarded shared-key mode")
         if self.suite is not None:
             task_ids = [entry.task_id for entry in self.suite]
             task_texts = [entry.task_text.strip() for entry in self.suite]
@@ -71,8 +72,8 @@ class NativeBatchConfig(RunConfig):
                 raise ValueError(f"Unknown suite scenarios: {', '.join(sorted(unknown))}")
             if self.scenario not in scenarios:
                 raise ValueError("Native suite must include the configured scenario")
-            if self.openrouter_key_mode in {"split", "shared_roles"}:
-                raise ValueError("Native task suites do not support split or shared_roles key modes")
+            if self.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
+                raise ValueError("Native task suites do not support strict role-budget key modes")
             if "train_refund_late" in scenarios and "cost_limit" not in self.model_fields_set:
                 raise ValueError("A suite containing train_refund_late requires an explicit cost_limit")
             if "train_refund_late" in scenarios and self.research_mode not in {"saved", "auto"}:
@@ -84,7 +85,7 @@ class NativeBatchConfig(RunConfig):
                 resolve_cost_limits(self.cost_limit, targets, scenario=scenario)
         if (self.trial_spend_cap_usd is None) != (self.key_spend_cap_usd is None):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
-        if self.openrouter_key_mode in {"split", "shared_roles"}:
+        if self.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
             mode = self.openrouter_key_mode
             if self.scenario != "train_refund_late":
                 raise ValueError(f"{mode} mode supports only train_refund_late")
@@ -104,6 +105,8 @@ class NativeBatchConfig(RunConfig):
             world = Decimal(str(self.world_cost_limit))
             if agent <= 0 or agent > 50 or world <= 0 or world > 100:
                 raise ValueError(f"{mode} role caps exceed supported $50/$100 ceilings")
+            if mode == "shared_caps" and (agent != 50 or world != 100):
+                raise ValueError("shared_caps mode requires $50 target and $100 world role caps")
             if mode == "shared_roles":
                 if self.shared_allowance_usd is None:
                     raise ValueError("shared_roles mode requires shared_allowance_usd")
@@ -130,7 +133,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
     if config.suite is not None:
         verify_suite_task_wheel(verified_wheel, {entry.scenario for entry in config.suite})
-    if config.openrouter_key_mode in {"split", "shared_roles"}:
+    if config.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
         verify_split_budget_wheel(config.agent_wheel)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
@@ -155,10 +158,12 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     }
     caps = caps_by_scenario[config.scenario]
     shared_role_budget_config = None
-    if config.openrouter_key_mode == "shared_roles":
+    shared_allowance = None
+    if config.openrouter_key_mode in {"shared_roles", "shared_caps"}:
+        shared_allowance = config.shared_allowance_usd if config.openrouter_key_mode == "shared_roles" else Decimal(150)
         shared_role_budget_config = json.dumps({
             "schema_version": 1,
-            "shared_allowance_usd": str(config.shared_allowance_usd),
+            "shared_allowance_usd": str(shared_allowance),
             "role_limits_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
             "scenario": config.scenario,
             "models": {"target": targets[0], "simulator": config.simulator_model, "grader": config.grader_model},
@@ -191,11 +196,11 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
-        shared_allowance_usd=config.shared_allowance_usd, shared_role_budget_config=shared_role_budget_config,
+        shared_allowance_usd=shared_allowance, shared_role_budget_config=shared_role_budget_config,
         requested_deadline=config.requested_deadline,
         suite_task=spec["suite_task"],
     ) for spec in task_specs]
-    if config.openrouter_key_mode in {"split", "shared_roles"}:
+    if config.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
         for task in tasks:
             verify_split_budget_task_sources(task)
     options = config.model_dump(
@@ -220,9 +225,11 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
                      {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
                       "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens),
-                      "REFUND_EVAL_SHARED_ROLE_MODE": "shared_roles",
-                      "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config}
-                     if config.openrouter_key_mode == "shared_roles" else
+                      "REFUND_EVAL_SHARED_ROLE_MODE": config.openrouter_key_mode,
+                      "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config,
+                      **({SHARED_CAPS_HEADROOM_BOUND_ENV: "false"}
+                         if config.openrouter_key_mode == "shared_caps" else {})}
+                     if config.openrouter_key_mode in {"shared_roles", "shared_caps"} else
                      {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
             for model in targets
         ],
@@ -285,6 +292,17 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         })
         if config.requested_deadline is not None:
             effective_parameters["requested_deadline"] = config.requested_deadline.isoformat()
+    elif config.openrouter_key_mode == "shared_caps":
+        effective_parameters.update({
+            "openrouter_key_mode": "shared_caps",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "shared_aggregate_ceiling_usd": "150",
+            "shared_allowance_source": "verified_key_headroom",
+            "role_caps_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
+            "runtime_metadata_confirmed": False,
+        })
+        if config.requested_deadline is not None:
+            effective_parameters["requested_deadline"] = config.requested_deadline.isoformat()
     record_data = {
         "schema_version": 1,
         "config": config.model_dump(mode="json"),
@@ -315,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         parser.error(str(error))
     print(f"Prepared {record}")
-    if config.openrouter_key_mode in {"split", "shared_roles"}:
+    if config.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
         manifest = record.with_name("laura-setup.json")
         job_name = f"laura-native-{record.parent.name}"
         commands = (
@@ -327,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if config.openrouter_key_mode == "split":
             print("Guarded split launch recipe; set OPENROUTER_AGENT_API_KEY and OPENROUTER_WORLD_API_KEY first:")
+        elif config.openrouter_key_mode == "shared_caps":
+            print("Guarded shared_caps launch recipe; set the ordinary key and require finite headroom before job creation:")
         else:
             print("Guarded shared_roles launch recipe; set the ordinary OPENROUTER_API_KEY and verify its available allocation")
         for command in commands:

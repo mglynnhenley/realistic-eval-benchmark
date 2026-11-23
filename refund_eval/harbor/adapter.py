@@ -44,6 +44,7 @@ from refund_eval.config import (
     RunConfig,
 )
 from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
+from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import (
     SCENARIO_DIR,
@@ -331,12 +332,12 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
         "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
-        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles"} else "false",
+        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles", "shared_caps"} else "false",
         "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
         "OPENROUTER_KEY_MODE": openrouter_key_mode,
         "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),
         "REQUESTED_DEADLINE": "" if requested_deadline is None else requested_deadline.isoformat(),
-        "SHARED_ROLE_MODE": "shared_roles" if openrouter_key_mode == "shared_roles" else "disabled",
+        "SHARED_ROLE_MODE": openrouter_key_mode if openrouter_key_mode in {"shared_roles", "shared_caps"} else "disabled",
         "SHARED_ROLE_BUDGET_CONFIG_TOML": json.dumps(shared_role_budget_config or ""),
         "SHARED_ROLE_BUDGET_CONFIG_YAML": yaml.safe_dump(shared_role_budget_config or "", default_style='"').strip(),
         "SUITE_TASK_ID": task_id if suite_task else "",
@@ -346,7 +347,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         path = task_dir / name
         rendered = _fill(path.read_text(), values)
         if name == "environment/docker-compose.yaml":
-            if openrouter_key_mode == "shared_roles":
+            if openrouter_key_mode in {"shared_roles", "shared_caps"}:
                 rendered = rendered.replace(
                     "    # ROLE_BUDGET_MAIN_VOLUME\n",
                     "    volumes:\n      - role-budget:/var/lib/refund-eval/role-budget\n",
@@ -355,6 +356,14 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                     "      - role-budget:/var/lib/refund-eval/role-budget\n"
                     "      - role-budget:/var/log/world/role-budget\n",
                 ).replace("  # ROLE_BUDGET_VOLUME\n", "  role-budget:\n")
+            if openrouter_key_mode == "shared_caps":
+                marker_anchor = '      REFUND_EVAL_SHARED_ROLE_MODE: "shared_caps"\n'
+                if rendered.count(marker_anchor) != 1:
+                    raise ValueError("shared_caps Compose mode marker is missing")
+                rendered = rendered.replace(
+                    marker_anchor,
+                    marker_anchor + f'      {SHARED_CAPS_HEADROOM_BOUND_ENV}: "false"\n',
+                )
             else:
                 rendered = rendered.replace("    # ROLE_BUDGET_MAIN_VOLUME\n", "")
                 rendered = rendered.replace("      # ROLE_BUDGET_WORLD_VOLUME\n", "")

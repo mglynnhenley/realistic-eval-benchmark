@@ -17,6 +17,8 @@ from refund_eval.models.shared_role_spend_ledger import (
 from scripts.offline_spend_guard import (
     GuardFailure,
     OpenRouterSnapshot,
+    SharedCapsSpendGuard,
+    SharedCapsThresholds,
     SharedRoleOpenRouterSnapshot,
     SharedRoleSpendGuard,
     SharedRoleThresholds,
@@ -198,6 +200,13 @@ def _key_metadata(
             "include_byok": True,
         }]
     return {"data": data}
+
+
+def _shared_caps_key_metadata(**kwargs):
+    payload = _key_metadata(**kwargs)
+    payload["data"].setdefault("budgets", [])
+    payload["data"].setdefault("effective_budget", None)
+    return payload
 
 
 def test_shared_role_snapshot_accepts_empty_budgets_and_explicit_null_effective_budget():
@@ -402,3 +411,117 @@ def test_shared_role_guard_requires_exact_key_and_budget_headroom(headroom_field
     reason = "limit_remaining" if headroom_field == "key" else "budget remaining"
     with pytest.raises(GuardFailure, match=reason):
         guard._accept_sample(current)
+
+
+def test_shared_caps_uses_smallest_verified_finite_headroom():
+    async def probe():
+        return _shared_caps_key_metadata(limit=80, remaining=70, budget_remaining=45)
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        await guard.start()
+        parameters = guard.sanitized_effective_parameters()
+        await guard.close()
+        return parameters
+
+    parameters = asyncio.run(run())
+    assert parameters["shared_allowance_usd"] == "45"
+    assert parameters["shared_allowance_source"] == "verified_key_headroom"
+    assert parameters["shared_aggregate_ceiling_usd"] == "150"
+
+
+@pytest.mark.parametrize("headroom", ["zero", "missing", "unlimited"])
+def test_shared_caps_refuses_unverified_or_exhausted_headroom(headroom):
+    payload = _shared_caps_key_metadata()
+    if headroom == "zero":
+        payload["data"]["limit_remaining"] = 0
+    elif headroom == "missing":
+        del payload["data"]["limit_remaining"]
+    else:
+        payload["data"]["limit"] = None
+        payload["data"]["limit_remaining"] = None
+
+    async def probe():
+        return payload
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        with pytest.raises(GuardFailure):
+            await guard.start()
+        with pytest.raises(GuardFailure):
+            await guard.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("missing_field", ["budgets", "effective_budget"])
+def test_shared_caps_requires_explicit_budget_metadata(missing_field):
+    payload = _shared_caps_key_metadata()
+    del payload["data"][missing_field]
+
+    async def probe():
+        return payload
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        with pytest.raises(GuardFailure, match="explicit OpenRouter budget metadata"):
+            await guard.start()
+        with pytest.raises(GuardFailure):
+            await guard.close()
+
+    asyncio.run(run())
+
+
+def test_shared_caps_rejects_cent_of_headroom_erosion_without_slack():
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(probe_timeout=0.1, poll_interval=0.1, max_sample_age=1)
+    )
+    baseline = SharedRoleOpenRouterSnapshot.parse(
+        _shared_caps_key_metadata(limit=80, remaining=60)
+    )
+    eroded = SharedRoleOpenRouterSnapshot.parse(
+        _shared_caps_key_metadata(limit=80, remaining=Decimal("59.99"))
+    )
+
+    guard._check_headroom(baseline)
+    with pytest.raises(GuardFailure, match="limit_remaining is below shared_allowance_usd"):
+        guard._check_headroom(eroded, baseline)
+
+
+def test_shared_caps_concurrency_and_unknown_retry_preserve_derived_hold(tmp_path):
+    config = SharedRoleBudgetConfig(
+        allowance_usd="70", role_limits_usd={"target": "50", "world": "100"},
+        scenario="train_refund_late",
+        models={"target": "openrouter/target", "simulator": "openrouter/sim", "grader": "openrouter/grade"},
+    )
+    first = SharedRoleSpendLedger(tmp_path, config)
+    second = SharedRoleSpendLedger(tmp_path, config)
+
+    def reserve(role):
+        attempt = str(uuid4())
+        try:
+            (first if role == "target" else second).reserve(role, attempt, "a" * 64, "40")
+            return attempt
+        except SharedRoleSpendLedgerError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        attempts = list(executor.map(reserve, ("target", "world")))
+    held = [attempt for attempt in attempts if attempt is not None]
+    assert len(held) == 1
+    first.mark_unknown(held[0])
+    with pytest.raises(SharedRoleSpendLedgerError, match="unresolved hold"):
+        second.reserve("world", str(uuid4()), "b" * 64, "1")
+    assert Decimal(first.snapshot()["aggregate_reserved_usd"]) == Decimal(40)

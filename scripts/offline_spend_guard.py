@@ -122,6 +122,18 @@ class SharedRoleThresholds:
         object.__setattr__(self, "shared_allowance_usd", allowance)
 
 
+@dataclass(frozen=True)
+class SharedCapsThresholds:
+    probe_timeout: float = 10.0
+    poll_interval: float = 15.0
+    max_sample_age: float = 35.0
+    cleanup_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        SharedRoleThresholds(Decimal(150), self.probe_timeout, self.poll_interval,
+                             self.max_sample_age, self.cleanup_timeout)
+
+
 _OPENROUTER_BUDGET_SCOPES = frozenset({
     "workspace_default_member", "workspace_default_key", "member", "api_key", "workspace", "key_limit",
 })
@@ -719,6 +731,62 @@ class SharedRoleSpendGuard(SpendGuard):
             "budget_remaining_usd": [str(budget.remaining) for budget in budgets],
             "effective_budget_remaining_usd": None if effective is None else str(effective.remaining),
             "runtime_metadata_confirmed": True,
+        }
+
+
+class SharedCapsSpendGuard(SharedRoleSpendGuard):
+    def __init__(self, thresholds: SharedCapsThresholds, *, openrouter_probe: Probe | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.shared_caps_thresholds = thresholds
+        self.effective_allowance_usd: Decimal | None = None
+        role_thresholds = SharedRoleThresholds(
+            Decimal(150), thresholds.probe_timeout, thresholds.poll_interval,
+            thresholds.max_sample_age, thresholds.cleanup_timeout,
+        )
+        super().__init__(role_thresholds, openrouter_probe=openrouter_probe, clock=clock)
+
+    def _check_headroom(
+        self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
+    ) -> None:
+        if not snapshot.budgets_present or not snapshot.effective_budget_present:
+            raise GuardFailure("shared_caps requires explicit OpenRouter budget metadata")
+        if self.effective_allowance_usd is None and baseline is None:
+            if (not snapshot.limit_reset_present or snapshot.limit_reset is not None
+                    or snapshot.is_management_key is not False or snapshot.is_provisioning_key is not False
+                    or snapshot.include_byok_in_limit is None):
+                raise GuardFailure("shared_caps requires finite ordinary non-resetting OpenRouter headroom")
+            if (snapshot.limit <= 0 or snapshot.remaining > snapshot.limit or snapshot.usage > snapshot.limit
+                    or snapshot.usage + snapshot.remaining > snapshot.limit + _MONEY_EPSILON):
+                raise GuardFailure("OpenRouter key headroom metadata is malformed")
+            headroom = [snapshot.remaining]
+            budgets = list(snapshot.budgets)
+            if snapshot.effective_budget is not None:
+                budgets.append(snapshot.effective_budget)
+            for budget in budgets:
+                if budget.reset_interval is not None or budget.resets_at is not None:
+                    raise GuardFailure("shared_caps does not support resetting OpenRouter budgets")
+                if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
+                        or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
+                    raise GuardFailure("OpenRouter budget metadata is malformed")
+                headroom.append(budget.remaining)
+            allowance = min(Decimal(150), *headroom)
+            if allowance <= 0:
+                raise GuardFailure("shared_caps has no positive verified key headroom")
+            self.effective_allowance_usd = allowance
+            thresholds = self.thresholds
+            self.thresholds = SharedRoleThresholds(
+                allowance, thresholds.probe_timeout, thresholds.poll_interval,
+                thresholds.max_sample_age, thresholds.cleanup_timeout,
+            )
+        super()._check_headroom(snapshot, baseline)
+
+    def sanitized_effective_parameters(self) -> dict[str, Any] | None:
+        parameters = super().sanitized_effective_parameters()
+        if parameters is None:
+            return None
+        return parameters | {
+            "shared_allowance_source": "verified_key_headroom",
+            "shared_aggregate_ceiling_usd": "150",
         }
 
 

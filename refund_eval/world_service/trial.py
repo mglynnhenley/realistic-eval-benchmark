@@ -57,6 +57,7 @@ from refund_eval.models.shared_role_spend_ledger import (
     LEDGER_DIRECTORY as SHARED_ROLE_LEDGER_DIRECTORY,
 )
 from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedger,
 )
@@ -173,14 +174,18 @@ class WorldTrial:
 
     async def __aenter__(self) -> Self:
         settings = self.settings
+        shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+        if (shared_role_mode == "shared_caps"
+                and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
+                     or settings.world_cost_limit is None)):
+            raise WorldSpendLedgerError("World shared_caps task has no verified headroom binding")
         self.scenario = scenario = load_scenario(settings.scenario)
         if settings.world_cost_limit is not None:
             model_mapping = ({"simulator": settings.simulator_model, "grader": settings.grader_model}
                              if self._model_client is None else
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
-            shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
-            if shared_role_mode == "shared_roles":
+            if shared_role_mode in {"shared_roles", "shared_caps"}:
                 shared_config = SharedRoleBudgetConfig.from_environment()
                 if (shared_config.scenario != settings.scenario
                         or shared_config.models["simulator"] != model_mapping["simulator"]

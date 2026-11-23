@@ -22,6 +22,7 @@ from refund_eval.models.world_spend_ledger import (
 LEDGER_DIRECTORY = Path("/var/lib/refund-eval/role-budget")
 LEDGER_FILE = "role-spend-ledger.json"
 CONFIG_ENV = "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"
+SHARED_CAPS_HEADROOM_BOUND_ENV = "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"
 ROLES = ("target", "world")
 _VERSION = 1
 

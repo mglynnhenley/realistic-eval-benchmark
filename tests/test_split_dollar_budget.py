@@ -22,6 +22,7 @@ from refund_eval.models.budget import BudgetedWorldModels
 from refund_eval.models.client import Message, ModelLimitExceeded
 from refund_eval.models.shared_role_spend_ledger import (
     CONFIG_ENV,
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedger,
 )
@@ -739,3 +740,17 @@ def test_shared_roles_target_spend_blocks_world_dispatch_via_budgeted_models(tmp
     snapshot = SharedRoleSpendLedger(ledger_dir, config).snapshot()
     assert Decimal(str(snapshot["spent_usd"])) == Decimal("0.8")
     assert recorded.dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_shared_caps_target_refuses_unbound_before_provider_metadata(monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv(SHARED_CAPS_HEADROOM_BOUND_ENV, "false")
+    tariff_calls = []
+    monkeypatch.setattr(dollar_budget, "openrouter_tariffs", lambda *args: tariff_calls.append(args))
+
+    with pytest.raises(WorldSpendLedgerError, match="verified headroom binding"):
+        async with dollar_budget.target_dollar_budget(object()):
+            pytest.fail("unbound shared_caps target must refuse")
+
+    assert tariff_calls == []
