@@ -49,6 +49,7 @@ from refund_eval.harbor.adapter import (
     verify_split_budget_wheel,
 )
 from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedgerError,
 )
@@ -367,11 +368,17 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
                 or (shared_caps and (cap != 50 or role_config.role_limits_usd["world"] != 100
                     or not Decimal(0) < role_config.allowance_usd <= Decimal(150)))):
             raise LauncherFailure("shared-role target cap or output bound is invalid")
+        expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
+                              "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
+                              "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+        if shared_caps:
+            expected_agent_env.add(SHARED_CAPS_HEADROOM_BOUND_ENV)
+            expected_bound_state = "true" if expected_shared_caps_allowance is not None else "false"
+            if agent_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != expected_bound_state:
+                raise LauncherFailure("shared_caps headroom binding state is invalid")
         if (agent.import_path != AGENT_IMPORT_PATH
                 or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE
-                or set(agent_env) != {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
-                    "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
-                    "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+                or set(agent_env) != expected_agent_env
                 or OPENROUTER_ROLE_KEY_NAMES.intersection(agent_env) - {"OPENROUTER_API_KEY"}
                 or _has_role_key_reference({key: value for key, value in agent_env.items()
                                             if key != "OPENROUTER_API_KEY"})):
@@ -463,6 +470,9 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             world, metadata = _shared_roles_compose_values(
                 task_path, expected_mode="shared_caps" if shared_caps else "shared_roles"
             )
+            if (shared_caps and world.get(SHARED_CAPS_HEADROOM_BOUND_ENV)
+                    != ("true" if expected_shared_caps_allowance is not None else "false")):
+                raise ValueError
             role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
             task_config = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
             task_env = task_config["environment"]["env"]

@@ -25,6 +25,7 @@ from refund_eval.models.shared_role_spend_ledger import (
     LEDGER_DIRECTORY as SHARED_ROLE_LEDGER_DIRECTORY,
 )
 from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedger,
 )
@@ -286,6 +287,9 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
     if shared_role_mode not in (None, "", "disabled", "shared_roles", "shared_caps"):
         raise WorldSpendLedgerError("Target shared-role budget mode is invalid")
+    if (shared_role_mode == "shared_caps"
+            and os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"):
+        raise WorldSpendLedgerError("Target shared_caps task has no verified headroom binding")
     if cap_raw is None and tokens_raw is None and shared_role_mode not in {"shared_roles", "shared_caps"}:
         yield
         return

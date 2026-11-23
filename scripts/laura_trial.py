@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor import batch
 from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedgerError,
 )
@@ -1285,6 +1286,8 @@ def _bind_shared_caps_allowance(config: JobConfig, allowance: Decimal) -> None:
     if runtime_task.exists():
         raise SetupFailure("shared_caps_runtime_task_already_exists")
     agent_env = config.agents[0].env or {}
+    if agent_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "false":
+        raise SetupFailure("shared_caps_runtime_task_binding_failed")
     old_config = agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
     try:
         task_toml_path = original / "task.toml"
@@ -1302,9 +1305,11 @@ def _bind_shared_caps_allowance(config: JobConfig, allowance: Decimal) -> None:
         compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
         world_env = compose["services"]["world"]["environment"]
         if (world_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps"
+                or world_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "false"
                 or world_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG") != old_config):
             raise ValueError
         compose["services"]["world"]["environment"]["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"] = runtime_config
+        compose["services"]["world"]["environment"][SHARED_CAPS_HEADROOM_BOUND_ENV] = "true"
         shutil.copytree(original, runtime_task)
         task_copy = runtime_task / "task.toml"
         text = task_copy.read_text(encoding="utf-8")
@@ -1319,6 +1324,7 @@ def _bind_shared_caps_allowance(config: JobConfig, allowance: Decimal) -> None:
     except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError, SharedRoleSpendLedgerError):
         raise SetupFailure("shared_caps_runtime_task_binding_failed") from None
     agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"] = runtime_config
+    agent_env[SHARED_CAPS_HEADROOM_BOUND_ENV] = "true"
     config.agents[0].env = agent_env
     config.tasks[0].path = runtime_task
 

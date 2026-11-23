@@ -44,6 +44,7 @@ from refund_eval.config import (
     RunConfig,
 )
 from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
+from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import (
     SCENARIO_DIR,
@@ -355,6 +356,14 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                     "      - role-budget:/var/lib/refund-eval/role-budget\n"
                     "      - role-budget:/var/log/world/role-budget\n",
                 ).replace("  # ROLE_BUDGET_VOLUME\n", "  role-budget:\n")
+            if openrouter_key_mode == "shared_caps":
+                marker_anchor = '      REFUND_EVAL_SHARED_ROLE_MODE: "shared_caps"\n'
+                if rendered.count(marker_anchor) != 1:
+                    raise ValueError("shared_caps Compose mode marker is missing")
+                rendered = rendered.replace(
+                    marker_anchor,
+                    marker_anchor + f'      {SHARED_CAPS_HEADROOM_BOUND_ENV}: "false"\n',
+                )
             else:
                 rendered = rendered.replace("    # ROLE_BUDGET_MAIN_VOLUME\n", "")
                 rendered = rendered.replace("      # ROLE_BUDGET_WORLD_VOLUME\n", "")

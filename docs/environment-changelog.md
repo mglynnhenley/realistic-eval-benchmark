@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 8.2 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 889463e8c2152b17f7e56a07cd790698c46436bf23d6d4d61dfead271b778d27
+- Fingerprint: 12ca8f7dfe905cc2337742e4a71050bca5c5738bc29f2fac70ad3c28039bc658
 - Trial round: none; offline validation only.
-- Changes: add the opt-in `shared_caps` guarded mode, deriving a fixed per-run aggregate allowance from verified finite key/budget headroom while preserving the saved manifest and existing shared-role ledger; allow the independent requested deadline in this mode.
+- Changes: add the opt-in `shared_caps` guarded mode, deriving a fixed per-run aggregate allowance from verified finite key/budget headroom while preserving the saved manifest and existing shared-role ledger; require explicit key budget metadata and runtime binding before target/world requests; allow the independent requested deadline in this mode.
 
 ## 8.1 — 2026-11-23
 - Kind: trivial batch

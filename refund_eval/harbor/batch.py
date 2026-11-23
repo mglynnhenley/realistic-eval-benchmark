@@ -25,6 +25,7 @@ from refund_eval.harbor.adapter import (
     verify_suite_task_wheel,
     write_task,
 )
+from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import scenario_names
 
@@ -225,7 +226,9 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
                       "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens),
                       "REFUND_EVAL_SHARED_ROLE_MODE": config.openrouter_key_mode,
-                      "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config}
+                      "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config,
+                      **({SHARED_CAPS_HEADROOM_BOUND_ENV: "false"}
+                         if config.openrouter_key_mode == "shared_caps" else {})}
                      if config.openrouter_key_mode in {"shared_roles", "shared_caps"} else
                      {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
             for model in targets

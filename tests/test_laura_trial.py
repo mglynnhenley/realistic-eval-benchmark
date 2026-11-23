@@ -490,15 +490,21 @@ def test_shared_caps_refuses_before_job_and_binds_immutable_headroom(
 
     def guarded_run(config, thresholds, **hooks):
         assert isinstance(thresholds, SharedCapsThresholds)
+        assert config.agents[0].env["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "false"
         manifest = native.prepared_dir / "laura-setup.json"
         manifest_before = manifest.read_bytes()
         original_task = Path(config.tasks[0].path)
         original_toml = (original_task / "task.toml").read_bytes()
+        original_compose = yaml.safe_load((original_task / "environment" / "docker-compose.yaml").read_text())
+        assert original_compose["services"]["world"]["environment"][
+            "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"
+        ] == "false"
 
         async def probe():
             return {"data": {
                 "usage": 0, "limit": 80, "limit_remaining": remaining, "limit_reset": None,
                 "is_management_key": False, "is_provisioning_key": False, "include_byok_in_limit": True,
+                "budgets": [], "effective_budget": None,
             }}
 
         class FakeJob:
@@ -530,6 +536,9 @@ def test_shared_caps_refuses_before_job_and_binds_immutable_headroom(
             runtime_config = tomllib.loads((runtime_task / "task.toml").read_text())
             shared_config = json.loads(runtime_config["environment"]["env"]["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
             assert shared_config["shared_allowance_usd"] == "40"
+            assert config.agents[0].env["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "true"
+            compose = yaml.safe_load((runtime_task / "environment" / "docker-compose.yaml").read_text())
+            assert compose["services"]["world"]["environment"]["REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"] == "true"
             assert config.agents[0].kwargs["requested_deadline"].isoformat() == "2027-02-04"
         return result
 
