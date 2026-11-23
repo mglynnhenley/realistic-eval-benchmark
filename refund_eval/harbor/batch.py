@@ -71,6 +71,10 @@ class NativeBatchConfig(RunConfig):
                 raise ValueError("Native task suites do not support split or shared_roles key modes")
             if "train_refund_late" in scenarios and "cost_limit" not in self.model_fields_set:
                 raise ValueError("A suite containing train_refund_late requires an explicit cost_limit")
+            if "train_refund_late" in scenarios and self.research_mode not in {"saved", "auto"}:
+                raise ValueError(
+                    "train_refund_late suite entries require research_mode 'saved' or 'auto' (saved dossiers)"
+                )
             targets = self.models or [self.model]
             for scenario in scenarios:
                 resolve_cost_limits(self.cost_limit, targets, scenario=scenario)

@@ -834,6 +834,17 @@ def test_native_suite_rejects_invalid_entries(case, error, approved_wheel):
         _native_suite_config(suite, approved_wheel)
 
 
+def test_native_suite_rejects_live_research_for_late_refund_entry(approved_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    config = _native_suite_config(suite, approved_wheel)
+    config_data = config.model_dump(mode="python", exclude_none=True)
+    config_data["scenario"] = "bills_price_rise"
+    config_data["research_mode"] = "live"
+
+    with pytest.raises(ValueError, match="train_refund_late.*research_mode"):
+        batch.NativeBatchConfig.model_validate(config_data)
+
+
 def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_wheel):
     config = {"scenario": "bills_price_rise", "execution": "docker", **_wheel_config(approved_wheel)}
     with pytest.raises(ValueError, match="world_cost_limit"):
