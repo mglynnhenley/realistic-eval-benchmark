@@ -309,8 +309,8 @@ class _Correspondence:
         self._merge_field(row, "organization", interception.get("org"))
         row["organization_status"] = "known" if _known(row["organization"]) else "unknown"
         self._merge_field(row, "subject", payload.get("subject"))
-        if _known(payload.get("body")):
-            self._merge_field(row, "body", payload.get("body"))
+        if payload.get("body") is not None:
+            self._merge_field(row, "body", payload["body"])
         elif "body_base64" in payload and (row.get("body_decoding_status") is None or self.world is None):
             body, encoding, status = _decode_body_base64(payload)
             row["body"] = body

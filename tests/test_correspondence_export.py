@@ -413,6 +413,19 @@ def test_web_action_decodes_text_only_multipart_but_not_binary_uploads():
     assert rows["binary-multipart"]["raw_payload"]["body_base64"] == binary_encoded
 
 
+def test_outbound_subject_only_email_preserves_explicit_empty_body():
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("empty-message", "email", "2026-10-30T12:00:00Z", {
+            "subject": "Subject only",
+            "body": "",
+        }),
+    ]}})
+    row = next(row for row in export["records"] if row.get("interception_id") == "empty-message")
+
+    assert row["subject"] == "Subject only"
+    assert row["body"] == ""
+
+
 @pytest.mark.parametrize("status", ["silent", "failed", "pending"])
 def test_outbound_submission_retains_matching_interaction_without_reply(status):
     interaction_id = "silent-submit:company:contact"
