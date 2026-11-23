@@ -174,10 +174,21 @@ async def run_guarded_job(
     job_factory: Any | None = None,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
+    before_job_run: Callable[[Any], None] | None = None,
+    total_time_limit_seconds: int | None = None,
 ) -> JobResult:
     require_pinned_harbor()
     validate_job_config(config)
     controller = guard or SpendGuard(thresholds)
+    deadline_task = None
+    if total_time_limit_seconds is not None:
+        if type(total_time_limit_seconds) is not int or total_time_limit_seconds <= thresholds.cleanup_timeout:
+            raise LauncherFailure("total time limit must exceed the cleanup timeout")
+        try:
+            controller.start_total_deadline(total_time_limit_seconds)
+        except ValueError:
+            raise LauncherFailure("invalid total time limit") from None
+        deadline_task = asyncio.create_task(controller.enforce_total_deadline())
     try:
         await controller.start()
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
@@ -200,6 +211,13 @@ async def run_guarded_job(
             if on_job_created is not None:
                 with suppress(Exception):
                     on_job_created(job)
+            await controller.ensure_healthy()
+            if before_job_run is not None:
+                try:
+                    before_job_run(job)
+                except Exception:
+                    await controller.fail_closed("required run metadata could not be written", cancel_job=False)
+                    raise
             await controller.ensure_healthy()
 
             run_task = asyncio.create_task(job.run())
@@ -226,6 +244,11 @@ async def run_guarded_job(
         await controller.cleanup_bound()
         raise
     finally:
+        if deadline_task is not None:
+            if not deadline_task.done() and controller.failure_reason != "total run deadline exceeded":
+                deadline_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await deadline_task
         await asyncio.shield(controller.close())
 
 
@@ -248,12 +271,20 @@ def run_guarded_config(
     *,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
+    before_job_run: Callable[[Any], None] | None = None,
+    total_time_limit_seconds: int | None = None,
 ) -> int:
     if thresholds.openrouter_key_ceiling != KEY_CEILING:
         print("guard_failed=OpenRouter key ceiling must be exactly $50 cleanup_uncertain=false", file=sys.stderr)
         return 2
     if not math.isfinite(thresholds.probe_timeout):
         print("guard_failed=invalid timeout cleanup_uncertain=false", file=sys.stderr)
+        return 2
+    if total_time_limit_seconds is not None and (
+        type(total_time_limit_seconds) is not int
+        or total_time_limit_seconds <= thresholds.cleanup_timeout
+    ):
+        print("guard_failed=total time limit must exceed cleanup timeout cleanup_uncertain=false", file=sys.stderr)
         return 2
     try:
         require_pinned_harbor()
@@ -263,6 +294,10 @@ def run_guarded_config(
             hooks["on_job_created"] = on_job_created
         if on_sandbox_created is not None:
             hooks["on_sandbox_created"] = on_sandbox_created
+        if before_job_run is not None:
+            hooks["before_job_run"] = before_job_run
+        if total_time_limit_seconds is not None:
+            hooks["total_time_limit_seconds"] = total_time_limit_seconds
         trial_failure = _trial_failure_reason(
             asyncio.run(run_guarded_job(config, thresholds, **hooks))
         )

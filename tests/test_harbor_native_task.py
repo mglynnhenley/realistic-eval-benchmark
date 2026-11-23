@@ -735,6 +735,46 @@ def test_batch_freezes_spend_caps_and_horizons(tmp_path, approved_wheel):
     assert world["WORLD_MAX_TURNS"] == "40"
 
 
+def test_total_time_limit_clamps_outer_agent_and_inner_worker_without_omitted_headroom(
+    tmp_path, approved_wheel
+):
+    values = {
+        "scenario": "train_refund_late",
+        "execution": "modal",
+        "data_mode": "fixture",
+        "research_mode": "saved",
+        "model": "openrouter/a",
+        "models": ["openrouter/a"],
+        "cost_limit": 1,
+        "world_cost_limit": 1,
+        "time_limit": 120,
+        "total_time_limit_seconds": 30,
+        **_wheel_config(approved_wheel),
+    }
+    out = tmp_path / "explicit-total"
+    record = json.loads(
+        batch.prepare(out, batch.NativeBatchConfig(**values)).read_text(encoding="utf-8")
+    )
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    task = Task(out / "train_refund_late")
+    assert job.agents[0].kwargs["time_limit"] == 30
+    assert task.config.agent.timeout_sec == 30
+    assert record["effective_parameters"]["worker_time_limit_seconds"] == 30
+    assert record["effective_parameters"]["total_time_limit_seconds"] == 30
+
+    omitted = {**values, "total_time_limit_seconds": None}
+    omitted_out = tmp_path / "omitted-total"
+    omitted_record = json.loads(
+        batch.prepare(omitted_out, batch.NativeBatchConfig(**omitted)).read_text(encoding="utf-8")
+    )
+    omitted_job = JobConfig.model_validate(yaml.safe_load((omitted_out / "job.yaml").read_bytes()))
+    omitted_task = Task(omitted_out / "train_refund_late")
+    assert omitted_job.agents[0].kwargs["time_limit"] == 120
+    assert omitted_task.config.agent.timeout_sec == 132
+    assert omitted_record["effective_parameters"]["worker_time_limit_seconds"] == 120
+    assert omitted_record["effective_parameters"]["total_time_limit_seconds"] is None
+
+
 def test_batch_spend_caps_fit_exactly_in_decimal_dollars(tmp_path, approved_wheel):
     config = {**SPEND_CAPPED, "models": ["openrouter/a"], "cost_limit": 0.1, "world_cost_limit": 0.2,
               "trials": 3, "concurrency": 1, "trial_spend_cap_usd": 0.3, "key_spend_cap_usd": 0.9,

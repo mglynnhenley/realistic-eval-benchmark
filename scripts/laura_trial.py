@@ -31,10 +31,12 @@ import yaml
 from harbor.models.job.config import JobConfig
 from pydantic import ValidationError
 
+from refund_eval.config import resolve_cost_limits
+from refund_eval.harbor import batch
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
-from scripts.offline_spend_guard import Thresholds
+from scripts.offline_spend_guard import KEY_CEILING, Thresholds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
@@ -676,6 +678,286 @@ def _decimal_argument(value: str) -> Decimal:
     return amount
 
 
+def _amount(value: Any) -> Decimal | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() and amount > 0 else None
+
+
+def _amount_text(value: Any) -> str | None:
+    amount = _amount(value)
+    return format(amount, "f") if amount is not None else None
+
+
+def _guard_parameters(parameters: dict[str, Any], thresholds: Thresholds, total: int | None) -> dict[str, Any]:
+    return {
+        **parameters,
+        "total_time_limit_seconds": total,
+        "openrouter_trial_delta_usd": str(thresholds.openrouter_trial_delta),
+        "openrouter_key_ceiling_usd": str(thresholds.openrouter_key_ceiling),
+        "cleanup_timeout_seconds": thresholds.cleanup_timeout,
+    }
+
+
+def _validate_total_limit(total: int | None, thresholds: Thresholds) -> None:
+    if total is not None and (type(total) is not int or total <= thresholds.cleanup_timeout):
+        raise SetupFailure("total_deadline_must_exceed_cleanup_timeout")
+
+
+def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
+    targets = config.models or [config.model]
+    if len(targets) != 1:
+        raise SetupFailure("target_model_sweep_unsupported")
+    return targets
+
+
+def _native_effective_parameters(
+    config: batch.NativeBatchConfig, thresholds: Thresholds
+) -> dict[str, Any]:
+    targets = _native_targets(config)
+    if config.execution != "modal":
+        raise SetupFailure("guarded_native_runs_require_modal")
+    if config.trials != 1 or config.concurrency != 1:
+        raise SetupFailure("guarded_native_runs_require_one_attempt_and_concurrency")
+    if config.inbox_snapshot is not None or config.resume_log is not None:
+        raise SetupFailure("guarded_native_runs_do_not_support_resume_or_inbox")
+    roles = [targets[0], config.simulator_model, config.grader_model]
+    if any(not isinstance(model, str) or not model.startswith("openrouter/") for model in roles):
+        raise SetupFailure("all_active_models_must_use_openrouter")
+
+    costs = resolve_cost_limits(config.cost_limit, targets, scenario=config.scenario)
+    agent_cost = _amount(costs[targets[0]])
+    world_cost = _amount(config.world_cost_limit)
+    if agent_cost is None or world_cost is None:
+        raise SetupFailure("native_cost_limits_must_be_finite")
+    runtime_delta = thresholds.openrouter_trial_delta
+    if agent_cost + world_cost > runtime_delta:
+        raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
+    if config.trial_spend_cap_usd is not None:
+        trial_cap = _amount(config.trial_spend_cap_usd)
+        key_cap = _amount(config.key_spend_cap_usd)
+        if trial_cap is None or key_cap is None:
+            raise SetupFailure("native_planning_caps_must_be_finite")
+        if trial_cap > runtime_delta or trial_cap < agent_cost + world_cost:
+            raise SetupFailure("native_trial_planning_cap_conflicts_with_runtime_guard")
+        if key_cap > KEY_CEILING or config.trials * trial_cap > key_cap:
+            raise SetupFailure("native_key_planning_cap_exceeds_supported_guard")
+
+    worker_time_limit = config.time_limit
+    if config.total_time_limit_seconds is not None:
+        worker_time_limit = min(worker_time_limit, config.total_time_limit_seconds)
+    return {
+        "target_model": targets[0],
+        "models": targets,
+        "simulator_model": config.simulator_model,
+        "grader_model": config.grader_model,
+        "sim_weeks": config.sim_weeks,
+        "max_turns": config.max_turns,
+        "agent_cost_limit_usd": format(agent_cost, "f"),
+        "world_cost_limit_usd": format(world_cost, "f"),
+        "worker_time_limit_seconds": worker_time_limit,
+        "effective_parameters_complete": True,
+        "unavailable_fields": [],
+    }
+
+
+def _world_environment(task_path: Path, config: JobConfig) -> dict[str, Any]:
+    compose_path = task_path / "environment" / "docker-compose.yaml"
+    try:
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    services = compose.get("services") if isinstance(compose, dict) else None
+    world = services.get("world") if isinstance(services, dict) else None
+    base = world.get("environment") if isinstance(world, dict) else None
+    environment = dict(base) if isinstance(base, dict) else {}
+    relevant = {
+        "WORLD_COST_LIMIT",
+        "WORLD_SIMULATOR_MODEL",
+        "WORLD_GRADER_MODEL",
+        "WORLD_SIM_WEEKS",
+        "WORLD_MAX_TURNS",
+    }
+    for overlay_path in config.environment.extra_docker_compose:
+        try:
+            overlay = yaml.safe_load(Path(overlay_path).read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            raise SetupFailure("saved_compose_overlay_unreadable") from None
+        overlay_services = overlay.get("services") if isinstance(overlay, dict) else None
+        overlay_world = overlay_services.get("world") if isinstance(overlay_services, dict) else None
+        if overlay_world is None:
+            continue
+        if not isinstance(overlay_world, dict):
+            raise SetupFailure("saved_world_overlay_unresolvable")
+        overrides = overlay_world.get("environment")
+        if overrides is None:
+            continue
+        if isinstance(overrides, dict):
+            items = overrides.items()
+        elif isinstance(overrides, list):
+            parsed = []
+            for item in overrides:
+                if not isinstance(item, str):
+                    raise SetupFailure("saved_world_overlay_unresolvable")
+                name, separator, value = item.partition("=")
+                if name in relevant:
+                    if not separator:
+                        raise SetupFailure("saved_world_overlay_unresolvable")
+                    parsed.append((name, value))
+            items = parsed
+        else:
+            raise SetupFailure("saved_world_overlay_unresolvable")
+        for name, value in items:
+            if name not in relevant:
+                continue
+            if value is None or (isinstance(value, str) and "$" in value):
+                raise SetupFailure("saved_world_overlay_unresolvable")
+            environment[name] = value
+    return environment
+
+
+def _saved_effective_parameters(
+    config: JobConfig, thresholds: Thresholds
+) -> dict[str, Any]:
+    if len(config.agents) != 1 or len(config.tasks) != 1 or not config.tasks[0].path:
+        raise SetupFailure("saved_native_values_unavailable")
+    target = config.agents[0].model_name
+    if not target.startswith("openrouter/"):
+        raise SetupFailure("saved_target_model_must_use_openrouter")
+    task_path = Path(config.tasks[0].path)
+    try:
+        task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        task_metadata = {}
+    if not isinstance(task_metadata, dict):
+        task_metadata = {}
+    world_env = _world_environment(task_path, config)
+    native_task = (
+        task_metadata.get("scenario") == _LAURA_SCENARIO
+        and isinstance(task_metadata.get("agent_wheel_sha256"), str)
+    )
+
+    def effective_role(environment_name: str, metadata_name: str) -> Any:
+        value = world_env.get(environment_name)
+        if isinstance(value, str) and "$" in value:
+            value = None
+        return task_metadata.get(metadata_name) if value is None else value
+
+    simulator = effective_role("WORLD_SIMULATOR_MODEL", "simulator_model")
+    grader = effective_role("WORLD_GRADER_MODEL", "grader_model")
+    for model in (simulator, grader):
+        if model is not None and (not isinstance(model, str) or not model.startswith("openrouter/")):
+            raise SetupFailure("saved_role_models_must_use_openrouter")
+    if native_task and (simulator is None or grader is None):
+        raise SetupFailure("saved_native_role_models_unavailable")
+
+    def positive_number(value: Any) -> float | None:
+        amount = _amount(value)
+        return float(amount) if amount is not None else None
+
+    def positive_integer(value: Any) -> int | None:
+        amount = _amount(value)
+        if amount is None or amount != amount.to_integral_value():
+            return None
+        return int(amount)
+
+    sim_weeks_raw = world_env.get("WORLD_SIM_WEEKS")
+    if isinstance(sim_weeks_raw, str) and "$" in sim_weeks_raw:
+        sim_weeks_raw = None
+    if sim_weeks_raw is None:
+        sim_weeks_raw = task_metadata.get("sim_weeks")
+    max_turns_raw = world_env.get("WORLD_MAX_TURNS")
+    if isinstance(max_turns_raw, str) and "$" in max_turns_raw:
+        max_turns_raw = None
+    if max_turns_raw is None:
+        max_turns_raw = task_metadata.get("max_turns")
+    sim_weeks = positive_number(sim_weeks_raw)
+    max_turns = positive_integer(max_turns_raw)
+    if sim_weeks_raw is not None and sim_weeks is None:
+        raise SetupFailure("saved_sim_weeks_invalid")
+    if max_turns_raw is not None and max_turns is None:
+        raise SetupFailure("saved_max_turns_invalid")
+
+    agent_kwargs = config.agents[0].kwargs
+    agent_cap_raw = agent_kwargs.get("cost_limit")
+    if isinstance(agent_cap_raw, dict):
+        agent_cap_raw = agent_cap_raw.get(target)
+    world_cap_raw = world_env.get("WORLD_COST_LIMIT")
+    agent_amount = _amount(agent_cap_raw)
+    world_amount = _amount(world_cap_raw)
+    if (
+        agent_amount is not None
+        and world_amount is not None
+        and agent_amount + world_amount > thresholds.openrouter_trial_delta
+    ):
+        raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
+    worker_time_raw = agent_kwargs.get("time_limit")
+    worker_time = positive_integer(worker_time_raw)
+    if worker_time_raw is not None and worker_time is None:
+        raise SetupFailure("saved_worker_time_limit_invalid")
+    unknown = []
+    for name, value in (
+        ("simulator_model", simulator),
+        ("grader_model", grader),
+        ("sim_weeks", sim_weeks),
+        ("max_turns", max_turns),
+        ("agent_cost_limit_usd", agent_amount),
+        ("world_cost_limit_usd", world_amount),
+        ("worker_time_limit_seconds", worker_time),
+    ):
+        if value is None:
+            unknown.append(name)
+    if native_task and unknown:
+        raise SetupFailure("saved_native_effective_values_invalid_or_unavailable")
+    if agent_cap_raw is not None and agent_amount is None:
+        raise SetupFailure("saved_agent_cost_limit_invalid")
+    if world_cap_raw is not None and world_amount is None:
+        raise SetupFailure("saved_world_cost_limit_invalid")
+    return {
+        "target_model": target,
+        "models": [target],
+        "simulator_model": simulator,
+        "grader_model": grader,
+        "sim_weeks": sim_weeks,
+        "max_turns": max_turns,
+        "agent_cost_limit_usd": _amount_text(agent_amount),
+        "world_cost_limit_usd": _amount_text(world_amount),
+        "worker_time_limit_seconds": worker_time,
+        "effective_parameters_complete": not unknown,
+        "unavailable_fields": unknown,
+    }
+
+
+def _record_effective_parameters(job: Any, config: JobConfig, parameters: dict[str, Any]) -> None:
+    del job
+    job_dir = Path(config.jobs_dir) / config.job_name
+    try:
+        job_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        job_dir = validate_private_output(job_dir)
+        record = job_dir / "effective_parameters.json"
+        descriptor = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(parameters, stream, sort_keys=True, indent=2, allow_nan=False)
+            stream.write("\n")
+    except (OSError, TypeError, ValueError):
+        raise SetupFailure("effective_parameters_record_write_failed") from None
+
+
+def _update_native_run_record(record_path: Path, parameters: dict[str, Any]) -> None:
+    try:
+        run_record = json.loads(record_path.read_text(encoding="utf-8"))
+        if not isinstance(run_record, dict):
+            raise TypeError
+        run_record["effective_parameters"] = parameters
+        record_path.write_text(json.dumps(run_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, ValueError, TypeError):
+        raise SetupFailure("native_run_record_write_failed") from None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -685,10 +967,14 @@ def _parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser("verify", help="compare the saved setup identity offline")
     verify.add_argument("--manifest", type=Path, required=True)
     run = subparsers.add_parser("run", help="run one fresh job through the guarded runner")
-    run.add_argument("--manifest", type=Path, required=True)
+    setup = run.add_mutually_exclusive_group(required=True)
+    setup.add_argument("--manifest", type=Path)
+    setup.add_argument("--run-config", type=Path)
+    run.add_argument("--prepared-dir", type=Path)
     run.add_argument("--job-name", required=True)
     run.add_argument("--openrouter-key-ceiling", type=_decimal_argument, required=True)
     run.add_argument("--openrouter-trial-delta", type=_decimal_argument, required=True)
+    run.add_argument("--total-time-limit-seconds", type=int)
     run.add_argument("--probe-timeout", type=float, default=10.0)
     run.add_argument("--poll-interval", type=float, default=15.0)
     run.add_argument("--max-sample-age", type=float, default=35.0)
@@ -707,12 +993,10 @@ def main(argv: list[str] | None = None) -> int:
             verify_setup(args.manifest)
             print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false")
             return 0
-        config = prepare_fresh_job(args.manifest, args.job_name)
     except (OSError, ValueError, TypeError, ImportError, yaml.YAMLError, guarded_harbor.LauncherFailure):
         print("laura_setup_failed=identity_or_job_validation", file=sys.stderr)
         return 2
 
-    print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
     try:
         thresholds = Thresholds(
             openrouter_key_ceiling=args.openrouter_key_ceiling,
@@ -725,11 +1009,55 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, TypeError) as failure:
         print(f"launcher_failed={type(failure).__name__} cleanup_uncertain=false", file=sys.stderr)
         return 1
+
+    try:
+        if args.manifest is not None:
+            if args.prepared_dir is not None:
+                raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
+            total_time_limit = args.total_time_limit_seconds
+            _validate_total_limit(total_time_limit, thresholds)
+            config = prepare_fresh_job(args.manifest, args.job_name)
+            parameters = _saved_effective_parameters(config, thresholds)
+        else:
+            if args.prepared_dir is None:
+                raise SetupFailure("prepared_dir_required_for_run_config")
+            native_config = batch.NativeBatchConfig.model_validate_json(
+                args.run_config.read_bytes()
+            )
+            if (
+                args.total_time_limit_seconds is not None
+                and args.total_time_limit_seconds != native_config.total_time_limit_seconds
+            ):
+                raise SetupFailure("conflicting_total_time_limits")
+            total_time_limit = native_config.total_time_limit_seconds
+            _validate_total_limit(total_time_limit, thresholds)
+            parameters = _native_effective_parameters(native_config, thresholds)
+            run_record_path = batch.prepare(args.prepared_dir, native_config)
+            effective = _guard_parameters(parameters, thresholds, total_time_limit)
+            _update_native_run_record(run_record_path, effective)
+            manifest_path = args.prepared_dir / "laura-setup.json"
+            save_setup(run_record_path.with_name("job.yaml"), manifest_path)
+            config = prepare_fresh_job(manifest_path, args.job_name)
+            parameters = effective
+    except SetupFailure as failure:
+        reason = str(failure)
+        if not reason or not reason.replace("_", "").isalnum():
+            reason = "identity_or_job_validation"
+        print(f"laura_setup_failed={reason}", file=sys.stderr)
+        return 2
+    except (OSError, ValueError, TypeError, ImportError, yaml.YAMLError, ValidationError, guarded_harbor.LauncherFailure):
+        print("laura_setup_failed=identity_or_job_validation", file=sys.stderr)
+        return 2
+
+    effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
+    print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
     return guarded_harbor.run_guarded_config(
         config,
         thresholds,
         on_job_created=_print_local_job_log,
         on_sandbox_created=_print_modal_dashboard,
+        before_job_run=lambda job: _record_effective_parameters(job, config, effective_parameters),
+        total_time_limit_seconds=total_time_limit,
     )
 
 

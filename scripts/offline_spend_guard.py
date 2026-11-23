@@ -173,7 +173,10 @@ class SpendGuard:
         self._cleanup_lock = asyncio.Lock()
         self._monitor_task: asyncio.Task[None] | None = None
         self._job_task: asyncio.Task[Any] | None = None
+        self._probe_task: asyncio.Task[Any] | None = None
         self._bindings: list[SandboxBinding] = []
+        self._total_deadline: float | None = None
+        self._work_deadline: float | None = None
         self.failure_reason: str | None = None
         self.cleanup_uncertain = False
 
@@ -187,6 +190,55 @@ class SpendGuard:
 
     def attach_job_task(self, task: asyncio.Task[Any] | None) -> None:
         self._job_task = task
+
+    def start_total_deadline(self, seconds: int) -> None:
+        if type(seconds) is not int or seconds <= self.thresholds.cleanup_timeout:
+            raise ValueError("total time limit must exceed the cleanup timeout")
+        if self._total_deadline is not None:
+            raise ValueError("total deadline is already set")
+        self._total_deadline = self._clock() + seconds
+        self._work_deadline = self._total_deadline - self.thresholds.cleanup_timeout
+
+    async def enforce_total_deadline(self) -> None:
+        if self._work_deadline is None:
+            return
+        await asyncio.sleep(max(0.0, self._work_deadline - self._clock()))
+        if self.failure_reason is None:
+            await self.fail_closed("total run deadline exceeded", cancel_probe=True)
+
+    def sandbox_lifetime_timeout(self, current: int | None) -> int | None:
+        if self._total_deadline is None:
+            return current
+        remaining = math.floor(self._total_deadline - self._clock())
+        if remaining < 1:
+            raise GuardFailure("total deadline leaves no whole second for sandbox lifetime")
+        if current is None:
+            return remaining
+        if type(current) is not int or current < 1:
+            raise GuardFailure("Modal sandbox lifetime is invalid")
+        return min(current, remaining)
+
+    async def bounded_exec_timeout(self, current: int | None) -> int | None:
+        if self._work_deadline is None:
+            return current
+        remaining = math.floor(self._work_deadline - self._clock())
+        if remaining < 1:
+            await self.fail_closed("total run deadline exceeded")
+            raise self._failure()
+        if current is None:
+            return remaining
+        return min(current, remaining)
+
+    def _cleanup_wait_seconds(self) -> float:
+        if self._total_deadline is None:
+            return self.thresholds.cleanup_timeout
+        return min(self.thresholds.cleanup_timeout, self._total_deadline - self._clock())
+
+    def _mark_cleanup_uncertain(self, reason: str) -> None:
+        for binding in self._bindings:
+            if binding.cleanup_state not in {"complete", "uncertain"}:
+                binding.cleanup_state = "uncertain"
+        self._latch(reason, cleanup_uncertain=True)
 
     def _latch(self, reason: str, *, cleanup_uncertain: bool = False) -> None:
         if self.failure_reason is None:
@@ -202,22 +254,29 @@ class SpendGuard:
 
     async def _probe(self, name: str, probe: Probe) -> object:
         task = asyncio.create_task(probe())
+        self._probe_task = task
         try:
-            done, _ = await asyncio.wait(
-                {task}, timeout=self.thresholds.probe_timeout
-            )
-        except asyncio.CancelledError:
-            task.cancel()
-            task.add_done_callback(_consume_task_exception)
-            raise
-        if not done:
-            task.cancel()
-            task.add_done_callback(_consume_task_exception)
-            raise GuardFailure(f"{name} probe failed") from None
-        try:
-            return task.result()
-        except Exception:  # noqa: BLE001
-            raise GuardFailure(f"{name} probe failed") from None
+            try:
+                done, _ = await asyncio.wait(
+                    {task}, timeout=self.thresholds.probe_timeout
+                )
+            except asyncio.CancelledError:
+                task.cancel()
+                task.add_done_callback(_consume_task_exception)
+                raise
+            if not done:
+                task.cancel()
+                task.add_done_callback(_consume_task_exception)
+                raise GuardFailure(f"{name} probe failed") from None
+            try:
+                return task.result()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                raise GuardFailure(f"{name} probe failed") from None
+        finally:
+            if self._probe_task is task:
+                self._probe_task = None
 
     async def _read_openrouter(self) -> OpenRouterSnapshot:
         value = await self._probe("OpenRouter", self.openrouter_probe)
@@ -295,6 +354,9 @@ class SpendGuard:
             await self.fail_closed("monitor failed")
 
     async def ensure_healthy(self) -> None:
+        if self._work_deadline is not None and self._clock() >= self._work_deadline:
+            await self.fail_closed("total run deadline exceeded", cancel_probe=True)
+            raise self._failure()
         if self.failure_reason is not None:
             raise self._failure()
         task = self._monitor_task
@@ -313,8 +375,13 @@ class SpendGuard:
         *,
         cleanup_uncertain: bool = False,
         cancel_job: bool = True,
+        cancel_probe: bool = False,
     ) -> None:
         self._latch(reason, cleanup_uncertain=cleanup_uncertain)
+        probe = self._probe_task
+        if cancel_probe and probe is not None and not probe.done():
+            probe.cancel()
+            probe.add_done_callback(_consume_task_exception)
         task = self._job_task
         if cancel_job and task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
@@ -369,11 +436,15 @@ class SpendGuard:
             return
         binding.cleanup_state = "in_progress"
         try:
+            timeout = self._cleanup_wait_seconds()
+            if timeout <= 0:
+                self._mark_cleanup_uncertain("sandbox cleanup exceeded total deadline")
+                return
             terminate = binding.sandbox.terminate
             termination = asyncio.create_task(terminate.aio(wait=True))
             try:
                 done, _ = await asyncio.wait(
-                    {termination}, timeout=self.thresholds.cleanup_timeout
+                    {termination}, timeout=timeout
                 )
             except asyncio.CancelledError:
                 termination.cancel()
@@ -382,7 +453,11 @@ class SpendGuard:
             if not done:
                 termination.cancel()
                 termination.add_done_callback(_consume_task_exception)
-                raise TimeoutError
+                if self._total_deadline is None:
+                    raise TimeoutError
+                binding.cleanup_state = "uncertain"
+                self._latch("sandbox cleanup timed out", cleanup_uncertain=True)
+                return
             termination.result()
         except asyncio.CancelledError:
             binding.cleanup_state = "uncertain"
@@ -401,13 +476,36 @@ class SpendGuard:
         if binding is None:
             self._latch("sandbox is not bound", cleanup_uncertain=True)
             return
-        async with self._cleanup_lock:
+        if not await self._acquire_cleanup_lock():
+            return
+        try:
             await self._cleanup_binding_locked(binding)
+        finally:
+            self._cleanup_lock.release()
 
     async def cleanup_bound(self) -> None:
-        async with self._cleanup_lock:
+        if not await self._acquire_cleanup_lock():
+            return
+        try:
             for binding in self._bindings:
                 await self._cleanup_binding_locked(binding)
+        finally:
+            self._cleanup_lock.release()
+
+    async def _acquire_cleanup_lock(self) -> bool:
+        if self._total_deadline is None:
+            await self._cleanup_lock.acquire()
+            return True
+        timeout = self._cleanup_wait_seconds()
+        if timeout <= 0:
+            self._mark_cleanup_uncertain("sandbox cleanup exceeded total deadline")
+            return False
+        try:
+            await asyncio.wait_for(self._cleanup_lock.acquire(), timeout=timeout)
+        except TimeoutError:
+            self._mark_cleanup_uncertain("sandbox cleanup timed out")
+            return False
+        return True
 
     async def authorize_exec(self, environment: object) -> None:
         await self.ensure_healthy()
@@ -447,14 +545,36 @@ class SpendGuard:
         identity: _EnvironmentIdentity,
         create_task: asyncio.Task[object],
     ) -> None:
-        try:
-            sandbox = await asyncio.shield(create_task)
-        except asyncio.CancelledError:
-            self._latch("sandbox creation result unresolved", cleanup_uncertain=True)
-            raise
-        except Exception:  # noqa: BLE001
-            self._latch("sandbox creation failed", cleanup_uncertain=True)
-            return
+        if self._total_deadline is None:
+            try:
+                sandbox = await asyncio.shield(create_task)
+            except asyncio.CancelledError:
+                self._latch("sandbox creation result unresolved", cleanup_uncertain=True)
+                raise
+            except Exception:  # noqa: BLE001
+                self._latch("sandbox creation failed", cleanup_uncertain=True)
+                return
+        else:
+            timeout = self._cleanup_wait_seconds()
+            if timeout <= 0:
+                create_task.cancel()
+                create_task.add_done_callback(_consume_task_exception)
+                self._latch("sandbox creation result unresolved", cleanup_uncertain=True)
+                return
+            done, _ = await asyncio.wait({create_task}, timeout=timeout)
+            if not done:
+                create_task.cancel()
+                create_task.add_done_callback(_consume_task_exception)
+                self._latch("sandbox creation result unresolved", cleanup_uncertain=True)
+                return
+            try:
+                sandbox = create_task.result()
+            except asyncio.CancelledError:
+                self._latch("sandbox creation result unresolved", cleanup_uncertain=True)
+                return
+            except Exception:  # noqa: BLE001
+                self._latch("sandbox creation failed", cleanup_uncertain=True)
+                return
         try:
             self.bind_sandbox(environment, sandbox, identity)
         except GuardFailure:
@@ -465,12 +585,25 @@ class SpendGuard:
         self._closing = True
         task = self._monitor_task
         if task is not None and not task.done():
-            if self.failure_reason is None:
+            if self.failure_reason is None or self.failure_reason == "total run deadline exceeded":
                 task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if self._total_deadline is None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            else:
+                remaining = max(0.0, self._total_deadline - self._clock())
+                done, _ = await asyncio.wait({task}, timeout=remaining)
+                if not done:
+                    task.cancel()
+                    task.add_done_callback(_consume_task_exception)
+                    self._latch("monitor cleanup exceeded total deadline", cleanup_uncertain=True)
+                else:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        pass
         await self.cleanup_bound()
         if self.failure_reason is not None or self.cleanup_uncertain:
             raise self._failure()
@@ -504,6 +637,15 @@ def install_modal_hooks(
             await guard.fail_closed("sandbox environment identity unavailable")
             raise guard._failure() from None
         await guard.ensure_healthy()
+        timeout_attribute = hasattr(self, "_sandbox_timeout")
+        current_timeout = getattr(self, "_sandbox_timeout", None)
+        try:
+            sandbox_timeout = guard.sandbox_lifetime_timeout(current_timeout)
+        except GuardFailure as failure:
+            await guard.fail_closed(failure.reason, cancel_probe=True)
+            raise guard._failure() from None
+        if guard._total_deadline is not None:
+            self._sandbox_timeout = sandbox_timeout
         creation = asyncio.create_task(
             raw_create(
                 self,
@@ -523,6 +665,12 @@ def install_modal_hooks(
         except Exception:
             guard._latch("sandbox creation failed", cleanup_uncertain=True)
             raise
+        finally:
+            if guard._total_deadline is not None:
+                if timeout_attribute:
+                    self._sandbox_timeout = current_timeout
+                else:
+                    delattr(self, "_sandbox_timeout")
         binding = guard.bind_sandbox(self, sandbox, identity)
         if guard.failure_reason is not None:
             await guard.cleanup_bound()
@@ -547,6 +695,7 @@ def install_modal_hooks(
         login: bool = False,
     ) -> object:
         await guard.authorize_exec(self)
+        timeout_sec = await guard.bounded_exec_timeout(timeout_sec)
         return await original_exec(
             self,
             command,

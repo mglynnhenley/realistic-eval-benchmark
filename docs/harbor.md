@@ -241,6 +241,69 @@ Scout/claim grading, and it preserves the configured Harbor verifier. The
 existing installed-agent smoke remains separate and can check startup using an
 exact wheel; save/verify perform only the public descriptor schema check above.
 
+For independent per-run native inputs, use a fresh private prepared directory.
+The configuration is validated before output preparation or the OpenRouter
+probe. It supports one Modal target/attempt with concurrency 1; target sweeps,
+resume/inbox inputs, unsupported providers, or agent-plus-world caps above the
+runtime trial delta are rejected. Target, simulator, and grader model IDs may
+differ, but every active role must use `openrouter/`.
+
+Example `native-run.json` (replace the wheel path and digest with the approved
+staged wheel):
+
+```json
+{
+  "execution": "modal",
+  "scenario": "train_refund_late",
+  "agent_wheel": "/path/to/approved-agent.whl",
+  "agent_wheel_sha256": "<64-hex-sha256>",
+  "model": "openrouter/target-model",
+  "simulator_model": "openrouter/simulator-model",
+  "grader_model": "openrouter/grader-model",
+  "data_mode": "fixture",
+  "research_mode": "saved",
+  "sim_weeks": 6,
+  "max_turns": 1000,
+  "token_budget": 40000000,
+  "time_limit": 36000,
+  "total_time_limit_seconds": 900,
+  "cost_limit": 10,
+  "world_cost_limit": 10,
+  "trials": 1,
+  "concurrency": 1
+}
+```
+
+```bash
+scripts/harbor python -m scripts.laura_trial run \
+  --run-config .context/laura/native-run.json \
+  --prepared-dir .context/laura/prepared-001 \
+  --job-name laura-native-fresh-001 \
+  --openrouter-key-ceiling 50 \
+  --openrouter-trial-delta 25 \
+  --cleanup-timeout 10
+```
+
+The native command prepares and saves the exact fresh bundle through the same
+public-only wheel/scenario validation gate, then runs it without rewriting an
+arbitrary saved JobConfig. Its `run.json` and the job result directory's
+`effective_parameters.json` record resolved roles, simulated weeks, turns,
+agent/world caps, worker limit, total cap, guard delta/key ceiling, and cleanup
+timeout. Here the 900-second total includes guard preflight, Harbor job and
+environment creation, execution and verifier; the worker limit is clamped to
+900 seconds. The 10-second cleanup reservation is inside that total, so work
+stops by second 890 and cleanup/reconciliation must finish by second 900.
+Modal sandbox lifetime is clamped to the remaining total lifetime and SDK execs
+to the work deadline. The provider timeout is relative to sandbox creation;
+host/provider/network failures or delayed creation can still leave cleanup
+uncertain. This is not a perfect distributed shutdown or invoice guarantee.
+
+Saved manifests do not persist a per-run total deadline. Pass
+`--total-time-limit-seconds` on every saved-manifest launch; doing so does not
+change the attested setup identity. For `--run-config`, the config is the source
+of truth and any explicit CLI value must match it. Omitted totals preserve the
+existing worker and Harbor timeout behavior.
+
 #### Optional batch spend planning
 
 Set `trial_spend_cap_usd` and `key_spend_cap_usd` together, and explicitly set
