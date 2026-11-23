@@ -151,6 +151,8 @@ def test_scope_mismatch_and_corrupt_history_fail_closed(tmp_path):
         ("reserved", "1.1", None, None, "exceeds its configured cap"),
         ([], "0.1", None, None, "attempt status"),
         ("settled", "0.1", "0.1", 7, "settlement provenance"),
+        ("settled", "0.1", "0.2", "usage", "exceeds its reservation"),
+        ("settlement_pending", "0.1", "0.2", "usage", "exceeds its reservation"),
     ],
 )
 def test_malformed_historical_ledger_values_fail_closed(tmp_path, status, reserved, charged, provenance, error):

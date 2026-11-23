@@ -168,7 +168,9 @@ class SharedRoleSpendLedger:
             if not isinstance(status, str) or status not in {"reserved", "unknown", "settlement_pending", "settled"}:
                 raise SharedRoleSpendLedgerError("Invalid shared-role attempt status")
             if status in {"settlement_pending", "settled"} or (status == "unknown" and item["charged_usd"] is not None):
-                _serialized_amount(item["charged_usd"], "charge")
+                charged = _serialized_amount(item["charged_usd"], "charge")
+                if status in {"settlement_pending", "settled"} and charged > reserved:
+                    raise SharedRoleSpendLedgerError("Shared-role settled charge exceeds its reservation")
                 if not isinstance(item["provenance"], str) or not item["provenance"].strip():
                     raise SharedRoleSpendLedgerError("Invalid shared-role settlement provenance")
             elif item["charged_usd"] is not None or item["provenance"] is not None:
