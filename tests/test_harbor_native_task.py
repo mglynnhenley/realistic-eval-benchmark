@@ -767,6 +767,18 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_whee
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
 
 
+def test_split_batch_rejects_bills_scenario_before_preparation(approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    with pytest.raises(ValueError, match="split mode supports only train_refund_late"):
+        batch.NativeBatchConfig(
+            scenario="bills_price_rise", execution="modal", data_mode="fixture", research_mode="saved",
+            model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+            cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+            openrouter_key_mode="split", agent_max_output_tokens=2048,
+            agent_wheel=wheel, agent_wheel_sha256=digest,
+        )
+
+
 def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, approved_wheel):
     path, digest = approved_wheel
     config = batch.NativeBatchConfig(

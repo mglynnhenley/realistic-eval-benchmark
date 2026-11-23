@@ -408,7 +408,8 @@ Split mode is limited to one Modal target attempt, concurrency one, and zero ret
 target and world allowances independently before each physical model request: the target cap is at most
 `$50`, while simulator and grader share a world cap of at most `$100`. Split configs must set a positive
 integer `agent_max_output_tokens`; there is no default because the request bound depends on this value.
-Combined planning-cap fields are not supported in split mode.
+Combined planning-cap fields are not supported in split mode. Split batches are currently limited to
+`train_refund_late`; other scenarios remain available in shared mode.
 
 Example native JSON config; replace the approved wheel path and digest with the current public wheel:
 

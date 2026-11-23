@@ -42,6 +42,8 @@ class NativeBatchConfig(RunConfig):
         if (self.trial_spend_cap_usd is None) != (self.key_spend_cap_usd is None):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
         if self.openrouter_key_mode == "split":
+            if self.scenario != "train_refund_late":
+                raise ValueError("split mode supports only train_refund_late")
             if self.execution != "modal":
                 raise ValueError("split mode requires Modal execution")
             if self.agent_max_output_tokens is None:
