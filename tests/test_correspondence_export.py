@@ -363,6 +363,36 @@ def test_web_action_decodes_text_but_preserves_raw_and_nontext_payloads():
     assert f"```\n{markup}\n```" in render_markdown(export)
 
 
+@pytest.mark.parametrize("status", ["silent", "failed", "pending"])
+def test_outbound_submission_retains_matching_interaction_without_reply(status):
+    interaction_id = "silent-submit:company:contact"
+    interaction = InteractionRecord(
+        id=interaction_id,
+        time="2026-10-30T12:00:00Z",
+        org="company",
+        event=CompanyEvent(kind="contact", incoming="Validated saved contact event", mode="email"),
+        status=status,
+        action=(CompanyAction(decision="silent", reply=False, reply_after_hours=0, body="")
+                if status == "silent" else None),
+        error="Saved failure" if status == "failed" else None,
+    )
+    store = {WORLD_KEY: {
+        "interceptions": [_interception("silent-submit", "email", "2026-10-30T12:00:00Z",
+                                         {"body": "Submitted without a response."})],
+        "interactions": [interaction],
+    }}
+
+    export = build_correspondence(store)
+    outbound = next(row for row in export["records"] if row.get("interception_id") == "silent-submit")
+    saved_record = next(source["record"] for source in outbound["source_records"]
+                        if source["record"].get("id") == interaction_id)
+
+    assert outbound["interaction_ids"] == [interaction_id]
+    assert interaction_id in outbound["reference_ids"]
+    assert saved_record == interaction.model_dump(mode="json")
+    assert not any(row["direction"] == "inbound" for row in export["records"])
+
+
 def test_saved_world_precedes_conflicting_events_and_unmatched_reply_reference_is_not_linked():
     store = _full_store()
     changed = _interception(

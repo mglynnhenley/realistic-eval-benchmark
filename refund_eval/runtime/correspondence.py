@@ -145,6 +145,7 @@ class _Correspondence:
         self._final_overlay: set[str] = set()
         self._final_opened: set[str] = set()
         self._opened_events: dict[str, list[Mapping[str, Any]]] = {}
+        self._interaction_sources: list[dict[str, Any]] = []
         self._omitted_channels: set[str] = set()
 
     def _new_row(self, row_id: str, direction: str, channel: str) -> dict[str, Any]:
@@ -334,6 +335,12 @@ class _Correspondence:
         effects = [effect for effect in effects if effect is not None]
         event_refs = [_event_reference(event)] if event else []
         interaction_source = _plain(interaction)
+        self._interaction_sources.append({
+            "id": interaction_id,
+            "record": interaction_source,
+            "source": source,
+            "event_refs": event_refs,
+        })
         for effect in effects:
             effect_id = effect.get("id")
             if not _known(effect_id):
@@ -398,7 +405,7 @@ class _Correspondence:
                           source: str, event_refs: list[dict[str, Any]]) -> None:
         if interaction_id not in row["interaction_ids"]:
             row["interaction_ids"].append(interaction_id)
-        self._add_source(row, f"{source}.interaction_response", source_record)
+        self._add_source(row, f"{source}.interaction", source_record)
         for reference in event_refs:
             if reference and reference not in row["lifecycle_events"]:
                 row["lifecycle_events"].append(reference)
@@ -492,6 +499,15 @@ class _Correspondence:
     def _link_interactions_to_submissions(self) -> None:
         interceptions = [row for row in self.rows.values() if row["direction"] == "outbound"]
         interactions = [row for row in self.rows.values() if row.get("interaction_ids")]
+        for outbound in interceptions:
+            interception_id = outbound.get("interception_id")
+            if not _known(interception_id):
+                continue
+            prefix = f"{interception_id}:"
+            for interaction in self._interaction_sources:
+                if interaction["id"].startswith(prefix):
+                    self._link_interaction(outbound, interaction["id"], interaction["record"],
+                                           interaction["source"], interaction["event_refs"])
         for outbound in interceptions:
             interception_id = outbound.get("interception_id")
             if not _known(interception_id):
