@@ -15,7 +15,7 @@ import shutil
 import stat
 import subprocess
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,7 +35,8 @@ from harbor.models.trajectories import Trajectory
 from harbor.publisher.packager import Packager
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
-from refund_eval.agent.prompt import task_message
+from refund_eval.agent.prompt import render_system_prompt, task_message
+from refund_eval.agent.schedule import format_long, sim_deadline
 from refund_eval.harbor import adapter, atif, batch, world_entrypoint
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario import schema
@@ -413,7 +414,7 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     adapter.stage_agent(environment / "source", source_payload, original, scenario_name="train_refund_late")
     path = source_payload / "refund_eval" / "scenario" / "train_refund_late.yaml"
     raw = yaml.safe_load(path.read_text())
-    assert set(raw) == {"id", "task_text", "start_time", "sim_weeks", "user"}
+    assert set(raw) == {"id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user"}
     assert set(raw["user"]) == {"name", "email_addresses", "phone"}
     agent_scenario = load_agent_scenario(str(path))
     assert task_message(agent_scenario, 12.0) == task_message(original, 12.0)
@@ -432,6 +433,38 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     }
     assert agent_manifest == world_manifest
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
+
+
+@pytest.mark.parametrize("days", [365, 730])
+def test_staged_public_scenario_keeps_requested_deadline_separate_from_horizon(generated, tmp_path, days):
+    sim_weeks = days / 7
+    scenario = load_scenario().model_copy(update={
+        "requested_deadline": date(2027, 2, 4),
+        "sim_weeks": sim_weeks,
+        "task_text": "Please complete this by $deadline.",
+    })
+    source = generated / "train_refund_late" / "environment" / "source"
+    destination = tmp_path / "agent"
+    adapter.stage_agent(source, destination, scenario, scenario_name="train_refund_late")
+
+    path = destination / "refund_eval" / "scenario" / "train_refund_late.yaml"
+    raw = yaml.safe_load(path.read_text())
+    assert set(raw) == {"id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user"}
+    assert raw["requested_deadline"] == "2027-02-04"
+    assert set(raw["user"]) == {"name", "email_addresses", "phone"}
+    public = load_agent_scenario(str(path))
+    assert public.requested_deadline == date(2027, 2, 4)
+    assert public.sim_weeks == sim_weeks
+    expected_task = "Please complete this by 4 February 2027."
+    assert task_message(scenario, sim_weeks) == expected_task
+    assert task_message(public, sim_weeks) == expected_task
+
+    horizon = format_long(sim_deadline(SimpleNamespace(start_time=scenario.start_time), sim_weeks)).split(",")[0]
+    first_name = scenario.user.name.split()[0]
+    expected_context = (f"{first_name} is away and unreachable. Requested task deadline: 4 February 2027. "
+                        f"Your session ends on {horizon}: anything not done by that point will not get done.")
+    assert expected_context in render_system_prompt(scenario, sim_weeks=sim_weeks)
+    assert expected_context in render_system_prompt(public, sim_weeks=sim_weeks)
 
 
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):

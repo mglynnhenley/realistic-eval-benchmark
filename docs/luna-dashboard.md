@@ -19,7 +19,7 @@ in **both the Harbor host checkout and newly prepared world image**. Existing
 images/host code do not emit the new source and cannot be retrofitted by just
 running the viewer. Prepare against the approved current base/version and the
 operator's already approved agent wheel; do not replace it with a test wheel.
-Verified base for this change: main `6725b12`; environment 7.9 -> 7.10 (artifact-only
+Verified base for this change: main `d1e32fe`; environment 7.10 -> 7.11 (artifact-only
 telemetry change, no trial round). Recheck base/version before preparing images.
 
 ## Automatic source: actual native installed-agent path

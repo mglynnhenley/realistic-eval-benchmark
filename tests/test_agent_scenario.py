@@ -65,7 +65,9 @@ def test_agent_scenario_phone_defaults_only_to_none(tmp_path):
     scenario = load_agent_scenario(str(_write_scenario(tmp_path / "agent.yaml", data)))
 
     assert scenario.user.phone is None
-    assert set(scenario.model_dump(mode="json")) == {"id", "task_text", "start_time", "sim_weeks", "user"}
+    assert set(scenario.model_dump(mode="json")) == {
+        "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+    }
     assert set(scenario.model_dump(mode="json")["user"]) == {"name", "email_addresses", "phone"}
 
 
@@ -75,6 +77,7 @@ def test_agent_prompt_matches_full_scenario_prompt():
         id=full.id,
         task_text=full.task_text,
         start_time=full.start_time,
+        requested_deadline=full.requested_deadline,
         sim_weeks=full.sim_weeks,
         user={
             "name": full.user.name,

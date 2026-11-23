@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.10 — 2026-11-23
+## 7.11 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: cc49349c3ebbfbadff0ac759e56102c090866dc37a89d05a4827060165f65322
+- Fingerprint: 3976af9bdc147319bafb3ff304aa977f1cc9353dab18c6c71586141c6b2cf9ef
 - Trial round: none; offline validation only, no paid calls.
 - Changes: Write scalar-only native world telemetry for the host-side installed-agent dashboard observer, without adding telemetry to agent context, tools or the public wheel (MAT-168).
+
+## 7.10 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 407f72faf66045b3d36f61accf141b960c87ec67528b68ce730f9b8f14fe566a
+- Trial round: none; offline validation only.
+- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon and frozen claim evidence.
 
 ## 7.9 — 2026-11-20
 - Kind: trivial batch

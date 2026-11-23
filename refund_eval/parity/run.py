@@ -108,6 +108,7 @@ def inprocess_task_args(script: Script, world_url: str, out: Path) -> dict:
         "id": True,
         "task_text": True,
         "start_time": True,
+        "requested_deadline": True,
         "sim_weeks": True,
         "user": {"name", "email_addresses", "phone"},
     }))

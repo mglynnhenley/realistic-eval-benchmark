@@ -76,7 +76,7 @@ Pass task settings as `-T name=value`:
 | `company_simulator` | none | Override the simulator implementation for every company, for example `concordia`. Personal contacts are unchanged. |
 | `research_mode` | `auto` | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial where supported. |
 | `max_turns` | `1000` | Maximum target model generations. |
-| `sim_weeks` | `6` | Maximum simulated duration. |
+| `sim_weeks` | `6` | Simulated session horizon in weeks; any positive finite duration. |
 | `cost_limit` | required for default late refund; `1` for bills | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
 | `token_budget` | none; `40000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
@@ -86,6 +86,23 @@ Pass task settings as `-T name=value`:
 | `resume_log` | none | Continue a `.eval` log or dashboard `snapshot.json` with the same target model. |
 | `browser_runtime` | `docker` | Local browser runtime; Harbor uses its packaged `subprocess`. |
 | `artifact_dir` | `.context/artifacts` | Browser audit artifact root. |
+
+The scenario's optional `requested_deadline` is a separate user-facing date; it
+does not set the session horizon. For example, a one-year horizon can be configured
+without moving the requested task deadline:
+
+```yaml
+requested_deadline: 2027-02-04
+sim_weeks: 52.142857142857146  # 365 days
+```
+
+Only a `$deadline` placeholder in `task_text` uses `requested_deadline`; literal
+dates in the task text are not rewritten.
+
+The CLI `--sim-weeks` option and task setting `-T sim_weeks=...` continue to
+override the scenario horizon without changing `requested_deadline`. Simulated
+time uses Python `datetime`; an extreme duration whose resulting date is outside
+its representable range cannot be calculated.
 
 Inspect also accepts `message_limit`, `token_limit`, `time_limit` and `working_limit`. Use `--max-samples N` to limit concurrent CLI trials.
 
