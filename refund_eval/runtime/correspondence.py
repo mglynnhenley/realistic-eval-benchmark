@@ -112,6 +112,7 @@ class _Correspondence:
         self._final_pending: set[str] = set()
         self._final_overlay: set[str] = set()
         self._final_opened: set[str] = set()
+        self._opened_events: dict[str, list[Mapping[str, Any]]] = {}
         self._omitted_channels: set[str] = set()
 
     def _new_row(self, row_id: str, direction: str, channel: str) -> dict[str, Any]:
@@ -182,6 +183,14 @@ class _Correspondence:
             self._queued.add(str(row["message_id"]))
         if event.get("kind") in {"mail_opened", "mail_opened_changed"} and row.get("message_id") is not None:
             self._read.add(str(row["message_id"]))
+
+    def _record_opened(self, message_id: Any, event: Mapping[str, Any] | None = None) -> None:
+        if not _known(message_id):
+            return
+        marker_id = str(message_id)
+        self._read.add(marker_id)
+        if event is not None:
+            self._opened_events.setdefault(marker_id, []).append(event)
 
     def add_email(self, email_value: Any, source: str, *, scheduled: Any = None,
                   event: Mapping[str, Any] | None = None, index: int = 0) -> str | None:
@@ -393,16 +402,22 @@ class _Correspondence:
         if kind in {"mail_delivered", "inbox_changed"}:
             self.add_email(payload.get("email"), f"event.{kind}", event=event, index=index)
             return
-        if kind in {"mail_dequeued", "mail_opened", "mail_opened_changed"}:
+        if kind == "mail_opened":
+            ids = payload.get("ids") if isinstance(payload.get("ids"), list) else [payload.get("id")]
+            for message_id in ids:
+                self._record_opened(message_id, event)
+            return
+        if kind in {"mail_dequeued", "mail_opened_changed"}:
             ids = payload.get("ids") if isinstance(payload.get("ids"), list) else [payload.get("id")]
             for message_id in ids:
                 if not _known(message_id):
                     continue
+                if kind == "mail_opened_changed":
+                    self._record_opened(message_id, event)
+                    continue
                 row = self._new_row(f"inbound:{message_id}", "inbound", "email")
                 row["message_id"] = message_id
                 self._add_event_ref(row, event)
-                if kind in {"mail_opened", "mail_opened_changed"}:
-                    self._read.add(str(message_id))
             return
         if kind in {"agent_write", "agent_write_result"}:
             self.add_interception(payload.get("interception"), f"event.{kind}", event=event, index=index)
@@ -431,11 +446,7 @@ class _Correspondence:
                                          index=item_index)
             elif path == ["opened_mail"]:
                 for message_id in _sequence(value):
-                    if _known(message_id):
-                        self._read.add(str(message_id))
-                        row = self._new_row(f"inbound:{message_id}", "inbound", "email")
-                        row["message_id"] = message_id
-                        self._add_event_ref(row, event)
+                    self._record_opened(message_id, event)
 
     def _link_interactions_to_submissions(self) -> None:
         interceptions = [row for row in self.rows.values() if row["direction"] == "outbound"]
@@ -475,6 +486,26 @@ class _Correspondence:
             }
             self._final_opened = {str(item) for item in _sequence(world_for_membership.get("opened_mail"))
                                   if _known(item)}
+        marker_ids = self._read | self._final_opened
+        for marker_id in marker_ids:
+            matching_rows = [row for row in self.rows.values()
+                             if (_known(row.get("message_id"))
+                                 and str(row.get("message_id")) == marker_id)
+                             or (row["direction"] == "outbound"
+                                 and _known(row.get("interception_id"))
+                                 and str(row.get("interception_id")) == marker_id)]
+            if not matching_rows:
+                marker = self._new_row(f"unknown:marker:{marker_id}", "unknown", "unknown")
+                marker["message_id"] = marker_id
+                matching_rows = [marker]
+            for row in matching_rows:
+                row["read_marker"] = "read"
+                for event in self._opened_events.get(marker_id, []):
+                    reference = _event_reference(event)
+                    if reference and reference not in row["lifecycle_events"]:
+                        row["lifecycle_events"].append(reference)
+                    if row["simulated_time"] is None and event.get("sim_time") is not None:
+                        self._set_time(row, event.get("sim_time"), "event.sim_time")
         self._link_interactions_to_submissions()
         rows = list(self.rows.values())
         thread_ids: dict[str, list[str]] = {}
@@ -527,6 +558,11 @@ class _Correspondence:
                         row["read_marker"] = "not_recorded"
                     if any(event.get("kind") == "mail_delivered" for event in row["lifecycle_events"]):
                         row["delivery_status"] = "delivered"
+            elif row["direction"] == "outbound":
+                if ((_known(row.get("message_id")) and str(row.get("message_id")) in marker_ids)
+                        or (_known(row.get("interception_id"))
+                            and str(row.get("interception_id")) in marker_ids)):
+                    row["read_marker"] = "read"
             row["reference_ids"] = list(dict.fromkeys(
                 str(value) for value in (row.get("message_id"), row.get("thread_id"), row.get("in_reply_to"),
                                           row.get("interception_id"), *row.get("interaction_ids", []),

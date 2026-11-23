@@ -167,6 +167,8 @@ def _full_store():
         {"seq": 21, "sim_time": "2026-10-30T12:00:00Z", "kind": "agent_write", "payload": {"interception": out_blocked}},
         {"seq": 22, "sim_time": "2026-10-30T13:00:00Z", "kind": "agent_write", "payload": {"interception": out_failed}},
         {"seq": 23, "sim_time": "2026-10-30T13:30:00Z", "kind": "agent_write", "payload": {"interception": out_form}},
+        {"seq": 24, "sim_time": "2026-10-31T00:33:00Z", "kind": "mail_opened",
+         "payload": {"id": "outgoing-message"}},
     ]
     world = {
         "overlay_inbox": [seeded, unmatched, unknown_sender, delivered,
@@ -261,6 +263,8 @@ def test_builder_preserves_both_directions_and_delivery_evidence_without_mutatio
     assert outgoing["delivery_status"] == "recipient_delivery_unconfirmed"
     assert outgoing["response_summary"] == "Message sent."
     assert outgoing["raw_payload"]["body"] == "Complete outbound email body."
+    assert outgoing["read_marker"] == "read"
+    assert "inbound:outgoing-message" not in rows
     assert outgoing["thread_id"] == reply["thread_id"]
     assert reply["id"] in outgoing["linked_record_ids"]
     assert len(reply["source_records"]) >= 4
@@ -311,6 +315,9 @@ def test_event_only_store_keeps_lifecycle_evidence_and_marks_completeness_unavai
     assert [event["kind"] for event in row["lifecycle_events"]] == ["mail_delivered", "mail_opened"]
     marker = next(row for row in export["records"] if row.get("message_id") == "marker-only")
     assert marker["body"] is None and marker["read_marker"] == "read"
+    assert marker["direction"] == "unknown"
+    assert marker["id"] == "unknown:marker:marker-only"
+    assert "inbound:marker-only" not in {row["id"] for row in export["records"]}
 
 
 def test_saved_world_precedes_conflicting_events_and_unmatched_reply_reference_is_not_linked():
