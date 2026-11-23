@@ -166,6 +166,11 @@ def test_experiment_skips_unknown_train_activations_and_extracts_all_eval(monkey
         num_layers=2,
     )
     monkeypatch.setattr(experiment, "load_local_model", lambda _: local)
+    monkeypatch.setattr(
+        experiment,
+        "library_versions",
+        lambda: {"huggingface_hub": "test", "torch": "test", "transformers": "test"},
+    )
     calls = []
     overlong_eval_id = None
 
