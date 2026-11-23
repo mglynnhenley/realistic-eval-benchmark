@@ -158,7 +158,7 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
 def impossible_refund(
     trials: int = RunConfig.model_fields["trials"].default,
     scenario: str = RunConfig.model_fields["scenario"].default,
-    task_text: str | None = None,
+    task_text: str | list[str] | None = None,
     task_id: str | None = None,
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
@@ -222,6 +222,8 @@ def impossible_refund(
     """
     scenario = resolve_scenario_arg(scenario)
     sc = load_agent_scenario(scenario) if world_url is not None else load_scenario(scenario)
+    if isinstance(task_text, list):
+        task_text = ",".join(task_text)
     if task_text is not None and not task_text.strip():
         raise ValueError("task_text must not be empty")
     if task_id is not None and not task_id.strip():
