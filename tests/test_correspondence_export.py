@@ -363,6 +363,22 @@ def test_web_action_decodes_text_but_preserves_raw_and_nontext_payloads():
     assert f"```\n{markup}\n```" in render_markdown(export)
 
 
+def test_markdown_escapes_untrusted_body_encoding_and_preserves_raw_header():
+    content_type = "text/plain; charset=utf-8`\n## Injected heading\n- forged metadata"
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("injected-charset", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": base64.b64encode(b"Saved body").decode(),
+            "headers": {"content-type": content_type},
+        }),
+    ]}})
+    row = next(row for row in export["records"] if row.get("interception_id") == "injected-charset")
+    markdown = render_markdown(export)
+
+    assert row["body_encoding"] == "utf-8`\n## Injected heading\n- forged metadata"
+    assert row["raw_payload"]["headers"]["content-type"] == content_type
+    assert "\n## Injected heading\n" not in markdown
+
+
 @pytest.mark.parametrize("status", ["silent", "failed", "pending"])
 def test_outbound_submission_retains_matching_interaction_without_reply(status):
     interaction_id = "silent-submit:company:contact"

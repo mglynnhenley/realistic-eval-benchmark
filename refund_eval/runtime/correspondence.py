@@ -734,7 +734,7 @@ def render_markdown(export: Mapping[str, Any]) -> str:
         "",
         "This file preserves identities and correspondence content. It is not a sharing copy.",
         "",
-        f"- Completeness: **{coverage.get('completeness', 'unavailable')}**",
+        f"- Completeness: **{_inline(coverage.get('completeness', 'unavailable'))}**",
         f"- Saved world available: **{str(bool(coverage.get('saved_world_available'))).lower()}**",
         f"- World events available: **{str(bool(coverage.get('world_events_available'))).lower()}**",
         f"- Identities hidden: **{str(bool(coverage.get('identities_hidden'))).lower()}**",
@@ -746,7 +746,8 @@ def render_markdown(export: Mapping[str, Any]) -> str:
         row = _object(row_value) or {}
         direction = str(row.get("direction") or "unknown").upper()
         channel = str(row.get("channel") or "unknown")
-        lines.extend([f"## {number}. {direction} · {channel}", "", f"- Record ID: {_inline(row.get('id', 'unknown'))}"])
+        lines.extend([f"## {number}. {_inline(direction)} · {_inline(channel)}", "",
+                      f"- Record ID: {_inline(row.get('id', 'unknown'))}"])
         time_value = row.get("simulated_time")
         lines.append(f"- Simulated time (UTC): {_inline(time_value)}" if time_value else "- Simulated time: **Unknown in saved source**")
         lines.append(f"- Sender identity: {row.get('sender_identity_status', 'unknown')} — {_inline(row.get('sender'))}"
@@ -761,11 +762,11 @@ def render_markdown(export: Mapping[str, Any]) -> str:
         if reference_ids:
             lines.append("- Reference IDs: " + ", ".join(_inline(value) for value in reference_ids))
         if row.get("delivery_status"):
-            lines.append(f"- Delivery status: **{row['delivery_status']}**")
+            lines.append(f"- Delivery status: **{_inline(row['delivery_status'])}**")
         if row.get("read_marker"):
-            lines.append(f"- Read marker: **{row['read_marker']}**")
+            lines.append(f"- Read marker: **{_inline(row['read_marker'])}**")
         if row.get("submission_status"):
-            lines.append(f"- Submission status: **{row['submission_status']}**")
+            lines.append(f"- Submission status: **{_inline(row['submission_status'])}**")
         if row.get("response_summary") is not None:
             lines.append("- Recorded response summary: " + _inline(row.get("response_summary")))
         if row.get("lifecycle_events"):
@@ -773,12 +774,13 @@ def render_markdown(export: Mapping[str, Any]) -> str:
             for event in row["lifecycle_events"]:
                 seq = event.get("seq", "unknown")
                 sim_time = event.get("sim_time") or "time unknown"
-                events.append(f"`{seq}` {event.get('kind', 'unknown')} ({sim_time})")
+                events.append(f"{_inline(seq)} {_inline(event.get('kind', 'unknown'))} ({_inline(sim_time)})")
             lines.append("- Lifecycle: " + "; ".join(events))
         body = row.get("body")
         lines.extend(["", "### Body", ""])
         if row.get("body_decoding_status"):
-            lines.append(f"Body decoding: **{row['body_decoding_status']}** ({row['body_encoding']}).")
+            lines.append(f"Body decoding: **{_inline(row['body_decoding_status'])}** "
+                         f"({_inline(row.get('body_encoding', 'unknown'))}).")
         if body is None:
             lines.append("Unknown or absent in saved source.")
         else:
@@ -789,14 +791,18 @@ def render_markdown(export: Mapping[str, Any]) -> str:
         lines.append("")
     omitted = _object(coverage.get("omitted_noncorrespondence")) or {}
     lines.extend(["## Coverage notes", "", "- `identities_hidden` is false; no redaction is applied."])
-    lines.append("- Omitted interception channels: " + ", ".join(omitted.get("interception_channels", [])))
-    lines.append("- Other omitted fields: " + "; ".join(omitted.get("world_fields", [])))
+    lines.append("- Omitted interception channels: " + ", ".join(
+        _inline(value) for value in _sequence(omitted.get("interception_channels"))))
+    lines.append("- Other omitted fields: " + "; ".join(
+        _inline(value) for value in _sequence(omitted.get("world_fields"))))
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _inline(value: Any) -> str:
-    text = str(value).replace("\n", " ").replace("`", "\\`")
-    return f"`{text}`"
+    text = re.sub(r"[\r\n\u0085\u2028\u2029]+", " ", str(value))
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    return f"{fence}{text}{fence}"
 
 
 def _fenced(value: str, *, language: str = "") -> list[str]:
