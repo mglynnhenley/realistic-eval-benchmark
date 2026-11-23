@@ -421,6 +421,27 @@ def test_web_action_decodes_text_only_multipart_but_not_binary_uploads():
     assert rows["binary-multipart"]["raw_payload"]["body_base64"] == binary_encoded
 
 
+def test_multipart_preserves_transfer_encoded_form_values():
+    body = (
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"base64\"\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8=\r\n"
+        b"--SavedBoundary\r\nContent-Disposition: form-data; name=\"quoted\"\r\n"
+        b"Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9\r\n--SavedBoundary--\r\n"
+    )
+    encoded = base64.b64encode(body).decode()
+    export = build_correspondence({WORLD_KEY: {"interceptions": [
+        _interception("transfer-encoded", "web_action", "2026-10-30T12:00:00Z", {
+            "body_base64": encoded,
+            "headers": {"content-type": "multipart/form-data; boundary=SavedBoundary"},
+        }),
+    ]}})
+    row = next(row for row in export["records"] if row.get("interception_id") == "transfer-encoded")
+
+    assert row["body"] == "base64: SGVsbG8=\nquoted: caf=E9"
+    assert row["body_decoding_status"] == "decoded_text"
+    assert row["raw_payload"]["body_base64"] == encoded
+
+
 def test_outbound_subject_only_email_preserves_explicit_empty_body():
     export = build_correspondence({WORLD_KEY: {"interceptions": [
         _interception("empty-message", "email", "2026-10-30T12:00:00Z", {

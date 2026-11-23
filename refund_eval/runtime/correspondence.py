@@ -115,6 +115,8 @@ def _decode_body_base64(payload: Mapping[str, Any]) -> tuple[str | None, str, st
         for part in message.iter_parts():
             if part.get_filename() is not None or part.get_content_maintype() != "text":
                 return None, "base64", "nontext"
+            if part.get("Content-Transfer-Encoding") is not None:
+                del part["Content-Transfer-Encoding"]
             content = part.get_payload(decode=True)
             if content is None:
                 return None, "base64", "nontext"
