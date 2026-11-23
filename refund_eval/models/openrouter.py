@@ -44,6 +44,8 @@ _SCHEMA_KEYS = {"type", "format", "description", "default", "enum", "items", "pr
                 "anyOf", "required", "pattern", "minLength", "maxLength", "minimum", "maximum", "examples"}
 _STOP: dict[str, StopReason] = {"stop": "stop", "length": "max_tokens", "tool_calls": "tool_calls",
                                 "function_call": "tool_calls", "content_filter": "content_filter"}
+_TARIFF_KEYS = {"input", "output", "input_cache_read", "input_cache_write", "input_cache_write_1h",
+                "internal_reasoning", "request"}
 
 
 def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
@@ -211,6 +213,14 @@ def _valid_cost(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
 
+def _all_zero_tariff(prices: Mapping[str, Any] | None) -> bool:
+    return (
+        isinstance(prices, Mapping)
+        and set(prices) == _TARIFF_KEYS
+        and all(_valid_cost(value) and value == 0 for value in prices.values())
+    )
+
+
 def _token_count(value: Any, *, minimum: int = 1) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
@@ -257,13 +267,15 @@ class OpenRouterClient:
     def __init__(self, roles: Mapping[Role, str], *, api_key: str | None = None,
                  base_url: str = OPENROUTER_BASE_URL, prices: Mapping[str, Mapping[str, float]] | None = None,
                  client: AsyncOpenAI | None = None, require_reported_cost: bool = False,
-                 pin_prices: bool = False, tariffs: Mapping[str, Mapping[str, float]] | None = None) -> None:
+                 pin_prices: bool = False, tariffs: Mapping[str, Mapping[str, float]] | None = None,
+                 strict_budget: bool = False) -> None:
         for role, name in roles.items():
             if not name.startswith(PREFIX):
                 raise ValueError(f"{role} model must be an openrouter/ model, not {name!r}")
         self.roles = dict(roles)
         self.prices = dict(prices or {})
         self.require_reported_cost = require_reported_cost
+        self.strict_budget = strict_budget
         self.pin_prices = pin_prices
         self.tariffs = dict(tariffs or {})
         self.client = client or AsyncOpenAI(api_key=api_key or os.environ.get(API_KEY_ENV), base_url=base_url)
@@ -281,7 +293,9 @@ class OpenRouterClient:
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
         require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
+        strict_budget = bool(getattr(settings, "strict_budget", False))
         kwargs["pin_prices"] = require_reported_cost
+        kwargs["strict_budget"] = strict_budget
         if require_reported_cost and not kwargs.get("tariffs"):
             from refund_eval.model_pricing import openrouter_tariffs
 
@@ -305,10 +319,13 @@ class OpenRouterClient:
             raise ValueError(f"No model for the {role} role")
         return self.roles[role]
 
-    async def _generation_cost(self, generation_id: str | None) -> tuple[float | None, bool]:
+    async def _generation_cost(
+        self, generation_id: str | None, *, require_non_byok: bool = False, allow_zero: bool = False,
+    ) -> tuple[float | None, bool, bool | None]:
         if not generation_id:
-            return None, False
+            return None, False, None
         found = False
+        is_byok: bool | None = None
         for attempt in range(3):
             if attempt:
                 await anyio.sleep(1)
@@ -317,16 +334,29 @@ class OpenRouterClient:
                     "/generation", cast_to=dict, options={"params": {"id": generation_id}})
                 found = True
                 data = record.get("data", {})
+                raw_is_byok = data.get("is_byok")
+                is_byok = raw_is_byok if isinstance(raw_is_byok, bool) else None
+                if require_non_byok and is_byok is True:
+                    return None, True, True
+                if require_non_byok and is_byok is not False:
+                    continue
+                if require_non_byok and (
+                    data.get("id") != generation_id or data.get("cancelled") is not False
+                ):
+                    continue
+                if data.get("cancelled") is True:
+                    continue
                 cost = data.get("total_cost")
                 finished = data.get("finish_reason") or data.get("native_finish_reason")
                 prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
                 completion = data.get("tokens_completion") or data.get("native_tokens_completion")
-                if (_valid_cost(cost) and cost > 0 and data.get("cancelled") is not True
-                        and finished and _token_count(prompt) and _token_count(completion)):
-                    return float(cost), True
+                terminal = bool(finished and _token_count(prompt) and _token_count(completion))
+                trusted_zero = require_non_byok and allow_zero and cost == 0
+                if _valid_cost(cost) and (cost > 0 or trusted_zero) and terminal:
+                    return float(cost), True, is_byok
             except (APIError, httpx.HTTPError, TypeError, ValueError, AttributeError):
                 continue
-        return None, found
+        return None, found, is_byok
 
     def _params(self, role: Role, messages: Sequence[Message], *, schema: OutputSchema | None = None,
                 tools: Sequence[Tool] = (), temperature: float | None = None,
@@ -385,9 +415,22 @@ class OpenRouterClient:
                 tariff = self.tariffs.get(name)
                 if tariff is None:
                     raise ModelLimitExceeded(f"No catalog tariff to pin for {name}; not sent")
-                extra["provider"] = {"max_price": {"prompt": tariff["input"], "completion": tariff["output"],
+                if self.strict_budget:
+                    required = {"input", "output", "input_cache_read", "input_cache_write",
+                                "input_cache_write_1h", "internal_reasoning", "request"}
+                    if set(tariff) != required:
+                        raise ModelLimitExceeded(f"No complete strict tariff to pin for {name}; not sent")
+                    prompt_price = max(tariff[key] for key in (
+                        "input", "input_cache_read", "input_cache_write", "input_cache_write_1h"))
+                    completion_price = tariff["output"] + tariff["internal_reasoning"]
+                else:
+                    prompt_price = tariff["input"]
+                    completion_price = tariff["output"]
+                extra["provider"] = {"max_price": {"prompt": prompt_price, "completion": completion_price,
                                                      "request": tariff["request"]}}
             if _is_anthropic_company_schema(name, schema):
+                extra.setdefault("provider", {})["require_parameters"] = True
+            if self.strict_budget:
                 extra.setdefault("provider", {})["require_parameters"] = True
             response = await self.client.chat.completions.with_raw_response.create(
                 **params, extra_body=extra)
@@ -412,25 +455,49 @@ class OpenRouterClient:
         error = screened_error(error)
         worst_case = _worst_case(params, self.prices.get(name)) if self.require_reported_cost else None
         usage = _usage(result.usage, None)
-        cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
-        if self.require_reported_cost and usage is not None and usage.cost == 0:
-            cost_method = None
-        if cost_method is None:
-            if self.require_reported_cost and usage is not None:
-                usage.cost = None
-            cost, found = await self._generation_cost(result.id) if self.require_reported_cost else (None, False)
-            if cost is not None:
-                cost_method = "generation_lookup"
-            elif failed and self.require_reported_cost:
-                cost = worst_case
-                cost_method = "worst_case" if cost is not None else None
+        if self.strict_budget:
+            usage_is_byok = getattr(result.usage, "is_byok", None)
+            if (usage_is_byok is False and usage is not None and _valid_cost(usage.cost)
+                    and (usage.cost > 0 or _all_zero_tariff(self.tariffs.get(name)))):
+                cost = usage.cost
+                cost_method = "actual"
+            elif usage_is_byok is True:
+                cost = None
+                cost_method = None
+                if usage is not None:
+                    usage.cost = None
             else:
-                cost = (None if found else self._estimate(result.usage, name)) if self.require_reported_cost else (
-                        cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
-                cost_method = "estimate" if cost is not None else None
-            if cost is not None:
-                usage = usage or Usage()
-                usage.cost = cost
+                if usage is not None:
+                    usage.cost = None
+                cost, _, generation_is_byok = await self._generation_cost(
+                    result.id,
+                    require_non_byok=True,
+                    allow_zero=_all_zero_tariff(self.tariffs.get(name)),
+                )
+                cost_method = "generation_lookup" if cost is not None and generation_is_byok is False else None
+                if cost is not None:
+                    usage = usage or Usage()
+                    usage.cost = cost
+        else:
+            cost_method = "actual" if usage is not None and _valid_cost(usage.cost) else None
+            if self.require_reported_cost and usage is not None and usage.cost == 0:
+                cost_method = None
+            if cost_method is None:
+                if self.require_reported_cost and usage is not None:
+                    usage.cost = None
+                cost, found, _ = await self._generation_cost(result.id) if self.require_reported_cost else (None, False, None)
+                if cost is not None:
+                    cost_method = "generation_lookup"
+                elif failed and self.require_reported_cost:
+                    cost = worst_case
+                    cost_method = "worst_case" if cost is not None else None
+                else:
+                    cost = (None if found else self._estimate(result.usage, name)) if self.require_reported_cost else (
+                            cost_from_prices(usage, self.prices[name]) if usage is not None and name in self.prices else None)
+                    cost_method = "estimate" if cost is not None else None
+                if cost is not None:
+                    usage = usage or Usage()
+                    usage.cost = cost
         if usage is not None:
             self.usage_by_model[name] = self.usage_by_model.get(name, Usage()) + usage
             self.usage_by_role[role] = self.usage_by_role.get(role, Usage()) + usage

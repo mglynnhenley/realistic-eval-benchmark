@@ -187,11 +187,13 @@ class WorldTrial:
         trial_store.install(self.trial)
         # Every world-side completion is kept in the store, so the trial can be replayed.
         recorded = RecordingModelClient(self._model_client)
+        if settings.strict_budget and settings.world_cost_limit is None:
+            raise ValueError("Strict world budget requires world_cost_limit")
         models.install(recorded if settings.world_cost_limit is None else
                        BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist,
                                            prices=getattr(self._model_client, "tariffs", None) or {},
                                            ledger=self._spend_ledger,
-                                           scope=self._spend_scope))
+                                           scope=self._spend_scope, strict_budget=settings.strict_budget))
         try:
             init_world(scenario, settings.seed)
             store = world_store()

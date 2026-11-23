@@ -75,6 +75,31 @@ class Thresholds:
 
 
 @dataclass(frozen=True)
+class SplitThresholds:
+    agent_trial_delta: Decimal
+    world_trial_delta: Decimal
+    probe_timeout: float = 10.0
+    poll_interval: float = 15.0
+    max_sample_age: float = 35.0
+    cleanup_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        try:
+            agent, world = _money(self.agent_trial_delta), _money(self.world_trial_delta)
+        except ValueError:
+            raise ValueError("Split OpenRouter thresholds must be finite and nonnegative") from None
+        if agent <= 0 or agent > KEY_CEILING or world <= 0 or world > Decimal(100):
+            raise ValueError("Split OpenRouter thresholds exceed their role ceilings")
+        for value in (self.probe_timeout, self.poll_interval, self.max_sample_age, self.cleanup_timeout):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError("guard timeouts and intervals must be finite and positive")
+        if self.max_sample_age <= self.poll_interval + self.probe_timeout:
+            raise ValueError("sample freshness must exceed poll interval plus probe timeout")
+        object.__setattr__(self, "agent_trial_delta", agent)
+        object.__setattr__(self, "world_trial_delta", world)
+
+
+@dataclass(frozen=True)
 class OpenRouterSnapshot:
     usage: Decimal
     limit: Decimal
@@ -147,6 +172,22 @@ def _read_openrouter_sync(timeout: float) -> object:
 
 async def openrouter_key_probe(timeout: float) -> object:
     return await asyncio.to_thread(_read_openrouter_sync, timeout)
+
+
+def _read_split_key_sync(env_name: str, timeout: float) -> object:
+    key = os.environ.get(env_name)
+    if not key:
+        raise GuardFailure("OpenRouter probe failed")
+    request = urllib.request.Request("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+    except Exception:  # noqa: BLE001
+        raise GuardFailure("OpenRouter probe failed") from None
+
+
+async def split_openrouter_key_probe(env_name: str, timeout: float) -> object:
+    return await asyncio.to_thread(_read_split_key_sync, env_name, timeout)
 
 
 class SpendGuard:
@@ -320,6 +361,7 @@ class SpendGuard:
             task.cancel()
         await self.cleanup_bound()
 
+
     def bind_sandbox(
         self,
         environment: object,
@@ -474,6 +516,79 @@ class SpendGuard:
         await self.cleanup_bound()
         if self.failure_reason is not None or self.cleanup_uncertain:
             raise self._failure()
+
+
+class SplitSpendGuard(SpendGuard):
+    def __init__(self, thresholds: SplitThresholds, *, agent_probe: Probe | None = None,
+                 world_probe: Probe | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        super().__init__(
+            Thresholds(
+                KEY_CEILING,
+                Decimal(1),
+                probe_timeout=thresholds.probe_timeout,
+                poll_interval=thresholds.poll_interval,
+                max_sample_age=thresholds.max_sample_age,
+                cleanup_timeout=thresholds.cleanup_timeout,
+            ),
+            clock=clock,
+            openrouter_probe=lambda: None,
+        )
+        self.thresholds = thresholds
+        self.agent_probe = agent_probe or (lambda: split_openrouter_key_probe("OPENROUTER_AGENT_API_KEY", thresholds.probe_timeout))
+        self.world_probe = world_probe or (lambda: split_openrouter_key_probe("OPENROUTER_WORLD_API_KEY", thresholds.probe_timeout))
+        self._split_baseline: dict[str, OpenRouterSnapshot] = {}
+        self._split_previous: dict[str, OpenRouterSnapshot] = {}
+
+    async def _read_openrouter(self) -> dict[str, OpenRouterSnapshot]:
+        agent_raw, world_raw = await asyncio.gather(
+            self._probe("OpenRouter agent", self.agent_probe),
+            self._probe("OpenRouter world", self.world_probe),
+        )
+        try:
+            parsed = {}
+            for role, raw in (("agent", agent_raw), ("world", world_raw)):
+                if not isinstance(raw, Mapping) or not isinstance(raw.get("data"), Mapping):
+                    raise TypeError
+                if "limit_reset" not in raw["data"] or raw["data"]["limit_reset"] is not None:
+                    raise ValueError
+                parsed[role] = OpenRouterSnapshot.parse(raw)
+            return parsed
+        except (ValueError, TypeError, OverflowError):
+            raise GuardFailure("split monitor data malformed or resettable") from None
+
+    def _accept_sample(self, openrouter: dict[str, OpenRouterSnapshot], *, initial: bool = False) -> None:
+        limits = {"agent": (KEY_CEILING, self.thresholds.agent_trial_delta),
+                  "world": (Decimal(100), self.thresholds.world_trial_delta)}
+        for role, sample in openrouter.items():
+            ceiling, delta = limits[role]
+            if sample.limit != ceiling or sample.remaining > sample.limit or sample.usage > sample.limit:
+                raise GuardFailure(f"OpenRouter {role} key ceiling or counters invalid")
+            if sample.usage + sample.remaining > sample.limit + _MONEY_EPSILON:
+                raise GuardFailure(f"OpenRouter {role} counters malformed")
+            if initial:
+                if sample.remaining < delta:
+                    raise GuardFailure(f"OpenRouter {role} remaining limit is below trial threshold")
+                self._split_baseline[role] = sample
+            else:
+                previous = self._split_previous.get(role)
+                baseline = self._split_baseline.get(role)
+                if previous is None or baseline is None:
+                    raise GuardFailure("split monitor state invalid")
+                if (sample.usage < previous.usage or sample.remaining > previous.remaining + _MONEY_EPSILON
+                        or sample.limit != previous.limit):
+                    raise GuardFailure(f"OpenRouter {role} counters are nonmonotonic")
+                if sample.usage - baseline.usage >= delta:
+                    raise GuardFailure(f"OpenRouter {role} trial threshold reached")
+            self._split_previous[role] = sample
+        self._last_sample_at = self._clock()
+
+    async def start(self) -> None:
+        agent_key = os.environ.get("OPENROUTER_AGENT_API_KEY")
+        world_key = os.environ.get("OPENROUTER_WORLD_API_KEY")
+        if not agent_key or not world_key or agent_key == world_key:
+            self._latch("split OpenRouter keys missing or not independent")
+            raise self._failure()
+        await super().start()
 
 
 @contextmanager

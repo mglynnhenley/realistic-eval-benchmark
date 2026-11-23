@@ -36,7 +36,7 @@ from refund_eval.harbor import batch
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
-from scripts.offline_spend_guard import KEY_CEILING, Thresholds
+from scripts.offline_spend_guard import KEY_CEILING, SplitThresholds, Thresholds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
@@ -693,21 +693,77 @@ def _amount_text(value: Any) -> str | None:
     return format(amount, "f") if amount is not None else None
 
 
-def _guard_parameters(parameters: dict[str, Any], thresholds: Thresholds, total: int | None) -> dict[str, Any]:
-    return {
+def _guard_parameters(
+    parameters: dict[str, Any], thresholds: Thresholds | SplitThresholds, total: int | None
+) -> dict[str, Any]:
+    common = {
         **parameters,
         "requested_total_time_limit_seconds": total,
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested" if total is None else "unavailable",
+        "cleanup_timeout_seconds": thresholds.cleanup_timeout,
+    }
+    if isinstance(thresholds, SplitThresholds):
+        return common | {
+            "openrouter_key_mode": "split",
+            "agent_trial_delta_usd": str(thresholds.agent_trial_delta),
+            "world_trial_delta_usd": str(thresholds.world_trial_delta),
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        }
+    return common | {
         "openrouter_trial_delta_usd": str(thresholds.openrouter_trial_delta),
         "openrouter_key_ceiling_usd": str(thresholds.openrouter_key_ceiling),
-        "cleanup_timeout_seconds": thresholds.cleanup_timeout,
     }
 
 
 def _reject_total_limit(total: int | None) -> None:
     if total is not None:
         raise SetupFailure("strict_total_deadline_unsupported_by_modal")
+
+
+def _shared_thresholds(args: argparse.Namespace) -> Thresholds:
+    if args.openrouter_key_ceiling is None or args.openrouter_trial_delta is None:
+        raise SetupFailure("shared_guard_thresholds_required")
+    return Thresholds(
+        openrouter_key_ceiling=args.openrouter_key_ceiling,
+        openrouter_trial_delta=args.openrouter_trial_delta,
+        probe_timeout=args.probe_timeout,
+        poll_interval=args.poll_interval,
+        max_sample_age=args.max_sample_age,
+        cleanup_timeout=args.cleanup_timeout,
+    )
+
+
+def _split_thresholds(args: argparse.Namespace, agent_cap: Any, world_cap: Any) -> SplitThresholds:
+    if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
+        raise SetupFailure("split_mode_rejects_shared_threshold_flags")
+    agent_amount = _amount(agent_cap)
+    world_amount = _amount(world_cap)
+    if agent_amount is None or world_amount is None:
+        raise SetupFailure("split_role_caps_must_be_finite")
+    return SplitThresholds(
+        agent_trial_delta=agent_amount,
+        world_trial_delta=world_amount,
+        probe_timeout=args.probe_timeout,
+        poll_interval=args.poll_interval,
+        max_sample_age=args.max_sample_age,
+        cleanup_timeout=args.cleanup_timeout,
+    )
+
+
+def _saved_split_caps(config: JobConfig) -> tuple[Any, Any]:
+    agent_env = config.agents[0].env or {}
+    task_path = Path(config.tasks[0].path)
+    try:
+        task_environment = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+        environment = task_environment.get("environment", {}).get("env", {})
+        if not isinstance(environment, dict):
+            raise TypeError
+        world_env = _world_environment(task_path, config, environment)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        raise SetupFailure("saved_world_environment_unresolvable") from None
+    return agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"), world_env.get("WORLD_COST_LIMIT")
 
 
 def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
@@ -718,7 +774,7 @@ def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
 
 
 def _native_effective_parameters(
-    config: batch.NativeBatchConfig, thresholds: Thresholds
+    config: batch.NativeBatchConfig, thresholds: Thresholds | SplitThresholds
 ) -> dict[str, Any]:
     targets = _native_targets(config)
     if config.execution != "modal":
@@ -736,21 +792,33 @@ def _native_effective_parameters(
     world_cost = _amount(config.world_cost_limit)
     if agent_cost is None or world_cost is None:
         raise SetupFailure("native_cost_limits_must_be_finite")
-    runtime_delta = thresholds.openrouter_trial_delta
-    if agent_cost + world_cost > runtime_delta:
-        raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
+    split = config.openrouter_key_mode == "split"
+    if split != isinstance(thresholds, SplitThresholds):
+        raise SetupFailure("native_key_mode_does_not_match_runtime_guard")
+    if split:
+        if config.agent_max_output_tokens is None:
+            raise SetupFailure("split_mode_requires_agent_max_output_tokens")
+        if agent_cost > thresholds.agent_trial_delta or world_cost > thresholds.world_trial_delta:
+            raise SetupFailure("split_role_caps_exceed_runtime_trial_deltas")
+    else:
+        assert isinstance(thresholds, Thresholds)
+        runtime_delta = thresholds.openrouter_trial_delta
+        if agent_cost + world_cost > runtime_delta:
+            raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
     if config.trial_spend_cap_usd is not None:
         trial_cap = _amount(config.trial_spend_cap_usd)
         key_cap = _amount(config.key_spend_cap_usd)
         if trial_cap is None or key_cap is None:
             raise SetupFailure("native_planning_caps_must_be_finite")
+        if split:
+            raise SetupFailure("split_mode_does_not_support_combined_planning_caps")
         if trial_cap > runtime_delta or trial_cap < agent_cost + world_cost:
             raise SetupFailure("native_trial_planning_cap_conflicts_with_runtime_guard")
         if key_cap > KEY_CEILING or config.trials * trial_cap > key_cap:
             raise SetupFailure("native_key_planning_cap_exceeds_supported_guard")
 
     worker_time_limit = config.time_limit
-    return {
+    effective = {
         "target_model": targets[0],
         "models": targets,
         "simulator_model": config.simulator_model,
@@ -763,10 +831,19 @@ def _native_effective_parameters(
         "effective_parameters_complete": True,
         "unavailable_fields": [],
     }
+    if split:
+        effective.update({
+            "openrouter_key_mode": "split",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        })
+    return effective
 
 
 _WORLD_ENVIRONMENT_FIELDS = {
     "WORLD_COST_LIMIT",
+    "WORLD_STRICT_BUDGET",
     "WORLD_SIMULATOR_MODEL",
     "WORLD_GRADER_MODEL",
     "WORLD_SIM_WEEKS",
@@ -870,7 +947,7 @@ def _world_environment(
 
 
 def _saved_effective_parameters(
-    config: JobConfig, thresholds: Thresholds
+    config: JobConfig, thresholds: Thresholds | SplitThresholds
 ) -> dict[str, Any]:
     if len(config.agents) != 1 or len(config.tasks) != 1 or not config.tasks[0].path:
         raise SetupFailure("saved_native_values_unavailable")
@@ -891,6 +968,13 @@ def _saved_effective_parameters(
     if not isinstance(task_environment, dict) or not isinstance(config.environment.env, dict):
         raise SetupFailure("saved_world_environment_unresolvable")
     world_env = _world_environment(task_path, config, task_environment)
+    split = (config.agents[0].env or {}).get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+    if split != isinstance(thresholds, SplitThresholds):
+        raise SetupFailure("saved_key_mode_does_not_match_runtime_guard")
+    if split and (
+        world_env.get("WORLD_STRICT_BUDGET") != "true"
+    ):
+        raise SetupFailure("saved_split_key_routing_or_strict_budget_missing")
     native_task = (
         task_metadata.get("scenario") == _LAURA_SCENARIO
         and isinstance(task_metadata.get("agent_wheel_sha256"), str)
@@ -950,12 +1034,23 @@ def _saved_effective_parameters(
     world_cap_raw = world_env.get("WORLD_COST_LIMIT")
     agent_amount = _amount(agent_cap_raw)
     world_amount = _amount(world_cap_raw)
-    if (
-        agent_amount is not None
-        and world_amount is not None
-        and agent_amount + world_amount > thresholds.openrouter_trial_delta
-    ):
-        raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
+    agent_output_tokens: int | None = None
+    if split:
+        agent_env = config.agents[0].env or {}
+        declared_agent_amount = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
+        raw_output_tokens = agent_env.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
+        if isinstance(raw_output_tokens, str) and raw_output_tokens.isdecimal():
+            agent_output_tokens = int(raw_output_tokens)
+        if (
+            agent_amount is None or declared_agent_amount != agent_amount or agent_output_tokens is None
+            or agent_output_tokens <= 0 or world_amount is None
+            or agent_amount > thresholds.agent_trial_delta or world_amount > thresholds.world_trial_delta
+        ):
+            raise SetupFailure("saved_split_role_caps_or_output_bound_invalid")
+    elif agent_amount is not None and world_amount is not None:
+        assert isinstance(thresholds, Thresholds)
+        if agent_amount + world_amount > thresholds.openrouter_trial_delta:
+            raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
     worker_time_raw = agent_kwargs.get("time_limit")
     worker_time = positive_integer(worker_time_raw)
     if worker_time_raw is not None and worker_time is None:
@@ -978,7 +1073,7 @@ def _saved_effective_parameters(
         raise SetupFailure("saved_agent_cost_limit_invalid")
     if world_cap_raw is not None and world_amount is None:
         raise SetupFailure("saved_world_cost_limit_invalid")
-    return {
+    effective = {
         "target_model": target,
         "models": [target],
         "simulator_model": simulator,
@@ -991,6 +1086,14 @@ def _saved_effective_parameters(
         "effective_parameters_complete": not unknown,
         "unavailable_fields": unknown,
     }
+    if split:
+        effective.update({
+            "openrouter_key_mode": "split",
+            "agent_max_output_tokens": agent_output_tokens,
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        })
+    return effective
 
 
 def _record_effective_parameters(job: Any, config: JobConfig, parameters: dict[str, Any]) -> None:
@@ -1033,8 +1136,8 @@ def _parser() -> argparse.ArgumentParser:
     setup.add_argument("--run-config", type=Path)
     run.add_argument("--prepared-dir", type=Path)
     run.add_argument("--job-name", required=True)
-    run.add_argument("--openrouter-key-ceiling", type=_decimal_argument, required=True)
-    run.add_argument("--openrouter-trial-delta", type=_decimal_argument, required=True)
+    run.add_argument("--openrouter-key-ceiling", type=_decimal_argument)
+    run.add_argument("--openrouter-trial-delta", type=_decimal_argument)
     run.add_argument("--total-time-limit-seconds", type=int)
     run.add_argument("--probe-timeout", type=float, default=10.0)
     run.add_argument("--poll-interval", type=float, default=15.0)
@@ -1059,25 +1162,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        thresholds = Thresholds(
-            openrouter_key_ceiling=args.openrouter_key_ceiling,
-            openrouter_trial_delta=args.openrouter_trial_delta,
-            probe_timeout=args.probe_timeout,
-            poll_interval=args.poll_interval,
-            max_sample_age=args.max_sample_age,
-            cleanup_timeout=args.cleanup_timeout,
-        )
-    except (ValueError, TypeError) as failure:
-        print(f"launcher_failed={type(failure).__name__} cleanup_uncertain=false", file=sys.stderr)
-        return 1
-
-    try:
         _reject_total_limit(args.total_time_limit_seconds)
         if args.manifest is not None:
             if args.prepared_dir is not None:
                 raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
             total_time_limit = None
             config = prepare_fresh_job(args.manifest, args.job_name)
+            split = (config.agents[0].env or {}).get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+            if split:
+                thresholds = _split_thresholds(args, *_saved_split_caps(config))
+            else:
+                thresholds = _shared_thresholds(args)
             parameters = _saved_effective_parameters(config, thresholds)
         else:
             native_config = batch.NativeBatchConfig.model_validate_json(
@@ -1087,6 +1182,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.prepared_dir is None:
                 raise SetupFailure("prepared_dir_required_for_run_config")
             total_time_limit = None
+            if native_config.openrouter_key_mode == "split":
+                targets = _native_targets(native_config)
+                costs = resolve_cost_limits(native_config.cost_limit, targets, scenario=native_config.scenario)
+                thresholds = _split_thresholds(args, costs[targets[0]], native_config.world_cost_limit)
+            else:
+                thresholds = _shared_thresholds(args)
             parameters = _native_effective_parameters(native_config, thresholds)
             run_record_path = batch.prepare(args.prepared_dir, native_config)
             effective = _guard_parameters(parameters, thresholds, total_time_limit)

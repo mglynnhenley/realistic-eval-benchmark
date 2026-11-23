@@ -82,7 +82,7 @@ class BudgetedWorldModels:
     def __init__(self, recorded: ModelClient, limit: float, persist: Callable[[], None], *,
                  prices: Mapping[str, Mapping[str, float]] | None = None,
                  ledger: WorldSpendLedger | None = None,
-                 scope: Mapping[str, Any] | None = None) -> None:
+                 scope: Mapping[str, Any] | None = None, strict_budget: bool = False) -> None:
         self.recorded = recorded
         self.limit = Decimal(str(limit))
         self.prices = None if prices is None else {name: dict(tariff) for name, tariff in prices.items()}
@@ -92,6 +92,7 @@ class BudgetedWorldModels:
         self.spent = Decimal(0)
         self.reserved = Decimal(0)
         self.persist = persist
+        self.strict_budget = strict_budget
         self.lock = anyio.Lock()
         self._request_rejected = False
         if self.ledger is None:
@@ -202,6 +203,11 @@ class BudgetedWorldModels:
                         if hasattr(error, "add_note"):
                             error.add_note(f"Could not persist interruption state: {type(persist_error).__name__}")
                     raise
+                if self.strict_budget:
+                    snapshot = self.ledger.mark_unknown(attempt_id)
+                    self._sync_ledger("unknown", snapshot)
+                    self.persist()
+                    raise ModelLimitExceeded("Strict world request failed with unknown charge; reservation retained") from None
                 request_exception = True
                 worst_case = self._worst_case(role, messages, settings)
                 completion = Completion(
@@ -214,6 +220,18 @@ class BudgetedWorldModels:
 
             reported = _decimal(completion.usage.cost if completion.usage else None)
             worst_case = _decimal(completion.worst_case_cost)
+            if self.strict_budget and (reported is None or completion.cost_method not in {"actual", "generation_lookup"}):
+                snapshot = self.ledger.mark_unknown(attempt_id)
+                self._sync_ledger("unknown", snapshot)
+                self.persist()
+                raise ModelLimitExceeded("Strict world request lacks an actual provider charge; reservation retained")
+            if self.strict_budget and reported == 0 and bound > 0:
+                snapshot = self.ledger.mark_unknown(attempt_id)
+                self._sync_ledger("unknown", snapshot)
+                self.persist()
+                raise ModelLimitExceeded(
+                    "Strict world zero charge is ambiguous with a nonzero tariff; reservation retained"
+                )
             if completion.failed:
                 if reported is None and worst_case is None and not request_exception:
                     snapshot = self.ledger.mark_unknown(attempt_id)
@@ -226,8 +244,11 @@ class BudgetedWorldModels:
                     charge = bound
                 else:
                     charge = max(value for value in (bound, reported, worst_case) if value is not None)
-                provenance = "worst_case" if completion.cost_method == "worst_case" or worst_case is not None else (
-                    completion.cost_method or "bounded_failed_request")
+                if self.strict_budget:
+                    provenance = "strict_failed_attempt_bound"
+                else:
+                    provenance = "worst_case" if completion.cost_method == "worst_case" or worst_case is not None else (
+                        completion.cost_method or "bounded_failed_request")
             elif reported is None:
                 snapshot = self.ledger.mark_unknown(attempt_id)
                 self._sync_ledger("unknown", snapshot)
@@ -261,6 +282,8 @@ class BudgetedWorldModels:
                 self._reject_request()
             if not completion.failed:
                 return completion
+            if self.strict_budget:
+                raise ModelLimitExceeded("Strict world model request failed; automatic retries are disabled")
             if attempt == 2:
                 self._mark("failed")
                 self.persist()

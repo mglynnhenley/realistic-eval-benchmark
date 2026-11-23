@@ -33,6 +33,7 @@ class WorldSettings(BaseModel):
     simulator_model: str = DEFAULT_ROLE_MODEL
     grader_model: str = DEFAULT_GRADER_MODEL
     world_cost_limit: CostCap | None = None
+    strict_budget: bool = False
     company_simulator: str | None = None
     # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
     # (in a network namespace where the host allows one), as on the Inspect path.
