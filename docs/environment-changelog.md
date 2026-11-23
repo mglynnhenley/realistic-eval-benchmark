@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: e9ec9f806d0f64f97d3a96864d96660bfba8f9a2c6feeed3ca72048451057cc1
+- Fingerprint: 31166ceac245c81e66af123c40d8e3023f23362c51317fdcc90baa0cd24c057c
 - Trial round: none; offline validation only.
-- Changes: add split-key $50/$100 routing and monitoring, local pre-call agent/world reservations with strict non-BYOK settlement, and public-only wheel/world-source attestation with native role-path validation.
+- Changes: add split-key $50/$100 routing and monitoring, strict local agent/world reservations and settlement, public-only wheel/world-source attestation, native role validation, and monitored split-launch guidance.
 
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
