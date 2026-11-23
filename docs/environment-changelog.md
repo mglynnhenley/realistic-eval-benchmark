@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.18 — 2026-11-23
+## 8.1 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: dcbff328e1849e7e0202890934083858d383e72045f21ebd7b987951cdd98f56
+- Fingerprint: f18ee32428609b89d2fc2bcc16b4801834335a905f24886fc464da96df7a5408
 - Trial round: none; offline validation only.
-- Changes: accept an independent requested deadline in native `shared_roles` preparation, applying it only to the agent-facing late-refund task and preserving default and world/company data.
+- Changes: carry an independent requested deadline through native `shared_roles` task arguments while preserving defaults and world/company data.
+
+## 8.0 — 2026-11-23
+- Kind: behaviour round
+- Fingerprint: cbba3aabaa9eb65fb1aedae5da01e80eda33ce4ce2036885dae10190c70c88a0
+- Trial round: not run; synthetic verification only. Any native round requires separate authorization.
+- Changes: reject wake-up requests at or after the simulated session cutoff instead of confirming a time when the agent cannot resume. Earlier mail and valid wake-up requests retain their existing behaviour (MAT-117).
 
 ## 7.17 — 2026-11-23
 - Kind: trivial batch
