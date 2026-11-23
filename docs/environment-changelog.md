@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 18a4db792f6bc8e933fc8f6aa205d28d6eda649bfc15565f18793c7f6eac9f24
+- Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb
 - Trial round: none; offline validation only, no paid calls.
-- Changes: Write scalar-only native world telemetry for the host-side installed-agent dashboard observer, without adding telemetry to agent context, tools or the public wheel (MAT-168).
+- Changes: Write allowlisted native world status and ordered action/result metadata for the host-side installed-agent timeline, without adding telemetry to agent context, tools, canonical trial records or the public wheel (MAT-168).
 
 ## 7.10 — 2026-11-23
 - Kind: trivial batch

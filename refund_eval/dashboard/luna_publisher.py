@@ -10,7 +10,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from refund_eval.dashboard.luna import FIELDS, timestamp, validate
+from refund_eval.dashboard.luna import FIELDS, check_step_update, timestamp, validate
 from refund_eval.world_service.status import atomic_json, finite_spend
 
 
@@ -38,9 +38,12 @@ def publish_once(source_path, output_path, *, run_id, result_path, now=None):
     except FileNotFoundError:
         if not result.get("finished_at"):
             raise
-        candidate = {key: None for key in FIELDS}
-        candidate.update(schema_version=1, run_id=run_id, launch_confirmed=True,
-                         model=result["config"]["agent"]["model_name"])
+        if output_path.exists():
+            candidate = validate(read_json(output_path), now, run_id)
+        else:
+            candidate = {key: None for key in FIELDS}
+            candidate.update(schema_version=1, run_id=run_id, launch_confirmed=True,
+                             model=result["config"]["agent"]["model_name"])
     if result.get("finished_at"):
         exceptions = [result["exception_info"], *(step.get("exception_info") for step in result.get("step_results") or [])]
         exception = next((item for item in exceptions if item is not None), None)
@@ -55,6 +58,7 @@ def publish_once(source_path, output_path, *, run_id, result_path, now=None):
     candidate = validate(candidate, now, run_id)
     if output_path.exists():
         previous = validate(read_json(output_path), now, run_id)
+        check_step_update(previous, candidate)
         for key in ("source_updated_at", "heartbeat_at"):
             if previous[key] and (not candidate[key] or timestamp(candidate[key]) < timestamp(previous[key])):
                 raise ValueError("older evidence")

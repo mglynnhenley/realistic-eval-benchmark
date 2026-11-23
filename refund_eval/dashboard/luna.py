@@ -13,6 +13,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from refund_eval.dashboard.luna_events import (
+    ACTIONS,
+    MAX_FEED_BYTES,
+    MAX_STEPS,
+    OUTCOMES,
+    STEP_FIELDS,
+)
+
 STATIC = Path(__file__).with_name("luna_static")
 FIELDS = {
     "schema_version", "run_id", "model", "stage", "launch_confirmed",
@@ -33,9 +41,9 @@ def timestamp(value):
 
 def validate(value, now, run_id=None):
     """Reject non-contract fields rather than risking a raw-log response."""
-    if not isinstance(value, dict) or set(value) != FIELDS:
+    if not isinstance(value, dict) or set(value) != (FIELDS | {"steps"} if value.get("schema_version") == 2 else FIELDS):
         raise ValueError("unexpected feed fields")
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] not in {1, 2}:
         raise ValueError("unsupported schema")
     if value["stage"] not in STAGES or type(value["launch_confirmed"]) is not bool:
         raise ValueError("invalid stage")
@@ -49,6 +57,29 @@ def validate(value, now, run_id=None):
         raise ValueError("different trial")
     if not value["launch_confirmed"] and value["stage"] != "preparation":
         raise ValueError("launch not confirmed")
+    steps = value.get("steps", [])
+    if not isinstance(steps, list) or len(steps) > MAX_STEPS or (steps and not value["launch_confirmed"]):
+        raise ValueError("invalid steps")
+    previous_seq = 0
+    normalized_steps = []
+    for step in steps:
+        step = dict(step) if isinstance(step, dict) else step
+        if not isinstance(step, dict) or set(step) != STEP_FIELDS:
+            raise ValueError("unexpected step fields")
+        if type(step["seq"]) is not int or step["seq"] <= previous_seq:
+            raise ValueError("unordered steps")
+        previous_seq = step["seq"]
+        if step["action"] not in ACTIONS or step["outcome"] not in OUTCOMES:
+            raise ValueError("untrusted step text")
+        if step["turn"] is not None and (type(step["turn"]) is not int or step["turn"] < 0):
+            raise ValueError("invalid step turn")
+        for key in ("at", "simulated_date"):
+            if step[key] is not None:
+                parsed = timestamp(step[key])
+                if key == "at" and (parsed - now).total_seconds() > 30:
+                    raise ValueError("future step")
+                step[key] = parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        normalized_steps.append(step)
     if value["turns"] is not None and (type(value["turns"]) is not int or value["turns"] < 0):
         raise ValueError("invalid turns")
     for key in ("agent_spend_usd", "world_spend_usd"):
@@ -56,6 +87,8 @@ def validate(value, now, run_id=None):
         if item is not None and (type(item) not in (int, float) or not math.isfinite(item) or item < 0):
             raise ValueError("invalid spend")
     result = dict(value)
+    if value["schema_version"] == 2:
+        result["steps"] = normalized_steps
     for key in ("source_updated_at", "heartbeat_at"):
         if key == "source_updated_at" and value[key] is None:
             continue
@@ -65,6 +98,16 @@ def validate(value, now, run_id=None):
         # Python accepts ISO forms (e.g. decimal commas) that browsers do not.
         result[key] = parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     return result
+
+
+def check_step_update(previous, candidate):
+    old = previous.get("steps", [])
+    new = candidate.get("steps", [])
+    if old and (not new or new[-1]["seq"] < old[-1]["seq"]):
+        raise ValueError("step history regression")
+    by_seq = {step["seq"]: step for step in old}
+    if any(step["seq"] in by_seq and step != by_seq[step["seq"]] for step in new):
+        raise ValueError("recorded step changed")
 
 
 class Feed:
@@ -84,14 +127,16 @@ class Feed:
             error = None
             try:
                 with self.path.open("rb") as handle:
-                    raw = handle.read(8193)
-                if len(raw) > 8192:
+                    raw = handle.read(MAX_FEED_BYTES + 1)
+                if len(raw) > MAX_FEED_BYTES:
                     raise ValueError("oversized feed")
                 candidate = validate(json.loads(raw), now, self.run_id)
                 if self.last and self.last["launch_confirmed"] and not candidate["launch_confirmed"]:
                     raise ValueError("launch state regression")
                 if self.last and timestamp(candidate["heartbeat_at"]) < timestamp(self.last["heartbeat_at"]):
                     raise ValueError("older heartbeat")
+                if self.last:
+                    check_step_update(self.last, candidate)
                 self.last = candidate
                 self.run_id = self.run_id or candidate["run_id"]
             except FileNotFoundError:
@@ -108,7 +153,8 @@ class Feed:
             heartbeat_age = age("heartbeat_at")
             source_age = age("source_updated_at")
             return {
-                **payload, "connected": self.last is not None, "feed_error": error,
+                **payload, "steps": payload.get("steps", []), "step_actions": ACTIONS, "step_outcomes": OUTCOMES,
+                "connected": self.last is not None, "feed_error": error,
                 "heartbeat_age_seconds": heartbeat_age, "source_age_seconds": source_age,
                 "stale": error is not None or heartbeat_age is None or heartbeat_age > 90,
                 "source_stale": source_age is None or source_age > 90,

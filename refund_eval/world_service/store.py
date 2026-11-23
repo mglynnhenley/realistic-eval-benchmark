@@ -68,6 +68,7 @@ class OutputWriter:
         self.directory.mkdir(parents=True, exist_ok=True)
         (self.directory / EVENTS_FILE).write_text("", encoding="utf-8")
         self._written = 0
+        self._operator_steps = []
 
     def write(self, store: MemoryStore, settings: dict[str, Any]) -> None:
         events = store.get(EVENTS_KEY) or []
@@ -83,6 +84,8 @@ class OutputWriter:
         os.replace(tmp, self.directory / STATE_FILE)
         if trial_name := os.environ.get("WORLD_TRIAL"):
             try:
-                atomic_json(self.directory / WORLD_STATUS_FILE, world_status(store, trial_name))
+                status = world_status(store, trial_name, previous_steps=self._operator_steps)
+                atomic_json(self.directory / WORLD_STATUS_FILE, status)
+                self._operator_steps = status["steps"]
             except Exception:  # noqa: BLE001 -- telemetry cannot change trial behavior or leak private errors
                 logging.getLogger(__name__).warning("Operator status could not be published")

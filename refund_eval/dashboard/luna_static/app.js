@@ -4,6 +4,63 @@ const money = (value) => value == null ? 'Unknown' : new Intl.NumberFormat('en-U
 let latest = null;
 let receivedAt = 0;
 let failed = false;
+const seenSteps = new Map();
+let timelineSnapshot = null;
+let timelineRunId = null;
+let unseenSteps = 0;
+function jumpToLatest() {
+  el('step-list')?.lastElementChild?.scrollIntoView({block:'end', behavior:'auto'});
+  unseenSteps = 0;
+  if (el('new-steps')) text('new-steps', '');
+}
+function renderTimeline(s) {
+  if (!el('step-list') || timelineSnapshot === s) return;
+  timelineSnapshot = s;
+  const list = el('step-list');
+  const runId = s.launch_confirmed ? s.run_id : null;
+  if (timelineRunId !== runId) {
+    seenSteps.clear(); list.replaceChildren(); unseenSteps = 0;
+    text('new-steps', ''); timelineRunId = runId;
+  }
+  const last = list.lastElementChild;
+  const rect = last?.getBoundingClientRect();
+  const following = el('follow-latest').checked && (!last || (rect.bottom >= 0 && rect.bottom <= window.innerHeight + 80));
+  const fragment = document.createDocumentFragment();
+  let added = 0;
+  for (const step of s.steps ?? []) {
+    if (seenSteps.has(step.seq)) continue;
+    const row = document.createElement('li'); row.className = 'step-row';
+    const number = document.createElement('span'); number.className = 'step-number'; number.textContent = String(step.seq).padStart(3, '0');
+    const content = document.createElement('div');
+    const action = document.createElement('h3'); action.textContent = s.step_actions[step.action];
+    const outcome = document.createElement('p'); outcome.className = `step-outcome ${step.outcome}`; outcome.textContent = s.step_outcomes[step.outcome];
+    const detail = document.createElement('p'); detail.className = 'step-meta';
+    detail.textContent = `${step.simulated_date == null ? 'Simulated time unknown' : 'Simulated ' + step.simulated_date.replace('T', ' ')} · ${step.turn == null ? 'Turn unknown' : 'Turn ' + step.turn}`;
+    const clock = document.createElement('time'); clock.className = 'step-clock';
+    clock.textContent = step.at == null ? 'Observation time unknown' : 'Observed ' + new Date(step.at).toISOString().replace('T', ' ').replace('Z', ' UTC');
+    if (step.at) clock.dateTime = step.at;
+    content.append(action, outcome, detail); row.append(number, content, clock); fragment.append(row);
+    seenSteps.set(step.seq, row); added++;
+  }
+  list.append(fragment); // Never replace old rows or move the reader to the top.
+  el('timeline-empty').hidden = seenSteps.size > 0;
+  if (!seenSteps.size) {
+    text('empty-explanation', s.launch_confirmed ? 'No observed steps have reached this page yet. Waiting for the operator’s action feed.' : 'Luna has not been confirmed launched. Real actions will appear when its operator connects the feed.');
+  }
+  text('step-count', seenSteps.size ? `${seenSteps.size.toLocaleString()} observed steps · oldest to newest` : 'No observed steps');
+  el('jump-latest').disabled = !seenSteps.size;
+  const first = seenSteps.keys().next().value;
+  el('history-note').hidden = !first || first === 1;
+  if (first > 1) text('history-note', `This feed begins at step ${first}. Earlier steps are not available here. Steps already on this page stay in place.`);
+  if (added && following) jumpToLatest();
+  else if (added) {
+    unseenSteps += added;
+    text('new-steps', `${unseenSteps} new ${unseenSteps === 1 ? 'step' : 'steps'} below. Your reading position is unchanged.`);
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  el('jump-latest')?.addEventListener('click', jumpToLatest);
+});
 const age = (seconds) => seconds == null ? 'Unknown' : seconds < 60 ? `${Math.floor(seconds)}s ago` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : `${Math.floor(seconds / 3600)}h ago`;
 function stamp(id, value, seconds) {
   const node = el(id);
@@ -17,6 +74,7 @@ function stamp(id, value, seconds) {
 function render() {
   if (!latest) return;
   const s = latest;
+  renderTimeline(s);
   const elapsed = Math.max(0, (Date.now() - receivedAt) / 1000);
   const heartbeatAge = s.heartbeat_age_seconds == null ? null : s.heartbeat_age_seconds + elapsed;
   const sourceAge = s.source_age_seconds == null ? null : s.source_age_seconds + elapsed;

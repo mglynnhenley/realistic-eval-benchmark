@@ -44,6 +44,26 @@ def test_missing_trial_identity_does_not_create_publisher(tmp_path, monkeypatch)
     assert not (tmp_path / WORLD_STATUS_FILE).exists()
 
 
+def test_action_timeline_is_ordered_fixed_vocabulary_and_does_not_change_the_trial(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORLD_TRIAL", "test-only-timeline__env")
+    activity = [{"kind": "tool_call", "tool": "search_threads", "status": "ok",
+                 "arguments": {"query": "PRIVATE"}, "result_text": "PRIVATE", "sim_time": "2026-01-01T00:00:00Z"}]
+    store = MemoryStore(agent_activity=activity)
+    original = json.dumps(store)
+    writer = OutputWriter(tmp_path)
+    writer.write(store, {})
+    first = json.loads((tmp_path / WORLD_STATUS_FILE).read_text())["steps"]
+    assert json.dumps(store) == original
+    activity.extend([{"kind": "tool_call", "tool": "PRIVATE", "status": "error", "error": "PRIVATE"},
+                     {"kind": "turn", "turn": 1, "stopped": True, "text": "PRIVATE"}])
+    writer.write(store, {})
+    second = json.loads((tmp_path / WORLD_STATUS_FILE).read_text())["steps"]
+    assert second[0] == first[0] and [step["seq"] for step in second] == [1, 2, 3]
+    assert [step["action"] for step in second] == ["mail_search", "tool", "turn"]
+    assert [step["outcome"] for step in second] == ["returned", "error", "stopped"]
+    assert "PRIVATE" not in json.dumps(second)
+
+
 @pytest.mark.parametrize("method", ["estimate", "worst_case", None])
 def test_allowance_estimates_are_not_reported_as_actual_spend(method):
     store = {"world_model_budget": {"spent_usd": 3, "status": "available"},

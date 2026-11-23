@@ -9,7 +9,7 @@ import pytest
 
 from refund_eval.dashboard.luna import Feed, make_server
 from refund_eval.dashboard.luna_publisher import publish_once
-from tests.test_luna_dashboard import snapshot
+from tests.test_luna_dashboard import snapshot, timeline_snapshot
 
 NOW = datetime(2026, 11, 23, 13, 0, tzinfo=UTC)
 
@@ -70,3 +70,13 @@ def test_operator_stop_cannot_turn_into_completed(tmp_path):
                                  "config": {"agent": {"model_name": "mockllm/model"}},
                                  "agent_result": {"metadata": {"world_stop_reason": "kill_switch"}}}))
     assert publish_once(source, output, result_path=result, now=NOW, run_id="TEST-ONLY-luna")["stage"] == "stopped"
+
+
+def test_terminal_fallback_preserves_the_received_timeline(tmp_path):
+    source, output, result = (tmp_path / name for name in ("source.json", "status.json", "result.json"))
+    source.write_text(json.dumps(timeline_snapshot(run_id="TEST-ONLY-luna")))
+    publish_once(source, output, result_path=result, now=NOW, run_id="TEST-ONLY-luna")
+    source.unlink()
+    result.write_text(json.dumps({"trial_name": "TEST-ONLY-luna", "finished_at": NOW.isoformat(), "exception_info": None}))
+    published = publish_once(source, output, result_path=result, now=NOW, run_id="TEST-ONLY-luna")
+    assert published["stage"] == "completed" and len(published["steps"]) == 1

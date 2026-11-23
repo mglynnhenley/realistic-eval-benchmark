@@ -122,3 +122,38 @@ def test_only_read_routes_and_assets_are_exposed(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def timeline_snapshot(**overrides):
+    step = {"seq": 1, "at": NOW.isoformat(), "simulated_date": "2026-01-01T00:00:00Z",
+            "turn": None, "action": "mail_search", "outcome": "returned"}
+    return snapshot(schema_version=2, launch_confirmed=True, stage="running", steps=[step], **overrides)
+
+
+def test_step_append_preserves_history_and_rejects_rewrites(tmp_path):
+    path = tmp_path / "timeline.json"
+    value = timeline_snapshot()
+    path.write_text(json.dumps(value))
+    feed = Feed(path, run_id="test-only-luna")
+    first = feed.read(NOW)
+    value["steps"].append({**value["steps"][0], "seq": 2, "action": "message", "outcome": "error"})
+    path.write_text(json.dumps(value))
+    second = feed.read(NOW)
+    assert second["steps"][0] == first["steps"][0] and len(second["steps"]) == 2
+    value["steps"][0]["action"] = "tool"
+    path.write_text(json.dumps(value))
+    assert feed.read(NOW)["steps"] == second["steps"]
+    value["steps"] = []
+    path.write_text(json.dumps(value))
+    assert feed.read(NOW)["steps"] == second["steps"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"payload": "PRIVATE"}, {"action": "PRIVATE"}, {"outcome": "PRIVATE"}, {"seq": True},
+    {"at": "PRIVATE"}, {"turn": -1},
+])
+def test_step_contract_rejects_private_or_invalid_fields(changes):
+    value = timeline_snapshot()
+    value["steps"][0].update(changes)
+    with pytest.raises((ValueError, TypeError)):
+        validate(value, NOW)

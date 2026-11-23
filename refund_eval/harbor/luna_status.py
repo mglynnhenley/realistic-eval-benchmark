@@ -6,7 +6,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from refund_eval.dashboard.luna import timestamp, validate
+from refund_eval.dashboard.luna import check_step_update, timestamp, validate
+from refund_eval.dashboard.luna_events import MAX_FEED_BYTES
 from refund_eval.world_service.status import (
     ACTION_SUMMARIES,
     WORLD_FIELDS,
@@ -27,10 +28,13 @@ class NativeStatus:
             local = Path(directory) / WORLD_STATUS_FILE
             await environment.service_download_file(f"/var/log/world/{WORLD_STATUS_FILE}", local, service="world")
             with local.open("rb") as handle:
-                source = json.loads(handle.read(8193))
+                raw = handle.read(MAX_FEED_BYTES + 1)
+            if len(raw) > MAX_FEED_BYTES:
+                raise ValueError("oversized source")
+            source = json.loads(raw)
         if not isinstance(source, dict) or set(source) != WORLD_FIELDS:
             raise ValueError("unexpected world status fields")
-        if type(source["schema_version"]) is not int or source["schema_version"] != 1:
+        if type(source["schema_version"]) is not int or source["schema_version"] != 2:
             raise ValueError("unsupported world status")
         if source["trial_name"] != self.run_id.lower():
             raise ValueError("different trial")
@@ -38,7 +42,7 @@ class NativeStatus:
             raise ValueError("untrusted status text")
         now = datetime.now(UTC)
         candidate = validate({
-            "schema_version": 1, "run_id": self.run_id, "model": self.model,
+            "schema_version": 2, "run_id": self.run_id, "model": self.model, "steps": source["steps"],
             "stage": "stopped" if source["stopped"] else "running", "launch_confirmed": True,
             "simulated_date": source["simulated_date"], "turns": source["turns"],
             "agent_spend_usd": None, "world_spend_usd": source["world_spend_usd"],
@@ -47,6 +51,8 @@ class NativeStatus:
         }, now, self.run_id)
         if self.last and timestamp(candidate["source_updated_at"]) < timestamp(self.last["source_updated_at"]):
             raise ValueError("older evidence")
+        if self.last:
+            check_step_update(self.last, candidate)
         self.directory.mkdir(parents=True, exist_ok=True)
         atomic_json(self.directory / "luna-source.json", candidate)
         self.last = candidate

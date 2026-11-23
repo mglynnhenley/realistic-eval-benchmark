@@ -27,8 +27,8 @@ telemetry change, no trial round). Recheck base/version before preparing images.
 1. The world sidecar's existing `OutputWriter.write()` atomically writes
    `/var/log/world/luna-world-status.json` whenever it persists a tool/turn/budget
    event. It projects **only** trial identity, clock, turns, trustworthy reported
-   world USD spend, a boolean stop flag, a fixed coarse action summary and UTC
-   evidence time. No inbox, arguments, case text, prompts, URLs, errors or secrets.
+   world USD spend, a boolean stop flag, fixed action/result labels, ordered step
+   IDs and timestamps. No inbox, arguments, case text, prompts, URLs, error details or secrets.
 2. `RefundInstalledAgent.run()` starts a **host-only observer** alongside its
    unchanged installed Inspect command. Every five seconds it uses Harbor
    0.26.0 `service_download_file(..., service="world")` to fetch that one sanitized
@@ -56,8 +56,18 @@ does not parse a live private Inspect log or estimate from tokens. Terminal
 target cost comes from native Harbor `agent_result.cost_usd`, when reported.
 World cost requires actual/generation-lookup completion-charge provenance matching
 the budget total. Estimates, worst-case settlements, missing provenance and unknown
-accounting stay null; no zero is invented. Actions are fixed "tool call recorded" / "agent
-turn recorded" summaries, never generated from case text.
+accounting stay null; no zero is invented. Individual world-connected tool calls
+and turn boundaries become ordered timeline rows with fixed action categories
+(mail, search, browser, scheduling or generic tool) and reported return/error/stop
+status. "Tool returned" is not a claim that a business action succeeded. Local-only
+agent memory actions and reasoning are not exposed. No result payload is copied.
+
+The timeline is the primary view; totals/source health are secondary. Existing rows
+are never replaced on refresh. "Follow new steps" follows only while the reader
+is at the latest row; scrolling back pauses automatic movement. "Jump to latest"
+is explicit. First-observed UTC times are cached outside canonical trial records;
+they are not exact action-start timestamps and do not enter agent/grader context.
+No examples or historical runs appear on the preparation App.
 
 ## Operator processes, only after preconditions and real launch confirmation
 
@@ -98,11 +108,12 @@ access remain unverified while preflight is stopped.
 
 ## Feed contract and liveness
 
-Version 1 requires exactly these fields. Unknown metrics are `null`, not zero.
+Version 2 requires exactly these fields plus `steps`. Version 1 remains supported
+for existing status/preparation feeds without steps. Unknown metrics are `null`.
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | Integer `1` |
+| `schema_version` | Integer `2` (`1` for legacy status-only feeds) |
 | `run_id` | Null in preparation; exact pinned trial directory name after launch |
 | `model` | Actual installed-agent model name |
 | `stage` | `preparation`, `running`, `paused`, `completed`, `failed`, `stopped` |
@@ -113,6 +124,16 @@ Version 1 requires exactly these fields. Unknown metrics are `null`, not zero.
 | `latest_action` | Allowlisted safe summary or null |
 | `source_updated_at` | Evidence UTC timestamp or null |
 | `heartbeat_at` | Last successful host observation UTC timestamp |
+| `steps` | Version 2 only: ordered list of fixed-vocabulary action/result metadata |
+
+Each step has exactly `seq` (strictly increasing integer), `at` (first observed UTC
+time or null), `simulated_date` (world time or null), `turn` (reported integer or
+null), `action` (fixed category code), and `outcome` (fixed return-status code).
+Raw tool names, IDs, inputs, results, agent text and error text are never copied.
+The transport retains the latest 10,000 steps within a 4 MiB limit. If earlier
+steps are outside that window, the page says so; rows already received remain in
+place. Overlapping steps cannot be rewritten, reordered or regressed. Terminal
+publication retains previously received steps even if the source disappears.
 
 The displayed $50 agent/$100 world caps are not enforcement controls. Native
 source heartbeats update every five seconds only after a successful sidecar

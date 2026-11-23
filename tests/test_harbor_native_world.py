@@ -141,9 +141,13 @@ async def main():
     status = json.loads(source.read_text())
     assert status["turns"] == 1 and status["run_id"] == trial.name
     assert status["model"] == "mockllm/model" and status["agent_spend_usd"] is None
+    assert status["schema_version"] == 2 and status["steps"]
+    assert all(set(step) == {"seq", "at", "simulated_date", "turn", "action", "outcome"} for step in status["steps"])
+    assert any(step["action"] == "turn" for step in status["steps"])
     output = trial / "luna-status.json"
     publish_once(source, output, run_id=trial.name, result_path=trial / "result.json")
-    assert Feed(output, run_id=trial.name).read()["turns"] == 1
+    consumed = Feed(output, run_id=trial.name).read()
+    assert consumed["turns"] == 1 and len(consumed["steps"]) == len(status["steps"])
     assert not list(logs.rglob("*luna*"))  # status is outside the agent log mount
     print("Installed-agent native status: PASS")
 
