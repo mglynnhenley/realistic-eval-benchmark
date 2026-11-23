@@ -883,6 +883,38 @@ async def test_run_executes_inspect_in_app_and_forwards_the_kill_switch(tmp_path
     assert [c for c, _ in environment.commands if "touch " in c] == ["mkdir -p /app/.context && touch /app/.context/KILL"]
 
 
+async def test_cancel_during_observer_cleanup_is_not_suppressed(tmp_path, monkeypatch):
+    from refund_eval.harbor import installed_agent
+
+    started, closing = asyncio.Event(), asyncio.Event()
+
+    class ClosingObserver:
+        def __init__(self, *_args):
+            pass
+
+        async def watch(self, _environment):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closing.set()
+                await asyncio.Event().wait()
+
+        async def safe_observe(self, _environment):
+            pass
+
+    monkeypatch.setattr(installed_agent, "NativeStatus", ClosingObserver)
+
+    async def execute(_environment):
+        await started.wait()
+
+    run = asyncio.create_task(make_agent(tmp_path).run("ignored", Environment(on_run=execute), AgentContext()))
+    await asyncio.wait_for(closing.wait(), timeout=5)
+    run.cancel()  # Harbor cancellation after Inspect exits, during observer teardown
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=5)
+
+
 def test_installed_task_detects_forwarded_kill_file(tmp_path, monkeypatch):
     from refund_eval import killswitch
     from refund_eval.harbor import installed_agent

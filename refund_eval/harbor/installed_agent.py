@@ -131,8 +131,7 @@ class RefundInstalledAgent(BaseInstalledAgent):
                 with suppress(asyncio.CancelledError):
                     await execution
             observer.cancel()
-            with suppress(asyncio.CancelledError):
-                await observer
+            await asyncio.gather(observer, return_exceptions=True)
             await status.safe_observe(environment)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
