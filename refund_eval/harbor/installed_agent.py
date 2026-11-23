@@ -33,6 +33,7 @@ from harbor.models.agent.context import AgentContext
 from pydantic import Field
 
 from refund_eval.config import BudgetNotice, RunConfig
+from refund_eval.harbor.luna_status import NativeStatus
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.provider import published_model_args
 
@@ -114,6 +115,8 @@ class RefundInstalledAgent(BaseInstalledAgent):
         if reason := kill_reason():
             raise RuntimeError(f"Trial blocked by kill switch: {reason}")
         execution = asyncio.create_task(self.exec_as_agent(environment, self.inspect_command(), cwd=APP))
+        status = NativeStatus(self.logs_dir, self.model_name)
+        observer = asyncio.create_task(status.watch(environment))
         try:
             killed = False
             while not execution.done():
@@ -127,6 +130,10 @@ class RefundInstalledAgent(BaseInstalledAgent):
                 execution.cancel()
                 with suppress(asyncio.CancelledError):
                     await execution
+            observer.cancel()
+            with suppress(asyncio.CancelledError):
+                await observer
+            await status.safe_observe(environment)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         path = self.logs_dir / "trajectory.json"

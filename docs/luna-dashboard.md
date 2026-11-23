@@ -1,152 +1,153 @@
-# Luna trial watch
+# Luna trial watch: installed-agent operator handoff
 
-A separate **read-only** view of the current GPT-6 Luna trial. It does not import
-the harness, expose run controls, read logs, or call model providers. The existing
-local launch-capable dashboard is intentionally not exposed.
+An authenticated, read-only view of the current GPT-6 Luna trial. The viewer
+serves static assets and `GET /api/status` only; no controls, trial queries,
+model calls or raw logs. The Python HTTP server is **not** an authentication
+service: publish only through the team-authenticated Devin App proxy.
 
-## Serving
+## Current state and deployment prerequisite
 
-```sh
-uv run --frozen python -m refund_eval.dashboard.luna --port 8080 --feed-file /path/outside/git/luna-status.json
-```
+The existing `luna-trial-watch` App remains a preparation view. The operator's
+`/home/ubuntu/trial_tools/luna-repeat-status.json` is a stopped-preflight
+annotation, **not** an automatic source. Do not point a publisher at it, copy old
+run data, connect test fixtures, or infer a launch from an App heartbeat.
+The 365-day/12-week preflight decision is owned by the coordinator/operator.
+This handoff does not authorize a launch, retry, reset, trial query or paid call.
 
-Serve through an authenticated Devin App. Its proxy handles team sign-in; the
-Python server is not an authentication service and must not be exposed directly
-on a public unauthenticated host. A signed-in viewer can only read static assets
-and `GET /api/status`. All write methods are unsupported. The App depends on its
-managing session: a visit wakes a sleeping session; archiving/ending it takes
-the App offline. Keep runtime status files outside the repository.
+Before any separately authorized launch, the operator must adopt this revision
+in **both the Harbor host checkout and newly prepared world image**. Existing
+images/host code do not emit the new source and cannot be retrofitted by just
+running the viewer. Prepare against the approved current base/version and the
+operator's already approved agent wheel; do not replace it with a test wheel.
+Verified base for this change: main `6725b12`; environment 7.9 -> 7.10 (artifact-only
+telemetry change, no trial round). Recheck base/version before preparing images.
 
-## Operator feed contract (version 1)
+## Automatic source: actual native installed-agent path
 
-The trial operator, not the dashboard, owns publication. An automatic publisher
-must repeatedly write the following JSON **atomically** to the configured file
-(temporary sibling file, then rename), including a heartbeat even if run evidence
-has not changed. Target a 30-second heartbeat. For different VMs, arrange an
-authenticated transport or an explicitly subscribed shared file in refresh mode.
-Creating a shared file alone is not an automatic publisher: until the operator
-has established repeated synchronization, the feed remains unconnected.
+1. The world sidecar's existing `OutputWriter.write()` atomically writes
+   `/var/log/world/luna-world-status.json` whenever it persists a tool/turn/budget
+   event. It projects **only** trial identity, clock, turns, trustworthy reported
+   world USD spend, a boolean stop flag, a fixed coarse action summary and UTC
+   evidence time. No inbox, arguments, case text, prompts, URLs, errors or secrets.
+2. `RefundInstalledAgent.run()` starts a **host-only observer** alongside its
+   unchanged installed Inspect command. Every five seconds it uses Harbor
+   0.26.0 `service_download_file(..., service="world")` to fetch that one sanitized
+   file. Reads time out after two seconds; observation failure cannot fail the
+   trial. The host validates the exact canonical world trial name, rejects older
+   evidence, and atomically writes `<EXACT_TRIAL_DIR>/luna-source.json` mode 0600.
+3. The co-located publisher below validates that source and reads only selected
+   terminal metadata from the **same trial's** `result.json`. It writes the final
+   allowlisted feed for the read-only viewer. No cross-VM export is required.
 
-| Field | Value |
-| --- | --- |
-| `schema_version` | Integer `1` |
-| `run_id` | Null before launch; actual trial ID required on launch and pinned until restart |
-| `model` | Operator-reported model name |
-| `stage` | `preparation`, `running`, `paused`, `completed`, `failed`, `stopped` |
-| `launch_confirmed` | Boolean; false requires preparation stage |
-| `simulated_date` | Reported simulated date/time string, or null |
-| `turns` | Nonnegative integer, or null |
-| `agent_spend_usd` | Recorded nonnegative finite spend, or null |
-| `world_spend_usd` | Recorded nonnegative finite spend, or null |
-| `latest_action` | Operator-sanitized summary, at most 400 characters, or null |
-| `source_updated_at` | Time run evidence was observed/updated, with timezone, or null |
-| `heartbeat_at` | Time publisher observed status, with timezone; required |
+The run pin is the **exact Harbor trial directory name** (`trial_name` in its
+result), available during execution, not the UUID written at exit. The world
+reports Harbor's lower-cased environment name with the `__env` suffix removed;
+the host compares it with the pinned directory name lower-cased and preserves
+the original exact directory name in the feed. Never select a directory by glob,
+"latest", or an older run. The operator must confirm the selected current run.
 
-Every field is required; unknown values are null, not inferred zeros. The approved
-caps are displayed as $50 for the agent and $100 for the world, not enforcement
-controls. No prompts, reasoning, email, private scenario data, full URLs containing
-tokens, or raw logs belong in this file. Arbitrary additional fields are rejected.
-The operator is responsible for sanitizing the summary before publication.
+Telemetry never enters the agent's prompt, messages, tools, `AgentContext`,
+installed public wheel, or `/logs/agent` mount. The world log volume is not
+mounted into `main`; the downloaded temporary file and host source are outside
+the agent-visible filesystem. The existing transcript/ATIF generation is unchanged.
 
-The browser refreshes every five seconds. Heartbeat age and run evidence age are
-separate; a recent heartbeat does not imply recent trial activity. After 90 seconds
-without a heartbeat the page labels data stale. On unreadable, malformed,
-oversized, out-of-order, or wrong-trial updates it retains the last known valid
-snapshot and explicitly labels the feed unavailable. A browser connection failure
-also retains last-known values and keeps aging them. No feed means preparation,
-unconnected, and unknown metrics, never a claim that a trial is running.
+Agent USD spend is **unknown while running**: this implementation deliberately
+does not parse a live private Inspect log or estimate from tokens. Terminal
+target cost comes from native Harbor `agent_result.cost_usd`, when reported.
+World cost is null when no authoritative budget record exists or accounting is
+unknown; no zero is invented. Actions are fixed "tool call recorded" / "agent
+turn recorded" summaries, never generated from case text.
 
-Use `--preparation-note 'Operator-confirmed blocker' --preparation-note-at ISO_TIME`
-to show a verified, source-dated preparation update independently of live feed
-connectivity. This never creates a heartbeat or marks the feed connected, and is
-hidden once the operator feed confirms launch. Clear or replace it when superseded.
+## Operator processes, only after preconditions and real launch confirmation
 
-## Co-located automatic publisher handoff
-
-No cross-VM export, shared-file approval, trial API access, or model call is needed.
-Run the publisher and this same viewer **on the operator's host**, beside the
-existing Harbor-local progress download. The existing agent downloads the
-runtime snapshot to the current trial's `agent/progress.json` about every two
-seconds (`refund_eval/harbor/agent.py`). The publisher only reads that file;
-it neither starts that writer nor contacts the sandbox or trial service.
-
-**Do not run this against the current stopped preflight.** There is no launched
-Luna trial or current progress file. The archived `luna-repeat-status.json`
-is an operator annotation, not runtime progress, and is not a publisher input.
-Keep the deployed preparation App unchanged until the operator can supply an
-actual current trial ID, its exact progress-file path, and confirmed launch time.
-Use the Harbor trial UUID (`id`), not its directory name, as the run ID.
-The exact same trial's Harbor `result.json` path is also required: its terminal
-result overrides a live progress file left at running/grading after exit.
-This handoff is not authorization to launch or change the trial.
-
-After a separately authorized launch, the operator checks out the dashboard PR
-and, from its repository root, runs these two long-lived processes. Replace
-each uppercase placeholder with operator-confirmed values; use a fresh private
-output directory outside Git, and no older run directory or glob.
+Keep both processes on the **operator host**, with output in an existing private
+directory outside Git. Replace all placeholders with the confirmed exact run.
+The source is created automatically by the installed-agent hook, not manually.
 
 ```sh
 uv run --frozen python -m refund_eval.dashboard.luna_publisher \
-  --progress-file /EXACT/CURRENT/TRIAL/agent/progress.json \
+  --source-file /EXACT/CURRENT/TRIAL/luna-source.json \
   --trial-result-file /EXACT/CURRENT/TRIAL/result.json \
   --output-file /PRIVATE/EXISTING/DIRECTORY/luna-status.json \
-  --run-id ACTUAL_CURRENT_TRIAL_ID \
-  --operator-confirmed-launch-at ACTUAL_LAUNCH_TIME_WITH_TIMEZONE
+  --run-id EXACT_HARBOR_TRIAL_DIRECTORY_NAME
 ```
 
 ```sh
 uv run --frozen python -m refund_eval.dashboard.luna \
   --port 8080 \
   --feed-file /PRIVATE/EXISTING/DIRECTORY/luna-status.json \
-  --run-id ACTUAL_CURRENT_TRIAL_ID
+  --run-id EXACT_HARBOR_TRIAL_DIRECTORY_NAME
 ```
 
-The publisher checks every 30 seconds and atomically writes mode-0600 status.
-Its output contains only the version-1 fields: fixed Luna model, the explicit
-operator-confirmed ID/launch, mapped runtime phase, world date and turn count.
-It does not copy messages, status reports, errors, inboxes, paths or arbitrary
-summary strings. Spend and latest action stay **unknown**: the existing progress
-snapshot provides no trustworthy split agent/world USD totals or sanitized action.
-Do not infer these from aggregate spend, token counts, or private text.
-On a finished Harbor result, the stage becomes completed, failed, or stopped
-(cancellation), using `finished_at` as terminal evidence time. Missing or
-pre-launch progress cannot supply terminal run metrics; those stay unknown.
+Register only this viewer command/directory/port with `deploy_devin_app` as
+`luna-operator-watch`, in the operator session. **Do not replace** the separate
+`luna-trial-watch` preparation App. Never expose a directory/file server, private
+source files or the launch-capable local benchmark dashboard. The authenticated
+proxy must deny signed-out requests. Send the verified team App URL to Chief of
+Staff before replacing the pinned preparation link. Apps depend on their managing
+session and are not an independent durable deployment.
 
-`heartbeat_at` means the local publisher successfully observed the file.
-`source_updated_at` remains the runtime's timestamp, even on unchanged reads;
-a fresh publisher heartbeat never makes old evidence fresh. Missing, malformed,
-oversized, pre-launch-window or regressing evidence leaves the output unchanged,
-so the last successful heartbeat ages out. The launch timestamp rejects older
-artifacts; the operator must also identify the exact current-trial path, since
-the raw snapshot itself contains no authenticated trial identity.
+Acceptance after the run preconditions: observe two real automatic source updates
+at `/api/status` without restarting the viewer; confirm exact run/model, null
+unknowns and signed-in read-only access; verify source/heartbeat ages independently.
+Do not start another run or query the trial just to test the dashboard.
+The operator already has team-authenticated App hosting; no new user credential
+or cross-VM channel is required. Actual production streaming and signed-in hosted
+access remain unverified while preflight is stopped.
 
-Serve only port 8080 through an authenticated Devin App named
-`luna-operator-watch` in the operator session. Do not deploy over the existing
-`luna-trial-watch` App owned by the separate dashboard session. Register the
-viewer command, repository directory and port with `deploy_devin_app`; do not
-expose the private source directory, a file server or the launch-capable local
-benchmark dashboard. Send the resulting authenticated App URL to Chief of Staff
-to replace the preparation-only pinned link. A signed-out request must be denied.
+## Feed contract and liveness
 
-Acceptance: observe two actual source updates reach `/api/status` without a
-viewer restart, confirm the expected run ID and null unknowns, then confirm
-staleness if the publisher stops. No trial queries are part of this check.
-For now the same producer-to-HTTP-consumer path is verified entirely offline by
-`tests/test_luna_publisher.py`, using temporary TEST ONLY paths and no deployed
-App. Do not point the production viewer at these fixtures.
+Version 1 requires exactly these fields. Unknown metrics are `null`, not zero.
 
-Remaining operational dependency: the operator's current-run progress source
-and co-located authenticated deployment. No additional user credential or
-cross-VM transport is required. No such real source exists while preflight is
-stopped; Chief of Staff coordinates the existing run-scope decision separately.
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Integer `1` |
+| `run_id` | Null in preparation; exact pinned trial directory name after launch |
+| `model` | Actual installed-agent model name |
+| `stage` | `preparation`, `running`, `paused`, `completed`, `failed`, `stopped` |
+| `launch_confirmed` | Boolean; false requires preparation |
+| `simulated_date` | Reported world clock or null |
+| `turns` | Nonnegative integer or null |
+| `agent_spend_usd` / `world_spend_usd` | Reported finite USD amount or null |
+| `latest_action` | Allowlisted safe summary or null |
+| `source_updated_at` | Evidence UTC timestamp or null |
+| `heartbeat_at` | Last successful host observation UTC timestamp |
 
-## Verification
+The displayed $50 agent/$100 world caps are not enforcement controls. Native
+source heartbeats update every five seconds only after a successful sidecar
+read. Publisher reads **cannot renew a stopped source's running heartbeat**.
+Evidence time changes only on a world persistence event. After 90 seconds the
+viewer labels stale data; malformed, unavailable, oversized, regressing or
+wrong-trial updates retain the last valid values and their original ages.
+
+An exact-trial finished result overrides a source left at running after the
+agent exits: completion, exception failure, cancellation or operator kill-switch
+stop are distinguished. Terminal evidence uses `finished_at`; terminal-only
+results can report stage with unknown metrics even if no world source arrived.
+The publisher's terminal heartbeat means the terminal result remains readable,
+not that a trial is still running. Writes are atomic mode-0600 sibling renames.
+
+`--preparation-note TEXT --preparation-note-at ISO_TIME` supplies a separate,
+source-dated operator annotation. It never creates a telemetry heartbeat or
+marks a trial launched. Keep the preparation App separate until the operator
+deployment and actual automatic updates have been verified.
+
+## Offline verification (TEST ONLY, never wired to the App)
 
 ```sh
-uv run pytest -q tests/test_luna_dashboard.py tests/test_luna_publisher.py
-uv run ruff check refund_eval/dashboard/luna.py refund_eval/dashboard/luna_publisher.py tests/test_luna_dashboard.py tests/test_luna_publisher.py
-node --check refund_eval/dashboard/luna_static/app.js
+uv sync --frozen --project integrations/harbor
+REFUND_EVAL_HARBOR_PACKAGE_SMOKE=1 uv run --offline --frozen pytest -q tests/test_harbor_native_world.py -k wheel
+uv run --frozen pytest -q tests/test_luna_dashboard.py tests/test_luna_publisher.py tests/test_luna_native_status.py tests/test_environment_version.py
+scripts/harbor python -m pytest -q tests/test_harbor_native_task.py -k 'inspect_command or run_executes or context'
+uv run ruff check .
 ```
 
-Only test fixtures belong in automated checks. Never write synthetic progress to
-the production feed. The dashboard cannot launch, reset, or resume the trial.
+The wheel smoke builds a visibly TEST ONLY public wheel (or uses explicitly
+provided exact bytes), installs it **non-editably in a fresh environment**, then
+runs the actual `RefundInstalledAgent.run()` and unchanged installed Inspect CLI
+against the real local world service with mock target/world models, fixture data
+and no provider credentials. Only container path/copy operations are translated
+to local filesystem operations. Assertions cover generated sidecar source ->
+host observer -> publisher -> viewer consumer, exact identity, turns and exclusion
+from agent context/mount/package. This is not a Docker/Modal provider acceptance
+test, paid run, or approval of the test wheel for production.

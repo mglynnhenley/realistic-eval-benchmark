@@ -797,6 +797,30 @@ def test_options_are_validated(tmp_path):
         make_agent(tmp_path, max_turns=10)  # a world setting, fixed in the task
 
 
+async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path):
+    from refund_eval.harbor.luna_status import NativeStatus
+    from refund_eval.world_service.status import world_status
+
+    source = tmp_path / "world-status.json"
+    source.write_text(json.dumps(world_status({"world": {"turn": 1}}, "train_refund__abc__env")))
+
+    class StatusEnvironment:
+        async def service_download_file(self, remote, destination, *, service):
+            assert service == "world" and remote == "/var/log/world/luna-world-status.json"
+            shutil.copyfile(source, destination)
+
+    agent = make_agent(tmp_path)
+    observer = NativeStatus(agent.logs_dir, agent.model_name)
+    assert await observer.safe_observe(StatusEnvironment())
+    output = agent.logs_dir.parent / "luna-source.json"
+    last = output.read_bytes()
+    assert json.loads(last)["turns"] == 1
+    source.write_text(json.dumps(world_status({"world": {"turn": 2}}, "different_trial__env")))
+    assert not await observer.safe_observe(StatusEnvironment())
+    assert output.read_bytes() == last  # no renewed heartbeat for an unavailable/wrong-run source
+    assert not (agent.logs_dir / "luna-source.json").exists()
+
+
 class Environment:
     def __init__(self, on_run=None):
         self.commands, self.on_run, self.default_user = [], on_run, None
