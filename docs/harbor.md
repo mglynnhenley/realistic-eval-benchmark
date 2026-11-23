@@ -241,6 +241,66 @@ Scout/claim grading, and it preserves the configured Harbor verifier. The
 existing installed-agent smoke remains separate and can check startup using an
 exact wheel; save/verify perform only the public descriptor schema check above.
 
+For independent per-run native inputs, use a fresh private prepared directory.
+The configuration is validated before output preparation or the OpenRouter
+probe. It supports one Modal target/attempt with concurrency 1; target sweeps,
+resume/inbox inputs, unsupported providers, or agent-plus-world caps above the
+runtime trial delta are rejected. Target, simulator, and grader model IDs may
+differ, but every active role must use `openrouter/`.
+
+Example `native-run.json` (replace the wheel path and digest with the approved
+staged wheel):
+
+```json
+{
+  "execution": "modal",
+  "scenario": "train_refund_late",
+  "agent_wheel": "/path/to/approved-agent.whl",
+  "agent_wheel_sha256": "<64-hex-sha256>",
+  "model": "openrouter/target-model",
+  "simulator_model": "openrouter/simulator-model",
+  "grader_model": "openrouter/grader-model",
+  "data_mode": "fixture",
+  "research_mode": "saved",
+  "sim_weeks": 6,
+  "max_turns": 1000,
+  "token_budget": 40000000,
+  "time_limit": 36000,
+  "cost_limit": 10,
+  "world_cost_limit": 10,
+  "trials": 1,
+  "concurrency": 1
+}
+```
+
+```bash
+scripts/harbor python -m scripts.laura_trial run \
+  --run-config .context/laura/native-run.json \
+  --prepared-dir .context/laura/prepared-001 \
+  --job-name laura-native-fresh-001 \
+  --openrouter-key-ceiling 50 \
+  --openrouter-trial-delta 25 \
+  --cleanup-timeout 10
+```
+
+The native command prepares and saves the exact fresh bundle through the same
+public-only wheel/scenario validation gate, then runs it without rewriting an
+arbitrary saved JobConfig. Its `run.json` and the job result directory's
+`effective_parameters.json` record resolved roles, simulated weeks, turns,
+agent/world caps, worker limit, requested/enforced total-cap status, guard
+delta/key ceiling, and cleanup timeout. Total-cap fields are recorded as not
+requested and not enforced for successful launches. The pinned Modal interface
+does not expose an absolute
+sandbox lifetime: `Sandbox.create(timeout=...)` is relative to creation and
+expiry is approximate. Therefore the guarded launcher rejects any explicit
+`total_time_limit_seconds` in a native config or
+`--total-time-limit-seconds` for a saved manifest with
+`strict_total_deadline_unsupported_by_modal`, before preparation or spending.
+`NativeBatchConfig` retains the field for clear validation, but `batch.prepare`
+also rejects it before creating output; worker and Harbor task timeouts are not
+end-to-end total-cap enforcement. Omitted totals preserve existing launch
+behavior. See <https://modal.com/docs/examples/sandbox_pool.md>.
+
 #### Optional batch spend planning
 
 Set `trial_spend_cap_usd` and `key_spend_cap_usd` together, and explicitly set

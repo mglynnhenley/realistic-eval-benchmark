@@ -174,7 +174,11 @@ async def run_guarded_job(
     job_factory: Any | None = None,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
+    before_job_run: Callable[[Any], None] | None = None,
+    total_time_limit_seconds: int | None = None,
 ) -> JobResult:
+    if total_time_limit_seconds is not None:
+        raise LauncherFailure("strict_total_deadline_unsupported_by_modal")
     require_pinned_harbor()
     validate_job_config(config)
     controller = guard or SpendGuard(thresholds)
@@ -200,6 +204,13 @@ async def run_guarded_job(
             if on_job_created is not None:
                 with suppress(Exception):
                     on_job_created(job)
+            await controller.ensure_healthy()
+            if before_job_run is not None:
+                try:
+                    before_job_run(job)
+                except Exception:
+                    await controller.fail_closed("required run metadata could not be written", cancel_job=False)
+                    raise
             await controller.ensure_healthy()
 
             run_task = asyncio.create_task(job.run())
@@ -248,7 +259,15 @@ def run_guarded_config(
     *,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
+    before_job_run: Callable[[Any], None] | None = None,
+    total_time_limit_seconds: int | None = None,
 ) -> int:
+    if total_time_limit_seconds is not None:
+        print(
+            "guard_failed=strict_total_deadline_unsupported_by_modal cleanup_uncertain=false",
+            file=sys.stderr,
+        )
+        return 2
     if thresholds.openrouter_key_ceiling != KEY_CEILING:
         print("guard_failed=OpenRouter key ceiling must be exactly $50 cleanup_uncertain=false", file=sys.stderr)
         return 2
@@ -263,6 +282,8 @@ def run_guarded_config(
             hooks["on_job_created"] = on_job_created
         if on_sandbox_created is not None:
             hooks["on_sandbox_created"] = on_sandbox_created
+        if before_job_run is not None:
+            hooks["before_job_run"] = before_job_run
         trial_failure = _trial_failure_reason(
             asyncio.run(run_guarded_job(config, thresholds, **hooks))
         )

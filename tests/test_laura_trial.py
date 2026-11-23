@@ -193,8 +193,37 @@ def _run_args(bundle: SimpleNamespace, job_name: str = "laura-fresh") -> list[st
         "--manifest", str(bundle.manifest_path),
         "--job-name", job_name,
         "--openrouter-key-ceiling", "50",
-        "--openrouter-trial-delta", "5",
+        "--openrouter-trial-delta", "25",
     ]
+
+
+def _native_run_input(tmp_path: Path) -> SimpleNamespace:
+    wheel, wheel_sha256 = _write_test_only_wheel(tmp_path / "native-wheel")
+    values = {
+        "execution": "modal",
+        "scenario": "train_refund_late",
+        "data_mode": "fixture",
+        "research_mode": "saved",
+        "model": "openrouter/target-test",
+        "models": ["openrouter/target-test"],
+        "simulator_model": "openrouter/simulator-test",
+        "grader_model": "openrouter/grader-test",
+        "cost_limit": {"openrouter/target-test": 10.0},
+        "world_cost_limit": 10.0,
+        "max_turns": 50,
+        "sim_weeks": 6,
+        "time_limit": 120,
+        "history_tokens": 0,
+        "budget_notice": "daily",
+        "trials": 1,
+        "concurrency": 1,
+        "seed": 0,
+        "agent_wheel": str(wheel),
+        "agent_wheel_sha256": wheel_sha256,
+    }
+    input_path = tmp_path / "native-config.json"
+    input_path.write_text(json.dumps(values), encoding="utf-8")
+    return SimpleNamespace(input_path=input_path, prepared_dir=tmp_path / "prepared", values=values)
 
 
 def test_save_and_verify_are_identity_only_and_preserve_completed_source_job(
@@ -259,14 +288,16 @@ def test_fresh_run_changes_only_job_name_and_surfaces_links_before_completion(
     captured = {}
     events = []
 
-    def guarded_run(config, thresholds, *, on_job_created, on_sandbox_created):
+    def guarded_run(config, thresholds, **hooks):
         events.append("guarded_runner")
         captured["config"] = config
         log_path = bundle.jobs_dir / "laura-fresh" / "job.log"
-        on_job_created(SimpleNamespace(_log_output_path=log_path))
-        on_sandbox_created(SimpleNamespace(
+        hooks["on_job_created"](SimpleNamespace(_log_output_path=log_path))
+        hooks["on_sandbox_created"](SimpleNamespace(
             _app=SimpleNamespace(get_dashboard_url=lambda: "https://modal.com/apps/ap-offline-test")
         ))
+        hooks["before_job_run"](SimpleNamespace())
+        assert hooks["total_time_limit_seconds"] is None
         print("guarded_harbor_job=complete")
         return 0
 
@@ -286,6 +317,550 @@ def test_fresh_run_changes_only_job_name_and_surfaces_links_before_completion(
     assert output[1] == f"harbor_job_log_uri={ (bundle.jobs_dir / 'laura-fresh' / 'job.log').resolve().as_uri() }"
     assert output[2] == "modal_dashboard_url=https://modal.com/apps/ap-offline-test"
     assert output[3] == "guarded_harbor_job=complete"
+
+
+def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
+    tmp_path, monkeypatch, capsys
+):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    original_input = native.input_path.read_bytes()
+    captured = {}
+
+    def guarded_run(config, thresholds, **hooks):
+        captured["config"] = config
+        captured["thresholds"] = thresholds
+        captured["total"] = hooks["total_time_limit_seconds"]
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run",
+        "--run-config", str(native.input_path),
+        "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-fresh",
+        "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 0
+
+    assert native.input_path.read_bytes() == original_input
+    config = captured["config"]
+    assert captured["total"] is None
+    assert config.agents[0].model_name == "openrouter/target-test"
+    assert config.agents[0].kwargs["time_limit"] == 120
+    task_path = Path(config.tasks[0].path)
+    task = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+    assert task["agent"]["timeout_sec"] == 132
+    assert task["metadata"]["simulator_model"] == "openrouter/simulator-test"
+    assert task["metadata"]["grader_model"] == "openrouter/grader-test"
+    expected = {
+        "target_model": "openrouter/target-test",
+        "models": ["openrouter/target-test"],
+        "simulator_model": "openrouter/simulator-test",
+        "grader_model": "openrouter/grader-test",
+        "sim_weeks": 6,
+        "max_turns": 50,
+        "agent_cost_limit_usd": "10.0",
+        "world_cost_limit_usd": "10.0",
+        "worker_time_limit_seconds": 120,
+        "requested_total_time_limit_seconds": None,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested",
+        "openrouter_trial_delta_usd": "25",
+        "openrouter_key_ceiling_usd": "50",
+        "cleanup_timeout_seconds": 10.0,
+        "effective_parameters_complete": True,
+        "unavailable_fields": [],
+    }
+    run_record = json.loads((native.prepared_dir / "run.json").read_text(encoding="utf-8"))
+    result_record = json.loads(
+        (Path(config.jobs_dir) / config.job_name / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert run_record["effective_parameters"] == expected
+    assert result_record == expected
+
+
+def test_native_run_without_optional_inputs_records_resolved_defaults(
+    tmp_path, monkeypatch
+):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    native.values["cost_limit"] = 1.0
+    native.values["world_cost_limit"] = 1.0
+    for name in ("model", "models", "sim_weeks", "max_turns", "time_limit"):
+        native.values.pop(name)
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    defaults = batch.NativeBatchConfig.model_validate_json(native.input_path.read_bytes())
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-defaults", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 0
+
+    effective = {
+        "target_model": defaults.model,
+        "models": [defaults.model],
+        "simulator_model": defaults.simulator_model,
+        "grader_model": defaults.grader_model,
+        "sim_weeks": defaults.sim_weeks,
+        "max_turns": defaults.max_turns,
+        "agent_cost_limit_usd": "1.0",
+        "world_cost_limit_usd": "1.0",
+        "worker_time_limit_seconds": defaults.time_limit,
+        "effective_parameters_complete": True,
+        "unavailable_fields": [],
+        "requested_total_time_limit_seconds": None,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested",
+        "openrouter_trial_delta_usd": "25",
+        "openrouter_key_ceiling_usd": "50",
+        "cleanup_timeout_seconds": 10.0,
+    }
+    run_record = json.loads((native.prepared_dir / "run.json").read_text(encoding="utf-8"))
+    job = yaml.safe_load((native.prepared_dir / "job.yaml").read_bytes())
+    assert run_record["effective_parameters"] == effective
+    assert job["agents"][0]["model_name"] == defaults.model
+    assert job["agents"][0]["kwargs"]["time_limit"] == defaults.time_limit
+    assert run_record["effective_parameters"]["sim_weeks"] == defaults.sim_weeks
+    assert json.loads(
+        (native.prepared_dir / "jobs" / "native-defaults" / "effective_parameters.json").read_text(
+            encoding="utf-8"
+        )
+    ) == effective
+
+
+def test_native_run_records_730_day_simulation_horizon(tmp_path, monkeypatch):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    horizon = 730 / 7
+    native.values["sim_weeks"] = horizon
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-long-horizon", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 0
+
+    run_record = json.loads((native.prepared_dir / "run.json").read_text(encoding="utf-8"))
+    effective_record = json.loads(
+        (native.prepared_dir / "jobs" / "native-long-horizon" / "effective_parameters.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    task_metadata = tomllib.loads(
+        (native.prepared_dir / "train_refund_late" / "task.toml").read_text(encoding="utf-8")
+    )["metadata"]
+    assert run_record["effective_parameters"]["sim_weeks"] == horizon
+    assert effective_record["sim_weeks"] == horizon
+    assert task_metadata["sim_weeks"] == horizon
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"models": ["openrouter/target-test", "openrouter/another-test"],
+          "cost_limit": {"openrouter/target-test": 10, "openrouter/another-test": 10}},
+         "target_model_sweep_unsupported"),
+        ({"model": "anthropic/target-test", "models": None, "cost_limit": 10},
+         "all_active_models_must_use_openrouter"),
+        ({"simulator_model": "anthropic/simulator"}, "all_active_models_must_use_openrouter"),
+        ({"execution": "docker"}, "guarded_native_runs_require_modal"),
+        ({"trials": 2}, "guarded_native_runs_require_one_attempt_and_concurrency"),
+        ({"inbox_snapshot": "test-inbox.json"}, "guarded_native_runs_do_not_support_resume_or_inbox"),
+        ({"resume_log": "resume.eval"}, "guarded_native_runs_do_not_support_resume_or_inbox"),
+        ({"cost_limit": {"openrouter/target-test": 20}},
+         "agent_and_world_caps_exceed_runtime_trial_delta"),
+        ({"trial_spend_cap_usd": 30, "key_spend_cap_usd": 40},
+         "native_trial_planning_cap_conflicts_with_runtime_guard"),
+        ({"trial_spend_cap_usd": 20, "key_spend_cap_usd": 51},
+         "native_key_planning_cap_exceeds_supported_guard"),
+    ],
+)
+def test_native_config_rejections_precede_preparation_and_guard(
+    tmp_path, monkeypatch, capsys, change, reason
+):
+    native = _native_run_input(tmp_path)
+    native.values.update(change)
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(laura_trial.batch, "prepare", lambda *args, **kwargs: prepare_calls.append(True))
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-fresh", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 2
+    assert prepare_calls == []
+    assert guard_calls == []
+    assert not native.prepared_dir.exists()
+    assert f"laura_setup_failed={reason}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad_total", [0, -1, float("nan"), float("inf"), True])
+def test_invalid_native_total_values_reject_before_preparation_and_guard(
+    tmp_path, monkeypatch, bad_total
+):
+    native = _native_run_input(tmp_path)
+    native.values["total_time_limit_seconds"] = bad_total
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(laura_trial.batch, "prepare", lambda *args, **kwargs: prepare_calls.append(True))
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-fresh", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]) == 2
+    assert prepare_calls == [] and guard_calls == []
+    assert not native.prepared_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("key_ceiling", "trial_delta"),
+    [("49", "25"), ("50", "51")],
+)
+def test_incompatible_guard_thresholds_reject_before_native_preparation(
+    tmp_path, monkeypatch, key_ceiling, trial_delta
+):
+    native = _native_run_input(tmp_path)
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(laura_trial.batch, "prepare", lambda *args, **kwargs: prepare_calls.append(True))
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-fresh", "--openrouter-key-ceiling", key_ceiling,
+        "--openrouter-trial-delta", trial_delta,
+    ]) != 0
+    assert prepare_calls == [] and guard_calls == []
+    assert not native.prepared_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("WORLD_SIMULATOR_MODEL", "anthropic/simulator", "saved_role_models_must_use_openrouter"),
+        ("WORLD_COST_LIMIT", "20", "saved_agent_and_world_caps_exceed_runtime_trial_delta"),
+        ("WORLD_COST_LIMIT", "0", "saved_native_effective_values_invalid_or_unavailable"),
+        ("WORLD_MAX_TURNS", "73.0", "saved_max_turns_invalid"),
+        ("WORLD_MAX_TURNS", 73.0, "saved_max_turns_invalid"),
+    ],
+)
+def test_saved_native_compatibility_is_checked_before_guard(
+    tmp_path, monkeypatch, capsys, field, value, reason
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"][field] = value
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert f"laura_setup_failed={reason}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("config_total", "cli_total"),
+    [(20, None), (None, "30"), (20, "30")],
+)
+def test_native_total_limit_refuses_before_preparation_and_guard(
+    tmp_path, monkeypatch, capsys, config_total, cli_total
+):
+    native = _native_run_input(tmp_path)
+    if config_total is not None:
+        native.values["total_time_limit_seconds"] = config_total
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.batch, "prepare", lambda *args, **kwargs: prepare_calls.append(True)
+    )
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+    args = [
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "native-fresh", "--openrouter-key-ceiling", "50",
+        "--openrouter-trial-delta", "25",
+    ]
+    if cli_total is not None:
+        args.extend(["--total-time-limit-seconds", cli_total])
+    assert laura_trial.main(args) == 2
+    assert prepare_calls == []
+    assert guard_calls == []
+    assert not native.prepared_dir.exists()
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=strict_total_deadline_unsupported_by_modal\n"
+    )
+
+
+def test_saved_manifest_total_limit_refuses_before_preparation_and_guard(
+    tmp_path, monkeypatch, capsys
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    _save(bundle)
+    manifest_before = bundle.manifest_path.read_bytes()
+    source_before = bundle.config_path.read_bytes()
+    prepare_calls = []
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial,
+        "prepare_fresh_job",
+        lambda *args, **kwargs: prepare_calls.append(True),
+    )
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+    assert laura_trial.main([
+        *_run_args(bundle), "--total-time-limit-seconds", "20",
+    ]) == 2
+    assert prepare_calls == []
+    assert guard_calls == []
+    assert bundle.manifest_path.read_bytes() == manifest_before
+    assert bundle.config_path.read_bytes() == source_before
+    assert not (bundle.jobs_dir / "laura-fresh").exists()
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=strict_total_deadline_unsupported_by_modal\n"
+    )
+
+
+def test_saved_result_record_uses_effective_world_horizon_values(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    world_environment = compose["services"]["world"]["environment"]
+    world_environment["WORLD_SIM_WEEKS"] = "4.5"
+    world_environment["WORLD_MAX_TURNS"] = "77"
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == 0
+    effective = json.loads(
+        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert effective["sim_weeks"] == 4.5
+    assert effective["max_turns"] == 77
+    assert effective["effective_parameters_complete"] is True
+    assert effective["unavailable_fields"] == []
+
+
+def test_saved_result_resolves_task_environment_instead_of_metadata(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    task_path = bundle.task_path / "task.toml"
+    task_lines = task_path.read_text(encoding="utf-8").splitlines()
+    task_path.write_text(
+        "\n".join(
+            'WORLD_SIM_WEEKS = "12.5"' if line.startswith("WORLD_SIM_WEEKS = ") else line
+            for line in task_lines
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"]["WORLD_SIM_WEEKS"] = "${WORLD_SIM_WEEKS:-12}"
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    monkeypatch.setenv("WORLD_SIM_WEEKS", "99")
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == 0
+    effective = json.loads(
+        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert effective["sim_weeks"] == 12.5
+
+
+def test_saved_compose_default_does_not_assume_an_unconfigured_host_value(
+    tmp_path, monkeypatch, capsys
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    task_path = bundle.task_path / "task.toml"
+    task_lines = task_path.read_text(encoding="utf-8").splitlines()
+    task_path.write_text(
+        "\n".join(line for line in task_lines if not line.startswith("WORLD_SIM_WEEKS = "))
+        + "\n",
+        encoding="utf-8",
+    )
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"]["WORLD_SIM_WEEKS"] = "${WORLD_SIM_WEEKS:-12}"
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    monkeypatch.setenv("WORLD_SIM_WEEKS", "99")
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=saved_world_environment_unresolvable\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected_code", "expected_weeks", "expected_error"),
+    [(":-", 0, 12, None), ("-", 2, None, "saved_sim_weeks_invalid")],
+)
+def test_saved_compose_defaults_distinguish_empty_from_unset(
+    tmp_path, monkeypatch, capsys, operator, expected_code, expected_weeks, expected_error
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"]["WORLD_SIM_WEEKS"] = (
+        f"${{WORLD_SIM_WEEKS{operator}12}}"
+    )
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    job = yaml.safe_load(bundle.config_path.read_bytes())
+    job["environment"]["env"] = {"WORLD_SIM_WEEKS": ""}
+    bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    guard_calls = []
+
+    def guarded_run(config, thresholds, **hooks):
+        guard_calls.append(True)
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == expected_code
+    if expected_code == 0:
+        assert guard_calls == [True]
+        effective = json.loads(
+            (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert effective["sim_weeks"] == expected_weeks
+        assert capsys.readouterr().err == ""
+    else:
+        assert guard_calls == []
+        assert capsys.readouterr().err == f"laura_setup_failed={expected_error}\n"
+
+
+def test_saved_result_resolves_compose_list_environment_and_job_override(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"] = [
+        "WORLD_SIM_WEEKS=${WORLD_SIM_WEEKS}",
+        "WORLD_SIMULATOR_MODEL=openrouter/list-simulator",
+        "WORLD_GRADER_MODEL=openrouter/list-grader",
+        "WORLD_COST_LIMIT=4.5",
+    ]
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    overlay = tmp_path / "world-env-overlay.yaml"
+    overlay.write_text(
+        "services:\n  world:\n    environment:\n"
+        "      - WORLD_SIM_WEEKS=${WORLD_SIM_WEEKS}\n"
+        "      - WORLD_MAX_TURNS=73\n",
+        encoding="utf-8",
+    )
+    job = yaml.safe_load(bundle.config_path.read_bytes())
+    job["environment"]["env"] = {"WORLD_SIM_WEEKS": "8.25"}
+    job["environment"]["extra_docker_compose"] = [str(overlay)]
+    bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == 0
+    effective = json.loads(
+        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert effective["sim_weeks"] == 8.25
+    assert effective["max_turns"] == 73
+    assert effective["simulator_model"] == "openrouter/list-simulator"
+    assert effective["grader_model"] == "openrouter/list-grader"
+    assert effective["world_cost_limit_usd"] == "4.5"
+
+
+@pytest.mark.parametrize(
+    "world_environment",
+    [
+        {"WORLD_SIMULATOR_MODEL": "${UNSUPPORTED_SIMULATOR_MODEL}"},
+        {"WORLD_SIM_WEEKS": "${WORLD_SIM_WEEKS:-$HOST_SIM_WEEKS}"},
+        ["WORLD_SIMULATOR_MODEL"],
+    ],
+)
+def test_saved_run_rejects_unresolved_interpolated_environment_before_guard(
+    tmp_path, monkeypatch, capsys, world_environment
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"] = world_environment
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=saved_world_environment_unresolvable\n"
+    )
 
 
 def test_run_rejects_existing_requested_job_before_guard(tmp_path, monkeypatch, capsys):

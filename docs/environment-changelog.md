@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.11 — 2026-11-23
+## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 366b792e23bab2fdcbe42f8d96433a5d8c6c8d490b049c9e49a22973f1a4b36e
+- Fingerprint: 29cff17bf2ef03dffc8dd9935491cbfdb9e413651ed7025ece7e27dcf563428f
 - Trial round: none; offline validation only.
 - Changes: Avoid repeated buffer-history reads when locating active Inspect tool-call spans, preserving the existing 200-event lookup semantics.
+
+## 7.11 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Write allowlisted native world status and ordered action/result metadata for the host-side installed-agent timeline, without adding telemetry to agent context, tools, canonical trial records or the public wheel (MAT-168).
 
 ## 7.10 — 2026-11-23
 - Kind: trivial batch
