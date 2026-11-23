@@ -1,7 +1,8 @@
+from inspect_ai._util.config import parse_cli_args
+
 from refund_eval import task as task_module
 from refund_eval.agent.prompt import task_message
 from refund_eval.scenario.schema import load_scenario
-from inspect_ai._util.config import parse_cli_args
 
 
 def test_task_text_override_keeps_scenario_and_default_prompt(monkeypatch):
