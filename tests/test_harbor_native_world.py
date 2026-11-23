@@ -31,7 +31,7 @@ from refund_eval.harbor.world_entrypoint import (
     world_argv,
 )
 from refund_eval.models.client import Message, OutputSchema
-from refund_eval.scenario.schema import SeedEmail
+from refund_eval.scenario.schema import SeedEmail, load_scenario
 from refund_eval.world_service.store import ACTIVITY_KEY
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
     MAX_TURNS,
@@ -180,7 +180,9 @@ def _check_public_scenario(path, scenario):
         public = yaml.safe_load(path.read_text())
     except (OSError, yaml.YAMLError):
         pytest.fail("Missing or invalid agent-visible scenario", pytrace=False)
-    if not isinstance(public, dict) or set(public) != {"id", "task_text", "start_time", "sim_weeks", "user"}:
+    if not isinstance(public, dict) or set(public) != {
+        "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+    }:
         pytest.fail("Agent scenario fields exceed or differ from the public contract", pytrace=False)
     expected_user = scenario.user.model_dump(include={"name", "email_addresses", "phone"}, exclude_none=True)
     user = public["user"]
@@ -190,10 +192,27 @@ def _check_public_scenario(path, scenario):
         start_time = datetime.fromisoformat(str(public["start_time"]))
     except ValueError:
         pytest.fail("Agent scenario has invalid public timing", pytrace=False)
-    if (public["id"], public["task_text"], start_time, public["sim_weeks"]) != (
-        scenario.id, scenario.task_text, scenario.start_time, scenario.sim_weeks,
+    requested_deadline = (scenario.requested_deadline.isoformat() if scenario.requested_deadline else None)
+    if (public["id"], public["task_text"], start_time, public["requested_deadline"], public["sim_weeks"]) != (
+        scenario.id, scenario.task_text, scenario.start_time, requested_deadline, scenario.sim_weeks,
     ):
         pytest.fail("Agent scenario does not match the resolved public values", pytrace=False)
+
+
+def test_public_scenario_contract_accepts_explicit_requested_deadline(tmp_path):
+    scenario = load_scenario().model_copy(update={"requested_deadline": date(2027, 2, 4)})
+    public = {
+        "id": scenario.id,
+        "task_text": scenario.task_text,
+        "start_time": scenario.start_time.isoformat(),
+        "requested_deadline": scenario.requested_deadline.isoformat(),
+        "sim_weeks": scenario.sim_weeks,
+        "user": scenario.user.model_dump(include={"name", "email_addresses", "phone"}, exclude_none=True),
+    }
+    path = tmp_path / "agent-scenario.yaml"
+    path.write_text(yaml.safe_dump(public))
+
+    _check_public_scenario(path, scenario)
 
 
 def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatch):

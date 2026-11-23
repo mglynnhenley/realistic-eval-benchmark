@@ -169,7 +169,7 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
         shutil.copyfile(source / relative, target)
 
     view = scenario.model_dump(mode="json", include={
-        "id": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "id": True, "task_text": True, "start_time": True, "requested_deadline": True, "sim_weeks": True,
         "user": {"name", "email_addresses", "phone"},
     })
     (destination / "refund_eval" / "scenario" / f"{scenario_name}.yaml").write_text(

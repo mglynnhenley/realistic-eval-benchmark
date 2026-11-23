@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Self
 
@@ -43,7 +43,8 @@ class AgentScenario(BaseModel):
     id: str
     task_text: str
     start_time: datetime
-    sim_weeks: float = Field(gt=0, le=12, allow_inf_nan=False)
+    requested_deadline: date | None = None
+    sim_weeks: float = Field(gt=0, allow_inf_nan=False)
     user: AgentUserProfile
 
 
@@ -101,7 +102,8 @@ class Scenario(BaseModel):
     grading_notes: str = ""
     task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
-    sim_weeks: float = Field(default=6.0, gt=0, le=12, allow_inf_nan=False)
+    requested_deadline: date | None = None
+    sim_weeks: float = Field(default=6.0, gt=0, allow_inf_nan=False)
     user: UserProfile
     orgs: list[Org]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
