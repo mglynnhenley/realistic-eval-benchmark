@@ -651,7 +651,7 @@ class SharedRoleSpendGuard(SpendGuard):
         allowance = self.thresholds.shared_allowance_usd
         key_usage_delta = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
         minimum = max(Decimal(0), allowance - key_usage_delta)
-        if snapshot.remaining + _MONEY_EPSILON < minimum:
+        if snapshot.remaining < minimum:
             raise GuardFailure("OpenRouter limit_remaining is below shared_allowance_usd")
         budgets = list(snapshot.budgets)
         if snapshot.effective_budget is not None:
@@ -662,7 +662,7 @@ class SharedRoleSpendGuard(SpendGuard):
             if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
                     or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
                 raise GuardFailure("OpenRouter budget metadata is malformed")
-            if budget.remaining + _MONEY_EPSILON < minimum:
+            if budget.remaining < minimum:
                 raise GuardFailure("OpenRouter budget remaining is below shared_allowance_usd")
 
     @staticmethod

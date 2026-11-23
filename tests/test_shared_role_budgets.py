@@ -360,3 +360,45 @@ def test_shared_role_guard_rejects_external_budget_erosion_below_required_headro
 
     with pytest.raises(GuardFailure, match="budget remaining is below"):
         guard._accept_sample(sample(9))
+
+
+@pytest.mark.parametrize("headroom_field", ["key", "budgets", "effective_budget"])
+@pytest.mark.parametrize(
+    ("phase", "remaining"),
+    [("initial", Decimal(0)), ("initial", Decimal("0.009")),
+     ("post_spend", Decimal(0)), ("post_spend", Decimal("0.004"))],
+)
+def test_shared_role_guard_requires_exact_key_and_budget_headroom(headroom_field, phase, remaining):
+    allowance = Decimal("0.01")
+
+    def sample(*, usage, key_remaining, budget_remaining):
+        payload = _key_metadata(usage=usage, remaining=key_remaining)
+        if headroom_field != "key":
+            budget = {
+                "scope": "key_limit", "limit_usd": Decimal(1),
+                "spend_usd": Decimal(1) - budget_remaining, "remaining_usd": budget_remaining,
+                "reset_interval": None, "resets_at": None, "include_byok": True,
+            }
+            payload["data"][headroom_field] = [budget] if headroom_field == "budgets" else budget
+        return SharedRoleOpenRouterSnapshot.parse(payload)
+
+    guard = SharedRoleSpendGuard(SharedRoleThresholds(allowance))
+    if phase == "initial":
+        key_remaining = remaining if headroom_field == "key" else allowance
+        budget_remaining = None if headroom_field == "key" else remaining
+        invalid = sample(usage=0, key_remaining=key_remaining, budget_remaining=budget_remaining)
+        reason = "limit_remaining" if headroom_field == "key" else "budget remaining"
+        with pytest.raises(GuardFailure, match=reason):
+            guard._accept_sample(invalid, initial=True)
+        return
+
+    baseline_budget = None if headroom_field == "key" else allowance
+    guard._accept_sample(
+        sample(usage=0, key_remaining=allowance, budget_remaining=baseline_budget), initial=True
+    )
+    key_remaining = remaining if headroom_field == "key" else Decimal("0.005")
+    budget_remaining = None if headroom_field == "key" else remaining
+    current = sample(usage=Decimal("0.005"), key_remaining=key_remaining, budget_remaining=budget_remaining)
+    reason = "limit_remaining" if headroom_field == "key" else "budget remaining"
+    with pytest.raises(GuardFailure, match=reason):
+        guard._accept_sample(current)
