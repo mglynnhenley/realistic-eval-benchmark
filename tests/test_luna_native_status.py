@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from refund_eval.world_service.status import (
     WORLD_FIELDS,
     WORLD_STATUS_FILE,
@@ -16,6 +18,8 @@ def test_real_output_writer_automatically_projects_without_raw_case_text(tmp_pat
     store = MemoryStore(world={"now": "2026-01-01T00:00:00Z", "turn": 1,
                                "overlay_inbox": ["PRIVATE_CASE_CANARY"], "status_reports": ["PRIVATE_CASE_CANARY"]},
                         world_model_budget={"spent_usd": 0.25, "status": "available"},
+                        model_completions=[{"response": {"usage": {"cost": 0.25}, "cost_method": "actual",
+                                                          "text": "PRIVATE_CASE_CANARY"}}],
                         agent_activity=[{"kind": "tool_call", "arguments": "PRIVATE_CASE_CANARY"}])
     writer.write(store, {"private_settings": "PRIVATE_CASE_CANARY"})
     path = tmp_path / WORLD_STATUS_FILE
@@ -38,3 +42,14 @@ def test_missing_trial_identity_does_not_create_publisher(tmp_path, monkeypatch)
     monkeypatch.delenv("WORLD_TRIAL", raising=False)
     OutputWriter(tmp_path).write(MemoryStore(), {})
     assert not (tmp_path / WORLD_STATUS_FILE).exists()
+
+
+@pytest.mark.parametrize("method", ["estimate", "worst_case", None])
+def test_allowance_estimates_are_not_reported_as_actual_spend(method):
+    store = {"world_model_budget": {"spent_usd": 3, "status": "available"},
+             "model_completions": [{"response": {"usage": {"cost": 3}, "cost_method": method}}]}
+    assert world_status(store, "test-only-estimated")["world_spend_usd"] is None
+    store["model_completions"][0]["response"].update(cost_method="generation_lookup", usage={"cost": 1})
+    assert world_status(store, "test-only-estimated")["world_spend_usd"] is None  # conservative ledger != actual charge
+    store["world_model_budget"]["spent_usd"] = 1
+    assert world_status(store, "test-only-estimated")["world_spend_usd"] == 1

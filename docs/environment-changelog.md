@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 3976af9bdc147319bafb3ff304aa977f1cc9353dab18c6c71586141c6b2cf9ef
+- Fingerprint: 18a4db792f6bc8e933fc8f6aa205d28d6eda649bfc15565f18793c7f6eac9f24
 - Trial round: none; offline validation only, no paid calls.
 - Changes: Write scalar-only native world telemetry for the host-side installed-agent dashboard observer, without adding telemetry to agent context, tools or the public wheel (MAT-168).
 

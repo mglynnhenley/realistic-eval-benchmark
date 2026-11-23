@@ -22,6 +22,7 @@ from refund_eval.models.client import (
     OutputSchema,
     Usage,
 )
+from refund_eval.models.replay import RecordingModelClient
 from refund_eval.models.world_spend_ledger import (
     LEDGER_FILE,
     LEDGER_VERSION,
@@ -30,6 +31,7 @@ from refund_eval.models.world_spend_ledger import (
 )
 from refund_eval.world import store as trial_store
 from refund_eval.world.store import world_store
+from refund_eval.world_service.status import world_status
 from refund_eval.world_service.store import MemoryTrial
 
 SCOPE = {"scenario": "train_refund_late",
@@ -120,6 +122,17 @@ async def test_estimate_exact_fit_returns_success_and_blocks_the_next_request(in
     with pytest.raises(ModelLimitExceeded, match="reached"):
         await budget.complete("simulator", MESSAGES, **SETTINGS)
     assert client.calls == 1
+
+
+@pytest.mark.parametrize("method", ["actual", "estimate"])
+async def test_operator_status_does_not_confuse_settled_estimates_with_provider_charges(installed_world_store, method):
+    charge = float(request_bound()) / 2
+    recorded = RecordingModelClient(ScriptedModels(completion(cost=charge, method=method)))
+    budget = make_budget(recorded, 1)
+    await budget.complete("simulator", MESSAGES, **SETTINGS)
+    assert budget.status == "available" and budget.spent > 0
+    status = world_status(world_store(), "test-only-world-spend")
+    assert status["world_spend_usd"] == (charge if method == "actual" else None)
 
 
 @pytest.mark.parametrize("case", ["unpriced", "unaffordable"])

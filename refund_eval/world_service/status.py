@@ -30,11 +30,28 @@ def finite_spend(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
 
+def reported_world_spend(store):
+    budget = store.get("world_model_budget") or {}
+    spent = finite_spend(budget.get("spent_usd"))
+    if spent is None or budget.get("status") not in {"available", "exhausted"}:
+        return None
+    # The allowance ledger can settle estimates and worst-case holds as spent.
+    # Read monetary scalars/provenance only, never response text or messages.
+    costs = []
+    for record in store.get("model_completions") or []:
+        response = record.get("response") or {}
+        cost = finite_spend((response.get("usage") or {}).get("cost"))
+        if response.get("cost_method") not in {"actual", "generation_lookup"} or cost is None:
+            return None
+        costs.append(cost)
+    return spent if math.isclose(sum(costs), spent, rel_tol=1e-9, abs_tol=1e-12) else None
+
+
 def world_status(store, trial_name, now=None):
     trial_name = trial_name.removesuffix("__env").lower()
     if not re.fullmatch(r"[a-z0-9_-]{1,180}", trial_name):
         raise ValueError("invalid trial identity")
-    world, budget = store.get("world") or {}, store.get("world_model_budget") or {}
+    world = store.get("world") or {}
     activity = store.get("agent_activity") or []
     simulated_date = world.get("now")
     if simulated_date is not None:
@@ -47,7 +64,7 @@ def world_status(store, trial_name, now=None):
         raise ValueError("invalid turn count")
     return {
         "schema_version": 1, "trial_name": trial_name, "simulated_date": simulated_date, "turns": turns,
-        "world_spend_usd": finite_spend(budget.get("spent_usd")) if budget.get("status") in {"available", "exhausted"} else None,
+        "world_spend_usd": reported_world_spend(store),
         "stopped": bool(world.get("killed") or world.get("stop_reason") in {"kill_switch", "cancelled"}),
         "latest_action": ACTION_SUMMARIES.get(activity[-1].get("kind")) if activity else None,
         "source_updated_at": (now or datetime.now(UTC)).isoformat(),

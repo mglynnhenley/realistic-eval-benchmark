@@ -54,8 +54,9 @@ the agent-visible filesystem. The existing transcript/ATIF generation is unchang
 Agent USD spend is **unknown while running**: this implementation deliberately
 does not parse a live private Inspect log or estimate from tokens. Terminal
 target cost comes from native Harbor `agent_result.cost_usd`, when reported.
-World cost is null when no authoritative budget record exists or accounting is
-unknown; no zero is invented. Actions are fixed "tool call recorded" / "agent
+World cost requires actual/generation-lookup completion-charge provenance matching
+the budget total. Estimates, worst-case settlements, missing provenance and unknown
+accounting stay null; no zero is invented. Actions are fixed "tool call recorded" / "agent
 turn recorded" summaries, never generated from case text.
 
 ## Operator processes, only after preconditions and real launch confirmation
