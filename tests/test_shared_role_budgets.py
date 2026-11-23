@@ -17,6 +17,7 @@ from refund_eval.models.shared_role_spend_ledger import (
 from scripts.offline_spend_guard import (
     GuardFailure,
     OpenRouterSnapshot,
+    SharedRoleOpenRouterSnapshot,
     SharedRoleSpendGuard,
     SharedRoleThresholds,
 )
@@ -189,11 +190,69 @@ def _key_metadata(*, usage=0, limit=80, remaining=80, reset=None, budget_remaini
     }
     if budget_remaining is not None:
         data["budgets"] = [{
-            "scope": "key", "limit_usd": 100, "spend_usd": 100 - budget_remaining,
+            "scope": "key_limit", "limit_usd": 100, "spend_usd": 100 - budget_remaining,
             "remaining_usd": budget_remaining, "reset_interval": None, "resets_at": None,
             "include_byok": True,
         }]
     return {"data": data}
+
+
+def test_shared_role_snapshot_accepts_empty_budgets_and_explicit_null_effective_budget():
+    payload = _key_metadata()
+    payload["data"].update(budgets=[], effective_budget=None)
+
+    snapshot = SharedRoleOpenRouterSnapshot.parse(payload)
+
+    assert snapshot.budgets == ()
+    assert snapshot.budgets_present
+    assert snapshot.effective_budget is None
+    assert snapshot.effective_budget_present
+
+
+@pytest.mark.parametrize("invalid_field", ["missing_reset_interval", "missing_resets_at", "unknown_scope"])
+def test_shared_role_guard_rejects_incomplete_or_unknown_budget_metadata(invalid_field):
+    payload = _key_metadata(budget_remaining=70)
+    budget = payload["data"]["budgets"][0]
+    if invalid_field == "missing_reset_interval":
+        del budget["reset_interval"]
+    elif invalid_field == "missing_resets_at":
+        del budget["resets_at"]
+    else:
+        budget["scope"] = "key"
+
+    async def probe():
+        return payload
+
+    guard = SharedRoleSpendGuard(
+        SharedRoleThresholds(Decimal(50), probe_timeout=0.1, poll_interval=0.1, max_sample_age=1),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        with pytest.raises(GuardFailure, match="monitor data malformed"):
+            await guard.start()
+        with pytest.raises(GuardFailure):
+            await guard.close()
+
+    asyncio.run(run())
+
+
+def test_shared_role_guard_rejects_effective_budget_null_to_object_change():
+    initial_payload = _key_metadata()
+    initial_payload["data"].update(budgets=[], effective_budget=None)
+    changed_payload = _key_metadata()
+    changed_payload["data"].update(
+        budgets=[],
+        effective_budget={
+            "scope": "key_limit", "limit_usd": 100, "spend_usd": 0, "remaining_usd": 100,
+            "reset_interval": None, "resets_at": None, "include_byok": True,
+        },
+    )
+    guard = SharedRoleSpendGuard(SharedRoleThresholds(Decimal(50)))
+    guard._accept_sample(SharedRoleOpenRouterSnapshot.parse(initial_payload), initial=True)
+
+    with pytest.raises(GuardFailure, match="budget metadata changed"):
+        guard._accept_sample(SharedRoleOpenRouterSnapshot.parse(changed_payload))
 
 
 def test_shared_role_guard_accepts_non_50_key_and_records_sanitized_baseline():

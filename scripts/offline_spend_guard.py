@@ -122,6 +122,11 @@ class SharedRoleThresholds:
         object.__setattr__(self, "shared_allowance_usd", allowance)
 
 
+_OPENROUTER_BUDGET_SCOPES = frozenset({
+    "workspace_default_member", "workspace_default_key", "member", "api_key", "workspace", "key_limit",
+})
+
+
 @dataclass(frozen=True)
 class OpenRouterBudget:
     scope: str
@@ -142,7 +147,8 @@ class OpenRouterBudget:
         guardrail_id, budget_id = value.get("guardrail_id"), value.get("budget_id")
         interval, resets_at = value.get("reset_interval"), value.get("resets_at")
         include_byok = value.get("include_byok")
-        if (not isinstance(scope, str) or not scope
+        if (not isinstance(scope, str) or scope not in _OPENROUTER_BUDGET_SCOPES
+                or "reset_interval" not in value or "resets_at" not in value
                 or (guardrail_id is not None and not isinstance(guardrail_id, str))
                 or (budget_id is not None and not isinstance(budget_id, str))
                 or interval not in (None, "daily", "weekly", "monthly")
@@ -212,7 +218,7 @@ class SharedRoleOpenRouterSnapshot:
                 or (provisioning is not None and type(provisioning) is not bool)
                 or (include_byok is not None and type(include_byok) is not bool)
                 or "limit_reset" not in data or not isinstance(budgets_value, list)
-                or (effective_present and not isinstance(effective_value, Mapping))):
+                or (effective_present and effective_value is not None and not isinstance(effective_value, Mapping))):
             raise TypeError
         return cls(
             base.usage, base.limit, base.remaining, reset, True, management, provisioning, include_byok,
