@@ -473,6 +473,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
         "openrouter_key_mode": "shared_roles",
         "shared_allowance_usd": 90,
         "agent_max_output_tokens": 2048,
+        "requested_deadline": "2027-02-04",
         "cost_limit": 50,
         "world_cost_limit": 100,
         "agent_wheel": str(wheel),
@@ -486,6 +487,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
         guarded_calls.append(config.job_name)
         assert thresholds.shared_allowance_usd == 90
         laura_trial.guarded_harbor.validate_job_config(config, expected_shared_roles=True)
+        assert config.agents[0].kwargs["requested_deadline"].isoformat() == "2027-02-04"
         assert config.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
         assert "OPENROUTER_AGENT_API_KEY" not in config.agents[0].env
         task_path = Path(config.tasks[0].path)
@@ -537,6 +539,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     assert initial_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
     assert initial_effective["runtime_metadata_confirmed"] is True
     assert initial_effective["shared_allowance_source"] == "operator_attested_allocation"
+    assert initial_effective["requested_deadline"] == "2027-02-04"
     assert initial_effective["key_limit_usd"] == "120"
     assert initial_effective["key_remaining_usd"] == "120"
     assert initial_effective["key_usage_baseline_usd"] == "0"
@@ -546,6 +549,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     assert run_effective["openrouter_key_mode"] == "shared_roles"
     assert run_effective["shared_allowance_usd"] == "90.0"
     assert run_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
+    assert run_effective["requested_deadline"] == "2027-02-04"
     for artifact in (manifest, run_record, effective_record):
         assert "fake-shared-role-key" not in artifact.read_text(encoding="utf-8")
 
@@ -560,6 +564,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     )
     assert reused_effective["openrouter_key_mode"] == "shared_roles"
     assert reused_effective["shared_allowance_usd"] == "90.0"
+    assert reused_effective["requested_deadline"] == "2027-02-04"
     assert reused_effective == initial_effective
     assert manifest.read_bytes() == manifest_bytes
 

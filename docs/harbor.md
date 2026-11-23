@@ -473,6 +473,12 @@ request bound.
 
 ### One-key role budgets (`shared_roles`)
 
+Native `shared_roles` preparation also accepts an optional `requested_deadline`
+date (for example, `"requested_deadline": "2027-02-04"`). It is independent of
+`sim_weeks`: it changes only the agent-facing task deadline and does not change
+the canonical scenario, world facts, or company refund window. Omitting it
+preserves the existing task wording.
+
 `openrouter_key_mode: "shared_roles"` is a separate native Modal mode for one ordinary
 `OPENROUTER_API_KEY`. It keeps the target and world request ceilings separate (at most `$50`
 and `$100`) and requires an explicit positive `shared_allowance_usd` (`H`) no greater than

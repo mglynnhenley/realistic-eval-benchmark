@@ -7,7 +7,7 @@ specific task, the scenario or evaluation.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
@@ -47,6 +47,17 @@ def _requested_deadline(scenario: PromptScenario, sim_weeks: float | None) -> st
     if scenario.requested_deadline is not None:
         return f"{scenario.requested_deadline.day} {scenario.requested_deadline:%B %Y}"
     return _deadline(scenario, sim_weeks).rsplit(" ", 1)[0]
+
+
+def with_requested_deadline(scenario: PromptScenario, requested_deadline: date | None) -> PromptScenario:
+    if requested_deadline is None:
+        return scenario
+    task_text = scenario.task_text
+    if "$deadline" not in task_text:
+        if task_text.count("4th January") != 1:
+            raise ValueError("requested_deadline_task_text_template_missing")
+        task_text = task_text.replace("4th January", "$deadline", 1)
+    return scenario.model_copy(update={"requested_deadline": requested_deadline, "task_text": task_text})
 
 
 def task_message(scenario: PromptScenario, sim_weeks: float | None = None) -> str:

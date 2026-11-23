@@ -36,12 +36,21 @@ from harbor.models.trajectories import Trajectory
 from harbor.publisher.packager import Packager
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
-from refund_eval.agent.prompt import render_system_prompt, task_message
+from refund_eval.agent.prompt import (
+    render_system_prompt,
+    task_message,
+    with_requested_deadline,
+)
 from refund_eval.agent.schedule import format_long, sim_deadline
 from refund_eval.harbor import adapter, atif, batch, world_entrypoint
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario import schema
-from refund_eval.scenario.schema import Org, load_agent_scenario, load_scenario
+from refund_eval.scenario.schema import (
+    AgentScenario,
+    Org,
+    load_agent_scenario,
+    load_scenario,
+)
 from refund_eval.sim import company_store
 
 
@@ -493,6 +502,85 @@ def test_staged_public_scenario_keeps_requested_deadline_separate_from_horizon(g
                         f"Your session ends on {horizon}: anything not done by that point will not get done.")
     assert expected_context in render_system_prompt(scenario, sim_weeks=sim_weeks)
     assert expected_context in render_system_prompt(public, sim_weeks=sim_weeks)
+
+
+@pytest.mark.parametrize("sim_weeks", [1.0, 365 / 7])
+def test_native_shared_roles_requested_deadline_reaches_target_without_world_overlay(
+    tmp_path, approved_split_budget_wheel, sim_weeks
+):
+    wheel, digest = approved_split_budget_wheel
+    deadline = date(2027, 2, 4)
+    out = tmp_path / "requested-deadline"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, max_turns=50, sim_weeks=sim_weeks, time_limit=120,
+        openrouter_key_mode="shared_roles", shared_allowance_usd=90, agent_max_output_tokens=2048,
+        requested_deadline=deadline, agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    record = json.loads(batch.prepare(out, config).read_text(encoding="utf-8"))
+    task_dir = out / "train_refund_late"
+    task = Task(task_dir)
+    metadata = task.config.metadata
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    assert job.agents[0].kwargs["requested_deadline"] == deadline
+    assert metadata["requested_deadline"] == "2027-02-04"
+    assert metadata["sim_weeks"] == sim_weeks
+    assert record["config"]["requested_deadline"] == "2027-02-04"
+    assert record["effective_parameters"]["requested_deadline"] == "2027-02-04"
+    assert record["effective_parameters"]["sim_weeks"] == sim_weeks
+
+    with zipfile.ZipFile(wheel) as archive:
+        public_data = yaml.safe_load(archive.read("refund_eval/scenario/train_refund_late.yaml"))
+    assert set(public_data) == {"id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user"}
+    public_scenario = AgentScenario.model_validate(public_data)
+    assert public_scenario.task_text == load_scenario().task_text
+    projected = with_requested_deadline(public_scenario, deadline)
+    instruction = (task_dir / "instruction.md").read_text(encoding="utf-8").strip()
+    assert instruction == task_message(projected, sim_weeks)
+    assert "by the 4 February 2027 HARD deadline" in instruction
+    prompt = render_system_prompt(projected, sim_weeks=sim_weeks)
+    assert "Requested task deadline: 4 February 2027" in prompt
+    session_end = format_long(sim_deadline(SimpleNamespace(start_time=projected.start_time), sim_weeks)).split(",")[0]
+    assert f"Your session ends on {session_end}" in prompt
+    assert session_end != "4 February 2027"
+    command = make_agent(tmp_path, model_name="openrouter/target", requested_deadline=deadline).inspect_command()
+    assert "-T requested_deadline=2027-02-04" in command
+    assert '-T sim_weeks="$WORLD_SIM_WEEKS"' in command
+
+    world_source = task_dir / "environment" / "source"
+    scenario_bytes = (world_source / "refund_eval/scenario/train_refund_late.yaml").read_bytes()
+    assert scenario_bytes == (
+        adapter.ROOT / "refund_eval/scenario/train_refund_late.yaml"
+    ).read_bytes()
+    assert b"5 October 2026" in scenario_bytes
+    rules = Path("refund_eval/scenario/rules/train_refund_late")
+    assert {
+        path.relative_to(rules).as_posix(): path.read_bytes() for path in rules.rglob("*") if path.is_file()
+    } == {
+        path.relative_to(world_source / rules).as_posix(): path.read_bytes()
+        for path in (world_source / rules).rglob("*") if path.is_file()
+    }
+    compose = yaml.safe_load((task_dir / "environment/docker-compose.yaml").read_bytes())
+    world_env = compose["services"]["world"]["environment"]
+    assert world_env["WORLD_SIM_WEEKS"] == "${WORLD_SIM_WEEKS}"
+    assert "WORLD_REQUESTED_DEADLINE" not in world_env
+    assert metadata["rules_sha256"] == record["task"]["rules_sha256"]
+
+
+@pytest.mark.parametrize("mode", ["shared", "split"])
+def test_requested_deadline_is_restricted_to_shared_roles(mode, approved_wheel):
+    wheel, digest = approved_wheel
+    options = {
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture", "research_mode": "saved",
+        "model": "openrouter/target", "simulator_model": "openrouter/simulator", "grader_model": "openrouter/grader",
+        "cost_limit": 50, "world_cost_limit": 100, "requested_deadline": date(2027, 2, 4),
+        "agent_wheel": wheel, "agent_wheel_sha256": digest, "openrouter_key_mode": mode,
+    }
+    if mode == "split":
+        options["agent_max_output_tokens"] = 2048
+    with pytest.raises(ValueError, match="requested_deadline is only valid in shared_roles mode"):
+        batch.NativeBatchConfig(**options)
 
 
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):

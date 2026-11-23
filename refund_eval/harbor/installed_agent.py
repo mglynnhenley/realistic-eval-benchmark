@@ -24,6 +24,7 @@ import asyncio
 import json
 import shlex
 from contextlib import suppress
+from datetime import date
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -52,6 +53,7 @@ class RefundAgentOptions(InstalledAgentOptions):
                                 description="Model-visible history in tokens (with a memory tool); 0 shows it all.")
     token_budget: int | None = Field(default=None, gt=0, description="Target tokens including cached input.")
     budget_notice: BudgetNotice = Field(default=RunConfig.model_fields["budget_notice"].default)
+    requested_deadline: date | None = None
     cost_limit: float | None = Field(default=None, gt=0, le=1000,
                                      description="Per-trial target-only USD cap (Inspect cost_limit); excludes world-service "
                                                  "model calls. Required for train_refund_late.")
@@ -95,6 +97,8 @@ class RefundInstalledAgent(BaseInstalledAgent):
         for name in ("token_budget", "cost_limit", "time_limit"):
             if getattr(options, name) is not None:
                 task_args[name] = getattr(options, name)
+        if options.requested_deadline is not None:
+            task_args["requested_deadline"] = options.requested_deadline.isoformat()
         # Inspect's task loader expects a cwd-relative path with Python 3.14.
         task_file = (f'"$({PYTHON} -c \'import os, refund_eval.task; '
                      'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')

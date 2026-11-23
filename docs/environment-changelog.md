@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.14 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 025421f7ca9f4d5e0aba801dfcb76e9db014ea509ab5e8ec1ff03465a2f25d98
+- Trial round: none; offline validation only.
+- Changes: accept an independent requested deadline in native `shared_roles` preparation, applying it only to the agent-facing late-refund task and preserving default and world/company data.
+
 ## 7.13 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd
