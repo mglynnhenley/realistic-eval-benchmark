@@ -408,7 +408,8 @@ Split mode is limited to one Modal target attempt, concurrency one, and zero ret
 target and world allowances independently before each physical model request: the target cap is at most
 `$50`, while simulator and grader share a world cap of at most `$100`. Split configs must set a positive
 integer `agent_max_output_tokens`; there is no default because the request bound depends on this value.
-Combined planning-cap fields are not supported in split mode.
+Combined planning-cap fields are not supported in split mode. Split batches are currently limited to
+`train_refund_late`; other scenarios remain available in shared mode.
 
 Example native JSON config; replace the approved wheel path and digest with the current public wheel:
 
@@ -464,7 +465,11 @@ when any tariff is nonzero; the hold remains unless a positive usage or generati
 Strict settlement also requires explicit non-BYOK billing metadata (`is_byok: false`) from usage or
 generation data; BYOK or ambiguous billing retains the reservation rather than treating OpenRouter
 credits as the upstream charge. Shared-key behavior is unchanged. This accounting scope is local and does
-not verify invoices, provider-side discounts or billing changes.
+not verify invoices, provider-side discounts or billing changes. Opaque encrypted reasoning continuations
+such as `reasoning.encrypted` are refused: OpenRouter documents them as opaque and bills resumed prompts
+using provider-native token counts, but does not document a token-count upper bound from ciphertext bytes.
+Known text, summary and signature reasoning metadata remains replayable and is included in the serialized
+request bound.
 
 ### One-key role budgets (`shared_roles`)
 

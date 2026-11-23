@@ -143,12 +143,45 @@ async def test_strict_world_does_not_trust_byok_credit_charge(
     assert client.generation_requests == generation_calls
 
 
-@pytest.mark.parametrize(("tariff_rate", "expected_method", "expected_cost", "generation_calls"), [
-    pytest.param(0, "actual", 0, 0, id="all-zero-tariff"),
-    pytest.param(1, None, None, 3, id="nonzero-tariff"),
+@pytest.mark.parametrize((
+    "tariff_rate", "inline_cost", "inline_byok", "generation_data", "expected_method", "expected_cost",
+    "generation_calls",
+), [
+    pytest.param(0, 0, False, {}, "actual", 0, 0, id="all-zero-inline-charge"),
+    pytest.param(1, 0, False, {}, None, None, 3, id="nonzero-tariff-inline-zero"),
+    pytest.param(0, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, "generation_lookup", 0, 1, id="all-zero-generation-lookup"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="nonzero-tariff-generation-zero"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, "generation_lookup", 0.000001, 1, id="matching-positive-generation-charge"),
+    pytest.param(1, None, None, {
+        "id": "another-generation", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="mismatched-positive-generation-id"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "provider/canonical-model", "is_byok": False,
+        "total_cost": 0.000001,
+        "cancelled": False, "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, "generation_lookup", 0.000001, 1, id="canonical-model-alias-positive-charge"),
+    pytest.param(1, None, None, {
+        "model": "test-model", "is_byok": False, "total_cost": 0.000001, "cancelled": False,
+        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="missing-positive-generation-id"),
+    pytest.param(1, None, None, {
+        "id": "verified-zero-charge", "model": "test-model", "is_byok": False, "total_cost": 0.000001,
+        "finish_reason": "stop", "tokens_prompt": 1, "tokens_completion": 1,
+    }, None, None, 3, id="missing-positive-cancellation-state"),
 ])
-async def test_strict_world_zero_charge_requires_all_zero_tariff(
-    monkeypatch, tariff_rate, expected_method, expected_cost, generation_calls
+async def test_strict_world_generation_charge_requires_trusted_evidence(
+    monkeypatch, tariff_rate, inline_cost, inline_byok, generation_data, expected_method, expected_cost,
+    generation_calls
 ):
     from refund_eval.models import openrouter as openrouter_module
 
@@ -172,8 +205,8 @@ async def test_strict_world_zero_charge_requires_all_zero_tariff(
                 prompt_tokens=0,
                 completion_tokens=0,
                 total_tokens=0,
-                cost=0,
-                is_byok=False,
+                cost=inline_cost,
+                is_byok=inline_byok,
             )
             choice = SimpleNamespace(message=FakeRawMessage(), finish_reason="stop", error=None)
             return SimpleNamespace(choices=[choice], usage=usage, error=None, id="verified-zero-charge")
@@ -196,7 +229,7 @@ async def test_strict_world_zero_charge_requires_all_zero_tariff(
 
         async def get(self, *_args, **_kwargs):
             self.generation_requests += 1
-            return {"data": {}}
+            return {"data": generation_data}
 
     tariff = {
         "input": tariff_rate, "output": tariff_rate, "input_cache_read": tariff_rate,
@@ -423,6 +456,54 @@ async def test_real_inspect_openrouter_replays_bounded_reasoning_details_with_to
     assert bound > original_charge_bound(without_reasoning, tariff)
     assert reservations_at_send[1] == bound
     assert len(requests) == 2
+
+
+async def test_real_inspect_refuses_opaque_encrypted_reasoning_before_replay_send(tmp_path, monkeypatch):
+    model_id = "openrouter/google/gemini-4-argon"
+    _install_real_target_budget(monkeypatch, tmp_path, model_id)
+    encrypted_reasoning = [{
+        "type": "reasoning.encrypted",
+        "id": "gemini-continuation",
+        "format": "google-gemini-v1",
+        "data": "opaque-continuation-token",
+    }]
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return _chat_response(
+            request,
+            tool_call=len(requests) == 1,
+            reasoning_details=encrypted_reasoning if len(requests) == 1 else None,
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            model_id,
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=32, max_retries=0, cache_prompt=False),
+            stream=False,
+        )
+        async with dollar_budget.target_dollar_budget(model):
+            tool_output = await model.generate(
+                "Continue the answer.",
+                tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+            )
+            assistant_message = tool_output.choices[0].message
+            call = assistant_message.tool_calls[0]
+            with pytest.raises(WorldSpendLedgerError, match="text-only messages"):
+                await model.generate(
+                    [
+                        ChatMessageUser(content="Continue the answer."),
+                        assistant_message,
+                        ChatMessageTool(content="Lookup complete.", tool_call_id=call.id, function=call.function),
+                        ChatMessageUser(content="Summarize the result."),
+                    ],
+                    tools=[ToolInfo(name="lookup", description="Lookup the status.", parameters=ToolParams())],
+                )
+
+    assert len(requests) == 1
 
 
 async def test_real_inspect_retry_hits_unresolved_target_hold_before_second_send(

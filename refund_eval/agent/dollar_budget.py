@@ -107,7 +107,6 @@ def _valid_reasoning_details(value: Any) -> bool:
         return False
     fields_by_type = {
         "reasoning.summary": {"type", "id", "format", "index", "summary"},
-        "reasoning.encrypted": {"type", "id", "format", "index", "data"},
         "reasoning.text": {"type", "id", "format", "index", "text", "signature"},
     }
     for detail in value:
@@ -124,9 +123,6 @@ def _valid_reasoning_details(value: Any) -> bool:
             return False
         if kind == "reasoning.summary":
             if not isinstance(detail.get("summary"), str):
-                return False
-        elif kind == "reasoning.encrypted":
-            if not isinstance(detail.get("data"), str):
                 return False
         elif any(
             field in detail and detail[field] is not None and not isinstance(detail[field], str)
@@ -237,7 +233,7 @@ def _bounded_request(api: OpenRouterAPI, request: dict[str, Any], cap: int) -> N
 
 
 async def _reported_charge(
-    api: OpenRouterAPI, completion: Any, *, allow_zero: bool, expected_model: str | None = None
+    api: OpenRouterAPI, completion: Any, *, allow_zero: bool
 ) -> Decimal | None:
     usage = getattr(completion, "usage", None)
     usage_is_byok = getattr(usage, "is_byok", None)
@@ -255,7 +251,7 @@ async def _reported_charge(
         data = record.get("data", {})
         if not isinstance(data, Mapping) or data.get("is_byok") is not False:
             return None
-        if data.get("cancelled") is True:
+        if data.get("cancelled") is not False:
             return None
         finish = data.get("finish_reason") or data.get("native_finish_reason")
         prompt = data.get("tokens_prompt") or data.get("native_tokens_prompt")
@@ -264,13 +260,7 @@ async def _reported_charge(
             return None
         if not isinstance(output, int) or isinstance(output, bool) or output < 1:
             return None
-        returned_id = data.get("id")
-        if returned_id is not None and returned_id != generation_id:
-            return None
-        returned_model = data.get("model")
-        known_models = {value for value in (expected_model, getattr(completion, "model", None))
-                        if isinstance(value, str) and value}
-        if returned_model is not None and known_models and returned_model not in known_models:
+        if data.get("id") != generation_id:
             return None
         value = _money(data.get("total_cost")) if isinstance(data, Mapping) else None
         return value if value is not None and (value > 0 or allow_zero) else None
@@ -356,9 +346,7 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
         except BaseException:
             ledger.mark_unknown(attempt_id)
             raise
-        charge = await _reported_charge(
-            api, completion, allow_zero=allow_zero_charge, expected_model=request.get("model")
-        )
+        charge = await _reported_charge(api, completion, allow_zero=allow_zero_charge)
         if charge is None or charge > bound:
             ledger.mark_unknown(attempt_id, charge, "reported_overrun" if charge is not None else None)
             raise WorldSpendLedgerError("Target charge is missing or exceeds its reservation; hold retained")
