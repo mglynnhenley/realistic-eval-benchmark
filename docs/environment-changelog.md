@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.12 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 27654f1bce57fb61d41243cff8fcae0db19cf393243fec687ed55c0d525f4f73
+- Trial round: none; offline validation only.
+- Changes: add split-key routing and strict local budgets with request-matched settlement evidence; attest role-specific sources, reject encrypted reasoning without a documented token bound, limit split batches to Laura, and print monitored split-launch guidance.
+
 ## 7.11 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb

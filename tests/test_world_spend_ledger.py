@@ -68,6 +68,8 @@ class ScriptedModels:
         self.observed = []
         self.entered = None
         self.release = None
+        self.ledger = None
+        self.ledger_observed = []
 
     def model_name(self, role: str) -> str:
         return f"fake/{role}"
@@ -78,6 +80,8 @@ class ScriptedModels:
     async def complete(self, role, messages, **settings):
         self.calls += 1
         self.observed.append(dict(world_store().get(WORLD_BUDGET_KEY)))
+        if self.ledger is not None:
+            self.ledger_observed.append(self.ledger.snapshot())
         if self.entered is not None:
             self.entered.set()
             await self.release.wait()
@@ -87,8 +91,9 @@ class ScriptedModels:
         return reply
 
 
-def make_budget(client, limit, *, ledger=None, prices=PRICES, persist=None):
-    return BudgetedWorldModels(client, limit, persist or (lambda: None), prices=prices, ledger=ledger, scope=SCOPE)
+def make_budget(client, limit, *, ledger=None, prices=PRICES, persist=None, strict_budget=False):
+    return BudgetedWorldModels(client, limit, persist or (lambda: None), prices=prices, ledger=ledger,
+                               scope=SCOPE, strict_budget=strict_budget)
 
 
 def request_bound() -> Decimal:
@@ -219,6 +224,140 @@ async def test_missing_billing_keeps_hold_and_does_not_retry(installed_world_sto
     assert client.calls == 1
     snapshot = ledger.snapshot()
     assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
+
+
+async def test_strict_mode_retains_missing_actual_charge_and_refuses_retry(installed_world_store, tmp_path):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 4, SCOPE)
+    client = ScriptedModels(completion(cost=None, method=None), completion(cost=float(bound) / 2))
+    budget = make_budget(client, bound * 4, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="actual provider charge"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
+
+
+async def test_strict_mode_retains_byok_credit_charge(installed_world_store, tmp_path):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 4, SCOPE)
+    client = ScriptedModels(completion(cost=0.03, method=None))
+    budget = make_budget(client, bound * 4, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="actual provider charge"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert snapshot["spent_usd"] == "0"
+    assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
+
+
+async def test_strict_world_zero_charge_for_all_zero_tariff_settles_without_lookup(installed_world_store, tmp_path):
+    zero_tariff = {key: 0 for key in TARIFF}
+    zero_prices = {"fake/simulator": zero_tariff, "fake/grader": zero_tariff}
+    ledger = WorldSpendLedger(tmp_path, 1, SCOPE)
+    client = ScriptedModels(completion(cost=0, method="actual"))
+    client.ledger = ledger
+    budget = make_budget(client, 1, ledger=ledger, prices=zero_prices, strict_budget=True)
+
+    result = await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert result.usage is not None and result.usage.cost == 0
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert snapshot["spent_usd"] == "0"
+    assert snapshot["reserved_usd"] == "0" and snapshot["unresolved_attempts"] == 0
+
+
+async def test_strict_world_zero_charge_with_nonzero_tariff_keeps_hold(installed_world_store, tmp_path):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 2, SCOPE)
+    client = ScriptedModels(completion(cost=0, method="actual"))
+    client.ledger = ledger
+    budget = make_budget(client, bound * 2, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="zero charge"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert Decimal(snapshot["spent_usd"]) == 0
+    assert snapshot["reserved_usd"] == str(bound) and snapshot["unresolved_attempts"] == 1
+
+
+async def test_strict_failed_attempt_is_not_retried_but_new_calls_reserve_again(
+    installed_world_store, tmp_path
+):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 4, SCOPE)
+    client = ScriptedModels(completion(cost=float(bound) / 2, failed=True),
+                            completion(cost=float(bound) / 2))
+    client.ledger = ledger
+    budget = make_budget(client, bound * 4, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    assert Decimal(client.ledger_observed[0]["reserved_usd"]) == bound
+    assert Decimal(ledger.snapshot()["spent_usd"]) == bound
+
+    await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    snapshot = ledger.snapshot()
+    assert client.calls == 2
+    assert Decimal(client.ledger_observed[1]["reserved_usd"]) == bound
+    assert Decimal(client.ledger_observed[1]["spent_usd"]) == bound
+    assert Decimal(snapshot["spent_usd"]) == bound + Decimal(str(float(bound) / 2))
+    assert snapshot["unresolved_attempts"] == 0 and snapshot["reserved_usd"] == "0"
+
+
+async def test_strict_failed_attempt_blocks_retry_when_its_bound_uses_remaining_allowance(
+    installed_world_store, tmp_path
+):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound, SCOPE)
+    client = ScriptedModels(
+        completion(cost=0.000001, failed=True),
+        completion(cost=float(bound) / 2),
+    )
+    budget = make_budget(client, bound, ledger=ledger, strict_budget=True)
+
+    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+        await budget.complete("simulator", MESSAGES, **SETTINGS)
+
+    assert client.calls == 1
+    snapshot = ledger.snapshot()
+    assert Decimal(snapshot["spent_usd"]) == bound
+    assert snapshot["reserved_usd"] == "0" and snapshot["unresolved_attempts"] == 0
+
+
+async def test_strict_world_concurrent_calls_are_reserved_serially(installed_world_store, tmp_path):
+    bound = request_bound()
+    ledger = WorldSpendLedger(tmp_path, bound * 2, SCOPE)
+    client = ScriptedModels(completion(cost=float(bound) / 2), completion(cost=float(bound) / 2))
+    client.ledger = ledger
+    client.entered, client.release = asyncio.Event(), asyncio.Event()
+    budget = make_budget(client, bound * 2, ledger=ledger, strict_budget=True)
+
+    first = asyncio.create_task(budget.complete("simulator", MESSAGES, **SETTINGS))
+    await client.entered.wait()
+    assert client.calls == 1
+    assert Decimal(ledger.snapshot()["reserved_usd"]) == bound
+    second = asyncio.create_task(budget.complete("grader", MESSAGES, **SETTINGS))
+    await asyncio.sleep(0)
+    assert client.calls == 1
+    client.release.set()
+    await asyncio.gather(first, second)
+
+    assert client.calls == 2
+    assert all(Decimal(sample["reserved_usd"]) == bound for sample in client.ledger_observed)
+    snapshot = ledger.snapshot()
+    assert Decimal(snapshot["spent_usd"]) == bound
+    assert snapshot["reserved_usd"] == "0" and snapshot["unresolved_attempts"] == 0
 
 
 async def test_failed_response_without_billing_keeps_hold_and_does_not_retry(installed_world_store, tmp_path):

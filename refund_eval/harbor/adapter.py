@@ -27,6 +27,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,10 +59,10 @@ AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
 SOURCE_FILES = ["refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"]
 AGENT_MODULES = {
     "": "__init__ config environment_version killswitch model_pricing output_paths task",
-    "agent": "__init__ adapters budget harness prompt schedule world_mode",
+    "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
-    "models": "__init__ client evidence replay",
+    "models": "__init__ client evidence replay world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
     "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
@@ -73,6 +74,26 @@ AGENT_MODULES = {
     "tasks/train_refund": "__init__ facts",
     "world": "__init__ clock event_log guards ids interception mail mailquery orgs snapshot_store state store timeutil trial_snapshot",
 }
+SPLIT_BUDGET_WHEEL_SOURCES = (
+    "refund_eval/agent/dollar_budget.py",
+    "refund_eval/agent/harness.py",
+    "refund_eval/agent/world_mode.py",
+    "refund_eval/model_pricing.py",
+    "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/published/provider.py",
+    "refund_eval/task.py",
+)
+SPLIT_BUDGET_TASK_SOURCES = (
+    "refund_eval/model_pricing.py",
+    "refund_eval/models/budget.py",
+    "refund_eval/models/client.py",
+    "refund_eval/models/openrouter.py",
+    "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/world_service/settings.py",
+    "refund_eval/world_service/__main__.py",
+    "refund_eval/world_service/trial.py",
+    "refund_eval/harbor/world_entrypoint.py",
+)
 HOST_SEED = "${WORLD_SEED:-}"
 DERIVED_SEED = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>')"
 WHEEL_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+!-]*\.whl\Z")
@@ -98,6 +119,34 @@ def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgent
     if actual_sha256 != expected_sha256.lower():
         raise ValueError("Agent wheel SHA256 does not match the supplied digest")
     return VerifiedAgentWheel(path, filename, actual_sha256, content)
+
+
+def verify_split_budget_wheel(path: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for relative in SPLIT_BUDGET_WHEEL_SOURCES:
+                actual = archive.read(relative)
+                if actual != (ROOT / relative).read_bytes():
+                    raise ValueError("split budget source does not match the current approved wheel source")
+                hashes[relative] = hashlib.sha256(actual).hexdigest()
+    except (OSError, KeyError, zipfile.BadZipFile):
+        raise ValueError("split mode requires an approved wheel with current budget sources") from None
+    return hashes
+
+
+def verify_split_budget_task_sources(task_path: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    source = task_path / "environment" / "source"
+    try:
+        for relative in SPLIT_BUDGET_TASK_SOURCES:
+            actual = (source / relative).read_bytes()
+            if actual != (ROOT / relative).read_bytes():
+                raise ValueError("split world source does not match current budget enforcement")
+            hashes[relative] = hashlib.sha256(actual).hexdigest()
+    except OSError:
+        raise ValueError("split task is missing current world budget sources") from None
+    return hashes
 
 
 def rules_sha256(scenario_id: str) -> str:
@@ -186,7 +235,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
                world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
-               verified_wheel: VerifiedAgentWheel | None = None) -> Path:
+               verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared") -> Path:
     """Write OUT/<scenario>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
@@ -233,6 +282,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
         "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
+        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode == "split" else "false",
+        "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):

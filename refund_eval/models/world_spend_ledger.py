@@ -27,6 +27,10 @@ class WorldSpendLedgerError(RuntimeError):
     """The durable world-spend ledger is invalid or cannot safely be changed."""
 
 
+class WorldSpendBudgetExhausted(WorldSpendLedgerError):
+    """A trustworthy reservation cannot fit within the configured spend limit."""
+
+
 def _amount(value: Any, field: str) -> Decimal:
     if isinstance(value, bool):
         raise WorldSpendLedgerError(f"Invalid {field} in world-spend ledger")
@@ -270,7 +274,7 @@ class WorldSpendLedger:
                 spent = _decimal_string(totals["spent_usd"], "spent amount")
                 reserved = _decimal_string(totals["reserved_usd"], "reserved amount")
                 if spent + reserved + bound > self.limit:
-                    raise WorldSpendLedgerError("World-spend ledger cannot cover the next request")
+                    raise WorldSpendBudgetExhausted("World-spend ledger cannot cover the next request")
                 state["attempts"][attempt_id] = {"request_hash": request_hash, "reserved_usd": str(bound),
                                                   "status": "reserved", "charged_usd": None, "provenance": None}
                 self._write_state(state)
