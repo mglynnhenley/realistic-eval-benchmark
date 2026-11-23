@@ -186,6 +186,61 @@ is not a hard invoice ceiling. Check `store.world_model_budget` in world
 external tools are not covered. Get approval for the full costs before
 launching. Use `"execution": "modal"` to prepare a Modal job.
 
+### Save and run a selected setup with the guarded launcher
+
+`scripts.laura_trial` is opt-in and wraps the existing guarded runner. It does
+not select Muse or native defaults. Save the exact prepared JobConfig and task
+tree you intend to use, including the originally attested staged wheel; replacing
+the wheel path, filename, digest or bytes changes the setup identity. Save and
+verify also validate the public-only scenario descriptor embedded in that exact
+wheel: the wheel named in `environment/agent/agent-wheel.json` must match its
+SHA-256 and the task metadata, and the descriptor selected by the metadata's
+`scenario` field is checked with `AgentScenario` (currently `train_refund_late`).
+Missing or duplicate descriptors and private fields fail closed. This is schema
+validation only: the wheel is not installed or run, so startup health, scenario
+behavior and launch approval remain unvalidated. A matching manifest means only
+that the recorded inputs are unchanged and the public descriptor still matches
+its schema. Remote agent skills are not snapshotted and therefore fail closed;
+local skills and `extra_instruction_paths` are fingerprinted.
+
+```bash
+scripts/harbor python -m scripts.laura_trial save \
+  --config .context/prepared/job.yaml \
+  --manifest .context/laura/setup.json
+scripts/harbor python -m scripts.laura_trial verify \
+  --manifest .context/laura/setup.json
+```
+
+Relative task, jobs, instruction, local-skill and extra-compose paths are anchored
+to the working directory used by `save`, matching Harbor's normal CLI path
+semantics; that base is captured in the private manifest. Extra Compose overlay
+files are fingerprinted; overlays with unverified local file references are
+unsupported and fail closed. Verify uses a fresh, non-existing
+validation job name, creates no job, and does not read or hash runtime outputs;
+it only checks whether that random validation-name path is already occupied. A
+completed source job does not prevent reuse. Only Python caches are omitted
+from task identity; jobs/runtime outputs are not hashed.
+
+Run each time with a new job name and an explicit owner-approved trial delta:
+
+```bash
+scripts/harbor python -m scripts.laura_trial run \
+  --manifest .context/laura/setup.json --job-name laura-trial-fresh-001 \
+  --openrouter-key-ceiling 50 \
+  --openrouter-trial-delta "$OPENROUTER_TRIAL_DELTA"
+```
+
+The run uses the saved JobConfig unchanged except for `job_name`, delegates to
+the existing OpenRouter monitor, and requires an owner budget every time. Save
+and verify make no provider or Modal calls. The command prints the local Harbor
+`job.log` file URI after job creation and, after Modal creates the sandbox,
+prints the dashboard URL returned by the Modal App SDK; it does not construct a
+URL from a sandbox ID. A fresh job and Modal sandbox do not resume prior runtime
+state; frozen task inputs may be reused. The wrapper does not run post-run
+Scout/claim grading, and it preserves the configured Harbor verifier. The
+existing installed-agent smoke remains separate and can check startup using an
+exact wheel; save/verify perform only the public descriptor schema check above.
+
 #### Optional batch spend planning
 
 Set `trial_spend_cap_usd` and `key_spend_cap_usd` together, and explicitly set

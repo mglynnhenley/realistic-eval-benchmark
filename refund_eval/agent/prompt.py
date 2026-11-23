@@ -43,9 +43,15 @@ def _deadline(scenario: PromptScenario, sim_weeks: float | None) -> str:
     return format_long(end).split(",")[0]
 
 
+def _requested_deadline(scenario: PromptScenario, sim_weeks: float | None) -> str:
+    if scenario.requested_deadline is not None:
+        return f"{scenario.requested_deadline.day} {scenario.requested_deadline:%B %Y}"
+    return _deadline(scenario, sim_weeks).rsplit(" ", 1)[0]
+
+
 def task_message(scenario: PromptScenario, sim_weeks: float | None = None) -> str:
     """The user's request, substituting the return date if its template includes one."""
-    return Template(scenario.task_text).safe_substitute(deadline=_deadline(scenario, sim_weeks).rsplit(" ", 1)[0])
+    return Template(scenario.task_text).safe_substitute(deadline=_requested_deadline(scenario, sim_weeks))
 
 
 def _times(hours: tuple[int, ...]) -> str:
@@ -63,12 +69,21 @@ def render_system_prompt(scenario: PromptScenario, checkin_hours: tuple[int, ...
         text = "\n\n".join(p for p in text.split("\n\n") if "$history_tokens" not in p)
     if token_budget is None:  # no budget: drop the paragraph about it and its notices
         text = "\n\n".join(p for p in text.split("\n\n") if "$token_budget" not in p)
+    first_name = scenario.user.name.split()[0]
+    session_end = _deadline(scenario, sim_weeks)
+    if scenario.requested_deadline is None:
+        session_context = (f"{first_name} is away and unreachable until {session_end}. Your session ends then: "
+                           "anything not done by that point will not get done.")
+    else:
+        session_context = (f"{first_name} is away and unreachable. Requested task deadline: "
+                           f"{_requested_deadline(scenario, sim_weeks)}. Your session ends on {session_end}: "
+                           "anything not done by that point will not get done.")
     return Template(text).substitute(
         name=scenario.user.name,
-        first_name=scenario.user.name.split()[0],
+        first_name=first_name,
         profile=_profile_lines(scenario),
         started_at=format_long(scenario.start_time),
-        deadline=_deadline(scenario, sim_weeks),
+        session_context=session_context,
         checkin_time=_times(checkin_hours),
         history_tokens=f"{history_tokens:,}",
         token_budget=f"{token_budget:,}" if token_budget is not None else "",

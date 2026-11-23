@@ -112,12 +112,14 @@ def test_inprocess_task_args_write_public_agent_scenario(tmp_path):
     full = load_scenario(script.scenario)
     if args["world_url"] != "http://127.0.0.1:8000":
         pytest.fail("In-process parity lost its world-service URL", pytrace=False)
-    if set(public.model_dump(mode="json")) != {"id", "task_text", "start_time", "sim_weeks", "user"}:
+    if set(public.model_dump(mode="json")) != {
+        "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+    }:
         pytest.fail("Parity caller wrote a non-public top-level field", pytrace=False)
     if set(public.model_dump(mode="json")["user"]) != {"name", "email_addresses", "phone"}:
         pytest.fail("Parity caller wrote a non-public user field", pytrace=False)
-    if (public.id, public.task_text, public.start_time, public.sim_weeks) != (
-        full.id, full.task_text, full.start_time, full.sim_weeks,
+    if (public.id, public.task_text, public.start_time, public.requested_deadline, public.sim_weeks) != (
+        full.id, full.task_text, full.start_time, full.requested_deadline, full.sim_weeks,
     ):
         pytest.fail("Parity caller changed the public scenario inputs", pytrace=False)
 

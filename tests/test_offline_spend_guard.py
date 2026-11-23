@@ -33,6 +33,7 @@ from modal import App, Sandbox, Workspace
 
 from scripts import guarded_harbor
 from scripts.guarded_harbor import LauncherFailure, run_guarded_job, validate_job_config
+from scripts.laura_trial import _print_local_job_log, _print_modal_dashboard
 from scripts.offline_spend_guard import (
     GuardFailure,
     SpendGuard,
@@ -290,7 +291,6 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
 
     async def execute(self, command):
         exec_calls.append(command)
-        events.append("sdk_exec")
         return "executed"
 
     install_fake_harbor_methods(monkeypatch, create, execute)
@@ -324,6 +324,72 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
     assert exec_calls == ["offline command"]
     assert sandbox.terminate_calls == 1
     assert guard.monitor_task is not None and guard.monitor_task.cancelled()
+
+
+def test_progress_links_are_emitted_after_guarded_job_and_sandbox_creation(
+    tmp_path, monkeypatch, capsys
+):
+    events = []
+    sandbox = FakeSandbox()
+
+    async def create(self, *, entrypoint=None, block_network=None, experimental_options=None):
+        events.append("sandbox_create")
+        return sandbox
+
+    install_fake_harbor_methods(monkeypatch, create)
+    config = valid_config(tmp_path)
+    guard, _ = stable_guard(events=events)
+    log_path = tmp_path / "jobs" / "offline-job" / "job.log"
+
+    class FakeJob:
+        _log_output_path = log_path
+
+        async def run(self):
+            events.append("job_run")
+            environment = make_environment()
+            environment._app = SimpleNamespace(
+                get_dashboard_url=lambda: "https://modal.com/apps/ap-offline-test"
+            )
+            environment._sandbox = await environment._create_sandbox()
+            await environment._sdk_exec("offline command")
+            events.append("sdk_exec")
+            await environment._terminate_sandbox()
+            return "done"
+
+    async def factory(job_config):
+        assert job_config is config
+        events.append("job_factory")
+        return FakeJob()
+
+    def report_job(job):
+        events.append("local_log")
+        _print_local_job_log(job)
+
+    def report_sandbox(environment):
+        events.append("modal_dashboard")
+        _print_modal_dashboard(environment)
+
+    result = asyncio.run(
+        run_guarded_job(
+            config,
+            make_thresholds(),
+            guard=guard,
+            job_factory=factory,
+            on_job_created=report_job,
+            on_sandbox_created=report_sandbox,
+        )
+    )
+
+    assert result == "done"
+    assert events.index("local_log") > events.index("job_factory")
+    assert events.index("local_log") < events.index("job_run")
+    assert events.index("sandbox_create") > events.index("openrouter_2")
+    assert events.index("modal_dashboard") > events.index("sandbox_create")
+    assert events.index("modal_dashboard") < events.index("sdk_exec")
+    assert capsys.readouterr().out.splitlines() == [
+        f"harbor_job_log_uri={log_path.resolve().as_uri()}",
+        "modal_dashboard_url=https://modal.com/apps/ap-offline-test",
+    ]
 
 
 def test_normal_environment_teardown_cleans_only_its_binding(monkeypatch):

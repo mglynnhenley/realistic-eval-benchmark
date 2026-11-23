@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 7.10 — 2026-11-21
+## 7.11 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 111a5b02cb881297ba8f9c97993c97e9ce5cd10090b2f418586d6f11cdd968d0
+- Fingerprint: 366b792e23bab2fdcbe42f8d96433a5d8c6c8d490b049c9e49a22973f1a4b36e
 - Trial round: none; offline validation only.
 - Changes: Avoid repeated buffer-history reads when locating active Inspect tool-call spans, preserving the existing 200-event lookup semantics.
+
+## 7.10 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 407f72faf66045b3d36f61accf141b960c87ec67528b68ce730f9b8f14fe566a
+- Trial round: none; offline validation only.
+- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon and frozen claim evidence.
 
 ## 7.9 — 2026-11-20
 - Kind: trivial batch

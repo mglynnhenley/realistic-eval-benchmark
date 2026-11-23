@@ -1,7 +1,7 @@
 """Private claim evidence is task-independent, pinned, and assessed as of the contact."""
 
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -133,6 +133,30 @@ def test_checklist_is_pinned_even_if_authored_file_changes_or_disappears(context
 def test_checklist_must_match_task_kind(context):
     with pytest.raises(ValueError, match="cannot check task"):
         load_checklist("another_task", CHECKLIST_PATH)
+
+
+def test_context_resolves_explicit_requested_deadline(context):
+    inbound, scenario, world, org = context
+    scenario = scenario.model_copy(update={
+        "task_text": "Please finish by $deadline.",
+        "requested_deadline": date(2027, 2, 4),
+    })
+
+    data = checking_context(inbound, scenario, world, org, None)
+
+    assert data["task_request"] == "Please finish by 4 February 2027."
+
+
+def test_context_preserves_task_text_without_explicit_requested_deadline(context):
+    inbound, scenario, world, org = context
+    scenario = scenario.model_copy(update={
+        "task_text": "Please finish by $deadline.",
+        "requested_deadline": None,
+    })
+
+    data = checking_context(inbound, scenario, world, org, None)
+
+    assert data["task_request"] == scenario.task_text
 
 
 def test_context_has_only_evidence_available_before_contact(context):
