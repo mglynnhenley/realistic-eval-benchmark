@@ -660,6 +660,106 @@ def test_saved_result_record_uses_effective_world_horizon_values(tmp_path, monke
     assert effective["unavailable_fields"] == []
 
 
+def test_saved_result_resolves_task_environment_instead_of_metadata(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    task_path = bundle.task_path / "task.toml"
+    task_lines = task_path.read_text(encoding="utf-8").splitlines()
+    task_path.write_text(
+        "\n".join(
+            'WORLD_SIM_WEEKS = "12.5"' if line.startswith("WORLD_SIM_WEEKS = ") else line
+            for line in task_lines
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"]["WORLD_SIM_WEEKS"] = "${WORLD_SIM_WEEKS}"
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == 0
+    effective = json.loads(
+        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert effective["sim_weeks"] == 12.5
+
+
+def test_saved_result_resolves_compose_list_environment_and_job_override(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"] = [
+        "WORLD_SIM_WEEKS=${WORLD_SIM_WEEKS}",
+        "WORLD_SIMULATOR_MODEL=openrouter/list-simulator",
+        "WORLD_GRADER_MODEL=openrouter/list-grader",
+        "WORLD_COST_LIMIT=4.5",
+    ]
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    overlay = tmp_path / "world-env-overlay.yaml"
+    overlay.write_text(
+        "services:\n  world:\n    environment:\n"
+        "      - WORLD_SIM_WEEKS=${WORLD_SIM_WEEKS}\n"
+        "      - WORLD_MAX_TURNS=73\n",
+        encoding="utf-8",
+    )
+    job = yaml.safe_load(bundle.config_path.read_bytes())
+    job["environment"]["env"] = {"WORLD_SIM_WEEKS": "8.25"}
+    job["environment"]["extra_docker_compose"] = [str(overlay)]
+    bundle.config_path.write_text(yaml.safe_dump(job, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+
+    def guarded_run(config, thresholds, **hooks):
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main(_run_args(bundle)) == 0
+    effective = json.loads(
+        (bundle.jobs_dir / "laura-fresh" / "effective_parameters.json").read_text(encoding="utf-8")
+    )
+    assert effective["sim_weeks"] == 8.25
+    assert effective["max_turns"] == 73
+    assert effective["simulator_model"] == "openrouter/list-simulator"
+    assert effective["grader_model"] == "openrouter/list-grader"
+    assert effective["world_cost_limit_usd"] == "4.5"
+
+
+@pytest.mark.parametrize(
+    "world_environment",
+    [
+        {"WORLD_SIMULATOR_MODEL": "${UNSUPPORTED_SIMULATOR_MODEL}"},
+        ["WORLD_SIMULATOR_MODEL"],
+    ],
+)
+def test_saved_run_rejects_unresolved_interpolated_role_before_guard(
+    tmp_path, monkeypatch, capsys, world_environment
+):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    compose_path = bundle.task_path / "environment" / "docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose["services"]["world"]["environment"] = world_environment
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    _save(bundle)
+    guard_calls = []
+    monkeypatch.setattr(
+        laura_trial.guarded_harbor,
+        "run_guarded_config",
+        lambda *args, **kwargs: guard_calls.append(True) or 0,
+    )
+
+    assert laura_trial.main(_run_args(bundle)) == 2
+    assert guard_calls == []
+    assert capsys.readouterr().err == (
+        "laura_setup_failed=saved_world_environment_unresolvable\n"
+    )
+
+
 def test_run_rejects_existing_requested_job_before_guard(tmp_path, monkeypatch, capsys):
     bundle = _native_setup(tmp_path, monkeypatch)
     _save(bundle)

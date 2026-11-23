@@ -765,23 +765,55 @@ def _native_effective_parameters(
     }
 
 
-def _world_environment(task_path: Path, config: JobConfig) -> dict[str, Any]:
+_WORLD_ENVIRONMENT_FIELDS = {
+    "WORLD_COST_LIMIT",
+    "WORLD_SIMULATOR_MODEL",
+    "WORLD_GRADER_MODEL",
+    "WORLD_SIM_WEEKS",
+    "WORLD_MAX_TURNS",
+}
+
+
+def _compose_environment_values(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    values: dict[str, Any] = {}
+    if isinstance(value, dict):
+        items = value.items()
+        for name, item in items:
+            if not isinstance(name, str):
+                raise SetupFailure("saved_world_environment_unresolvable")
+            if name not in _WORLD_ENVIRONMENT_FIELDS:
+                continue
+            if item is not None and (
+                isinstance(item, bool) or not isinstance(item, (str, int, float))
+            ):
+                raise SetupFailure("saved_world_environment_unresolvable")
+            values[name] = item
+    elif isinstance(value, list):
+        for item in value:
+            if not isinstance(item, str):
+                raise SetupFailure("saved_world_environment_unresolvable")
+            name, separator, item_value = item.partition("=")
+            if name in _WORLD_ENVIRONMENT_FIELDS:
+                values[name] = item_value if separator else None
+    else:
+        raise SetupFailure("saved_world_environment_unresolvable")
+    return values
+
+
+def _world_environment(
+    task_path: Path, config: JobConfig, task_environment: dict[str, Any]
+) -> dict[str, Any]:
     compose_path = task_path / "environment" / "docker-compose.yaml"
     try:
         compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
-        return {}
+        raise SetupFailure("saved_world_environment_unresolvable") from None
     services = compose.get("services") if isinstance(compose, dict) else None
     world = services.get("world") if isinstance(services, dict) else None
     base = world.get("environment") if isinstance(world, dict) else None
-    environment = dict(base) if isinstance(base, dict) else {}
-    relevant = {
-        "WORLD_COST_LIMIT",
-        "WORLD_SIMULATOR_MODEL",
-        "WORLD_GRADER_MODEL",
-        "WORLD_SIM_WEEKS",
-        "WORLD_MAX_TURNS",
-    }
+    environment = _compose_environment_values(base)
     for overlay_path in config.environment.extra_docker_compose:
         try:
             overlay = yaml.safe_load(Path(overlay_path).read_text(encoding="utf-8"))
@@ -796,28 +828,39 @@ def _world_environment(task_path: Path, config: JobConfig) -> dict[str, Any]:
         overrides = overlay_world.get("environment")
         if overrides is None:
             continue
-        if isinstance(overrides, dict):
-            items = overrides.items()
-        elif isinstance(overrides, list):
-            parsed = []
-            for item in overrides:
-                if not isinstance(item, str):
-                    raise SetupFailure("saved_world_overlay_unresolvable")
-                name, separator, value = item.partition("=")
-                if name in relevant:
-                    if not separator:
-                        raise SetupFailure("saved_world_overlay_unresolvable")
-                    parsed.append((name, value))
-            items = parsed
-        else:
-            raise SetupFailure("saved_world_overlay_unresolvable")
-        for name, value in items:
-            if name not in relevant:
+        environment.update(_compose_environment_values(overrides))
+
+    job_environment = config.environment.env
+
+    def configured_value(name: str) -> str | None:
+        for source in (job_environment, task_environment):
+            if name not in source:
                 continue
-            if value is None or (isinstance(value, str) and "$" in value):
-                raise SetupFailure("saved_world_overlay_unresolvable")
-            environment[name] = value
-    return environment
+            value = source[name]
+            if not isinstance(value, str) or "$" in value:
+                raise SetupFailure("saved_world_environment_unresolvable")
+            return value
+        return None
+
+    effective: dict[str, Any] = {}
+    for name, value in environment.items():
+        if value is None:
+            value = configured_value(name)
+        elif isinstance(value, str) and "$" in value:
+            match = re.fullmatch(
+                r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)",
+                value,
+            )
+            if match is None:
+                raise SetupFailure("saved_world_environment_unresolvable")
+            reference = match.group(1) or match.group(2)
+            if reference not in _WORLD_ENVIRONMENT_FIELDS:
+                raise SetupFailure("saved_world_environment_unresolvable")
+            value = configured_value(reference)
+        if value is None:
+            raise SetupFailure("saved_world_environment_unresolvable")
+        effective[name] = value
+    return effective
 
 
 def _saved_effective_parameters(
@@ -830,12 +873,18 @@ def _saved_effective_parameters(
         raise SetupFailure("saved_target_model_must_use_openrouter")
     task_path = Path(config.tasks[0].path)
     try:
-        task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
+        task_config = tomllib.loads(
+            (task_path / "task.toml").read_text(encoding="utf-8")
+        )
     except (OSError, tomllib.TOMLDecodeError):
-        task_metadata = {}
+        task_config = {}
+    task_metadata = task_config.get("metadata", {})
     if not isinstance(task_metadata, dict):
         task_metadata = {}
-    world_env = _world_environment(task_path, config)
+    task_environment = task_config.get("environment", {}).get("env", {})
+    if not isinstance(task_environment, dict) or not isinstance(config.environment.env, dict):
+        raise SetupFailure("saved_world_environment_unresolvable")
+    world_env = _world_environment(task_path, config, task_environment)
     native_task = (
         task_metadata.get("scenario") == _LAURA_SCENARIO
         and isinstance(task_metadata.get("agent_wheel_sha256"), str)
@@ -843,8 +892,6 @@ def _saved_effective_parameters(
 
     def effective_role(environment_name: str, metadata_name: str) -> Any:
         value = world_env.get(environment_name)
-        if isinstance(value, str) and "$" in value:
-            value = None
         return task_metadata.get(metadata_name) if value is None else value
 
     simulator = effective_role("WORLD_SIMULATOR_MODEL", "simulator_model")
@@ -866,13 +913,9 @@ def _saved_effective_parameters(
         return int(amount)
 
     sim_weeks_raw = world_env.get("WORLD_SIM_WEEKS")
-    if isinstance(sim_weeks_raw, str) and "$" in sim_weeks_raw:
-        sim_weeks_raw = None
     if sim_weeks_raw is None:
         sim_weeks_raw = task_metadata.get("sim_weeks")
     max_turns_raw = world_env.get("WORLD_MAX_TURNS")
-    if isinstance(max_turns_raw, str) and "$" in max_turns_raw:
-        max_turns_raw = None
     if max_turns_raw is None:
         max_turns_raw = task_metadata.get("max_turns")
     sim_weeks = positive_number(sim_weeks_raw)
