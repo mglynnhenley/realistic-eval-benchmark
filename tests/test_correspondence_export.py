@@ -7,8 +7,8 @@ import stat
 from copy import deepcopy
 from datetime import datetime, timedelta
 
-from markdown_it import MarkdownIt
 import pytest
+from markdown_it import MarkdownIt
 
 from refund_eval.companies.models import CompanyAction, CompanyEvent
 from refund_eval.runtime.correspondence import (

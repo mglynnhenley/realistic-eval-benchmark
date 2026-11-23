@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import hashlib
@@ -460,6 +461,114 @@ def test_split_launcher_succeeds_and_reuses_saved_setup_with_sanitized_effective
     assert [name for name, _ in guarded_calls] == ["split-fresh", "split-reused"]
     assert "fake-distinct-agent-key" not in manifest.read_text(encoding="utf-8")
     assert "fake-distinct-world-key" not in manifest.read_text(encoding="utf-8")
+
+
+def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard(
+    tmp_path, monkeypatch, capsys
+):
+    source_root = _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    wheel, digest = _write_public_split_wheel(tmp_path / "shared-role-wheel")
+    native.values.update({
+        "openrouter_key_mode": "shared_roles",
+        "shared_allowance_usd": 90,
+        "agent_max_output_tokens": 2048,
+        "cost_limit": 50,
+        "world_cost_limit": 100,
+        "agent_wheel": str(wheel),
+        "agent_wheel_sha256": digest,
+    })
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-shared-role-key")
+    guarded_calls = []
+
+    def guarded_run(config, thresholds, **hooks):
+        guarded_calls.append(config.job_name)
+        assert thresholds.shared_allowance_usd == 90
+        laura_trial.guarded_harbor.validate_job_config(config, expected_shared_roles=True)
+        assert config.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
+        assert "OPENROUTER_AGENT_API_KEY" not in config.agents[0].env
+        task_path = Path(config.tasks[0].path)
+        compose = yaml.safe_load((task_path / "environment" / "docker-compose.yaml").read_bytes())
+        main_mounts = compose["services"]["main"].get("volumes", [])
+        world_mounts = compose["services"]["world"].get("volumes", [])
+        assert any("role-budget" in str(mount) for mount in main_mounts)
+        assert any("role-budget" in str(mount) for mount in world_mounts)
+        assert all("world-logs" not in str(mount) for mount in main_mounts)
+
+        class FakeJob:
+            is_resuming = False
+
+            async def run(self):
+                return 0
+
+        async def probe():
+            return {"data": {
+                "usage": 0,
+                "limit": 120,
+                "limit_remaining": 120,
+                "limit_reset": None,
+                "is_management_key": False,
+                "is_provisioning_key": False,
+                "include_byok_in_limit": True,
+            }}
+
+        async def factory(_config):
+            return FakeJob()
+
+        guard = laura_trial.guarded_harbor.SharedRoleSpendGuard(thresholds, openrouter_probe=probe)
+        return asyncio.run(laura_trial.guarded_harbor.run_guarded_job(
+            config, thresholds, guard=guard, job_factory=factory, **hooks
+        ))
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "shared-role-fresh",
+    ]) == 0
+    capsys.readouterr()
+
+    manifest = native.prepared_dir / "laura-setup.json"
+    run_record = native.prepared_dir / "run.json"
+    effective_record = native.prepared_dir / "jobs" / "shared-role-fresh" / "effective_parameters.json"
+    initial_effective = json.loads(effective_record.read_text(encoding="utf-8"))
+    assert initial_effective["openrouter_key_mode"] == "shared_roles"
+    assert initial_effective["shared_allowance_usd"] == "90.0"
+    assert initial_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
+    assert initial_effective["runtime_metadata_confirmed"] is True
+    assert initial_effective["shared_allowance_source"] == "operator_attested_allocation"
+    assert initial_effective["key_limit_usd"] == "120"
+    assert initial_effective["key_remaining_usd"] == "120"
+    assert initial_effective["key_usage_baseline_usd"] == "0"
+    assert initial_effective["budget_remaining_usd"] == []
+    assert initial_effective["effective_budget_remaining_usd"] is None
+    run_effective = json.loads(run_record.read_text(encoding="utf-8"))["effective_parameters"]
+    assert run_effective["openrouter_key_mode"] == "shared_roles"
+    assert run_effective["shared_allowance_usd"] == "90.0"
+    assert run_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
+    for artifact in (manifest, run_record, effective_record):
+        assert "fake-shared-role-key" not in artifact.read_text(encoding="utf-8")
+
+    manifest_bytes = manifest.read_bytes()
+    assert laura_trial.main([
+        "run", "--manifest", str(manifest), "--job-name", "shared-role-reused",
+    ]) == 0
+    reused_effective = json.loads(
+        (native.prepared_dir / "jobs" / "shared-role-reused" / "effective_parameters.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert reused_effective["openrouter_key_mode"] == "shared_roles"
+    assert reused_effective["shared_allowance_usd"] == "90.0"
+    assert reused_effective == initial_effective
+    assert manifest.read_bytes() == manifest_bytes
+
+    (source_root / "refund_eval/current.py").write_text("CURRENT_SOURCE = 'changed'\n", encoding="utf-8")
+    assert laura_trial.main([
+        "run", "--manifest", str(manifest), "--job-name", "shared-role-stale",
+    ]) == 2
+    assert guarded_calls == ["shared-role-fresh", "shared-role-reused"]
+    assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"
 
 
 def test_native_run_without_optional_inputs_records_resolved_defaults(
