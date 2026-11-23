@@ -1113,6 +1113,30 @@ def test_options_are_validated(tmp_path):
         make_agent(tmp_path, max_turns=10)  # a world setting, fixed in the task
 
 
+async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path):
+    from refund_eval.harbor.luna_status import NativeStatus
+    from refund_eval.world_service.status import world_status
+
+    source = tmp_path / "world-status.json"
+    source.write_text(json.dumps(world_status({"world": {"turn": 1}}, "train_refund__abc__env")))
+
+    class StatusEnvironment:
+        async def service_download_file(self, remote, destination, *, service):
+            assert service == "world" and remote == "/var/log/world/luna-world-status.json"
+            shutil.copyfile(source, destination)
+
+    agent = make_agent(tmp_path)
+    observer = NativeStatus(agent.logs_dir, agent.model_name)
+    assert await observer.safe_observe(StatusEnvironment())
+    output = agent.logs_dir.parent / "luna-source.json"
+    last = output.read_bytes()
+    assert json.loads(last)["turns"] == 1
+    source.write_text(json.dumps(world_status({"world": {"turn": 2}}, "different_trial__env")))
+    assert not await observer.safe_observe(StatusEnvironment())
+    assert output.read_bytes() == last  # no renewed heartbeat for an unavailable/wrong-run source
+    assert not (agent.logs_dir / "luna-source.json").exists()
+
+
 class Environment:
     def __init__(self, on_run=None):
         self.commands, self.on_run, self.default_user = [], on_run, None
@@ -1140,6 +1164,38 @@ async def test_run_executes_inspect_in_app_and_forwards_the_kill_switch(tmp_path
     [(command, cwd)] = [c for c in environment.commands if "inspect eval" in c[0]]
     assert cwd == "/app" and "world_url=http://world:8000" in command
     assert [c for c, _ in environment.commands if "touch " in c] == ["mkdir -p /app/.context && touch /app/.context/KILL"]
+
+
+async def test_cancel_during_observer_cleanup_is_not_suppressed(tmp_path, monkeypatch):
+    from refund_eval.harbor import installed_agent
+
+    started, closing = asyncio.Event(), asyncio.Event()
+
+    class ClosingObserver:
+        def __init__(self, *_args):
+            pass
+
+        async def watch(self, _environment):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closing.set()
+                await asyncio.Event().wait()
+
+        async def safe_observe(self, _environment):
+            pass
+
+    monkeypatch.setattr(installed_agent, "NativeStatus", ClosingObserver)
+
+    async def execute(_environment):
+        await started.wait()
+
+    run = asyncio.create_task(make_agent(tmp_path).run("ignored", Environment(on_run=execute), AgentContext()))
+    await asyncio.wait_for(closing.wait(), timeout=5)
+    run.cancel()  # Harbor cancellation after Inspect exits, during observer teardown
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=5)
 
 
 def test_installed_task_detects_forwarded_kill_file(tmp_path, monkeypatch):

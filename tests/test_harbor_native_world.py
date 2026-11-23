@@ -92,6 +92,69 @@ assert atif.main(["inspect", "--out", "trajectory.json"]) == 0
 """
 
 
+# Host runs Harbor's real installed-agent method; only container filesystem and
+# sidecar copy operations are translated to local paths. Inspect runs from the
+# non-editable public installation, against the real fixture world service.
+INSTALLED_STATUS_HOST = r'''
+import asyncio, json, os, shutil, sys
+from pathlib import Path
+from types import SimpleNamespace
+from harbor.models.agent.context import AgentContext
+from harbor.models.task.config import MCPServerConfig
+from refund_eval.harbor.installed_agent import RefundInstalledAgent
+from refund_eval.dashboard.luna_publisher import publish_once
+from refund_eval.dashboard.luna import Feed
+from refund_eval.world_service.status import WORLD_STATUS_FILE
+
+python, app, world, url, trial = sys.argv[1:]
+python, app, world, trial = map(Path, (python, app, world, trial))
+logs = trial / "agent"
+logs.mkdir(parents=True)
+
+class LocalEnvironment:
+    default_user = None
+    async def exec(self, command, **kwargs):
+        assert "luna-status" not in command and "luna-source" not in command
+        command = command.replace("/app/.venv/bin/python", str(python))
+        command = command.replace("/app/.venv/bin/inspect", str(python.parent / "inspect"))
+        command = command.replace("/logs/agent", str(logs)).replace("/app", str(app))
+        env = {key: os.environ[key] for key in ("PATH", "WORLD_TURN_TOKEN")}
+        env.update(HOME=str(app), PYTHON_DOTENV_DISABLED="1", REFUND_EVAL_COMPANY_STORE="off",
+                   WORLD_SCENARIO="train_refund_late", WORLD_SIM_WEEKS="1", WORLD_DATA_MODE="fixture")
+        process = await asyncio.create_subprocess_shell(command, cwd=app, env=env,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, error = await process.communicate()
+        assert process.returncode == 0, (out + error).decode()
+        return SimpleNamespace(return_code=process.returncode, stdout=out.decode(), stderr=error.decode())
+    async def service_download_file(self, source, destination, *, service):
+        assert service == "world" and source == f"/var/log/world/{WORLD_STATUS_FILE}"
+        shutil.copyfile(world / WORLD_STATUS_FILE, destination)
+
+async def main():
+    agent = RefundInstalledAgent(logs_dir=logs, model_name="mockllm/model", cost_limit=1,
+        time_limit=30, history_tokens=0, mcp_servers=[MCPServerConfig(name="world",
+        transport="streamable-http", url=url + "/mcp")])
+    context = AgentContext()
+    await agent.run("Ignored by the installed agent", LocalEnvironment(), context)
+    assert not context.metadata  # no telemetry fed back into agent context
+    source = trial / "luna-source.json"
+    status = json.loads(source.read_text())
+    assert status["turns"] == 1 and status["run_id"] == trial.name
+    assert status["model"] == "mockllm/model" and status["agent_spend_usd"] is None
+    assert status["schema_version"] == 2 and status["steps"]
+    assert all(set(step) == {"seq", "at", "simulated_date", "turn", "action", "outcome"} for step in status["steps"])
+    assert any(step["action"] == "turn" for step in status["steps"])
+    output = trial / "luna-status.json"
+    publish_once(source, output, run_id=trial.name, result_path=trial / "result.json")
+    consumed = Feed(output, run_id=trial.name).read()
+    assert consumed["turns"] == 1 and len(consumed["steps"]) == len(status["steps"])
+    assert not list(logs.rglob("*luna*"))  # status is outside the agent log mount
+    print("Installed-agent native status: PASS")
+
+asyncio.run(main())
+'''
+
+
 @pytest.mark.skipif(os.environ.get("REFUND_EVAL_HARBOR_PACKAGE_SMOKE") != "1",
                     reason="needs a local Python 3.14 and cached uv dependencies")
 def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch):
@@ -107,10 +170,22 @@ def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch)
         actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
         if actual_sha256 != expected_sha256.lower():
             pytest.fail("The exact agent wheel SHA-256 does not match", pytrace=False)
+    else:
+        # Build an explicitly TEST ONLY public wheel; no task launch or approval
+        # of these bytes for a paid run is implied by this offline smoke.
+        source, staged = tmp_path / "source", tmp_path / "public-agent"
+        adapter.copy_source(source)
+        adapter.stage_agent(source, staged, adapter.load_scenario("train_refund_late"),
+                            scenario_name="train_refund_late")
+        subprocess.run(["uv", "build", "--offline", "--wheel", str(staged), "--out-dir", str(tmp_path / "wheels")],
+                       check=True, capture_output=True, text=True, timeout=60)
+        [wheel_path] = (tmp_path / "wheels").glob("*.whl")
+        expected_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
     task_dir = adapter.write_task(tmp_path / "prepared", scenario="train_refund_late",
                                   data_mode="fixture", research_mode="saved", sim_weeks=1, max_turns=1,
                                   simulator_model="mockllm/model", grader_model="mockllm/model",
-                                  agent_timeout=60, verifier_timeout=60, cpus=1, memory_mb=1024)
+                                  agent_timeout=60, verifier_timeout=60, cpus=1, memory_mb=1024,
+                                  agent_wheel=wheel_path, agent_wheel_sha256=expected_sha256)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     venv = tmp_path / "venv"
@@ -254,6 +329,21 @@ def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatc
     assert (tool["kind"], tool["tool"], tool["call_id"], tool["status"]) == (
         "tool_call", call["function_name"], call["tool_call_id"], "ok")
     assert turn["kind"] == "turn" and turn["turn"] == 1 and turn["stopped"]
+    # Exercise RefundInstalledAgent.run itself, not a fixture progress.json.
+    host_python = Path(__file__).resolve().parents[1] / "integrations/harbor/.venv/bin/python"
+    assert host_python.is_file(), "uv sync --frozen --project integrations/harbor is required for the host observer smoke"
+    monkeypatch.setenv("WORLD_TRIAL", "test-only-installed__env")
+    trial = tmp_path / "host" / "test-only-installed"
+    with world_service_thread(settings(tmp_path / "native-status", scenario=name, sim_weeks=1, max_turns=1),
+                              monkeypatch) as (url, _):
+        run = subprocess.run([str(host_python), "-c", INSTALLED_STATUS_HOST, str(python), str(run_dir),
+                              str(tmp_path / "native-status/world"), url, str(trial)],
+                             cwd=Path(__file__).resolve().parents[1], timeout=60, check=False,
+                             env={**env, TURN_TOKEN_ENV: os.environ[TURN_TOKEN_ENV], "HARBOR_TELEMETRY": "0"},
+                             capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    # The public installation has no world telemetry implementation or files.
+    assert not (Path(installed.strip()) / "refund_eval/world_service/status.py").exists()
 
 
 def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):
