@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 7.10 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: def6140ad94bcdcd4a3c7c17ba489c342bfdc0f09e368dee9d75f5447544dfec
+- Trial round: none; offline validation only.
+- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon.
+
 ## 7.9 — 2026-11-20
 - Kind: trivial batch
 - Fingerprint: 0bdd56442b2b22671533b80a9efbaa74e629e423bdfa35b0aa300514ca77fa93

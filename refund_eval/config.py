@@ -119,7 +119,7 @@ class RunConfig(BaseModel):
         "Per-trial USD cap for target and world model calls in-process (Inspect cost_limit). "
         "A mapping selects the cap for each target model."
     ))
-    sim_weeks: float = Field(default=6.0, gt=0, le=12)
+    sim_weeks: float = Field(default=6.0, gt=0, allow_inf_nan=False)
     execution: Literal["local", "modal", "docker"] = "local"
     trials: int = Field(default=1, ge=1, le=100, strict=True)
     concurrency: int = Field(default=1, ge=1, le=16, strict=True)
