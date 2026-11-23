@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tomllib
 import zipfile
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -109,6 +110,14 @@ def _wheel_config(approved_wheel):
 def _wheel_cli_args(approved_wheel):
     path, sha256 = approved_wheel
     return ["--agent-wheel", str(path), "--agent-wheel-sha256", sha256]
+
+
+def _native_suite_config(suite, wheel):
+    return batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="docker", data_mode="fixture", research_mode="saved",
+        cost_limit=1, world_cost_limit=1, sim_weeks=12, trials=1, concurrency=2,
+        suite=suite, **_wheel_config(wheel),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -311,6 +320,7 @@ def test_task_loads_with_harbors_task_model(generated):
     assert config.task.name == "refund-eval/train_refund_late"
     meta = config.metadata
     assert meta["task_version"] == adapter.TASK_VERSION and meta["scenario"] == "train_refund_late"
+    assert meta["task_id"] == "train_refund_late"
     assert meta["environment_version"] == adapter.ENVIRONMENT_VERSION
     assert meta["environment_fingerprint"] == adapter.environment_fingerprint()
     assert meta["rules_sha256"] == adapter.rules_sha256("train_refund_late") != "none"
@@ -325,7 +335,11 @@ def test_task_loads_with_harbors_task_model(generated):
     [server] = config.environment.mcp_servers
     assert (server.name, server.url) == ("world", "http://world:8000/mcp")
     env = config.environment.env
-    assert set(env) == {"WORLD_SCENARIO", "WORLD_SIM_WEEKS", "WORLD_DATA_MODE", "WORLD_TURN_TOKEN"}
+    assert set(env) == {
+        "WORLD_TASK_ID", "WORLD_SCENARIO", "WORLD_SIM_WEEKS", "WORLD_DATA_MODE", "WORLD_TURN_TOKEN",
+        "REFUND_EVAL_SHARED_ROLE_MODE", "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG",
+    }
+    assert env["WORLD_TASK_ID"] == ""
     assert env["WORLD_TURN_TOKEN"].startswith("${WORLD_TURN_TOKEN:-") and len(env["WORLD_TURN_TOKEN"]) > 40
     assert config.agent.timeout_sec == 39600 and config.environment.network_mode.value == "public"
     instruction = (task_dir / "instruction.md").read_text()
@@ -752,6 +766,64 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
     assert not (out / "jobs").exists()
     with pytest.raises(FileExistsError, match="empty output directory"):
         batch.prepare(out, batch.NativeBatchConfig.model_validate_json(config.read_bytes()))
+
+
+def test_native_suite_prepares_ten_distinct_tasks(tmp_path, approved_split_budget_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    config = _native_suite_config(suite, approved_split_budget_wheel)
+    baseline = next(entry for entry in suite if entry["task_id"] == "rail_original_baseline")
+    assert baseline["task_text"] == task_message(load_scenario("train_refund_late"), 12)
+
+    out = tmp_path / "prepared-suite"
+    record_path = batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    raw_job = yaml.safe_load((out / "job.yaml").read_bytes())
+    assert raw_job["agents"][0]["kwargs"]["forward_task_instruction"] is True
+    expected = {entry["task_id"]: entry for entry in suite}
+    assert len(job.tasks) == len(expected) == 10
+    assert len({task.path for task in job.tasks}) == 10
+    for job_task in job.tasks:
+        metadata = Task(job_task.path).config.metadata
+        entry = expected[metadata["task_id"]]
+        assert metadata["scenario"] == entry["scenario"]
+        task_env = tomllib.loads((job_task.path / "task.toml").read_text())["environment"]["env"]
+        assert task_env["WORLD_TASK_ID"] == metadata["task_id"]
+        assert (job_task.path / "instruction.md").read_text() == entry["task_text"] + "\n"
+    dataset = tomllib.loads((out / "dataset.toml").read_text())
+    assert len(dataset["tasks"]) == 10
+    record = json.loads(record_path.read_text())
+    assert record["total_trials"] == 10
+    assert record["effective_parameters"]["task_count"] == 10
+    assert record["effective_parameters"]["attempts_per_task"] == 1
+    assert {task["task_id"] for task in record["tasks"]} == set(expected)
+    assert {task["scenario"] for task in record["tasks"]} == {"train_refund_late", "bills_price_rise"}
+
+
+@pytest.mark.parametrize(
+    ("case", "error"),
+    [
+        ("path", "task_id"),
+        ("duplicate_id", "unique"),
+        ("duplicate_text", "unique"),
+        ("blank", "blank"),
+        ("unknown_scenario", "(?i)unknown.*scenario|scenario.*unknown"),
+    ],
+)
+def test_native_suite_rejects_invalid_entries(case, error, approved_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    if case == "path":
+        suite[0]["task_id"] = "../outside"
+    elif case == "duplicate_id":
+        suite[1]["task_id"] = suite[0]["task_id"]
+    elif case == "duplicate_text":
+        suite[1]["task_text"] = suite[0]["task_text"]
+    elif case == "blank":
+        suite[0]["task_text"] = " \n "
+    else:
+        suite[0]["scenario"] = "unknown_scenario"
+
+    with pytest.raises(ValueError, match=error):
+        _native_suite_config(suite, approved_wheel)
 
 
 def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_wheel):
@@ -1222,8 +1294,23 @@ def test_inspect_command(tmp_path):
     assert convert.startswith("/app/.venv/bin/python -m refund_eval.harbor.atif /logs/agent/inspect "
                               "--out /logs/agent/trajectory.json")
     assert convert.endswith("exit $status")
+    assert "-T task_id" not in run and "-T task_text" not in run
+    default_with_instruction = make_agent(tmp_path).inspect_command("a Harbor instruction")
+    assert "-T task_id" not in default_with_instruction and "-T task_text" not in default_with_instruction
     mock = make_agent(tmp_path, model_name="mockllm/model").inspect_command()
     assert "-M " not in mock and "-T cost_limit" not in mock and "-T token_budget" not in mock
+
+
+def test_inspect_command_forwards_task_instruction_safely(tmp_path):
+    import shlex
+
+    instruction = "Check Laura's dates; do not expand $WORLD_SCENARIO."
+    suite_agent = make_agent(tmp_path, forward_task_instruction=True)
+    command = suite_agent.inspect_command(instruction + "\n")
+    assert f"-T task_text={shlex.quote(instruction)}" in command
+    assert '-T task_id="$WORLD_TASK_ID"' in command
+    with pytest.raises(ValueError, match="Suite task forwarding"):
+        suite_agent.inspect_command()
 
 
 def test_options_are_validated(tmp_path):

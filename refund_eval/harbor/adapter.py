@@ -5,7 +5,7 @@
 
 The approved wheel path and its SHA256 are required; the adapter hashes the bytes before output creation
 and stages those exact bytes. Writes, and launches nothing:
-- `OUT/<scenario>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
+- `OUT/<task_id>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
   docker-compose.yaml, world/Dockerfile and separate agent and world build inputs) and
   tests/ (the verifier image and test.sh);
 - `OUT/dataset.toml`: the tasks in OUT, each pinned by Harbor's content digest, and `OUT/metric.py`
@@ -21,7 +21,9 @@ directory holds the source and per-task tokens: keep it private (an ignored path
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
+import io
 import json
 import re
 import secrets
@@ -121,6 +123,30 @@ def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgent
     if actual_sha256 != expected_sha256.lower():
         raise ValueError("Agent wheel SHA256 does not match the supplied digest")
     return VerifiedAgentWheel(path, filename, actual_sha256, content)
+
+
+def verify_suite_task_wheel(wheel: VerifiedAgentWheel) -> None:
+    error = (
+        "Native task suites require a verified wheel whose "
+        "refund_eval.task.impossible_refund has optional task_text and task_id parameters"
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(wheel.content)) as archive:
+            source = archive.read("refund_eval/task.py")
+        module = ast.parse(source)
+    except (OSError, KeyError, zipfile.BadZipFile, SyntaxError, UnicodeDecodeError):
+        raise ValueError(error) from None
+    task = next((node for node in module.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "impossible_refund"),
+                None)
+    if task is None:
+        raise ValueError(error)
+    positional = task.args.posonlyargs + task.args.args
+    optional = {argument.arg for argument in positional[len(positional) - len(task.args.defaults):]}
+    optional.update(argument.arg for argument, default in zip(task.args.kwonlyargs, task.args.kw_defaults)
+                    if default is not None)
+    if not {"task_text", "task_id"} <= optional:
+        raise ValueError(error)
 
 
 def verify_split_budget_wheel(path: Path) -> dict[str, str]:
@@ -238,8 +264,9 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
                world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
                verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
-               shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None) -> Path:
-    """Write OUT/<scenario>/ and return it."""
+               shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None,
+               task_id: str | None = None, task_text: str | None = None, suite_task: bool = False) -> Path:
+    """Write OUT/<task_id>/ and return it."""
     from refund_eval.agent.prompt import task_message
 
     if verified_wheel is None:
@@ -250,7 +277,12 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     sc = load_scenario(scenario)
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
-    task_dir = out / scenario
+    task_id = scenario if task_id is None else task_id
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", task_id):
+        raise ValueError("task_id must start with a lowercase letter and contain only lowercase letters, digits, '_' or '-'")
+    if task_text is not None and not task_text.strip():
+        raise ValueError("task_text must not be empty")
+    task_dir = out / task_id
     if task_dir.exists():
         raise FileExistsError(f"Refusing to overwrite a generated task: {task_dir}")
     shutil.copytree(TEMPLATE, task_dir)
@@ -273,9 +305,9 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     elif world_seed:
         seed_policy = f"fixed for all trials: {world_seed}"
     values = {
-        "TASK_NAME": f"{ORG}/{scenario}", "SCENARIO": scenario, "TASK_VERSION": task_version,
+        "TASK_NAME": f"{ORG}/{task_id}", "TASK_ID": task_id, "SCENARIO": scenario, "TASK_VERSION": task_version,
         "ENVIRONMENT_VERSION": ENVIRONMENT_VERSION, "ENVIRONMENT_FINGERPRINT": environment_fingerprint(),
-        "DESCRIPTION": f"Impossible-refund benchmark, scenario {sc.id}: a long-horizon customer-service task "
+        "DESCRIPTION": f"Long-horizon customer-service task {task_id} using scenario {sc.id}, "
                        "against simulated organisations, graded from the world's event log.",
         "DATA_MODE": data_mode, "SIM_WEEKS": sim_weeks, "MAX_TURNS": max_turns, "RESEARCH_MODE": research_mode,
         "SIMULATOR_MODEL": simulator_model, "GRADER_MODEL": grader_model, "RULES_SHA256": rules_sha256(sc.id),
@@ -292,6 +324,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "SHARED_ROLE_MODE": "shared_roles" if openrouter_key_mode == "shared_roles" else "disabled",
         "SHARED_ROLE_BUDGET_CONFIG_TOML": json.dumps(shared_role_budget_config or ""),
         "SHARED_ROLE_BUDGET_CONFIG_YAML": yaml.safe_dump(shared_role_budget_config or "", default_style='"').strip(),
+        "SUITE_TASK_ID": task_id if suite_task else "",
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):
@@ -313,7 +346,10 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                 rendered = rendered.replace("  # ROLE_BUDGET_VOLUME\n", "")
         path.write_text(rendered, encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
-    (task_dir / "instruction.md").write_text(task_message(sc, sim_weeks) + "\n", encoding="utf-8")
+    instruction = task_text if task_text is not None else task_message(sc, sim_weeks)
+    (task_dir / "instruction.md").write_text(
+        instruction if instruction.endswith("\n") else instruction + "\n", encoding="utf-8",
+    )
     if store_root is not None:
         company_store.register_native_jobs_root(out / "jobs", root=store_root)
     return task_dir
