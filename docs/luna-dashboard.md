@@ -75,6 +75,9 @@ Luna trial or current progress file. The archived `luna-repeat-status.json`
 is an operator annotation, not runtime progress, and is not a publisher input.
 Keep the deployed preparation App unchanged until the operator can supply an
 actual current trial ID, its exact progress-file path, and confirmed launch time.
+Use the Harbor trial UUID (`id`), not its directory name, as the run ID.
+The exact same trial's Harbor `result.json` path is also required: its terminal
+result overrides a live progress file left at running/grading after exit.
 This handoff is not authorization to launch or change the trial.
 
 After a separately authorized launch, the operator checks out the dashboard PR
@@ -85,6 +88,7 @@ output directory outside Git, and no older run directory or glob.
 ```sh
 uv run --frozen python -m refund_eval.dashboard.luna_publisher \
   --progress-file /EXACT/CURRENT/TRIAL/agent/progress.json \
+  --trial-result-file /EXACT/CURRENT/TRIAL/result.json \
   --output-file /PRIVATE/EXISTING/DIRECTORY/luna-status.json \
   --run-id ACTUAL_CURRENT_TRIAL_ID \
   --operator-confirmed-launch-at ACTUAL_LAUNCH_TIME_WITH_TIMEZONE
@@ -104,6 +108,9 @@ It does not copy messages, status reports, errors, inboxes, paths or arbitrary
 summary strings. Spend and latest action stay **unknown**: the existing progress
 snapshot provides no trustworthy split agent/world USD totals or sanitized action.
 Do not infer these from aggregate spend, token counts, or private text.
+On a finished Harbor result, the stage becomes completed, failed, or stopped
+(cancellation), using `finished_at` as terminal evidence time. Missing or
+pre-launch progress cannot supply terminal run metrics; those stay unknown.
 
 `heartbeat_at` means the local publisher successfully observed the file.
 `source_updated_at` remains the runtime's timestamp, even on unchanged reads;

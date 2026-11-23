@@ -70,3 +70,35 @@ def test_historical_invalid_or_unknown_source_never_creates_feed(tmp_path, chang
     with pytest.raises((ValueError, TypeError, KeyError)):
         publish_once(source, output, now=NOW, run_id="TEST-ONLY-luna", confirmed_at=NOW.isoformat())
     assert not output.exists()
+
+
+@pytest.mark.parametrize(("exception", "stage"), [
+    (None, "completed"), ({"exception_type": "AgentTimeoutError", "exception_message": "PRIVATE"}, "failed"),
+    ({"exception_type": "CancelledError"}, "stopped"),
+])
+@pytest.mark.parametrize("with_progress", [False, True])
+def test_final_harbor_result_supersedes_live_phase_even_without_progress(tmp_path, exception, stage, with_progress):
+    source, output, result = (tmp_path / name for name in ("progress.json", "status.json", "result.json"))
+    if with_progress:
+        source.write_text(json.dumps(progress(phase="grading")))
+    result.write_text(json.dumps({"id": "TEST-ONLY-luna", "finished_at": NOW.isoformat(), "exception_info": exception}))
+    published = publish_once(source, output, result_path=result, now=NOW,
+                             run_id="TEST-ONLY-luna", confirmed_at=NOW.isoformat())
+    assert published["stage"] == stage
+    assert published["turns"] == (1 if with_progress else None)
+    assert "PRIVATE" not in output.read_text()
+
+
+def test_terminal_result_rejects_wrong_identity_and_discards_historical_metrics(tmp_path):
+    source, output, result = (tmp_path / name for name in ("progress.json", "status.json", "result.json"))
+    source.write_text(json.dumps(progress(updated_at=(NOW - timedelta(days=1)).isoformat())))
+    terminal = {"id": "other-run", "finished_at": NOW.isoformat(), "exception_info": None,
+                "step_results": [{"exception_info": {"exception_type": "AgentTimeoutError"}}]}
+    result.write_text(json.dumps(terminal))
+    args = {"result_path": result, "now": NOW, "run_id": "TEST-ONLY-luna", "confirmed_at": NOW.isoformat()}
+    with pytest.raises(ValueError, match="different terminal trial"):
+        publish_once(source, output, **args)
+    assert not output.exists()
+    result.write_text(json.dumps({**terminal, "id": "TEST-ONLY-luna"}))
+    published = publish_once(source, output, **args)
+    assert published["stage"] == "failed" and published["turns"] is None

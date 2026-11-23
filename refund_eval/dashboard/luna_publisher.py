@@ -43,19 +43,53 @@ def project(source, *, run_id, confirmed_at, now):
     }, now, run_id=run_id)
 
 
-def publish_once(source_path, output_path, *, run_id, confirmed_at, now=None):
-    """Atomically publish validated status without modifying the private source."""
-    if source_path.resolve() == output_path.resolve():
-        raise ValueError("source and output must differ")
-    with source_path.open("rb") as handle:
+def read_json(path):
+    with path.open("rb") as handle:
         raw = handle.read(32 * 1024 * 1024 + 1)
     if len(raw) > 32 * 1024 * 1024:
-        raise ValueError("oversized progress file")
-    candidate = project(json.loads(raw), run_id=run_id, confirmed_at=confirmed_at,
-                        now=now or datetime.now(UTC))
+        raise ValueError("oversized source file")
+    return json.loads(raw)
+
+
+def publish_once(source_path, output_path, *, run_id, confirmed_at, now=None, result_path=None):
+    """Atomically publish validated status without modifying the private source."""
+    now = now or datetime.now(UTC)
+    if output_path.resolve() in {path.resolve() for path in (source_path, result_path) if path is not None}:
+        raise ValueError("source and output must differ")
+    result = read_json(result_path) if result_path is not None and result_path.exists() else {}
+    if not isinstance(result, dict):
+        raise TypeError("invalid trial result")
+    finished_at = result.get("finished_at")
+    try:
+        source = read_json(source_path)
+    except (OSError, ValueError):
+        if not finished_at:
+            raise
+        source = {"world": {}}
+    if finished_at:
+        # Live progress may remain at 'running'/'grading' forever after exit.
+        # Harbor's final result is the authoritative terminal-state evidence.
+        if result["id"] != run_id:
+            raise ValueError("different terminal trial")
+        exceptions = [result["exception_info"], *(step.get("exception_info") for step in result.get("step_results") or [])]
+        exception = next((item for item in exceptions if item is not None), None)
+        if exception is not None and not isinstance(exception, dict):
+            raise TypeError("invalid terminal exception")
+        phase = ("stopped" if exception and exception.get("exception_type") == "CancelledError"
+                 else "failed" if exception is not None else "completed")
+        if not isinstance(source, dict) or not isinstance(source.get("world"), dict):
+            source = {"world": {}}
+        try:
+            evidence_at = timestamp(source.get("updated_at"))
+            if not timestamp(confirmed_at) <= evidence_at <= timestamp(finished_at):
+                source = {"world": {}}
+        except (TypeError, ValueError):
+            source = {"world": {}}
+        source = {**source, "phase": phase, "updated_at": finished_at}
+    candidate = project(source, run_id=run_id, confirmed_at=confirmed_at, now=now)
     if output_path.exists():
         with output_path.open("rb") as handle:
-            previous = validate(json.loads(handle.read(8193)), now or datetime.now(UTC), run_id)
+            previous = validate(json.loads(handle.read(8193)), now, run_id)
         if previous["source_updated_at"] and timestamp(candidate["source_updated_at"]) < timestamp(previous["source_updated_at"]):
             raise ValueError("older run evidence")
     temporary = None
@@ -76,6 +110,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--progress-file", required=True, type=Path)
     parser.add_argument("--output-file", required=True, type=Path)
+    parser.add_argument("--trial-result-file", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--operator-confirmed-launch-at", required=True)
     args = parser.parse_args()
@@ -87,7 +122,8 @@ def main():
     while True:
         try:
             publish_once(args.progress_file, args.output_file, run_id=args.run_id,
-                         confirmed_at=args.operator_confirmed_launch_at)
+                         confirmed_at=args.operator_confirmed_launch_at,
+                         result_path=args.trial_result_file)
         except (OSError, ValueError, TypeError, KeyError):
             # Do not log private paths, payloads, tracebacks or source error text.
             print("Status not updated; retaining the previous source timestamps.", flush=True)
