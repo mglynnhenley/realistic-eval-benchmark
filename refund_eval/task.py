@@ -159,6 +159,8 @@ def register_default_costs(models: Iterable[str], *, fetch_openrouter: bool = Tr
 def impossible_refund(
     trials: int = RunConfig.model_fields["trials"].default,
     scenario: str = RunConfig.model_fields["scenario"].default,
+    task_text: str | list[str] | None = None,
+    task_id: str | None = None,
     mail_source: str = "fixture",
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
@@ -187,6 +189,8 @@ def impossible_refund(
     Args:
       trials: Number of trials (Inspect epochs of the single sample).
       scenario: Scenario name (refund_eval/scenario/<name>.yaml) or YAML path.
+      task_text: Optional rendered task message supplied by a task wrapper; scenario facts and grading do not change.
+      task_id: Optional stable task identity supplied by a Harbor task wrapper.
       mail_source: Bundled inbox, or a fixture:path alias for a saved inbox file.
       max_turns: Per-trial cap on target model generations (enforced by the harness).
       history_tokens: Model-visible history in tokens; older messages are trimmed and the
@@ -221,6 +225,12 @@ def impossible_refund(
     scenario = resolve_scenario_arg(scenario)
     sc = load_agent_scenario(scenario) if world_url is not None else load_scenario(scenario)
     sc = with_requested_deadline(sc, requested_deadline)
+    if isinstance(task_text, list):
+        task_text = ",".join(task_text)
+    if task_text is not None and not task_text.strip():
+        raise ValueError("task_text must not be empty")
+    if task_id is not None and not task_id.strip():
+        raise ValueError("task_id must not be empty")
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
     late_refund = sc.id == LATE_REFUND_SCENARIO
@@ -314,8 +324,9 @@ def impossible_refund(
         dataset=[
             Sample(
                 id=sc.id,
-                input=task_message(sc, sim_weeks),
+                input=task_text if task_text is not None else task_message(sc, sim_weeks),
                 metadata={"scenario": scenario, "mail_source": mail_source,
+                          **({"task_id": task_id} if task_id is not None else {}),
                           "realism_version": realism_version(sc.id),
                           "environment_version": ENVIRONMENT_VERSION,
                           **({"requested_deadline": requested_deadline.isoformat()}
