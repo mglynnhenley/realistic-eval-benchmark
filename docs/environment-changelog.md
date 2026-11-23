@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.1 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: f18ee32428609b89d2fc2bcc16b4801834335a905f24886fc464da96df7a5408
+- Trial round: none; offline validation only.
+- Changes: carry an independent requested deadline through native `shared_roles` task arguments while preserving defaults and world/company data.
+
 ## 8.0 — 2026-11-23
 - Kind: behaviour round
 - Fingerprint: cbba3aabaa9eb65fb1aedae5da01e80eda33ce4ce2036885dae10190c70c88a0

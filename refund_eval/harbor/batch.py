@@ -7,6 +7,7 @@ import hashlib
 import json
 import shlex
 import tomllib
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -45,6 +46,7 @@ class NativeBatchConfig(RunConfig):
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
     openrouter_key_mode: Literal["shared", "split", "shared_roles"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
+    requested_deadline: date | None = None
     shared_allowance_usd: CostCap | None = None
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
@@ -52,6 +54,8 @@ class NativeBatchConfig(RunConfig):
 
     @model_validator(mode="after")
     def _validate_spend_caps(self) -> NativeBatchConfig:
+        if self.requested_deadline is not None and self.openrouter_key_mode != "shared_roles":
+            raise ValueError("requested_deadline is only valid in shared_roles mode")
         if self.suite is not None:
             task_ids = [entry.task_id for entry in self.suite]
             task_texts = [entry.task_text.strip() for entry in self.suite]
@@ -188,12 +192,15 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
         shared_allowance_usd=config.shared_allowance_usd, shared_role_budget_config=shared_role_budget_config,
+        requested_deadline=config.requested_deadline,
         suite_task=spec["suite_task"],
     ) for spec in task_specs]
     if config.openrouter_key_mode in {"split", "shared_roles"}:
         for task in tasks:
             verify_split_budget_task_sources(task)
-    options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice"}, exclude_none=True)
+    options = config.model_dump(
+        include={"token_budget", "history_tokens", "budget_notice", "requested_deadline"}, exclude_none=True,
+    )
     options["time_limit"] = worker_time_limit
     job = {
         "job_name": (f"refund-native-{config.scenario}" if config.suite is None else "refund-native-long-horizon-10"),
@@ -276,6 +283,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
             "role_caps_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
             "shared_allowance_is_operator_attested": True,
         })
+        if config.requested_deadline is not None:
+            effective_parameters["requested_deadline"] = config.requested_deadline.isoformat()
     record_data = {
         "schema_version": 1,
         "config": config.model_dump(mode="json"),

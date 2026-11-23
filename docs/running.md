@@ -97,7 +97,10 @@ sim_weeks: 52.142857142857146  # 365 days
 ```
 
 Only a `$deadline` placeholder in `task_text` uses `requested_deadline`; literal
-dates in the task text are not rewritten.
+dates are otherwise not rewritten. Native `shared_roles` preparation accepts an
+explicit requested deadline for `train_refund_late` and applies it to an
+agent-only task-text projection, leaving the canonical scenario and world data
+unchanged. Omitting it preserves the existing literal task date.
 
 The CLI `--sim-weeks` option and task setting `-T sim_weeks=...` continue to
 override the scenario horizon without changing `requested_deadline`. Simulated

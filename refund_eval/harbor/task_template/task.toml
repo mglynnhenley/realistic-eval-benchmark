@@ -23,6 +23,7 @@ task_id = "__TASK_ID__"
 scenario = "__SCENARIO__"
 data_mode = "__DATA_MODE__"
 sim_weeks = __SIM_WEEKS__
+requested_deadline = "__REQUESTED_DEADLINE__"
 max_turns = __MAX_TURNS__
 research_mode = "__RESEARCH_MODE__"
 simulator_model = "__SIMULATOR_MODEL__"

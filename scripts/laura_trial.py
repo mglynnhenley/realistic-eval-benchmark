@@ -22,6 +22,7 @@ import tomllib
 import zipfile
 import zlib
 from contextlib import suppress
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -890,6 +891,8 @@ def _native_effective_parameters(
             "shared_allowance_source": "operator_attested_allocation",
             "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
         })
+        if config.requested_deadline is not None:
+            effective["requested_deadline"] = config.requested_deadline.isoformat()
     return effective
 
 
@@ -1100,6 +1103,28 @@ def _saved_effective_parameters(
         raise SetupFailure("saved_max_turns_invalid")
 
     agent_kwargs = config.agents[0].kwargs
+
+    def requested_deadline_text(value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        if type(value) is date:
+            return value.isoformat()
+        if isinstance(value, str):
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError:
+                raise SetupFailure("saved_requested_deadline_invalid") from None
+            if parsed.isoformat() != value:
+                raise SetupFailure("saved_requested_deadline_invalid")
+            return parsed.isoformat()
+        raise SetupFailure("saved_requested_deadline_invalid")
+
+    requested_deadline = requested_deadline_text(task_metadata.get("requested_deadline"))
+    agent_requested_deadline = requested_deadline_text(agent_kwargs.get("requested_deadline"))
+    if requested_deadline != agent_requested_deadline:
+        raise SetupFailure("saved_requested_deadline_metadata_mismatch")
+    if requested_deadline is not None and not shared_roles:
+        raise SetupFailure("saved_requested_deadline_requires_shared_roles")
     agent_cap_raw = agent_kwargs.get("cost_limit")
     if isinstance(agent_cap_raw, dict):
         agent_cap_raw = agent_cap_raw.get(target)
@@ -1189,6 +1214,8 @@ def _saved_effective_parameters(
             "shared_allowance_source": "operator_attested_allocation",
             "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
         })
+        if requested_deadline is not None:
+            effective["requested_deadline"] = requested_deadline
     return effective
 
 

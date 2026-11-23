@@ -473,6 +473,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
         "openrouter_key_mode": "shared_roles",
         "shared_allowance_usd": 90,
         "agent_max_output_tokens": 2048,
+        "requested_deadline": "2027-02-04",
         "cost_limit": 50,
         "world_cost_limit": 100,
         "agent_wheel": str(wheel),
@@ -481,11 +482,13 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
     monkeypatch.setenv("OPENROUTER_API_KEY", "fake-shared-role-key")
     guarded_calls = []
+    probe_calls = []
 
     def guarded_run(config, thresholds, **hooks):
         guarded_calls.append(config.job_name)
         assert thresholds.shared_allowance_usd == 90
         laura_trial.guarded_harbor.validate_job_config(config, expected_shared_roles=True)
+        assert config.agents[0].kwargs["requested_deadline"].isoformat() == "2027-02-04"
         assert config.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
         assert "OPENROUTER_AGENT_API_KEY" not in config.agents[0].env
         task_path = Path(config.tasks[0].path)
@@ -503,6 +506,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
                 return 0
 
         async def probe():
+            probe_calls.append("probe")
             return {"data": {
                 "usage": 0,
                 "limit": 120,
@@ -537,6 +541,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     assert initial_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
     assert initial_effective["runtime_metadata_confirmed"] is True
     assert initial_effective["shared_allowance_source"] == "operator_attested_allocation"
+    assert initial_effective["requested_deadline"] == "2027-02-04"
     assert initial_effective["key_limit_usd"] == "120"
     assert initial_effective["key_remaining_usd"] == "120"
     assert initial_effective["key_usage_baseline_usd"] == "0"
@@ -546,6 +551,7 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     assert run_effective["openrouter_key_mode"] == "shared_roles"
     assert run_effective["shared_allowance_usd"] == "90.0"
     assert run_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
+    assert run_effective["requested_deadline"] == "2027-02-04"
     for artifact in (manifest, run_record, effective_record):
         assert "fake-shared-role-key" not in artifact.read_text(encoding="utf-8")
 
@@ -560,8 +566,33 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     )
     assert reused_effective["openrouter_key_mode"] == "shared_roles"
     assert reused_effective["shared_allowance_usd"] == "90.0"
+    assert reused_effective["requested_deadline"] == "2027-02-04"
     assert reused_effective == initial_effective
     assert manifest.read_bytes() == manifest_bytes
+
+    capsys.readouterr()
+    manifest_document = json.loads(manifest_bytes)
+    config_path = Path(manifest_document["config"]["path"])
+    config_bytes = config_path.read_bytes()
+    job_document = yaml.safe_load(config_bytes)
+    job_document["agents"][0]["kwargs"]["requested_deadline"] = "2027-02-05"
+    mismatched_config = yaml.safe_dump(job_document, sort_keys=False).encode("utf-8")
+    config_path.write_bytes(mismatched_config)
+    manifest_document["config"]["size"] = len(mismatched_config)
+    manifest_document["config"]["sha256"] = hashlib.sha256(mismatched_config).hexdigest()
+    manifest.write_text(json.dumps(manifest_document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    guarded_count = len(guarded_calls)
+    probe_count = len(probe_calls)
+    assert laura_trial.main([
+        "run", "--manifest", str(manifest), "--job-name", "shared-role-deadline-mismatch",
+    ]) == 2
+    assert "laura_setup_failed=saved_requested_deadline_metadata_mismatch" in capsys.readouterr().err
+    assert len(guarded_calls) == guarded_count
+    assert len(probe_calls) == probe_count
+
+    config_path.write_bytes(config_bytes)
+    manifest.write_bytes(manifest_bytes)
 
     (source_root / "refund_eval/current.py").write_text("CURRENT_SOURCE = 'changed'\n", encoding="utf-8")
     assert laura_trial.main([

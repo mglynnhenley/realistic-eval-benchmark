@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import zipfile
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -79,6 +80,7 @@ AGENT_MODULES = {
 SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/dollar_budget.py",
     "refund_eval/agent/harness.py",
+    "refund_eval/agent/prompt.py",
     "refund_eval/agent/world_mode.py",
     "refund_eval/model_pricing.py",
     "refund_eval/models/world_spend_ledger.py",
@@ -275,9 +277,10 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
                verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
                shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None,
-               task_id: str | None = None, task_text: str | None = None, suite_task: bool = False) -> Path:
+               task_id: str | None = None, task_text: str | None = None, suite_task: bool = False,
+               requested_deadline: date | None = None) -> Path:
     """Write OUT/<task_id>/ and return it."""
-    from refund_eval.agent.prompt import task_message
+    from refund_eval.agent.prompt import task_message, with_requested_deadline
 
     if verified_wheel is None:
         verified_wheel = read_verified_agent_wheel(agent_wheel, agent_wheel_sha256)
@@ -285,6 +288,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         raise ValueError("Verified agent wheel does not match the supplied wheel and SHA256")
 
     sc = load_scenario(scenario)
+    agent_scenario = with_requested_deadline(sc, requested_deadline)
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
     task_id = scenario if task_id is None else task_id
@@ -298,7 +302,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
     shutil.copytree(TEMPLATE, task_dir)
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
-    stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario,
+    stage_agent(source, task_dir / "environment" / "agent", agent_scenario, scenario_name=scenario,
                 verified_wheel=verified_wheel)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
     from refund_eval.sim import company_store
@@ -331,6 +335,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
         "OPENROUTER_KEY_MODE": openrouter_key_mode,
         "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),
+        "REQUESTED_DEADLINE": "" if requested_deadline is None else requested_deadline.isoformat(),
         "SHARED_ROLE_MODE": "shared_roles" if openrouter_key_mode == "shared_roles" else "disabled",
         "SHARED_ROLE_BUDGET_CONFIG_TOML": json.dumps(shared_role_budget_config or ""),
         "SHARED_ROLE_BUDGET_CONFIG_YAML": yaml.safe_dump(shared_role_budget_config or "", default_style='"').strip(),
@@ -356,7 +361,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                 rendered = rendered.replace("  # ROLE_BUDGET_VOLUME\n", "")
         path.write_text(rendered, encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
-    instruction = task_text if task_text is not None else task_message(sc, sim_weeks)
+    instruction = task_text if task_text is not None else task_message(agent_scenario, sim_weeks)
     (task_dir / "instruction.md").write_text(
         instruction if instruction.endswith("\n") else instruction + "\n", encoding="utf-8",
     )
