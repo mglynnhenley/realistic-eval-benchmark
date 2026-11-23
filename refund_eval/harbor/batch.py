@@ -28,6 +28,7 @@ class NativeBatchConfig(RunConfig):
     agent_wheel: Path
     agent_wheel_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
+    total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
 
@@ -44,6 +45,8 @@ class NativeBatchConfig(RunConfig):
 
 
 def prepare(out: Path, config: NativeBatchConfig) -> Path:
+    if config.total_time_limit_seconds is not None:
+        raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
@@ -54,6 +57,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     if total > 100 or config.concurrency > total:
         raise ValueError("A batch allows at most 100 trials and concurrency cannot exceed the trial count")
     caps = resolve_cost_limits(config.cost_limit, targets, scenario=config.scenario)
+    worker_time_limit = config.time_limit
+    agent_timeout = 1.1 * config.time_limit
     limits = None
     if config.trial_spend_cap_usd is not None:
         trial_cap = Decimal(str(config.trial_spend_cap_usd))
@@ -64,7 +69,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         if total * trial_cap > Decimal(str(config.key_spend_cap_usd)):
             raise ValueError(f"{total} attempts x trial_spend_cap_usd {config.trial_spend_cap_usd} "
                              f"exceeds key_spend_cap_usd {config.key_spend_cap_usd}")
-        limits = {"max_turns": config.max_turns, "time_limit_seconds": config.time_limit,
+        limits = {"max_turns": config.max_turns, "time_limit_seconds": worker_time_limit,
                   "trial_spend_cap_usd": config.trial_spend_cap_usd,
                   "key_spend_cap_usd": config.key_spend_cap_usd}
     out = validate_private_output(out)
@@ -75,13 +80,13 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     task = write_task(
         out, scenario=config.scenario, data_mode=config.data_mode, sim_weeks=config.sim_weeks,
         max_turns=config.max_turns, research_mode=config.research_mode, simulator_model=config.simulator_model,
-        grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=1.1 * config.time_limit,
+        grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=agent_timeout,
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel,
     )
-    options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice", "time_limit"},
-                                exclude_none=True)
+    options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice"}, exclude_none=True)
+    options["time_limit"] = worker_time_limit
     job = {
         "job_name": f"refund-native-{config.scenario}",
         "jobs_dir": str(out / "jobs"),
@@ -115,6 +120,19 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "total_trials": total,
         "target_cost_limits_usd": caps,
         "world_cost_limit_usd_per_trial": config.world_cost_limit,
+        "effective_parameters": {
+            "models": targets,
+            "simulator_model": config.simulator_model,
+            "grader_model": config.grader_model,
+            "sim_weeks": config.sim_weeks,
+            "max_turns": config.max_turns,
+            "agent_cost_limits_usd": caps,
+            "world_cost_limit_usd": config.world_cost_limit,
+            "worker_time_limit_seconds": worker_time_limit,
+            "requested_total_time_limit_seconds": None,
+            "effective_enforced_total_time_limit_seconds": None,
+            "total_time_limit_enforcement": "not_requested",
+        },
         **({"limits": limits} if limits is not None else {}),
     }, indent=2) + "\n", encoding="utf-8")
     return record

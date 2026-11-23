@@ -326,6 +326,77 @@ def test_pinned_harbor_shapes_and_guarded_launcher_ordering(tmp_path, monkeypatc
     assert guard.monitor_task is not None and guard.monitor_task.cancelled()
 
 
+def test_required_effective_parameter_record_failure_prevents_job_run(tmp_path):
+    config = valid_config(tmp_path)
+    guard, _ = stable_guard()
+    run_calls = []
+
+    class NeverRunJob:
+        async def run(self):
+            run_calls.append(True)
+
+    async def factory(_):
+        return NeverRunJob()
+
+    def fail_record(_job):
+        raise OSError("offline record write failure")
+
+    with pytest.raises(GuardFailure):
+        asyncio.run(
+            run_guarded_job(
+                config,
+                make_thresholds(),
+                guard=guard,
+                job_factory=factory,
+                before_job_run=fail_record,
+            )
+        )
+    assert run_calls == []
+
+
+def test_guarded_entry_points_refuse_total_limit_before_provider_or_guard(
+    tmp_path, monkeypatch, capsys
+):
+    config = valid_config(tmp_path)
+    guard, probe = stable_guard()
+    harbor_calls = []
+    guard_constructions = []
+    monkeypatch.setattr(
+        guarded_harbor,
+        "require_pinned_harbor",
+        lambda: harbor_calls.append("require_harbor"),
+    )
+
+    class TrackedGuard:
+        def __init__(self, *args, **kwargs):
+            guard_constructions.append(True)
+
+    monkeypatch.setattr(guarded_harbor, "SpendGuard", TrackedGuard)
+    with pytest.raises(
+        LauncherFailure, match="strict_total_deadline_unsupported_by_modal"
+    ):
+        asyncio.run(
+            run_guarded_job(
+                config,
+                make_thresholds(),
+                guard=guard,
+                total_time_limit_seconds=30,
+            )
+        )
+    assert guard._start_attempted is False
+    assert probe.calls == 0
+    assert harbor_calls == []
+
+    assert guarded_harbor.run_guarded_config(
+        config, make_thresholds(), total_time_limit_seconds=30
+    ) == 2
+    assert capsys.readouterr().err == (
+        "guard_failed=strict_total_deadline_unsupported_by_modal cleanup_uncertain=false\n"
+    )
+    assert guard_constructions == []
+    assert harbor_calls == []
+
+
 def test_progress_links_are_emitted_after_guarded_job_and_sandbox_creation(
     tmp_path, monkeypatch, capsys
 ):
