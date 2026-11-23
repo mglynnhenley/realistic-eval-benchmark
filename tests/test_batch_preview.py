@@ -273,3 +273,24 @@ def test_cli_error_reports_invalid_config_without_writing_artifacts(tmp_path, ca
     assert error.value.code == 2
     assert "Unknown or inactive scenarios" in capsys.readouterr().err
     assert sorted(path.name for path in tmp_path.iterdir()) == ["preview.json"]
+
+
+@pytest.mark.parametrize(("config", "expected_error"), [
+    (preview_config(api_key="dummy-sensitive-value"), "api_key"),
+    (preview_config(cost_limit={
+        "openrouter/example/target-a": "dummy-sensitive-value",
+        "openrouter/example/target-b": 2.0,
+    }), "cost_limit"),
+])
+def test_cli_validation_errors_hide_sensitive_input(tmp_path, capsys, config, expected_error):
+    config_path = tmp_path / "preview.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        main(["--config", str(config_path)])
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert expected_error in stderr
+    assert "dummy-sensitive-value" not in stderr
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["preview.json"]
