@@ -16,6 +16,7 @@ import stat
 import subprocess
 import zipfile
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,6 +67,33 @@ def _write_inert_wheel(directory):
         for name, content in files.items():
             archive.writestr(name, content)
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+def _write_split_budget_wheel(directory):
+    source = directory / "source"
+    public_source = directory / "public-source"
+    adapter.copy_source(source)
+    adapter.stage_agent(
+        source,
+        public_source,
+        load_scenario("train_refund_late"),
+        scenario_name="train_refund_late",
+    )
+    build_dir = directory / "built-wheel"
+    subprocess.run(
+        ["uv", "build", "--offline", "--wheel", "--out-dir", str(build_dir)],
+        cwd=public_source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    [wheel] = build_dir.glob("*.whl")
+    return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+@pytest.fixture(scope="module")
+def approved_split_budget_wheel(tmp_path_factory):
+    return _write_split_budget_wheel(tmp_path_factory.mktemp("public-split-wheel"))
 
 
 @pytest.fixture(scope="module")
@@ -750,6 +778,225 @@ def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match="SHA256 does not match"):
         batch.prepare(out, config)
     assert not out.exists()
+
+
+def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
+    tmp_path, monkeypatch, approved_split_budget_wheel
+):
+    wheel, digest = approved_split_budget_wheel
+    monkeypatch.setenv("OPENROUTER_AGENT_API_KEY", "agent-fake-never-packaged")
+    monkeypatch.setenv("OPENROUTER_WORLD_API_KEY", "world-fake-never-packaged")
+    out = tmp_path / "split-batch"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="split", agent_max_output_tokens=2048,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+
+    record_path = batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    [agent] = job.agents
+    compose = yaml.safe_load((out / "train_refund_late" / "environment" / "docker-compose.yaml").read_text())
+    world_env = compose["services"]["world"]["environment"]
+    record = json.loads(record_path.read_text())
+
+    assert agent.import_path == adapter.AGENT_IMPORT_PATH
+    assert agent.env == {
+        "OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
+        "REFUND_EVAL_AGENT_DOLLAR_CAP": "50.0",
+        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "2048",
+    }
+    assert "OPENROUTER_WORLD_API_KEY" not in agent.env
+    assert world_env["OPENROUTER_API_KEY"] == "${OPENROUTER_WORLD_API_KEY}"
+    assert world_env["WORLD_STRICT_BUDGET"] == "true"
+    assert "OPENROUTER_AGENT_API_KEY" not in world_env["OPENROUTER_API_KEY"]
+    assert record["effective_parameters"]["openrouter_key_mode"] == "split"
+    assert record["effective_parameters"]["agent_max_output_tokens"] == 2048
+    assert record["effective_parameters"]["agent_key_ceiling_usd"] == 50
+    assert record["effective_parameters"]["world_key_ceiling_usd"] == 100
+    assert "agent-fake-never-packaged" not in (out / "job.yaml").read_text()
+    assert "world-fake-never-packaged" not in compose["services"]["world"]["environment"]["OPENROUTER_API_KEY"]
+
+    from harbor.utils.env import resolve_env_vars
+
+    from refund_eval.realism.track import SOURCE_MANIFEST, freeze_source_manifest
+    from scripts.guarded_harbor import (
+        LauncherFailure,
+        _has_role_key_reference,
+        _split_compose_values,
+        run_guarded_job,
+        validate_job_config,
+    )
+    from scripts.offline_spend_guard import SplitThresholds
+
+    task_path = out / "train_refund_late"
+    assert resolve_env_vars({"OPENROUTER_API_KEY": agent.env["OPENROUTER_API_KEY"]}) == {
+        "OPENROUTER_API_KEY": "agent-fake-never-packaged"
+    }
+    assert resolve_env_vars({"OPENROUTER_API_KEY": world_env["OPENROUTER_API_KEY"]}) == {
+        "OPENROUTER_API_KEY": "world-fake-never-packaged"
+    }
+    assert _has_role_key_reference({"OTHER": "$OPENROUTER_WORLD_API_KEY"})
+    assert _has_role_key_reference({"OTHER": "${OPENROUTER_AGENT_API_KEY:-fallback}"})
+    assert validate_job_config(job) is None
+
+    compose_path = task_path / "environment" / "docker-compose.yaml"
+    original_compose = compose_path.read_bytes()
+    list_compose = yaml.safe_load(original_compose)
+    world_values = list_compose["services"]["world"]["environment"]
+    list_compose["services"]["world"]["environment"] = [
+        f"{name}={value}" for name, value in world_values.items()
+    ]
+    compose_path.write_text(yaml.safe_dump(list_compose, sort_keys=False), encoding="utf-8")
+    parsed_values = _split_compose_values(task_path)
+    assert parsed_values["WORLD_STRICT_BUDGET"] == "true"
+    assert Decimal(parsed_values["WORLD_COST_LIMIT"]) == Decimal(100)
+    assert parsed_values["WORLD_SIMULATOR_MODEL"] == "openrouter/simulator"
+    assert parsed_values["WORLD_GRADER_MODEL"] == "openrouter/grader"
+    assert parsed_values["WORLD_SIM_WEEKS"] == "${WORLD_SIM_WEEKS}"
+    assert int(parsed_values["WORLD_MAX_TURNS"]) == 1000
+
+    malformed = yaml.safe_load(original_compose)
+    malformed["services"]["world"]["environment"] = ["OPENROUTER_API_KEY"]
+    compose_path.write_text(yaml.safe_dump(malformed, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+
+    for override, value in (
+        ("image", "untrusted/image"),
+        ("command", ["/bin/true"]),
+        ("entrypoint", ["/bin/true"]),
+        ("env_file", ["untrusted.env"]),
+        ("extends", {"service": "main"}),
+        ("secrets", ["runtime-key"]),
+    ):
+        modified = yaml.safe_load(original_compose)
+        modified["services"]["world"][override] = value
+        compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+        with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+            _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["other"] = {}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["main"]["environment"] = {"EXTRA_KEY": "$OPENROUTER_WORLD_API_KEY"}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["world"]["environment"]["EXTRA_KEY"] = "${OPENROUTER_AGENT_API_KEY:-fallback}"
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["secrets"] = {"runtime-key": {"file": "secret.txt"}}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    compose_path.write_bytes(original_compose)
+
+    for mutate in (
+        lambda raw: raw["environment"].update(extra_docker_compose=["overlay.yaml"]),
+        lambda raw: raw["environment"].update(kwargs={"secrets": ["named-secret"]}),
+        lambda raw: raw["agents"][0]["env"].update(EXTRA_KEY="$OPENROUTER_WORLD_API_KEY"),
+        lambda raw: raw["environment"].setdefault("env", {}).update(
+            EXTRA_KEY="${OPENROUTER_AGENT_API_KEY:-fallback}"
+        ),
+        lambda raw: raw["verifier"].setdefault("env", {}).update(EXTRA_KEY="$OPENROUTER_WORLD_API_KEY"),
+    ):
+        raw = job.model_dump(mode="python")
+        mutate(raw)
+        with pytest.raises(LauncherFailure):
+            validate_job_config(JobConfig.model_validate(raw))
+
+    task_toml_path = task_path / "task.toml"
+    original_task_toml = task_toml_path.read_text(encoding="utf-8")
+    task_toml_path.write_text(
+        original_task_toml.replace(
+            "[environment.env]\n", '[environment.env]\nEXTRA_KEY = "$OPENROUTER_AGENT_API_KEY"\n', 1
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(LauncherFailure, match="split task base environment"):
+        validate_job_config(job)
+    task_toml_path.write_text(original_task_toml, encoding="utf-8")
+
+    world_dockerfile = task_path / "environment" / "world" / "Dockerfile"
+    original_world_dockerfile = world_dockerfile.read_bytes()
+    world_dockerfile.write_bytes(original_world_dockerfile + b"\n")
+    with pytest.raises(LauncherFailure, match="build/runtime paths"):
+        validate_job_config(job)
+    world_dockerfile.write_bytes(original_world_dockerfile)
+
+    world_source = task_path / "environment" / "source"
+    stale_module = world_source / "refund_eval" / "models" / "budget.py"
+    stale_module.write_bytes(stale_module.read_bytes() + b"\n# stale world budget module\n")
+    freeze_source_manifest(world_source)
+    current_task = Task(task_path)
+    old_source_sha = current_task.config.metadata["source_sha256"]
+    source_manifest = json.loads((world_source / SOURCE_MANIFEST).read_text())
+    task_toml = (task_path / "task.toml").read_text()
+    task_toml = task_toml.replace(old_source_sha, source_manifest["source_sha256"])
+    (task_path / "task.toml").write_text(task_toml)
+    record["task"]["source_sha256"] = source_manifest["source_sha256"]
+    record["task"]["digest"] = f"sha256:{Packager.compute_content_hash(task_path)[0]}"
+    record_path.write_text(json.dumps(record))
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+
+    class ProbeGuard:
+        started = False
+
+        async def start(self):
+            self.started = True
+
+    probe_guard = ProbeGuard()
+
+    async def fail_job(_):
+        pytest.fail("stale split task reached Harbor job creation")
+
+    with pytest.raises(LauncherFailure, match="split world source does not attest"):
+        asyncio.run(run_guarded_job(
+            job,
+            SplitThresholds(Decimal(50), Decimal(100)),
+            guard=probe_guard,
+            job_factory=fail_job,
+        ))
+    assert probe_guard.started is False
+
+
+@pytest.mark.parametrize(("change", "expected_error"), [
+    ({"agent_max_output_tokens": None}, "split mode requires agent_max_output_tokens"),
+    ({"agent_max_output_tokens": True}, "agent_max_output_tokens"),
+    ({"execution": "docker"}, "split mode requires Modal execution"),
+    ({"trials": 2}, "split mode requires one target attempt and concurrency one"),
+    ({"concurrency": 2}, "split mode requires one target attempt and concurrency one"),
+    ({"trial_spend_cap_usd": 150, "key_spend_cap_usd": 200},
+     "split mode does not support combined planning caps"),
+])
+def test_split_native_config_rejects_unbounded_or_ambiguous_modes_before_preparation(
+    tmp_path, change, expected_error, approved_split_budget_wheel
+):
+    wheel, digest = approved_split_budget_wheel
+    config = {
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture",
+        "research_mode": "saved", "model": "openrouter/target", "simulator_model": "openrouter/sim",
+        "grader_model": "openrouter/grade", "cost_limit": 50, "world_cost_limit": 100,
+        "trials": 1, "concurrency": 1, "openrouter_key_mode": "split", "agent_max_output_tokens": 2048,
+        "agent_wheel": wheel, "agent_wheel_sha256": digest,
+    } | change
+
+    baseline = batch.NativeBatchConfig(**(config | {key: value for key, value in {
+        "agent_max_output_tokens": 2048, "execution": "modal", "trials": 1, "concurrency": 1,
+        "trial_spend_cap_usd": None, "key_spend_cap_usd": None,
+    }.items()}))
+    assert baseline.openrouter_key_mode == "split"
+    with pytest.raises((ValueError, TypeError), match=expected_error):
+        batch.NativeBatchConfig(**config)
+    assert not (tmp_path / "split-invalid").exists()
 
 
 SPEND_CAPPED = {"execution": "docker", "scenario": "train_refund_late", "models": ["openrouter/a", "openrouter/b"],

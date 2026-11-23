@@ -22,8 +22,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import importlib.metadata
+import json
 import math
+import os
+import re
 import sys
 import tomllib
 from collections.abc import Callable
@@ -38,16 +42,28 @@ from harbor.models.job.config import JobConfig
 from harbor.models.job.result import JobResult
 from pydantic import ValidationError
 
+from refund_eval.harbor import adapter
+from refund_eval.harbor.adapter import (
+    AGENT_IMPORT_PATH,
+    verify_split_budget_task_sources,
+    verify_split_budget_wheel,
+)
 from scripts.offline_spend_guard import (
     KEY_CEILING,
     GuardFailure,
     SpendGuard,
+    SplitSpendGuard,
+    SplitThresholds,
     Thresholds,
     install_modal_hooks,
 )
 
 PINNED_HARBOR_VERSION = "0.26.0"
 OPENROUTER_KEY_REFERENCE = "${OPENROUTER_API_KEY}"
+OPENROUTER_AGENT_KEY_REFERENCE = "${OPENROUTER_AGENT_API_KEY}"
+OPENROUTER_WORLD_KEY_REFERENCE = "${OPENROUTER_WORLD_API_KEY}"
+OPENROUTER_ROLE_KEY_NAMES = {"OPENROUTER_API_KEY", "OPENROUTER_AGENT_API_KEY", "OPENROUTER_WORLD_API_KEY"}
+_ROLE_KEY_REFERENCE = re.compile(r"\$(?:\{)?(OPENROUTER_API_KEY|OPENROUTER_AGENT_API_KEY|OPENROUTER_WORLD_API_KEY)\b")
 
 
 class LauncherFailure(RuntimeError):
@@ -87,7 +103,14 @@ def _reject_openrouter_key_override(env: dict[str, str], location: str) -> None:
         raise LauncherFailure(f"{location} overrides the monitored OpenRouter key")
 
 
-def _validate_local_task_envs(task_path: Path) -> None:
+def _has_role_key_reference(env: dict[str, Any]) -> bool:
+    return any(
+        isinstance(value, str) and _ROLE_KEY_REFERENCE.search(value) is not None
+        for value in env.values()
+    )
+
+
+def _validate_local_task_envs(task_path: Path, *, split: bool = False) -> None:
     try:
         task_config = tomllib.loads(
             (task_path / "task.toml").read_text(encoding="utf-8")
@@ -101,7 +124,11 @@ def _validate_local_task_envs(task_path: Path) -> None:
                 env = value["env"]
                 if not isinstance(env, dict):
                     raise LauncherFailure("local task configuration is invalid")
-                _reject_openrouter_key_override(env, "local task environment")
+                if split:
+                    if OPENROUTER_ROLE_KEY_NAMES.intersection(env) or _has_role_key_reference(env):
+                        raise LauncherFailure("split task base environment may not inject a shared OpenRouter key")
+                else:
+                    _reject_openrouter_key_override(env, "local task environment")
             for key, nested in value.items():
                 if key != "env":
                     validate_env_maps(nested)
@@ -112,7 +139,76 @@ def _validate_local_task_envs(task_path: Path) -> None:
     validate_env_maps(task_config)
 
 
-def validate_job_config(config: JobConfig) -> None:
+def _compose_environment(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        if any(
+            not isinstance(name, str) or not name or item is None
+            or not isinstance(item, (str, int, float, bool))
+            for name, item in value.items()
+        ):
+            raise ValueError
+        return {name: str(item) for name, item in value.items()}
+    if isinstance(value, list):
+        result = {}
+        for item in value:
+            if not isinstance(item, str) or "=" not in item:
+                raise ValueError
+            name, item_value = item.split("=", 1)
+            if not name or name in result:
+                raise ValueError
+            result[name] = item_value
+        return result
+    raise ValueError
+
+
+def _split_compose_values(task_path: Path) -> dict[str, Any]:
+    try:
+        environment_dir = task_path / "environment"
+        if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
+            raise ValueError
+        compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
+        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+            raise ValueError
+        services = compose["services"]
+        if not isinstance(services, dict) or set(services) != {"main", "world"}:
+            raise ValueError
+        if compose["volumes"] != {"world-logs": None}:
+            raise ValueError
+        main = services["main"]
+        world_service = services["world"]
+        if main != {"depends_on": {"world": {"condition": "service_healthy"}}}:
+            raise ValueError
+        if not isinstance(world_service, dict) or set(world_service) != {
+            "build", "expose", "environment", "security_opt", "volumes"
+        }:
+            raise ValueError
+        if (world_service["build"] != {"context": "${CONTEXT_DIR}", "dockerfile": "world/Dockerfile"}
+                or world_service["expose"] != ["8000"]
+                or world_service["security_opt"] != ["seccomp=unconfined"]
+                or world_service["volumes"] != ["world-logs:/var/log/world"]):
+            raise ValueError
+        world = _compose_environment(world_service["environment"])
+        for service_name, service in services.items():
+            env = _compose_environment(service.get("environment"))
+            for name, value in env.items():
+                if name in OPENROUTER_ROLE_KEY_NAMES:
+                    expected = (service_name == "world" and name == "OPENROUTER_API_KEY"
+                                and value == OPENROUTER_WORLD_KEY_REFERENCE)
+                    if not expected:
+                        raise ValueError
+                if _ROLE_KEY_REFERENCE.search(value):
+                    expected = (service_name == "world" and name == "OPENROUTER_API_KEY"
+                                and value == OPENROUTER_WORLD_KEY_REFERENCE)
+                    if not expected:
+                        raise ValueError
+        return world
+    except (OSError, UnicodeError, yaml.YAMLError, KeyError, TypeError, ValueError):
+        raise LauncherFailure("split task Compose environment is invalid") from None
+
+
+def validate_job_config(config: JobConfig, *, expected_split: bool | None = None) -> None:
     if (
         config.n_attempts != 1
         or config.n_concurrent_trials != 1
@@ -135,6 +231,11 @@ def validate_job_config(config: JobConfig) -> None:
 
     agent = config.agents[0]
     agent_env = agent.env or {}
+    split = agent_env.get("OPENROUTER_API_KEY") == OPENROUTER_AGENT_KEY_REFERENCE
+    if expected_split is not None and split != expected_split:
+        raise LauncherFailure("guard mode does not match the prepared role-key routing")
+    if not split and agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE:
+        raise LauncherFailure("agent must use the host OpenRouter key without resume settings")
     if (
         agent.n_concurrent not in (None, 1)
         or agent.resume_trajectory
@@ -143,13 +244,49 @@ def validate_job_config(config: JobConfig) -> None:
         or not agent.model_name
         or not agent.model_name.startswith("openrouter/")
         or agent.base_url is not None
-        or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE
+        or (not split and agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_KEY_REFERENCE)
     ):
         raise LauncherFailure("agent must use the host OpenRouter key without resume settings")
 
+    if split:
+        kwargs = getattr(agent, "kwargs", {}) or {}
+        try:
+            cap = Decimal(str(kwargs["cost_limit"]))
+            declared_cap = Decimal(str(agent_env["REFUND_EVAL_AGENT_DOLLAR_CAP"]))
+            output_tokens_raw = agent_env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"]
+            if not isinstance(output_tokens_raw, str) or not output_tokens_raw.isdecimal():
+                raise ValueError
+            output_cap = int(output_tokens_raw)
+        except (KeyError, InvalidOperation, ValueError, TypeError):
+            raise LauncherFailure("split agent dollar cap or output cap is invalid") from None
+        if not cap.is_finite() or cap <= 0 or cap > 50 or cap != declared_cap or output_cap <= 0:
+            raise LauncherFailure("split agent dollar cap must match cost_limit within supported ceiling")
+        if (agent.import_path != AGENT_IMPORT_PATH
+                or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_AGENT_KEY_REFERENCE
+                or set(agent_env) != {
+                    "OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP", "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"
+                }
+                or OPENROUTER_ROLE_KEY_NAMES.intersection(agent_env) - {"OPENROUTER_API_KEY"}
+                or _has_role_key_reference({key: value for key, value in agent_env.items()
+                                            if key != "OPENROUTER_API_KEY"})):
+            raise LauncherFailure("split mode requires the native guarded agent and role-isolated key env")
+
     environment_env = config.environment.env or {}
-    _reject_openrouter_key_override(environment_env, "Modal environment")
-    _reject_openrouter_key_override(config.verifier.env or {}, "verifier environment")
+    if split:
+        if (OPENROUTER_ROLE_KEY_NAMES.intersection(environment_env)
+                or OPENROUTER_ROLE_KEY_NAMES.intersection(config.verifier.env or {})
+                or _has_role_key_reference(environment_env)
+                or _has_role_key_reference(config.verifier.env or {})
+                or "COMPOSE_FILE" in os.environ
+                or "COMPOSE_PROFILES" in os.environ
+                or getattr(config.environment, "extra_docker_compose", None)
+                or (getattr(config.environment, "kwargs", None) or {}).get("secrets")
+                or (getattr(config.environment, "kwargs", None) or {}).get("registry_secret")
+                or (getattr(config.environment, "kwargs", None) or {}).get("volumes")):
+            raise LauncherFailure("split keys may only be routed to their role containers")
+    else:
+        _reject_openrouter_key_override(environment_env, "Modal environment")
+        _reject_openrouter_key_override(config.verifier.env or {}, "verifier environment")
 
     task = config.tasks[0]
     if task.path is None or task.git_url or task.source:
@@ -157,7 +294,53 @@ def validate_job_config(config: JobConfig) -> None:
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
-    _validate_local_task_envs(task_path)
+    _validate_local_task_envs(task_path, split=split)
+    if split:
+        try:
+            verify_split_budget_task_sources(task_path)
+        except (OSError, ValueError):
+            raise LauncherFailure("split world source does not attest current budget enforcement") from None
+        values = _split_compose_values(task_path)
+        if values.get("OPENROUTER_API_KEY") != OPENROUTER_WORLD_KEY_REFERENCE or values.get("WORLD_STRICT_BUDGET") != "true":
+            raise LauncherFailure("split world key routing or strict budget is missing")
+        try:
+            world_cap = Decimal(str(values["WORLD_COST_LIMIT"]))
+        except (KeyError, InvalidOperation, ValueError, TypeError):
+            raise LauncherFailure("split world dollar cap is invalid") from None
+        if not world_cap.is_finite() or world_cap <= 0 or world_cap > 100:
+            raise LauncherFailure("split world dollar cap exceeds its supported ceiling")
+        for role_name in ("WORLD_SIMULATOR_MODEL", "WORLD_GRADER_MODEL"):
+            if not isinstance(values.get(role_name), str) or not values[role_name].startswith("openrouter/"):
+                raise LauncherFailure("split world models must use OpenRouter")
+        if any("OPENROUTER_AGENT_API_KEY" in str(value) for value in values.values()):
+            raise LauncherFailure("agent OpenRouter key is exposed to the world service")
+        try:
+            for relative, trusted in (
+                ("environment/Dockerfile", adapter.TEMPLATE / "environment" / "Dockerfile"),
+                ("environment/world/Dockerfile", adapter.TEMPLATE / "environment" / "world" / "Dockerfile"),
+                ("environment/agent/install-agent.py", Path(adapter.__file__).with_name("install_agent.py")),
+            ):
+                if (task_path / relative).read_bytes() != trusted.read_bytes():
+                    raise ValueError
+        except (OSError, ValueError):
+            raise LauncherFailure("split container build/runtime paths are invalid") from None
+        try:
+            task_toml = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+            task_metadata = task_toml["metadata"]
+            wheel_name = task_metadata["agent_wheel_filename"]
+            if not isinstance(wheel_name, str) or Path(wheel_name).name != wheel_name:
+                raise ValueError
+            wheel_path = task_path / "environment" / "agent" / "wheels" / wheel_name
+            wheel_record = json.loads(
+                (task_path / "environment" / "agent" / "agent-wheel.json").read_text(encoding="utf-8")
+            )
+            wheel_digest = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+            if (wheel_record != {"filename": wheel_name, "sha256": wheel_digest}
+                    or task_metadata.get("agent_wheel_sha256") != wheel_digest):
+                raise ValueError
+            verify_split_budget_wheel(wheel_path)
+        except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError):
+            raise LauncherFailure("split agent wheel does not attest current budget sources") from None
 
     if Path(config.job_name).name != config.job_name or config.job_name in {".", ".."}:
         raise LauncherFailure("job name must be a single path component")
@@ -168,7 +351,7 @@ def validate_job_config(config: JobConfig) -> None:
 
 async def run_guarded_job(
     config: JobConfig,
-    thresholds: Thresholds,
+    thresholds: Thresholds | SplitThresholds,
     *,
     guard: SpendGuard | None = None,
     job_factory: Any | None = None,
@@ -180,8 +363,9 @@ async def run_guarded_job(
     if total_time_limit_seconds is not None:
         raise LauncherFailure("strict_total_deadline_unsupported_by_modal")
     require_pinned_harbor()
-    validate_job_config(config)
-    controller = guard or SpendGuard(thresholds)
+    split = isinstance(thresholds, SplitThresholds)
+    validate_job_config(config, expected_split=split)
+    controller = guard or (SplitSpendGuard(thresholds) if split else SpendGuard(thresholds))
     try:
         await controller.start()
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
@@ -255,7 +439,7 @@ def _trial_failure_reason(result: JobResult) -> str | None:
 
 def run_guarded_config(
     config: JobConfig,
-    thresholds: Thresholds,
+    thresholds: Thresholds | SplitThresholds,
     *,
     on_job_created: Callable[[Any], None] | None = None,
     on_sandbox_created: Callable[[Any], None] | None = None,
@@ -268,7 +452,7 @@ def run_guarded_config(
             file=sys.stderr,
         )
         return 2
-    if thresholds.openrouter_key_ceiling != KEY_CEILING:
+    if isinstance(thresholds, Thresholds) and thresholds.openrouter_key_ceiling != KEY_CEILING:
         print("guard_failed=OpenRouter key ceiling must be exactly $50 cleanup_uncertain=false", file=sys.stderr)
         return 2
     if not math.isfinite(thresholds.probe_timeout):
@@ -276,7 +460,7 @@ def run_guarded_config(
         return 2
     try:
         require_pinned_harbor()
-        validate_job_config(config)
+        validate_job_config(config, expected_split=isinstance(thresholds, SplitThresholds))
         hooks = {}
         if on_job_created is not None:
             hooks["on_job_created"] = on_job_created

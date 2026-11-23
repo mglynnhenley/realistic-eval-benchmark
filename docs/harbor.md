@@ -400,3 +400,68 @@ uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [
 Each path writes `OUT/<script>/<path>/`. The comparison goes to `OUT/REPORT.md` and `OUT/results.json`. `--skip-harbor` runs only the two in-process paths.
 
 The gate exits 1 if any path run fails, ends with a stop reason other than the script's expected one, or has an unexplained difference; otherwise it exits 0. `REPORT.md` states `Gate: PASS` or `Gate: FAIL`, and `results.json` includes `passed` and `failed_runs`. A zero-difference comparison alone is not a pass when a path failed. `--harbor-concurrency` limits concurrent Docker path runs (default 3).
+
+### Split OpenRouter keys (opt-in)
+
+Shared-key mode remains the default and retains its existing `$50` key ceiling and combined trial delta.
+Split mode is limited to one Modal target attempt, concurrency one, and zero retries. It reserves the
+target and world allowances independently before each physical model request: the target cap is at most
+`$50`, while simulator and grader share a world cap of at most `$100`. Split configs must set a positive
+integer `agent_max_output_tokens`; there is no default because the request bound depends on this value.
+Combined planning-cap fields are not supported in split mode.
+
+Example native JSON config; replace the approved wheel path and digest with the current public wheel:
+
+```json
+{
+  "execution": "modal",
+  "scenario": "train_refund_late",
+  "data_mode": "hybrid",
+  "sim_weeks": 52,
+  "max_turns": 500,
+  "time_limit": 36000,
+  "openrouter_key_mode": "split",
+  "model": "openrouter/provider/model",
+  "simulator_model": "openrouter/provider/model",
+  "grader_model": "openrouter/provider/model",
+  "cost_limit": 50,
+  "world_cost_limit": 100,
+  "agent_max_output_tokens": 2048,
+  "agent_wheel": "/path/to/approved-agent.whl",
+  "agent_wheel_sha256": "<64-hex-sha256>"
+}
+```
+
+Prepare and launch through the guarded native command; unlike shared mode, omit both shared-key threshold
+flags because role deltas are derived from the role caps:
+
+```bash
+scripts/harbor python -m scripts.laura_trial run \
+  --run-config .context/split-run.json --prepared-dir .context/split-run \
+  --job-name split-trial
+```
+
+Execution requires an approved fresh agent wheel whose target-budget sources byte-match this checkout,
+and a task world-source tree whose budget-enforcement modules also byte-match this checkout, plus two
+distinct lifetime OpenRouter keys exported to the guarded launcher as
+`OPENROUTER_AGENT_API_KEY` and `OPENROUTER_WORLD_API_KEY`. Both keys are probed before job creation and
+must report lifetime limits of exactly `$50` and `$100`, respectively. Creating or changing keys requires
+separate approval; this mode does not provision keys or change account/global settings. Key bytes are
+never placed in task/job artifacts or effective-parameter records. Split mode rejects unverified routing
+overlays and named Modal secrets.
+
+The local pre-call reservation is conditional on the declared complete tariff data and the provider
+honoring the pinned output-token and maximum-price parameters. It fails closed on unsupported or
+unbounded requests and retains unresolved holds. This is not a hard invoice cutoff: provider accounting,
+in-flight requests, or tariff changes may still exceed local reservations. Independent key polling is an
+additional guard, not a replacement for per-request reservations or provider-side account controls.
+
+Target reservations cover supported OpenRouter text-chat requests: serialized request bytes plus a
+16,384-token framing allowance, the configured output-token ceiling, the highest published input/cache
+rate, output plus reasoning rates, and any per-request tariff. Paid plugins, multimodal input, alternate
+routes and unpriceable tariff fields are refused. A zero reported charge is not treated as settlement
+when any tariff is nonzero; the hold remains unless a positive usage or generation charge is available.
+Strict settlement also requires explicit non-BYOK billing metadata (`is_byok: false`) from usage or
+generation data; BYOK or ambiguous billing retains the reservation rather than treating OpenRouter
+credits as the upstream charge. Shared-key behavior is unchanged. This accounting scope is local and does
+not verify invoices, provider-side discounts or billing changes.

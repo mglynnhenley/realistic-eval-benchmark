@@ -24,11 +24,12 @@ services:
       WORLD_SIMULATOR_MODEL: "__SIMULATOR_MODEL__"
       WORLD_GRADER_MODEL: "__GRADER_MODEL__"
       WORLD_COST_LIMIT: "__WORLD_COST_LIMIT__"
+      WORLD_STRICT_BUDGET: "__WORLD_STRICT_BUDGET__"
       WORLD_TASK_VERSION: "__TASK_VERSION__"
       REFUND_EVAL_COMPANY_STORE: "__COMPANY_STORE_ROOT__"
       WORLD_TRIAL: ${COMPOSE_PROJECT_NAME}  # Harbor's `<trial name>__env`; with the task version, the seed
       WORLD_SEED: "__WORLD_SEED__"
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_KEY: __OPENROUTER_WORLD_KEY__
       REFUND_EVAL_EXA_API_KEY: ${REFUND_EVAL_EXA_API_KEY:-}
       REFUND_EVAL_FAKE_WORLD_MODELS: ${REFUND_EVAL_FAKE_WORLD_MODELS:-}  # test only; refuses to run with any key set
     # The browser's network namespace (`unshare -rn`) needs user namespaces, which Docker's default

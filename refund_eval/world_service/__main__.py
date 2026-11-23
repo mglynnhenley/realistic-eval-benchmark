@@ -54,12 +54,17 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
     if not admin_token or not turn_token:
         print(f"Set {ADMIN_TOKEN_ENV} and {TURN_TOKEN_ENV}.", file=sys.stderr)
         return 2
+    strict_budget_raw = os.environ.get("WORLD_STRICT_BUDGET", "false")
+    if strict_budget_raw not in {"true", "false"}:
+        print("WORLD_STRICT_BUDGET must be true or false.", file=sys.stderr)
+        return 2
     settings = WorldSettings(
         scenario=args.scenario, seed=args.seed, max_turns=args.max_turns,
         **({"sim_weeks": args.sim_weeks} if hasattr(args, "sim_weeks") else {}),
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
         world_cost_limit=args.world_cost_limit,
+        strict_budget=strict_budget_raw == "true",
         company_simulator=args.company_simulator, browser_runtime=args.browser_runtime,
         require_verified_browser_isolation=args.require_verified_browser_isolation, output_dir=args.output_dir,
     )

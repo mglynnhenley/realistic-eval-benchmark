@@ -9,6 +9,7 @@ import shlex
 import tomllib
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import Field, model_validator
@@ -18,6 +19,8 @@ from refund_eval.harbor.adapter import (
     AGENT_IMPORT_PATH,
     read_verified_agent_wheel,
     validate_and_index,
+    verify_split_budget_task_sources,
+    verify_split_budget_wheel,
     write_task,
 )
 from refund_eval.output_paths import validate_private_output
@@ -29,6 +32,8 @@ class NativeBatchConfig(RunConfig):
     agent_wheel_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     time_limit: int = Field(default=36_000, ge=1, le=72000, strict=True)
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
+    openrouter_key_mode: Literal["shared", "split"] = "shared"
+    agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
 
@@ -36,6 +41,25 @@ class NativeBatchConfig(RunConfig):
     def _validate_spend_caps(self) -> NativeBatchConfig:
         if (self.trial_spend_cap_usd is None) != (self.key_spend_cap_usd is None):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
+        if self.openrouter_key_mode == "split":
+            if self.execution != "modal":
+                raise ValueError("split mode requires Modal execution")
+            if self.agent_max_output_tokens is None:
+                raise ValueError("split mode requires agent_max_output_tokens")
+            targets = self.models or [self.model]
+            if self.trials != 1 or self.concurrency != 1 or len(targets) != 1:
+                raise ValueError("split mode requires one target attempt and concurrency one")
+            if self.trial_spend_cap_usd is not None:
+                raise ValueError("split mode does not support combined planning caps")
+            roles = [targets[0], self.simulator_model, self.grader_model]
+            if any(not isinstance(model, str) or not model.startswith("openrouter/") for model in roles):
+                raise ValueError("split mode requires OpenRouter models for all roles")
+            agent = Decimal(str(resolve_cost_limits(self.cost_limit, targets, scenario=self.scenario)[targets[0]]))
+            world = Decimal(str(self.world_cost_limit))
+            if agent <= 0 or agent > 50 or world <= 0 or world > 100:
+                raise ValueError("split role caps exceed supported $50/$100 key ceilings")
+        elif self.agent_max_output_tokens is not None:
+            raise ValueError("agent_max_output_tokens is only valid in split mode")
         if self.trial_spend_cap_usd is None:
             return self
         missing = {"max_turns", "time_limit"} - self.model_fields_set
@@ -48,6 +72,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     if config.total_time_limit_seconds is not None:
         raise ValueError("strict_total_deadline_unsupported_by_modal")
     verified_wheel = read_verified_agent_wheel(config.agent_wheel, config.agent_wheel_sha256)
+    if config.openrouter_key_mode == "split":
+        verify_split_budget_wheel(config.agent_wheel)
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
         raise ValueError("Native batches require execution='docker' or execution='modal'")
@@ -83,8 +109,10 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         grader_model=config.grader_model, world_cost_limit=config.world_cost_limit, agent_timeout=agent_timeout,
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
-        verified_wheel=verified_wheel,
+        verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
     )
+    if config.openrouter_key_mode == "split":
+        verify_split_budget_task_sources(task)
     options = config.model_dump(include={"token_budget", "history_tokens", "budget_notice"}, exclude_none=True)
     options["time_limit"] = worker_time_limit
     job = {
@@ -96,7 +124,10 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "environment": {"type": config.execution, "delete": True},
         "agents": [
             {"import_path": AGENT_IMPORT_PATH, "model_name": model, "kwargs": {**options, "cost_limit": caps[model]},
-             "env": {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}}
+             "env": ({"OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
+                      "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
+                      "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens)}
+                     if config.openrouter_key_mode == "split" else {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"})}
             for model in targets
         ],
         "tasks": [{"path": str(task)}],
@@ -107,6 +138,26 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     job_path.write_bytes(job_bytes)
     metadata = tomllib.loads((task / "task.toml").read_text(encoding="utf-8"))["metadata"]
     record = out / "run.json"
+    effective_parameters = {
+        "models": targets,
+        "simulator_model": config.simulator_model,
+        "grader_model": config.grader_model,
+        "sim_weeks": config.sim_weeks,
+        "max_turns": config.max_turns,
+        "agent_cost_limits_usd": caps,
+        "world_cost_limit_usd": config.world_cost_limit,
+        "worker_time_limit_seconds": worker_time_limit,
+        "requested_total_time_limit_seconds": None,
+        "effective_enforced_total_time_limit_seconds": None,
+        "total_time_limit_enforcement": "not_requested",
+    }
+    if config.openrouter_key_mode == "split":
+        effective_parameters.update({
+            "openrouter_key_mode": "split",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        })
     record.write_text(json.dumps({
         "schema_version": 1,
         "config": config.model_dump(mode="json"),
@@ -120,19 +171,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "total_trials": total,
         "target_cost_limits_usd": caps,
         "world_cost_limit_usd_per_trial": config.world_cost_limit,
-        "effective_parameters": {
-            "models": targets,
-            "simulator_model": config.simulator_model,
-            "grader_model": config.grader_model,
-            "sim_weeks": config.sim_weeks,
-            "max_turns": config.max_turns,
-            "agent_cost_limits_usd": caps,
-            "world_cost_limit_usd": config.world_cost_limit,
-            "worker_time_limit_seconds": worker_time_limit,
-            "requested_total_time_limit_seconds": None,
-            "effective_enforced_total_time_limit_seconds": None,
-            "total_time_limit_enforcement": "not_requested",
-        },
+        "effective_parameters": effective_parameters,
         **({"limits": limits} if limits is not None else {}),
     }, indent=2) + "\n", encoding="utf-8")
     return record

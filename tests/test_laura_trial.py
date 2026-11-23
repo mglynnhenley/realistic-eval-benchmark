@@ -20,7 +20,7 @@ pytestmark = pytest.mark.harbor
 
 pytest.importorskip("harbor.models.job.config")
 
-from refund_eval.harbor import batch
+from refund_eval.harbor import adapter, batch
 from refund_eval.harbor.batch import NativeBatchConfig
 from scripts import laura_trial
 
@@ -78,6 +78,30 @@ def _write_test_only_wheel(
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
                     archive.writestr(name, content)
+    return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+def _write_public_split_wheel(directory: Path) -> tuple[Path, str]:
+    from refund_eval.scenario.schema import load_scenario
+
+    source = directory / "source"
+    public_source = directory / "public-source"
+    adapter.copy_source(source)
+    adapter.stage_agent(
+        source,
+        public_source,
+        load_scenario("train_refund_late"),
+        scenario_name="train_refund_late",
+    )
+    build_dir = directory / "built-wheel"
+    subprocess.run(
+        ["uv", "build", "--offline", "--wheel", "--out-dir", str(build_dir)],
+        cwd=public_source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    [wheel] = build_dir.glob("*.whl")
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
@@ -379,6 +403,63 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
     )
     assert run_record["effective_parameters"] == expected
     assert result_record == expected
+
+
+def test_split_launcher_succeeds_and_reuses_saved_setup_with_sanitized_effective_records(
+    tmp_path, monkeypatch
+):
+    _source_repo(tmp_path / "source-root", monkeypatch)
+    native = _native_run_input(tmp_path)
+    wheel, digest = _write_public_split_wheel(tmp_path / "split-wheel")
+    native.values.update({
+        "openrouter_key_mode": "split",
+        "agent_max_output_tokens": 2048,
+        "cost_limit": 50,
+        "world_cost_limit": 100,
+        "agent_wheel": str(wheel),
+        "agent_wheel_sha256": digest,
+    })
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    monkeypatch.setenv("OPENROUTER_AGENT_API_KEY", "fake-distinct-agent-key")
+    monkeypatch.setenv("OPENROUTER_WORLD_API_KEY", "fake-distinct-world-key")
+    guarded_calls = []
+
+    def guarded_run(config, thresholds, **hooks):
+        guarded_calls.append((config.job_name, thresholds))
+        hooks["before_job_run"](SimpleNamespace())
+        return 0
+
+    monkeypatch.setattr(laura_trial.guarded_harbor, "run_guarded_config", guarded_run)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "split-fresh",
+    ]) == 0
+
+    run_record = json.loads((native.prepared_dir / "run.json").read_text(encoding="utf-8"))
+    fresh_effective_path = native.prepared_dir / "jobs" / "split-fresh" / "effective_parameters.json"
+    fresh_effective = json.loads(fresh_effective_path.read_text(encoding="utf-8"))
+    for record in (run_record, fresh_effective):
+        effective = record.get("effective_parameters", record)
+        assert effective["openrouter_key_mode"] == "split"
+        assert effective["agent_key_ceiling_usd"] == 50
+        assert effective["world_key_ceiling_usd"] == 100
+        assert effective["agent_max_output_tokens"] == 2048
+        assert "fake-distinct-agent-key" not in json.dumps(record)
+        assert "fake-distinct-world-key" not in json.dumps(record)
+
+    manifest = native.prepared_dir / "laura-setup.json"
+    assert laura_trial.main([
+        "run", "--manifest", str(manifest), "--job-name", "split-reused",
+    ]) == 0
+    reused = json.loads(
+        (native.prepared_dir / "jobs" / "split-reused" / "effective_parameters.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert reused == fresh_effective
+    assert [name for name, _ in guarded_calls] == ["split-fresh", "split-reused"]
+    assert "fake-distinct-agent-key" not in manifest.read_text(encoding="utf-8")
+    assert "fake-distinct-world-key" not in manifest.read_text(encoding="utf-8")
 
 
 def test_native_run_without_optional_inputs_records_resolved_defaults(
