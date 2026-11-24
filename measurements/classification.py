@@ -8,7 +8,7 @@ that a classifier (human, fake, or LLM-backed) can review.
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -168,13 +168,6 @@ def collect_organization_evidence(
             result, key=lambda item: (item.organization.casefold(), item.organization)
         )
     )
-
-
-def evidence_by_organization(
-    evidence: Iterable[OrganizationEvidence],
-) -> Mapping[str, OrganizationEvidence]:
-    """Return a case-insensitive lookup without losing display names."""
-    return {item.organization.casefold(): item for item in evidence}
 
 
 # A short alias keeps callers readable while the long name remains self-documenting.
