@@ -16,7 +16,7 @@ ENVIRONMENT_PATHS = (
     "refund_eval/realism/track.py",
     "refund_eval/image-lock.json", "pyproject.toml", "uv.lock", ".python-version",
     "refund_eval/agent", "refund_eval/tasks", "refund_eval/grading",
-    "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scripts/offline_spend_guard.py", "scout",
+    "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scout",
 )
 ROOT = Path(__file__).resolve().parents[1]
 

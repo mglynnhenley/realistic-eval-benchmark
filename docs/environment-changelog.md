@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: fa75344a414e0f1adc308e61da62449c9d71b2d7c009c2edc77f0fea0e4924a6
+- Fingerprint: 5a20d2ed71193a8412202e0601cee228743fe5e6b4f57e6e3625b209647b1106
 - Trial round: none. Offline validation only; no launch.
 - Changes: spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
 
