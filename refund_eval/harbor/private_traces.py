@@ -155,10 +155,13 @@ def _durable_metadata(path: Path, *, complete_jsonl: bool = False) -> tuple[int,
     return size, digest
 
 
-def _prune_generations(directory: Path, keep: Path) -> None:
-    for path in directory.iterdir():
-        if path != keep:
-            path.unlink(missing_ok=True)
+def _generation_prune_candidates(directory: Path, keep: Path) -> tuple[Path, ...]:
+    return tuple(path for path in directory.iterdir() if path != keep)
+
+
+def _prune_generations(directory: Path, obsolete: tuple[Path, ...]) -> None:
+    for path in obsolete:
+        path.unlink(missing_ok=True)
     _fsync_directory(directory)
 
 
@@ -281,7 +284,8 @@ class PrivateTraceCapture:
                     current = self.directory / record["path"] if record.get("path") else None
                     if (record.get("sha256") == digest and record.get("bytes") == size
                             and current is not None and current.is_file()):
-                        await asyncio.to_thread(_prune_generations, generation_directory, current)
+                        obsolete = _generation_prune_candidates(generation_directory, current)
+                        await asyncio.to_thread(_prune_generations, generation_directory, obsolete)
                         return
                 destination = generation_directory / f"{uuid4().hex}-{source.filename}"
                 os.replace(temp_path, destination)
@@ -307,7 +311,8 @@ class PrivateTraceCapture:
                         self.manifest["files"][source.name] = prior_record
                         self._checkpoint = prior_checkpoint
                         raise
-                    await asyncio.to_thread(_prune_generations, generation_directory, destination)
+                    obsolete = _generation_prune_candidates(generation_directory, destination)
+                    await asyncio.to_thread(_prune_generations, generation_directory, obsolete)
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 -- independent source failures retain earlier snapshots
