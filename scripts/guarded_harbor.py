@@ -223,7 +223,7 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
 
 
 def _shared_roles_compose_values(
-    task_path: Path, *, expected_mode: str = "shared_roles"
+    task_path: Path, *, expected_mode: str = "shared_roles", expected_usage_reporting_mode: str = "strict"
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         environment_dir = task_path / "environment"
@@ -261,6 +261,8 @@ def _shared_roles_compose_values(
         if (metadata.get("openrouter_key_mode") != expected_mode
                 or world.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
                 or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
+                or metadata.get("usage_reporting_mode", "strict") != expected_usage_reporting_mode
+                or world.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict") != expected_usage_reporting_mode
                 or world.get("WORLD_STRICT_BUDGET") != "true"
                 or world.get("OPENROUTER_API_KEY") != "${OPENROUTER_API_KEY:-}"):
             raise ValueError
@@ -306,6 +308,11 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     split = agent_env.get("OPENROUTER_API_KEY") == OPENROUTER_AGENT_KEY_REFERENCE
     shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
     shared_caps = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_caps"
+    usage_reporting_mode = agent_env.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict")
+    if usage_reporting_mode not in {"strict", "usage_only"} or (
+        usage_reporting_mode == "usage_only" and not shared_caps
+    ):
+        raise LauncherFailure("usage reporting mode is invalid for the guarded key mode")
     if sum((split, shared_roles, shared_caps)) > 1:
         raise LauncherFailure("guarded key modes conflict")
     if expected_split is not None and split != expected_split:
@@ -341,11 +348,14 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             raise LauncherFailure("split agent dollar cap or output cap is invalid") from None
         if not cap.is_finite() or cap <= 0 or cap > 50 or cap != declared_cap or output_cap <= 0:
             raise LauncherFailure("split agent dollar cap must match cost_limit within supported ceiling")
+        expected_split_env = {
+            "OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP", "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"
+        }
+        if "REFUND_EVAL_USAGE_REPORTING_MODE" in agent_env:
+            expected_split_env.add("REFUND_EVAL_USAGE_REPORTING_MODE")
         if (agent.import_path != AGENT_IMPORT_PATH
                 or agent_env.get("OPENROUTER_API_KEY") != OPENROUTER_AGENT_KEY_REFERENCE
-                or set(agent_env) != {
-                    "OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP", "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"
-                }
+                or set(agent_env) != expected_split_env
                 or OPENROUTER_ROLE_KEY_NAMES.intersection(agent_env) - {"OPENROUTER_API_KEY"}
                 or _has_role_key_reference({key: value for key, value in agent_env.items()
                                             if key != "OPENROUTER_API_KEY"})):
@@ -371,6 +381,8 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
         expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
                               "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
                               "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"}
+        if "REFUND_EVAL_USAGE_REPORTING_MODE" in agent_env:
+            expected_agent_env.add("REFUND_EVAL_USAGE_REPORTING_MODE")
         if shared_caps:
             expected_agent_env.add(SHARED_CAPS_HEADROOM_BOUND_ENV)
             expected_bound_state = "true" if expected_shared_caps_allowance is not None else "false"
@@ -414,6 +426,11 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
         raise LauncherFailure("task metadata is invalid") from None
     task_mode = task_metadata.get("openrouter_key_mode") if isinstance(task_metadata, dict) else None
     expected_task_mode = "split" if split else "shared_caps" if shared_caps else "shared_roles" if shared_roles else "shared"
+    task_usage_reporting_mode = (
+        task_metadata.get("usage_reporting_mode", "strict") if isinstance(task_metadata, dict) else None
+    )
+    if task_usage_reporting_mode != usage_reporting_mode:
+        raise LauncherFailure("task usage reporting mode does not match the agent configuration")
     if task_mode in {"split", "shared_roles", "shared_caps"} and task_mode != expected_task_mode:
         raise LauncherFailure("task budget mode does not match guarded key routing")
     if (split or shared_roles or shared_caps) and task_mode != expected_task_mode:
@@ -468,7 +485,9 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
         try:
             verify_split_budget_task_sources(task_path)
             world, metadata = _shared_roles_compose_values(
-                task_path, expected_mode="shared_caps" if shared_caps else "shared_roles"
+                task_path,
+                expected_mode="shared_caps" if shared_caps else "shared_roles",
+                expected_usage_reporting_mode=usage_reporting_mode,
             )
             if (shared_caps and world.get(SHARED_CAPS_HEADROOM_BOUND_ENV)
                     != ("true" if expected_shared_caps_allowance is not None else "false")):

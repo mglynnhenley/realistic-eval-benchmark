@@ -24,11 +24,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 8.7 — 2026-11-24
+## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 57080ca5fda7b85419571ba0223433d9d21209f0c6c00885f0290be69aa4adf4
+- Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc
 - Trial round: none. Offline validation only.
 - Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown.
+
+## 8.8 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3
+- Trial round: none. Offline validation only; no launch.
+- Changes: usage_only clamps output tokens without tariff-only text sizing across tool-call turns; strict reservations unchanged.
+
+## 8.7 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 1979600b810ae90db2a493c6a161d5de346601fd151521c50c65d31ecb6462a0
+- Trial round: none. Offline validation only; no invocation authorized.
+- Changes: add opt-in response-only usage reporting for native shared_caps runs. Strict tariff enforcement remains the default; response-reported thresholds are observational, and missing cost remains unknown without generation lookups.
 
 ## 8.6 — 2026-11-24
 - Kind: trivial batch

@@ -34,6 +34,7 @@ from mcp.client.streamable_http import streamable_http_client
 from openai import AsyncOpenAI
 
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
+from refund_eval.models import budget as world_budget
 from refund_eval.models import client as models
 from refund_eval.models.budget import WORLD_BUDGET_KEY, BudgetedWorldModels
 from refund_eval.models.client import (
@@ -1311,3 +1312,30 @@ async def test_shared_caps_world_refuses_unbound_before_provider_client(tmp_path
     with pytest.raises(WorldSpendLedgerError, match="verified headroom binding"):
         await WorldTrial(settings(tmp_path, scenario="train_refund_late", world_cost_limit=100),
                          model_client=object()).__aenter__()
+
+
+@pytest.mark.asyncio
+async def test_usage_only_world_unknown_cost_stays_unknown_without_retry(monkeypatch):
+    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+
+    class Recorded:
+        calls = 0
+
+        def model_name(self, role):
+            return "openrouter/test-world"
+
+        async def complete(self, role, messages, **settings):
+            self.calls += 1
+            return Completion(
+                text="returned", message=Message("assistant", "returned"), usage=Usage(cost=None), failed=True
+            )
+
+    recorded = Recorded()
+    budget = BudgetedWorldModels(recorded, 100, lambda: None, prices={}, usage_reporting_only=True)
+    completion = await budget.complete("simulator", [Message("user", "hello")])
+    assert completion.failed is True
+    assert completion.usage is not None and completion.usage.cost is None
+    assert budget.status == "unknown"
+    with pytest.raises(ModelLimitExceeded, match="no further requests"):
+        await budget.complete("simulator", [Message("user", "later priced response")])
+    assert recorded.calls == 1

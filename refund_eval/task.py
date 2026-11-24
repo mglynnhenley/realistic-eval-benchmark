@@ -224,6 +224,13 @@ def impossible_refund(
         (turn token in WORLD_TURN_TOKEN) and its settings decide the world; see
         `refund_eval.agent.world_mode`. No Inspect scorers: the world's state is graded separately.
     """
+    usage_reporting_mode = os.environ.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict")
+    if usage_reporting_mode not in {"strict", "usage_only"}:
+        raise ValueError("Unsupported REFUND_EVAL_USAGE_REPORTING_MODE")
+    usage_only = usage_reporting_mode == "usage_only"
+    if usage_only and os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps":
+        raise ValueError("usage_only reporting requires shared_caps")
+
     scenario = resolve_scenario_arg(scenario)
     sc = load_agent_scenario(scenario) if world_url is not None else load_scenario(scenario)
     sc = with_requested_deadline(sc, requested_deadline)
@@ -356,9 +363,10 @@ def impossible_refund(
         mail_source = "gmail-fixture"
     eval_model = _eval_model_name()
     roles = default_model_roles(eval_model)
+    inspect_cost_limit = None if usage_only else cost_limit
     register_default_costs(
         [m for m in [eval_model, *roles.values(), *_given_role_models()] if m],
-        fetch_openrouter=cost_limit is not None,
+        fetch_openrouter=inspect_cost_limit is not None,
     )
 
     scorers = adapters.load_scorers() if world_url is None else []
@@ -416,7 +424,7 @@ def impossible_refund(
         token_limit=token_limit,
         time_limit=time_limit,
         working_limit=working_limit,
-        cost_limit=cost_limit,
+        cost_limit=inspect_cost_limit,
         metadata={
             "scenario": scenario,
             "mail_source": mail_source,

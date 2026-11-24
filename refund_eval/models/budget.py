@@ -82,13 +82,16 @@ class BudgetedWorldModels:
     def __init__(self, recorded: ModelClient, limit: float, persist: Callable[[], None], *,
                  prices: Mapping[str, Mapping[str, float]] | None = None,
                  ledger: WorldSpendLedger | None = None,
-                 scope: Mapping[str, Any] | None = None, strict_budget: bool = False) -> None:
+                 scope: Mapping[str, Any] | None = None, strict_budget: bool = False,
+                 usage_reporting_only: bool = False) -> None:
         self.recorded = recorded
         self.limit = Decimal(str(limit))
         self.prices = None if prices is None else {name: dict(tariff) for name, tariff in prices.items()}
         if ledger is not None and self.prices is None:
             raise ValueError("A world-spend ledger requires complete reservation tariffs")
-        self.ledger = (ledger or WorldSpendLedger.in_memory(self.limit, scope)) if self.prices is not None else None
+        self.usage_reporting_only = usage_reporting_only
+        self.ledger = ((ledger or WorldSpendLedger.in_memory(self.limit, scope))
+                       if self.prices is not None and not usage_reporting_only else None)
         self.spent = Decimal(0)
         self.reserved = Decimal(0)
         self.persist = persist
@@ -326,6 +329,9 @@ class BudgetedWorldModels:
                 self._mark("unknown")
                 if completion.provider_error_type == "invalid_request":
                     self._reject_request()
+                if self.usage_reporting_only:
+                    self.persist()
+                    return completion
                 raise ModelLimitExceeded("World model request did not report a valid charge")
             self.spent += cost
             if self.spent >= self.limit:
@@ -336,6 +342,10 @@ class BudgetedWorldModels:
             if not completion.failed:
                 self._mark("available")
                 return completion
+            if self.usage_reporting_only:
+                self._mark("failed")
+                self.persist()
+                raise ModelLimitExceeded("Usage-only world request failed; automatic retries are disabled")
             if completion.provider_error_type == "invalid_request":
                 self._reject_request()
             if attempt == 2:
