@@ -36,6 +36,7 @@ from pydantic import Field
 
 from refund_eval.config import BudgetNotice, RunConfig
 from refund_eval.harbor.luna_status import NativeStatus
+from refund_eval.harbor.private_traces import PrivateTraceCapture
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.provider import published_model_args
 
@@ -124,12 +125,19 @@ class RefundInstalledAgent(BaseInstalledAgent):
                  "--max-samples", "1", "--metadata", shlex.quote(f"harbor_trial={self.logs_dir.parent.name}")]
         convert = [PYTHON, "-m", "refund_eval.harbor.atif", f"{logs}/inspect", "--out", f"{logs}/trajectory.json",
                    "--agent-name", self.name(), "--agent-version", AGENT_VERSION]
-        return (f"mkdir -p {logs}/inspect; {' '.join(parts)} > {logs}/inspect.log 2>&1; status=$?; "
+        return (f"mkdir -p {logs}/inspect; "
+                f"{' '.join(parts)} > {logs}/inspect.log 2>&1; status=$?; "
                 f"{' '.join(convert)} >> {logs}/inspect.log 2>&1; exit $status")
 
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         if reason := kill_reason():
             raise RuntimeError(f"Trial blocked by kill switch: {reason}")
+        capture = PrivateTraceCapture(
+            self.logs_dir.parent.name,
+            native=True,
+        )
+        terminal_status = "failed"
+        trace_observer = asyncio.create_task(capture.watch(environment))
         execution = asyncio.create_task(self.exec_as_agent(
             environment,
             self.inspect_command(instruction if self.options.forward_task_instruction else None),
@@ -145,14 +153,32 @@ class RefundInstalledAgent(BaseInstalledAgent):
                     killed = True
                 await asyncio.wait({execution}, timeout=0.5)
             await execution
+        except asyncio.CancelledError:
+            terminal_status = "cancelled"
+            raise
+        except Exception:
+            terminal_status = "failed"
+            raise
+        else:
+            terminal_status = "agent_succeeded"
         finally:
-            if not execution.done():
-                execution.cancel()
-                with suppress(asyncio.CancelledError):
-                    await execution
-            observer.cancel()
-            await asyncio.gather(observer, return_exceptions=True)
-            await status.safe_observe(environment)
+            try:
+                if not execution.done():
+                    execution.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await execution
+                observer.cancel()
+                await asyncio.gather(observer, return_exceptions=True)
+                await status.safe_observe(environment)
+            finally:
+                trace_observer.cancel()
+                await asyncio.gather(trace_observer, return_exceptions=True)
+                try:
+                    await capture.safe_capture(environment)
+                finally:
+                    if asyncio.current_task().cancelling():
+                        terminal_status = "cancelled"
+                    capture.finish(terminal_status, collection_status="unconfirmed")
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         path = self.logs_dir / "trajectory.json"

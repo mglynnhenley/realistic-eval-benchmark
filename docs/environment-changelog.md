@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.9 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 5fa4844e13c9a6ddbbf169e89e2e17daf4fa9bffe0bad7a665c7c0e68474e4c3
+- Trial round: none. Offline validation only; no launch.
+- Changes: retain private live Harbor agent/simulator checkpoints with a guarded Modal-only world bind and direct transfers, while keeping non-Modal world volumes Compose-project scoped.
+
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3

@@ -57,6 +57,13 @@ from refund_eval.sim import company_store
 from scripts.laura_trial import main as laura_trial_main
 
 
+@pytest.fixture(autouse=True)
+def _use_test_private_trace_root(tmp_path, monkeypatch):
+    from refund_eval.harbor import private_traces
+
+    monkeypatch.setattr(private_traces, "TRACE_ROOT", tmp_path / "partial-traces")
+
+
 def _write_inert_wheel(directory):
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
     dist_info = "synthetic_agent-0.0.0.dist-info"
@@ -368,10 +375,14 @@ def test_task_loads_with_harbors_task_model(generated):
 def test_compose_world_sidecar(generated):
     environment = generated / "train_refund_late" / "environment"
     compose = yaml.safe_load((environment / "docker-compose.yaml").read_text())
-    assert compose["services"]["main"] == {"depends_on": {"world": {"condition": "service_healthy"}}}
+    assert compose["services"]["main"] == {
+        "depends_on": {"world": {"condition": "service_healthy"}},
+    }
     world = compose["services"]["world"]
     assert world["build"] == {"context": "${CONTEXT_DIR}", "dockerfile": "world/Dockerfile"}
-    assert world["volumes"] == ["world-logs:/var/log/world"] and "world-logs" in compose["volumes"]
+    assert world["volumes"] == ["world-logs:/var/log/world"]
+    assert compose["volumes"] == {"world-logs": None}
+    assert "volumes" not in compose["services"]["main"]
     assert world["security_opt"] == ["seccomp=unconfined"]
     assert world["environment"]["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY:-}"
     assert world["environment"]["WORLD_TRIAL"] == "${COMPOSE_PROJECT_NAME}"
@@ -384,6 +395,73 @@ def test_compose_world_sidecar(generated):
     assert "HEALTHCHECK" in dockerfile and "8000" in dockerfile and "refund_eval.harbor.world_entrypoint" in dockerfile
     for text in (dockerfile, (environment / "docker-compose.yaml").read_text()):
         assert "__" not in text.replace("__env", "")
+
+
+def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
+    from harbor.environments.modal import ModalEnvironment, _ModalDinD
+
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from scripts.guarded_harbor import private_world_bind_mount_adapter
+
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir()
+    compose_path = environment_dir / "docker-compose.yaml"
+    compose_path.write_text(
+        "services:\n  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n",
+        encoding="utf-8",
+    )
+    environment = object.__new__(ModalEnvironment)
+    environment._mounts = [{"type": "bind", "source": "/logs/agent", "target": "/logs/agent"}]
+    environment.environment_dir = environment_dir
+    original_mounts = list(environment._mounts)
+    second_environment = object.__new__(ModalEnvironment)
+    second_environment._mounts = list(environment._mounts)
+    second_environment.environment_dir = environment_dir
+    observed = {}
+
+    async def start(strategy, _force_build):
+        await asyncio.sleep(0.01)
+        directory = strategy._env.environment_dir
+        observed[strategy._env] = (
+            directory,
+            (directory / "docker-compose.yaml").read_text(encoding="utf-8"),
+        )
+
+    monkeypatch.setattr(_ModalDinD, "start", start)
+    strategy = object.__new__(_ModalDinD)
+    strategy._env = environment
+    second_strategy = object.__new__(_ModalDinD)
+    second_strategy._env = second_environment
+    with private_world_bind_mount_adapter():
+        assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets(writable_only=True)
+        assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets()
+        source = f"{PRIVATE_WORLD_LOGS_ROOT}/state.json"
+        assert strategy._host_log_path(source) == source
+        assert strategy._host_log_path("/run/state.json") is None
+
+        async def start_both():
+            await asyncio.gather(strategy.start(False), second_strategy.start(False))
+
+        asyncio.run(start_both())
+    assert len(observed) == 2
+    assert len({entry[0] for entry in observed.values()}) == 2
+    for directory, compose in observed.values():
+        assert f"- {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in compose
+        assert "\n      - world-logs:/var/log/world" not in compose
+        assert not directory.exists()
+    assert compose_path.read_text(encoding="utf-8") == (
+        "services:\n  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n"
+    )
+    assert environment._mounts == original_mounts
+    assert second_environment._mounts == original_mounts
+    assert environment.environment_dir == second_environment.environment_dir == environment_dir
+    assert getattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
+    assert getattr(second_environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
 
 
 @pytest.mark.parametrize("mode", ["auto", "saved", "live"])
@@ -1771,10 +1849,8 @@ def test_inspect_command(tmp_path):
     command = make_agent(tmp_path, cost_limit=150, token_budget=40_000_000, history_tokens=60000, time_limit=36000,
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
-    assert run.startswith('mkdir -p /logs/agent/inspect; REFUND_EVAL_KILL_FILE=/app/.context/KILL '
-                          '/app/.venv/bin/inspect eval '
-                          '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
-                          'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
+    assert run.startswith("mkdir -p /logs/agent/inspect; ")
+    assert "trace_mirror" not in command and "/mnt/refund-world-logs" not in command
     for part in ("--model openrouter/anthropic/claude-opus-5.5", "--max-retries 0", "-M max_retries=0",
                  "-M strict_tools=false", "-M reasoning_enabled=true",
                  "-T world_url=http://world:8000", '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
@@ -1813,15 +1889,23 @@ def test_options_are_validated(tmp_path):
 
 async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path):
     from refund_eval.harbor.luna_status import NativeStatus
-    from refund_eval.world_service.status import world_status
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from refund_eval.world_service.status import WORLD_STATUS_FILE, world_status
 
     source = tmp_path / "world-status.json"
     source.write_text(json.dumps(world_status({"world": {"turn": 1}}, "train_refund__abc__env")))
 
     class StatusEnvironment:
-        async def service_download_file(self, remote, destination, *, service):
-            assert service == "world" and remote == "/var/log/world/luna-world-status.json"
+        async def download_file(self, remote, destination):
+            assert remote == f"{PRIVATE_WORLD_LOGS_ROOT}/{WORLD_STATUS_FILE}"
             shutil.copyfile(source, destination)
+
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=object())
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
 
     agent = make_agent(tmp_path)
     observer = NativeStatus(agent.logs_dir, agent.model_name)
@@ -1834,6 +1918,19 @@ async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path)
     assert output.read_bytes() == last  # no renewed heartbeat for an unavailable/wrong-run source
     assert not (agent.logs_dir / "luna-source.json").exists()
 
+    class UnguardedModalStatusEnvironment:
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=object())
+
+        async def service_download_file(self, remote, destination, *, service):
+            assert remote == f"/var/log/world/{WORLD_STATUS_FILE}"
+            assert service == "world"
+            shutil.copyfile(source, destination)
+
+    source.write_text(json.dumps(world_status({"world": {"turn": 3}}, "train_refund__abc__env")))
+    unguarded_observer = NativeStatus(agent.logs_dir, agent.model_name)
+    assert await unguarded_observer.safe_observe(UnguardedModalStatusEnvironment())
+
 
 class Environment:
     def __init__(self, on_run=None):
@@ -1844,6 +1941,239 @@ class Environment:
         if "inspect eval" in command and self.on_run is not None:
             await self.on_run(self)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+
+async def test_private_trace_capture_uses_file_api_and_isolates_source_failures(tmp_path, monkeypatch):
+    from inspect_ai.log import read_eval_log_async
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    fsynced_directories = []
+    original_fsync_directory = private_traces._fsync_directory
+
+    def record_fsync(directory):
+        fsynced_directories.append(Path(directory))
+        original_fsync_directory(directory)
+
+    monkeypatch.setattr(private_traces, "_fsync_directory", record_fsync)
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+
+    class ListFiles:
+        async def aio(self, directory):
+            assert directory == "/logs/agent/inspect"
+            return [SimpleNamespace(name="run.eval")]
+
+    class DirectFilesOnly:
+        def __init__(self):
+            self.values = {
+                "/logs/agent/inspect/run.eval": partial_eval,
+                "/refund-eval-private/world-logs/state.json": b'{"turn":1}',
+                "/refund-eval-private/world-logs/events.jsonl": b'{"event":1}\n{"event":2}',
+            }
+            self.failures = {"simulator-events"}
+            self.exec_calls = 0
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+            setattr(self, private_traces.PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def exec(self, *_args, **_kwargs):
+            self.exec_calls += 1
+            raise AssertionError("capture must not use sandbox exec")
+
+        async def download_file(self, remote, destination):
+            if remote.endswith("events.jsonl") and "simulator-events" in self.failures:
+                raise RuntimeError("blocked event-file transfer")
+            if remote.endswith(".eval") and "agent_eval" in self.failures:
+                raise RuntimeError("blocked agent-file transfer")
+            Path(destination).write_bytes(self.values[remote])
+
+    environment = DirectFilesOnly()
+    capture = PrivateTraceCapture("offline-native", native=True, root=tmp_path / "spool")
+    await capture.capture(environment)
+    first_agent = (capture.directory / "agent.eval").read_bytes()
+    partial_log = await read_eval_log_async(capture.directory / "agent.eval")
+    assert len(partial_log.samples) == 1
+    assert any("recoverable partial agent event" in str(message.content)
+               for message in partial_log.samples[0].messages)
+    assert partial_log.status not in {"success", "error"}
+    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":1}'
+    assert not (capture.directory / "simulator-events.jsonl").exists()
+    environment.values["/refund-eval-private/world-logs/state.json"] = b'{"turn":2}'
+    environment.failures = {"agent_eval"}
+    await capture.capture(environment)
+    assert (capture.directory / "agent.eval").read_bytes() == first_agent
+    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":2}'
+    assert (capture.directory / "simulator-events.jsonl").read_bytes() == b'{"event":1}\n'
+    assert environment.exec_calls == 0
+    assert capture.directory.stat().st_mode & 0o777 == 0o700
+    assert capture.manifest_path.stat().st_mode & 0o777 == 0o600
+    assert tmp_path / "spool" in fsynced_directories
+    manifest = json.loads(capture.manifest_path.read_text())
+    assert manifest["status"] == "incomplete"
+    assert manifest["files"]["agent_eval"]["status"] == "durable"
+    assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
+    assert manifest["files"]["simulator_state"]["last_durable_checkpoint"] is not None
+    assert manifest["files"]["simulator_events"]["status"] == "durable"
+    assert all((capture.directory / name).stat().st_mode & 0o777 == 0o600
+               for name in ("agent.eval", "simulator-state.json", "simulator-events.jsonl"))
+    environment.failures = set()
+    environment.values["/logs/agent/inspect/run.eval"] = b"truncated .eval archive"
+    await capture.capture(environment)
+    assert (capture.directory / "agent.eval").read_bytes() == first_agent
+    manifest = json.loads(capture.manifest_path.read_text())
+    assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
+
+
+async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
+    from inspect_ai.log import read_eval_log_async
+
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+
+    class NonModalFiles:
+        def __init__(self):
+            self.service_paths = []
+
+        async def download_dir(self, remote, destination):
+            assert remote == "/logs/agent/inspect"
+            Path(destination).mkdir(parents=True, exist_ok=True)
+            (Path(destination) / "run.eval").write_bytes(partial_eval)
+
+        async def service_download_file(self, remote, destination, *, service):
+            assert service == "world"
+            self.service_paths.append(remote)
+            files = {
+                "/var/log/world/state.json": b'{"turn":4}',
+                "/var/log/world/events.jsonl": b'{"event":"retained"}\n',
+            }
+            Path(destination).write_bytes(files[remote])
+
+        async def exec(self, *_args, **_kwargs):
+            raise AssertionError("trace capture must not use sandbox exec")
+
+    capture = PrivateTraceCapture("offline-nonmodal", native=True, root=tmp_path / "spool")
+    await capture.capture(NonModalFiles())
+    log = await read_eval_log_async(capture.directory / "agent.eval")
+    assert any("recoverable partial agent event" in str(message.content) for message in log.samples[0].messages)
+    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":4}'
+    assert (capture.directory / "simulator-events.jsonl").read_bytes() == b'{"event":"retained"}\n'
+
+    class ListFiles:
+        async def aio(self, _directory):
+            return [SimpleNamespace(name="run.eval")]
+
+    class UnguardedModalFiles(NonModalFiles):
+        def __init__(self):
+            super().__init__()
+            self.direct_paths = []
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+
+        async def download_file(self, remote, destination):
+            self.direct_paths.append(remote)
+            assert remote == "/logs/agent/inspect/run.eval"
+            Path(destination).write_bytes(partial_eval)
+
+    unguarded_modal = UnguardedModalFiles()
+    unguarded_capture = PrivateTraceCapture(
+        "offline-unguarded-modal", native=True, root=tmp_path / "spool-unguarded-modal",
+    )
+    await unguarded_capture.capture(unguarded_modal)
+    assert unguarded_modal.direct_paths == ["/logs/agent/inspect/run.eval"]
+    assert set(unguarded_modal.service_paths) == {
+        "/var/log/world/state.json", "/var/log/world/events.jsonl",
+    }
+
+
+async def _partial_inspect_eval_bytes(tmp_path):
+    from inspect_ai import Task, eval_async
+    from inspect_ai.dataset import Sample
+    from inspect_ai.log import read_eval_log_async
+    from inspect_ai.log._recorders.eval import EvalRecorder
+    from inspect_ai.model import ModelOutput, get_model
+    from inspect_ai.solver import generate
+
+    task = Task(dataset=[Sample(input="Summarize this test event.")], solver=generate())
+    model = get_model(
+        "mockllm/model",
+        custom_outputs=[ModelOutput.from_content("mockllm/model", "recoverable partial agent event")],
+        memoize=False,
+    )
+    [complete] = await eval_async(task, model=model, log_dir=str(tmp_path / "complete"), log_format="eval")
+    partial_path = tmp_path / "partial" / "run.eval"
+    partial_path.parent.mkdir(parents=True)
+    recorder = EvalRecorder(str(partial_path.parent))
+    await recorder.log_init(complete.eval, location=str(partial_path), clean=True)
+    await recorder.log_start(complete.eval, complete.plan)
+    await recorder.log_sample(complete.eval, complete.samples[0], write_through=True)
+    await recorder.flush(complete.eval)
+    await recorder.log_discard(complete.eval, keep_destination=True)
+    partial = await read_eval_log_async(partial_path)
+    assert len(partial.samples) == 1
+    assert any("recoverable partial agent event" in str(message.content)
+               for message in partial.samples[0].messages)
+    return partial_path.read_bytes()
+
+
+async def test_native_partial_traces_survive_short_run_cancellation_and_collection_failure(tmp_path):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from refund_eval.world_service.status import WORLD_STATUS_FILE, world_status
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+
+    class ListFiles:
+        async def aio(self, _directory):
+            return [SimpleNamespace(name="run.eval")]
+
+    class TraceEnvironment(Environment):
+        def __init__(self):
+            self.started, self.release = asyncio.Event(), asyncio.Event()
+            self.files = {
+                "/logs/agent/inspect/run.eval": partial_eval,
+                f"{PRIVATE_WORLD_LOGS_ROOT}/state.json": b'{"turn":1}',
+                f"{PRIVATE_WORLD_LOGS_ROOT}/events.jsonl": b'{"event":"private"}\n',
+                f"{PRIVATE_WORLD_LOGS_ROOT}/{WORLD_STATUS_FILE}": json.dumps(
+                    world_status({"world": {"turn": 1}}, "train_refund__abc__env")
+                ).encode(),
+            }
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+            super().__init__(on_run=self.run_agent)
+
+        async def run_agent(self, _environment):
+            self.started.set()
+            await self.release.wait()
+
+        async def download_file(self, source, destination):
+            Path(destination).write_bytes(self.files[source])
+
+        async def download_dir(self, _source, _target):
+            raise RuntimeError("usage monitor blocked final artifact collection")
+
+    environment = TraceEnvironment()
+    agent = make_agent(tmp_path, model_name="mockllm/model")
+    run = asyncio.create_task(agent.run("ignored", environment, AgentContext()))
+    await asyncio.wait_for(environment.started.wait(), timeout=5)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=5)
+    with pytest.raises(RuntimeError, match="usage monitor blocked"):
+        await environment.download_dir("/var/log/world", tmp_path)
+    [spool] = list((tmp_path / "partial-traces").iterdir())
+    from inspect_ai.log import read_eval_log_async
+    partial_log = await read_eval_log_async(spool / "agent.eval")
+    assert any("recoverable partial agent event" in str(message.content)
+               for message in partial_log.samples[0].messages)
+    assert (spool / "simulator-events.jsonl").read_bytes() == b'{"event":"private"}\n'
+    manifest = json.loads((spool / "manifest.json").read_text())
+    assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
+    assert manifest["collection_status"] == "incomplete"
+    feed = (agent.logs_dir.parent / "luna-source.json").read_text()
+    assert "recoverable partial agent event" not in feed and "private event" not in feed
 
 
 async def test_run_executes_inspect_in_app_and_forwards_the_kill_switch(tmp_path, monkeypatch):
@@ -1913,7 +2243,7 @@ def test_installed_task_detects_forwarded_kill_file(tmp_path, monkeypatch):
     monkeypatch.delenv("REFUND_EVAL_KILL_FILE", raising=False)
     assert killswitch.kill_reason() is None
     command = make_agent(tmp_path).inspect_command()
-    assignment = command.split("; ", 1)[1].split()[0]
+    assignment = next(token for token in command.split() if token.startswith("REFUND_EVAL_KILL_FILE="))
     key, value = assignment.split("=", 1)
     monkeypatch.setenv(key, value)
     assert killswitch.kill_reason() == f"kill file {stop}"

@@ -16,6 +16,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from refund_eval.harbor.config import TrialRequest, TrialSettings
+from refund_eval.harbor.private_traces import PrivateTraceCapture
 from refund_eval.killswitch import kill_reason
 
 
@@ -41,8 +42,31 @@ class RefundInspectAgent(BaseAgent):
             raise RuntimeError(f"Inspect runtime is unavailable: {result.stderr}")
 
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
-        if self.options.trial_deadlines is not None:
-            return await self._run_bounded(instruction, environment, context)
+        capture = PrivateTraceCapture(
+            self.session_id or self.logs_dir.parent.name,
+        )
+        watcher = asyncio.create_task(capture.watch(environment))
+        terminal_status = "failed"
+        try:
+            if self.options.trial_deadlines is not None:
+                await self._run_bounded(instruction, environment, context)
+            else:
+                await self._run_unbounded(instruction, environment, context)
+            terminal_status = "agent_succeeded"
+        except asyncio.CancelledError:
+            terminal_status = "cancelled"
+            raise
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+            try:
+                await capture.safe_capture(environment)
+            finally:
+                if asyncio.current_task().cancelling():
+                    terminal_status = "cancelled"
+                capture.finish(terminal_status)
+
+    async def _run_unbounded(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         request = TrialRequest(
             instruction=instruction, model=self.model_name or "",
             settings=self.options, trial_id=self.session_id or self.logs_dir.parent.name,

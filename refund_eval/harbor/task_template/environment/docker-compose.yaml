@@ -3,10 +3,10 @@
 # [environment.env] (also set in `main`). Secrets come from the host as ${VAR}.
 services:
   main:
-    # ROLE_BUDGET_MAIN_VOLUME
     depends_on:
       world:
         condition: service_healthy
+    # ROLE_BUDGET_MAIN_VOLUME
 
   world:
     build:
@@ -42,7 +42,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - world-logs:/var/log/world  # state.json, events.jsonl, seed.json, browser/; collected for the verifier
+      - world-logs:/var/log/world  # collected for the verifier
       # ROLE_BUDGET_WORLD_VOLUME
 
 volumes:

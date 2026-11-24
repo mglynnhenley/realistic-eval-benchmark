@@ -123,6 +123,39 @@ Jobs are saved under the prepared directory's `jobs/`. Each trial includes
 - `usage.json` with model totals and separate simulator/grader usage.
 - `request.json`, `result.json` and browser network/interception evidence.
 
+Harbor also keeps live private trace checkpoints under
+`~/refund-eval-data/partial-traces/`, outside trial output and task artifact
+trees and the Luna status feed. The task keeps its named `world-logs` volume by
+default, isolating non-Modal Docker trials by Compose project. Only the guarded Modal launcher
+temporarily replaces that source during Dind startup with a private
+`/refund-eval-private/world-logs` bind on the trial's outer sandbox. The world
+service alone mounts it at the existing `/var/log/world` artifact path; it is
+not mounted into `main`, agent logs, or artifact roots. Harbor's Dind path maps
+the fixed world files to Modal's `filesystem.copy_to_local` API rather than
+guarded `_sdk_exec`/`docker compose cp`; non-Modal runs use the existing
+world-service file-transfer API. Modal agent `.eval` files are listed from
+self-bound log directories with Modal's filesystem API; non-Modal environments
+use a scoped directory download and select the newest `.eval`. Legacy runs
+capture `/logs/artifacts/refund` `.eval` files and
+`/logs/agent/progress/snapshot.json` without a remote mirror. Invalid live
+`.eval` archives do not replace an earlier durable checkpoint. Incomplete event
+JSONL snapshots are trimmed to the last newline-terminated record before the
+host marks the copy durable.
+
+Each per-run directory is mode 0700, and its parent is fsync'd on creation.
+Each host checkpoint is marked durable only after a mode-0600 temporary file
+has been flushed and fsync'd, atomically replaced, and its mode-0700 parent
+directory fsync'd. manifest.json records the last durable checkpoint and a
+sanitized error type independently for each source; a failed source does not
+replace its previous good copy. The manifest stays incomplete: a checkpoint
+is a file snapshot, not a guarantee that every event was captured or that
+Harbor's final artifact collection completed. Inspect `.eval` contents are
+recoverable only after Inspect has flushed them; a host copy cannot preserve
+events still buffered by Inspect. Host polling is nominally 1 second plus
+transfer time. Anything written after the last successful durable checkpoint
+can be lost; if capture or transfer stalls or fails, the unretained tail has
+no fixed bound.
+
 These artifacts can contain inbox contents. Keep run directories out of published
 results. Browser containment and tool boundaries are described in the
 [runbook](running.md#boundaries-and-evidence). Harbor's `trial_completed` reward indicates completion,
