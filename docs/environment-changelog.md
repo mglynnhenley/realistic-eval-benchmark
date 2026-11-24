@@ -24,6 +24,18 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.8 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3
+- Trial round: none. Offline validation only; no launch.
+- Changes: usage_only clamps output tokens without tariff-only text sizing across tool-call turns; strict reservations unchanged.
+
+## 8.7 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 1979600b810ae90db2a493c6a161d5de346601fd151521c50c65d31ecb6462a0
+- Trial round: none. Offline validation only; no invocation authorized.
+- Changes: add opt-in response-only usage reporting for native shared_caps runs. Strict tariff enforcement remains the default; response-reported thresholds are observational, and missing cost remains unknown without generation lookups.
+
 ## 8.6 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 9704d16033a7eecd0560c00d149b9617fb17917f592b11df1fc9e1011f2faac7

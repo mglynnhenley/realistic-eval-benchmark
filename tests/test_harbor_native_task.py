@@ -54,6 +54,7 @@ from refund_eval.scenario.schema import (
     load_scenario,
 )
 from refund_eval.sim import company_store
+from scripts.laura_trial import main as laura_trial_main
 
 
 def _write_inert_wheel(directory):
@@ -569,6 +570,136 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
         [sys.executable, "-c", loader_check], cwd=tmp_path, env=environment,
         check=True, capture_output=True, text=True,
     )
+    replay_check = textwrap.dedent("""
+        import asyncio
+        import json
+        import os
+        from pathlib import Path
+
+        import httpx2
+        from inspect_ai.model import ChatMessageTool, ChatMessageUser, GenerateConfig, get_model
+        from inspect_ai.tool import ToolInfo, ToolParams
+        import refund_eval.agent.dollar_budget as budget
+
+        assert Path(budget.__file__).resolve().is_relative_to(
+            Path(os.environ["PUBLIC_WHEEL_INSTALL"]).resolve()
+        )
+        budget.openrouter_tariffs = lambda *_: (_ for _ in ()).throw(
+            AssertionError("usage_only must not load tariffs")
+        )
+        requests = []
+
+        def transport(request):
+            assert request.url.path == "/api/v1/chat/completions"
+            payload = json.loads(request.content)
+            output_limits = [
+                payload[name] for name in ("max_tokens", "max_completion_tokens") if name in payload
+            ]
+            assert output_limits and max(output_limits) == 4096
+            requests.append(payload)
+            if len(requests) == 1:
+                message = {
+                    "role": "assistant",
+                    "content": "Synthetic tool-call text.",
+                    "tool_calls": [{
+                        "id": "call-offline",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"},
+                    }],
+                    "reasoning_details": [{
+                        "type": "reasoning.encrypted",
+                        "id": "synthetic-reasoning-id",
+                        "format": "synthetic",
+                        "index": 0,
+                        "data": "Synthetic encrypted reasoning payload.",
+                    }],
+                }
+                assert message["content"] == "Synthetic tool-call text."
+                finish_reason = "tool_calls"
+            else:
+                assert any(
+                    item.get("role") == "assistant" and item.get("tool_calls")
+                    for item in payload["messages"]
+                )
+                assert any(item.get("role") == "tool" for item in payload["messages"])
+                message = {"role": "assistant", "content": "Offline replay complete."}
+                finish_reason = "stop"
+            return httpx2.Response(200, request=request, json={
+                "id": f"offline-{len(requests)}",
+                "object": "chat.completion",
+                "created": 0,
+                "model": payload["model"],
+                "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11},
+            })
+
+        async def main():
+            async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+                model = get_model(
+                    "openrouter/openai/gpt-6-luna",
+                    http_client=client,
+                    memoize=False,
+                    config=GenerateConfig(max_tokens=8192, max_retries=2, cache_prompt=False),
+                    stream=False,
+                )
+                async with budget.target_dollar_budget(model):
+                    assert model.config.max_retries == 0
+                    first = await model.generate(
+                        "Synthetic request.",
+                        tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+                    )
+                    assistant = first.choices[0].message
+                    assert isinstance(assistant.content, list)
+                    assert {type(block).__name__ for block in assistant.content} >= {
+                        "ContentReasoning", "ContentText",
+                    }
+                    assert any(
+                        type(block).__name__ == "ContentReasoning" and block.redacted
+                        for block in assistant.content
+                    )
+                    call = assistant.tool_calls[0]
+                    final = await model.generate(
+                        [
+                            ChatMessageUser(content="Synthetic request."),
+                            assistant,
+                            ChatMessageTool(
+                                content="Synthetic tool result.", tool_call_id=call.id, function=call.function
+                            ),
+                            ChatMessageUser(content="Summarize the synthetic result."),
+                        ],
+                        tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+                    )
+                    assert first.metadata["usage_reported_cost_usd"] is None
+                    assert first.usage.total_cost is None
+                    assert final.metadata["usage_reported_cost_usd"] is None
+                    assert final.usage.total_cost is None
+                assert model.config.max_retries == 2
+            assert len(requests) == 2
+
+        asyncio.run(main())
+    """)
+    replay_environment = {
+        **environment,
+        "OPENROUTER_API_KEY": "offline-key",
+        "REFUND_EVAL_USAGE_REPORTING_MODE": "usage_only",
+        "REFUND_EVAL_SHARED_ROLE_MODE": "shared_caps",
+        "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND": "true",
+        "REFUND_EVAL_AGENT_DOLLAR_CAP": "50",
+        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "4096",
+        "WORLD_SCENARIO": "train_refund_late",
+    }
+    repo_root = Path(__file__).resolve().parents[1]
+    replay_python = subprocess.run(
+        [
+            "uv", "run", "--project", str(repo_root), "--frozen",
+            "python", "-c", "import sys; print(sys.executable)",
+        ],
+        cwd=repo_root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [replay_python, "-c", replay_check], cwd=tmp_path, env=replay_environment,
+        check=True, capture_output=True, text=True,
+    )
 
 
 @pytest.mark.parametrize("days", [365, 730])
@@ -742,6 +873,47 @@ def test_native_shared_roles_requested_deadline_reaches_target_without_world_ove
     assert world_env["WORLD_SIM_WEEKS"] == "${WORLD_SIM_WEEKS}"
     assert "WORLD_REQUESTED_DEADLINE" not in world_env
     assert metadata["rules_sha256"] == record["task"]["rules_sha256"]
+
+
+def test_usage_only_mode_preserves_finite_native_bounds(tmp_path, approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "usage-only"
+    deadline = date(2027, 2, 4)
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="hybrid", research_mode="auto",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, max_turns=3000, sim_weeks=365 / 7, time_limit=36000,
+        openrouter_key_mode="shared_caps", agent_max_output_tokens=4096, requested_deadline=deadline,
+        usage_reporting_mode="usage_only", disable_verifier=True, trials=1, concurrency=1,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    record_path = batch.prepare(out, config)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    task = Task(out / "train_refund_late")
+    metadata = task.config.metadata
+    compose = yaml.safe_load((out / "train_refund_late/environment/docker-compose.yaml").read_bytes())
+    world_env = compose["services"]["world"]["environment"]
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    [agent] = job.agents
+
+    assert record["effective_parameters"]["usage_reporting_mode"] == "usage_only"
+    assert record["effective_parameters"]["cost_limit_enforcement"] == "response_reported_observed_not_pre_call"
+    assert record["effective_parameters"]["max_turns"] == 3000
+    assert record["effective_parameters"]["worker_time_limit_seconds"] == 36000
+    assert record["effective_parameters"]["requested_deadline"] == deadline.isoformat()
+    assert metadata["usage_reporting_mode"] == "usage_only"
+    assert metadata["max_turns"] == 3000
+    assert metadata["requested_deadline"] == deadline.isoformat()
+    assert world_env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
+    assert agent.env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
+    assert agent.env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"] == "4096"
+    assert agent.kwargs["requested_deadline"] == deadline
+    assert agent.kwargs["cost_limit"] == 50
+    assert job.retry.max_retries == 0
+    assert job.verifier.disable is True
+    manifest = tmp_path / "usage-only-manifest.json"
+    assert laura_trial_main(["save", "--config", str(out / "job.yaml"), "--manifest", str(manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
 
 
 @pytest.mark.parametrize("stale_source", [

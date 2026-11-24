@@ -58,13 +58,21 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
     if strict_budget_raw not in {"true", "false"}:
         print("WORLD_STRICT_BUDGET must be true or false.", file=sys.stderr)
         return 2
+    usage_reporting_mode = os.environ.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict")
+    if usage_reporting_mode not in {"strict", "usage_only"}:
+        print("REFUND_EVAL_USAGE_REPORTING_MODE must be strict or usage_only.", file=sys.stderr)
+        return 2
+    if usage_reporting_mode == "usage_only" and os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps":
+        print("usage_only reporting requires the shared_caps outer key monitor.", file=sys.stderr)
+        return 2
     settings = WorldSettings(
         scenario=args.scenario, seed=args.seed, max_turns=args.max_turns,
         **({"sim_weeks": args.sim_weeks} if hasattr(args, "sim_weeks") else {}),
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
         world_cost_limit=args.world_cost_limit,
-        strict_budget=strict_budget_raw == "true",
+        strict_budget=strict_budget_raw == "true" and usage_reporting_mode == "strict",
+        usage_reporting_mode=usage_reporting_mode,
         company_simulator=args.company_simulator, browser_runtime=args.browser_runtime,
         require_verified_browser_isolation=args.require_verified_browser_isolation, output_dir=args.output_dir,
     )
