@@ -350,12 +350,6 @@ class _Correspondence:
             self._add_event_ref(row, event)
         return row_id
 
-    @staticmethod
-    def _response_fields(interaction: Mapping[str, Any]) -> dict[str, Any]:
-        action = _object(interaction.get("action")) or {}
-        return {key: _plain(action[key]) for key in (
-            "reply", "reply_kind", "subject", "body", "page_body", "from_address") if key in action}
-
     def add_interaction(self, value: Any, source: str, *, event: Mapping[str, Any] | None = None,
                         index: int = 0) -> None:
         interaction = _object(value)
