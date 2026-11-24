@@ -592,18 +592,29 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
         def transport(request):
             assert request.url.path == "/api/v1/chat/completions"
             payload = json.loads(request.content)
-            assert payload["max_tokens"] == 16
+            output_limits = [
+                payload[name] for name in ("max_tokens", "max_completion_tokens") if name in payload
+            ]
+            assert output_limits and max(output_limits) == 4096
             requests.append(payload)
             if len(requests) == 1:
                 message = {
                     "role": "assistant",
-                    "content": None,
+                    "content": "Synthetic tool-call text.",
                     "tool_calls": [{
                         "id": "call-offline",
                         "type": "function",
                         "function": {"name": "lookup", "arguments": "{}"},
                     }],
+                    "reasoning_details": [{
+                        "type": "reasoning.encrypted",
+                        "id": "synthetic-reasoning-id",
+                        "format": "synthetic",
+                        "index": 0,
+                        "data": "Synthetic encrypted reasoning payload.",
+                    }],
                 }
+                assert message["content"] == "Synthetic tool-call text."
                 finish_reason = "tool_calls"
             else:
                 assert any(
@@ -625,10 +636,10 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
         async def main():
             async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
                 model = get_model(
-                    "openrouter/anthropic/claude-opus-5",
+                    "openrouter/openai/gpt-6-luna",
                     http_client=client,
                     memoize=False,
-                    config=GenerateConfig(max_tokens=32, max_retries=2, cache_prompt=False),
+                    config=GenerateConfig(max_tokens=8192, max_retries=2, cache_prompt=False),
                     stream=False,
                 )
                 async with budget.target_dollar_budget(model):
@@ -638,15 +649,26 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
                         tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
                     )
                     assistant = first.choices[0].message
+                    assert isinstance(assistant.content, list)
+                    assert {type(block).__name__ for block in assistant.content} >= {
+                        "ContentReasoning", "ContentText",
+                    }
+                    assert any(
+                        type(block).__name__ == "ContentReasoning" and block.redacted
+                        for block in assistant.content
+                    )
                     call = assistant.tool_calls[0]
-                    final = await model.generate([
-                        ChatMessageUser(content="Synthetic request."),
-                        assistant,
-                        ChatMessageTool(
-                            content="Synthetic tool result.", tool_call_id=call.id, function=call.function
-                        ),
-                        ChatMessageUser(content="Summarize the synthetic result."),
-                    ])
+                    final = await model.generate(
+                        [
+                            ChatMessageUser(content="Synthetic request."),
+                            assistant,
+                            ChatMessageTool(
+                                content="Synthetic tool result.", tool_call_id=call.id, function=call.function
+                            ),
+                            ChatMessageUser(content="Summarize the synthetic result."),
+                        ],
+                        tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+                    )
                     assert first.metadata["usage_reported_cost_usd"] is None
                     assert first.usage.total_cost is None
                     assert final.metadata["usage_reported_cost_usd"] is None
@@ -663,13 +685,13 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
         "REFUND_EVAL_SHARED_ROLE_MODE": "shared_caps",
         "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND": "true",
         "REFUND_EVAL_AGENT_DOLLAR_CAP": "50",
-        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "16",
+        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "4096",
         "WORLD_SCENARIO": "train_refund_late",
     }
     repo_root = Path(__file__).resolve().parents[1]
     replay_python = subprocess.run(
         [
-            "uv", "run", "--project", str(repo_root), "--frozen", "--no-sync",
+            "uv", "run", "--project", str(repo_root), "--frozen",
             "python", "-c", "import sys; print(sys.executable)",
         ],
         cwd=repo_root, check=True, capture_output=True, text=True,
