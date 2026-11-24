@@ -91,7 +91,7 @@ def example(monkeypatch, tmp_path):
     mock = MockSim()
     install_mock_models(mock)
 
-    async def research(*args):
+    async def research(*args, **kwargs):
         return {"retrieved_at": scenario.start_time.isoformat(),
                 "dossier": {"summary": "A fictional records office.", "facts": []}}
 
