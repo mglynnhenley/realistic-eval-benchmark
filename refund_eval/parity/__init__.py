@@ -1,4 +1,4 @@
-"""Free parity gate (migration step 19): scripted fixture-mode trials on the native Inspect path and on the
+"""Free parity gate: scripted fixture-mode trials on the native Inspect path and on the
 native Harbor task's path (in-process and in local Docker), compared world, event log and grades.
 
     uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--skip-harbor]

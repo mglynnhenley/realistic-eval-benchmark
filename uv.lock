@@ -3827,7 +3827,6 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "transect" },
     { name = "uvicorn" },
 ]
 
@@ -3853,6 +3852,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "transect" },
 ]
 
 [package.metadata]
@@ -3876,7 +3876,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml" },
     { name = "torch", marker = "extra == 'awareness'" },
-    { name = "transect", git = "https://github.com/AI-Safety-Institute/transect.git?rev=2655747e88a53141b769755f1cbe564cd58070b9" },
     { name = "transformers", marker = "extra == 'awareness'" },
     { name = "uvicorn" },
     { name = "xai-sdk", marker = "extra == 'providers'" },
@@ -3889,6 +3888,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "transect", git = "https://github.com/AI-Safety-Institute/transect.git?rev=2655747e88a53141b769755f1cbe564cd58070b9" },
 ]
 
 [[package]]

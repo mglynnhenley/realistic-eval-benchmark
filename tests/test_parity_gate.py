@@ -1,4 +1,4 @@
-"""The free parity gate (migration step 19): scripted fixture trials on the old Inspect path and the native
+"""The free parity gate: scripted fixture trials on the old Inspect path and the native
 Harbor task's path give the same world, event log and grades, apart from known differences
 (`refund_eval.parity.run.KNOWN`).
 
