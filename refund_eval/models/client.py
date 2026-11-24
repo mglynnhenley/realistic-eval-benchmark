@@ -23,6 +23,14 @@ class ModelLimitExceeded(Exception):
     """A token, cost or time limit stopped a model call. Callers re-raise it; never retry."""
 
 
+class ModelRequestRejected(Exception):
+    """A provider permanently rejected a structured model request."""
+
+    def __init__(self) -> None:
+        super().__init__("Provider rejected the request (invalid_request, code 400); check schema and provider support; "
+                         "rejected field unavailable.")
+
+
 @dataclass(frozen=True)
 class ToolCall:
     id: str
@@ -93,6 +101,7 @@ class Completion:
     raw_finish_reason: str | None = None
     http_status: int | None = None
     worst_case_cost: float | None = None
+    provider_error_type: Literal["invalid_request"] | None = None
 
     @property
     def tool_calls(self) -> list[ToolCall]:
@@ -103,6 +112,8 @@ class Completion:
         from refund_eval.model_io import completion_json
 
         if self.failed:
+            if self.provider_error_type == "invalid_request":
+                raise ModelRequestRejected()
             raise ValueError("Model reply failed")
 
         return completion_json(self.text)

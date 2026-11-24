@@ -15,6 +15,8 @@ from typing import Any
 DIAGNOSTICS_FILENAME = "startup-diagnostics.jsonl"
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _SPECIAL_FUNCTIONS = {"<lambda>", "<module>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>"}
+_TRACEBACK_FRAME = re.compile(r'^  File "([^"]+)", line (\d+), in (.+)$')
+_EVAL_EXCEPTION_TYPE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s*(?::|$)")
 
 
 class StartupMarker(StrEnum):
@@ -58,6 +60,37 @@ class StartupDiagnostics:
             frames = traceback.extract_tb(exception.__traceback__, limit=64)
             self._append({"kind": "exception", "exception_type": exception_type_name(exception),
                           "frames": [self._frame(frame.filename, frame.lineno, frame.name) for frame in frames]})
+        except BaseException:  # noqa: BLE001, S110
+            pass
+
+    def record_eval_error(self, error: Any) -> None:
+        try:
+            formatted_traceback = getattr(error, "traceback", None)
+            frames = []
+            exception_type = "<unknown>"
+            if isinstance(formatted_traceback, str):
+                in_traceback = False
+                for line in formatted_traceback.splitlines():
+                    if not in_traceback:
+                        if line == "Traceback (most recent call last):":
+                            in_traceback = True
+                        continue
+
+                    match = _TRACEBACK_FRAME.fullmatch(line)
+                    if match:
+                        if len(frames) < 64:
+                            frames.append(self._frame(match.group(1), int(match.group(2)), match.group(3)))
+                        continue
+
+                    if line and not line[0].isspace():
+                        match = _EVAL_EXCEPTION_TYPE.match(line)
+                        if match:
+                            name = match.group(1).rsplit(".", 1)[-1]
+                            if _IDENTIFIER.fullmatch(name):
+                                exception_type = name
+                        break
+
+            self._append({"kind": "exception", "exception_type": exception_type, "frames": frames})
         except BaseException:  # noqa: BLE001, S110
             pass
 

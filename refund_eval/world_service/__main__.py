@@ -38,6 +38,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--company-simulator", default=None, help="Simulator kind for every organisation (e.g. concordia)")
     p.add_argument("--browser-runtime", choices=["docker", "subprocess"], default=defaults.browser_runtime,
                    help="Browser: a network-disabled Docker container, or a Node subprocess (default: %(default)s)")
+    p.add_argument("--require-verified-browser-isolation", action="store_true",
+                   help="Refuse startup unless browser network isolation is verified")
     p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Where state.json, events.jsonl and browser/ go (default: %(default)s)")
     p.add_argument("--host", default="0.0.0.0", help="Agent-facing host (default: %(default)s)")
     p.add_argument("--port", type=int, default=8000, help="Agent-facing port (default: %(default)s)")
@@ -52,13 +54,19 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
     if not admin_token or not turn_token:
         print(f"Set {ADMIN_TOKEN_ENV} and {TURN_TOKEN_ENV}.", file=sys.stderr)
         return 2
+    strict_budget_raw = os.environ.get("WORLD_STRICT_BUDGET", "false")
+    if strict_budget_raw not in {"true", "false"}:
+        print("WORLD_STRICT_BUDGET must be true or false.", file=sys.stderr)
+        return 2
     settings = WorldSettings(
         scenario=args.scenario, seed=args.seed, max_turns=args.max_turns,
         **({"sim_weeks": args.sim_weeks} if hasattr(args, "sim_weeks") else {}),
         checkin_hours=tuple(args.checkin_hours), research_mode=args.research_mode, data_mode=args.data_mode,
         inbox=args.inbox, simulator_model=args.simulator_model, grader_model=args.grader_model,
         world_cost_limit=args.world_cost_limit,
-        company_simulator=args.company_simulator, browser_runtime=args.browser_runtime, output_dir=args.output_dir,
+        strict_budget=strict_budget_raw == "true",
+        company_simulator=args.company_simulator, browser_runtime=args.browser_runtime,
+        require_verified_browser_isolation=args.require_verified_browser_isolation, output_dir=args.output_dir,
     )
 
     async def run() -> None:

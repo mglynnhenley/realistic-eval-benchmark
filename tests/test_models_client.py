@@ -17,6 +17,7 @@ from inspect_ai.model._model import prepare_tools
 from inspect_ai.tool import ToolDef
 from inspect_ai.util import LimitExceededError, json_schema
 from openai import AsyncOpenAI
+from pydantic import BaseModel, ValidationError
 
 from refund_eval import model_pricing
 from refund_eval.companies import (
@@ -32,6 +33,7 @@ from refund_eval.models.client import (
     Completion,
     Message,
     ModelLimitExceeded,
+    ModelRequestRejected,
     OutputSchema,
     ToolCall,
     Usage,
@@ -49,7 +51,10 @@ from refund_eval.world.state import World
 ACTION = {
     "decision": "evidence_required", "decision_basis": "We need a medical note.", "summary": "Asked for evidence.",
     "reply": True, "reply_after_hours": 24, "subject": "Your renewal", "body": "Please send a medical note.",
-    "page_body": "", "payments": [], "case_status": "open",
+    "case_notes": None, "reply_kind": "substantive", "page_body": "", "from_address": None,
+    "new_offers": [], "accept_offer": None, "withdraw_offers": False, "payments": [],
+    "grant_ground": None, "case_status": "open", "notes_to_others": [], "follow_up_in_hours": None,
+    "follow_up_plan": "", "follow_up_action": "new", "follow_up_ids": [],
 }
 LATE = load_scenario("train_refund_late")
 
@@ -290,7 +295,8 @@ def openrouter(handler, **kwargs):
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     sdk = AsyncOpenAI(api_key="not-a-key", base_url="https://openrouter.test/api/v1", http_client=http,
                       max_retries=0)
-    roles = {"simulator": "openrouter/anthropic/claude-opus-5.5", "grader": "openrouter/anthropic/claude-haiku-4.5"}
+    roles = kwargs.pop("roles", {"simulator": "openrouter/anthropic/claude-opus-5.5",
+                                  "grader": "openrouter/anthropic/claude-haiku-4.5"})
     return OpenRouterClient(roles, client=sdk, **kwargs)
 
 
@@ -306,27 +312,240 @@ def test_openrouter_response_schema_matches_inspect(schema):
     assert response_json_schema(schema) == json_schema(schema).model_dump(exclude_none=True)
 
 
-async def test_openrouter_request_maps_role_schema_and_settings():
+@pytest.mark.parametrize(("temperature", "wire_temperature"), [(1.0, None), (0.6, 0.6)])
+async def test_openrouter_request_maps_role_schema_and_settings(temperature, wire_temperature):
     requests = []
 
     def handler(request):
-        requests.append(json.loads(request.content))
+        body = json.loads(request.content)
+        if wire_temperature is None:
+            assert "temperature" not in body
+        else:
+            assert body["temperature"] == wire_temperature
+        requests.append(body)
         return httpx.Response(200, json=reply({"role": "assistant", "content": json.dumps(ACTION)}))
 
     client = openrouter(handler)
     out = await client.complete("simulator", [Message("system", "sys"), Message("user", ["a", "b"])],
-                                temperature=1.0, max_tokens=50, stop=["\n\n"],
+                                temperature=temperature, max_tokens=50, stop=["\n\n"],
                                 schema=OutputSchema("open_world_action", CompanyAction, "What it does."))
     [body] = requests
     assert body["model"] == "anthropic/claude-opus-5.5"
     assert body["messages"] == [{"role": "system", "content": "sys"}, {"role": "user", "content": [
         {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}]
-    assert (body["temperature"], body["max_tokens"], body["stop"]) == (1.0, 50, ["\n\n"])
-    assert body["response_format"] == {"type": "json_schema", "json_schema": {
-        "name": "open_world_action", "schema": response_json_schema(CompanyAction), "description": "What it does."}}
-    assert body["usage"] == {"include": True} and "tools" not in body
+    assert (body["max_tokens"], body["stop"]) == (50, ["\n\n"])
+    response_schema = body["response_format"]["json_schema"]
+    assert response_schema["name"] == "open_world_action"
+    assert_anthropic_company_schema(response_schema["schema"])
+    assert response_schema["schema"] != response_json_schema(CompanyAction)
+    assert response_schema["strict"] is True and response_schema["description"] == "What it does."
+    assert body["usage"] == {"include": True} and body["provider"] == {"require_parameters": True}
+    assert "tools" not in body
     assert out.json() == ACTION and out.stop_reason == "stop" and out.model == client.roles["simulator"]
     assert client.model_name("grader") == "openrouter/anthropic/claude-haiku-4.5"
+
+
+def is_screened_provider_error(value, redacted):
+    return value == redacted
+
+
+@pytest.mark.parametrize(("location", "code", "metadata", "message", "expected"), [
+    ("response", 400, {"error_type": "invalid_request"}, "provider rejected", "invalid_request"),
+    ("choice", 400, {"error_type": "invalid_request"}, "provider rejected", "invalid_request"),
+    ("response", 400, None, "invalid_request", None),
+    ("response", 401, {"error_type": "invalid_request"}, "provider rejected", None),
+    ("response", 400, {"error_type": "other"}, "provider rejected", None),
+])
+async def test_openrouter_classifies_only_explicit_structured_invalid_request(
+        location, code, metadata, message, expected):
+    from refund_eval.world import store
+    from refund_eval.world_service.store import MemoryTrial
+
+    private_value = LATE.user.email_addresses[0]
+    error = {"code": code, "message": private_value if expected and location == "response" else message}
+    if metadata is not None:
+        error["metadata"] = metadata
+    body = reply({"role": "assistant", "content": ""})
+    if location == "response":
+        body["error"] = error
+        body["choices"] = []
+    else:
+        body["choices"][0]["error"] = error
+    client = openrouter(lambda request: httpx.Response(200, json=body))
+    previous = store._context
+    store.install(MemoryTrial("train_refund_late"))
+    try:
+        completion = await client.complete("simulator", [Message("user", "safe test")])
+    finally:
+        store.install(previous)
+    actual_error_type = completion.provider_error_type
+    assert actual_error_type == expected, \
+        "only code 400 with metadata.error_type invalid_request is non-retryable"
+    if location == "response" and expected:
+        from refund_eval.published import REDACTED_SCENARIO_VALUE
+
+        assert is_screened_provider_error(completion.error, REDACTED_SCENARIO_VALUE), \
+            "private provider text must be screened"
+
+
+def test_model_request_rejected_is_safe_and_not_a_limit():
+    assert not issubclass(ModelRequestRejected, ModelLimitExceeded), "provider rejection is not spending-limit exhaustion"
+    assert str(ModelRequestRejected()) == (
+        "Provider rejected the request (invalid_request, code 400); check schema and provider support; "
+        "rejected field unavailable."
+    )
+
+
+def test_failed_completion_json_preserves_request_rejection():
+    completion = Completion(text="", message=Message("assistant", ""), failed=True,
+                            provider_error_type="invalid_request")
+    with pytest.raises(ModelRequestRejected):
+        completion.json()
+
+
+async def test_failed_research_request_rejection_propagates(fake):
+    client = fake(Completion(text="", message=Message("assistant", ""), failed=True,
+                             provider_error_type="invalid_request"))
+    with pytest.raises(ModelRequestRejected):
+        await research.research_live(LATE.org("trainline"), scenario=LATE)
+    assert len(client.calls) == 1
+
+
+async def test_openrouter_http_402_remains_a_model_limit():
+    client = openrouter(lambda request: httpx.Response(402, json={"error": {"message": "out of credit"}}))
+    with pytest.raises(ModelLimitExceeded):
+        await client.complete("simulator", [Message("user", "safe test")])
+
+
+def assert_anthropic_company_schema(schema):
+    unsupported = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength"}
+
+    def visit(node):
+        if isinstance(node, dict):
+            assert unsupported.isdisjoint(node)
+            if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+                assert node.get("additionalProperties") is False
+                assert set(node.get("required", [])) == set(node["properties"])
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(schema)
+
+
+async def test_llm_company_simulator_uses_anthropic_compatible_schema_and_keeps_local_validation():
+    requests = []
+    action = CompanyAction.model_validate({
+        "decision": "deny", "reply": False, "reply_after_hours": 0, "body": "",
+    }).model_dump(mode="json")
+    tariffs = {"openrouter/anthropic/claude-opus-5.5": {"input": 1.0, "output": 2.0, "request": 0.01}}
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        assert "temperature" not in body
+        schema = body["response_format"]["json_schema"]["schema"]
+        assert_anthropic_company_schema(schema)
+        return httpx.Response(200, json=reply({"role": "assistant", "content": json.dumps(action)}))
+
+    model = openrouter(handler, pin_prices=True, tariffs=tariffs)
+    simulator = LLMCompanySimulator(model)
+    context = CompanyContext(
+        org=CompanyProfile(key="example", name="Example Rail", kind="railway"),
+        subject="Synthetic journey", customer_name="Alex Example", customer_email="customer@example.test",
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    result = await simulator.respond(CompanyEvent(incoming="Synthetic contact"), context)
+
+    [body] = requests
+    formatted = body["response_format"]["json_schema"]
+    schema = formatted["schema"]
+    assert body["model"] == "anthropic/claude-opus-5.5"
+    assert "temperature" not in body
+    assert result.decision == "deny" and result.reply is False
+    assert formatted["strict"] is True
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["properties"]["case_notes"]["anyOf"][-1] == {"type": "null"}
+    assert schema["properties"]["case_status"]["default"] == "open"
+    assert "at least 0" in schema["properties"]["reply_after_hours"]["description"]
+    assert "at least 0" in schema["properties"]["new_offers"]["items"]["properties"]["amount"]["description"]
+    assert "greater than 0" in schema["properties"]["payments"]["items"]["properties"]["amount"]["description"]
+    assert body["provider"] == {"max_price": {"prompt": 1.0, "completion": 2.0, "request": 0.01},
+                                 "require_parameters": True}
+
+
+def test_anthropic_company_required_fields_preserve_default_normalization():
+    original = CompanyAction.model_validate({
+        "decision": "offer_voucher",
+        "reply": True,
+        "reply_after_hours": 2.5,
+        "body": "A synthetic voucher offer.",
+        "summary": "Voucher offered.",
+        "new_offers": [{"kind": "voucher", "amount": 17.5}],
+        "follow_up_action": "continue",
+    })
+    explicit_data = original.model_dump(mode="json")
+    assert explicit_data["new_offers"][0]["expires_in_days"] is None
+
+    explicit = CompanyAction.model_validate(explicit_data)
+
+    assert explicit.model_dump(mode="json") == explicit_data
+    assert set(explicit.model_fields_set) == set(CompanyAction.model_fields)
+    assert explicit.new_offers[0].expires_in_days is None
+    assert set(explicit.new_offers[0].model_fields_set) == {"kind", "amount", "expires_in_days"}
+    assert (explicit.decision, explicit.reply_after_hours, explicit.follow_up_action,
+            explicit.new_offers[0].amount) == ("offer_voucher", 2.5, "continue", 17.5)
+
+
+@pytest.mark.parametrize("invalid", [
+    {"reply_after_hours": -1},
+    {"payments": [{"kind": "cash_refund", "amount": -1, "via": "card"}]},
+])
+def test_company_action_still_rejects_negative_bounds_locally(invalid):
+    action = {"decision": "deny", "reply": False, "reply_after_hours": 0, "body": ""} | invalid
+    with pytest.raises(ValidationError):
+        CompanyAction.model_validate(action)
+
+
+async def test_non_anthropic_company_schema_keeps_existing_wire_format():
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "{}"}))
+
+    client = openrouter(handler, roles={"simulator": "openrouter/openai/gpt-4.1"})
+    await client.complete("simulator", [Message("user", "synthetic")],
+                          temperature=1.0, schema=OutputSchema("open_world_action", CompanyAction))
+
+    [body] = requests
+    assert body["temperature"] == 1.0
+    assert body["response_format"]["json_schema"]["schema"] == response_json_schema(CompanyAction)
+    assert "strict" not in body["response_format"]["json_schema"]
+    assert "provider" not in body
+
+
+async def test_unrelated_anthropic_map_schema_is_left_unchanged():
+    class MapOutput(BaseModel):
+        values: dict[str, str]
+
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply({"role": "assistant", "content": "{}"}))
+
+    client = openrouter(lambda request: handler(request))
+    await client.complete("simulator", [Message("user", "synthetic")],
+                          temperature=1.0, schema=OutputSchema("unrelated_map", MapOutput))
+
+    [body] = requests
+    assert body["temperature"] == 1.0
+    assert body["response_format"]["json_schema"]["schema"] == response_json_schema(MapOutput)
+    assert "provider" not in body
+    assert "strict" not in body["response_format"]["json_schema"]
 
 
 async def test_openrouter_tool_calls_round_trip_the_assistant_message():

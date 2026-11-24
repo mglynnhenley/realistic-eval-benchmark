@@ -15,6 +15,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from inspect_ai._util.error import EvalError
+from inspect_ai.log._log import EvalLog, EvalSample, EvalSpec
+from inspect_ai.log._log import eval_error as inspect_eval_error
 
 from refund_eval.world_service.startup_diagnostics import (
     DIAGNOSTICS_FILENAME,
@@ -186,6 +189,73 @@ def test_logging_failure_does_not_mask_inprocess_exception(tmp_path, monkeypatch
     assert result["ok"] is False and result["error"] == "ValueError"
     assert json.loads((out / "run.json").read_text())["error"] == "ValueError"
     assert not (out / DIAGNOSTICS_FILENAME).exists()
+
+
+@pytest.mark.parametrize("error_location", ["sample", "evaluation"])
+def test_inspect_failed_evaluation_records_safe_error_details(tmp_path, monkeypatch, error_location):
+    from refund_eval.parity import run
+
+    out = tmp_path / "run"
+    out.mkdir()
+    diagnostics = StartupDiagnostics(out, REPO_ROOT)
+    message = (
+        "ERROR_SENTINEL\n"
+        f'  File "{REPO_ROOT}/refund_eval/agent/MESSAGE_FRAME_SENTINEL.py", line 999, in MESSAGE_FRAME_SENTINEL\n'
+        "MessageExceptionType: TYPE_SENTINEL"
+    )
+
+    def failing_startup():
+        raise RuntimeError(message)
+
+    try:
+        failing_startup()
+    except RuntimeError as exception:
+        inspect_error = inspect_eval_error(exception, type(exception), exception, exception.__traceback__)
+
+    assert isinstance(inspect_error, EvalError)
+    assert "MESSAGE_FRAME_SENTINEL" in inspect_error.traceback
+    assert "MessageExceptionType" in inspect_error.traceback
+    eval_spec = EvalSpec.model_construct(tags=[], metadata={})
+    if error_location == "sample":
+        log = EvalLog.model_construct(
+            eval=eval_spec,
+            status="error",
+            error=None,
+            samples=[EvalSample.model_construct(error=inspect_error)],
+        )
+        assert log.error is None and log.samples is not None
+    else:
+        log = EvalLog.model_construct(eval=eval_spec, status="error", error=inspect_error, samples=None)
+        assert log.error is inspect_error and log.samples is None
+
+    inspect_module = ModuleType("inspect_ai")
+    inspect_module.eval = lambda *args, **kwargs: [log]
+    monkeypatch.setitem(sys.modules, "inspect_ai", inspect_module)
+    monkeypatch.setattr(run, "scripted_model", lambda script: object())
+
+    assert run._eval(run.SCRIPTS["late_form"], {}, out / "logs", diagnostics=diagnostics) is log
+
+    raw_log = (out / DIAGNOSTICS_FILENAME).read_bytes()
+    records = [json.loads(line) for line in raw_log.decode().splitlines()]
+    assert [record["kind"] for record in records] == ["marker", "exception"]
+    assert records[0] == {"kind": "marker", "marker": "task runner entered"}
+    error_record = records[1]
+    assert error_record["kind"] == "exception"
+    assert error_record["exception_type"] == "RuntimeError"
+    frames = error_record["frames"]
+    assert [frame["file"] for frame in frames] == [
+        "tests/test_parity_startup_diagnostics.py",
+        "tests/test_parity_startup_diagnostics.py",
+    ]
+    assert [frame["function"] for frame in frames] == [
+        "test_inspect_failed_evaluation_records_safe_error_details",
+        "failing_startup",
+    ]
+    assert all(frame["line"] > 0 for frame in frames)
+    assert b"ERROR_SENTINEL" not in raw_log
+    assert b"MESSAGE_FRAME_SENTINEL" not in raw_log
+    assert b"MessageExceptionType" not in raw_log
+    assert b"TYPE_SENTINEL" not in raw_log
 
 
 def test_first_request_marker_callback_failure_does_not_block_app():

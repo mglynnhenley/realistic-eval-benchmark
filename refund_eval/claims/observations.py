@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from refund_eval.agent.prompt import task_message
 from refund_eval.claims.checklist import checklist_id, load_checklist
 from refund_eval.claims.models import ClaimObservation, TaskChecklist
 from refund_eval.world.store import world_store
@@ -52,7 +53,8 @@ def checking_context(inbound: Inbound, scenario: Scenario, world: World, org: Or
     return {
         "now": now.isoformat(),
         "task_kind": scenario.task_kind,
-        "task_request": scenario.task_text,
+        "task_request": (task_message(scenario) if getattr(scenario, "requested_deadline", None) is not None
+                         else scenario.task_text),
         "facts": scenario.facts.model_dump(mode="json"),
         "facts_schema": scenario.facts.model_json_schema(),
         "user": scenario.user.model_dump(mode="json"),

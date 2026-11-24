@@ -79,14 +79,6 @@ def sim_deadline(world: World, sim_weeks: float) -> datetime:
     return london(world.start_time) + timedelta(weeks=sim_weeks)
 
 
-def new_mail_count(
-    world: World, since: datetime, until: datetime, arrived: Iterable[Email]
-) -> int:
-    """Incoming mail that arrived after `since` and by `until`: what was just
-    delivered, plus anything that came in while the agent was working."""
-    return len(new_mail_ids(world, since, until, arrived))
-
-
 def new_mail_ids(world: World, since: datetime, until: datetime, arrived: Iterable[Email]) -> set[str]:
     """IDs underlying a notice, without counting the same arrival twice."""
     lo, hi = as_utc(since), as_utc(until)

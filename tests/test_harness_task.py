@@ -19,7 +19,8 @@ from inspect_ai.model import get_model, get_model_info
 
 from refund_eval import task as task_module
 from refund_eval.agent import adapters
-from refund_eval.environment_version import ENVIRONMENT_VERSION
+from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
+from refund_eval.run_identity import scenario_fingerprint
 from refund_eval.sim.open_world import SIMULATOR_REVISION
 from refund_eval.task import impossible_refund
 
@@ -48,6 +49,11 @@ def test_task_dry_run_with_mockllm(tmp_path):
             "simulator_revision": SIMULATOR_REVISION, "simulator_transitions": [],
             "realism_version": sample.metadata["realism_version"],
             "environment_version": ENVIRONMENT_VERSION,
+            "environment_fingerprint": environment_fingerprint(),
+            "scenario_fingerprint": scenario_fingerprint(SCENARIO_PATH),
+            "browser_runtime": "docker",
+            "runtime_identity_kind": "docker_image_ref",
+            "runtime_identity": "refund-eval-playwright:0.0.83",
             "task_grading_notes": {"task_kind": "train_refund", "scenario_id": scenario().id,
                                    "revision": SIMULATOR_REVISION, "notes": scenario().grading_notes},
         }
@@ -71,6 +77,12 @@ def test_task_dry_run_with_mockllm(tmp_path):
         "max_turns": 6,
         "history_tokens": 60000,
         "sim_weeks": 6,
+        "environment_version": ENVIRONMENT_VERSION,
+        "environment_fingerprint": environment_fingerprint(),
+        "scenario_fingerprint": scenario_fingerprint(SCENARIO_PATH),
+        "browser_runtime": "docker",
+        "runtime_identity_kind": "docker_image_ref",
+        "runtime_identity": "refund-eval-playwright:0.0.83",
     }
 
 
@@ -134,6 +146,53 @@ def test_default_costs_registered_for_cost_limit():
 def test_trials_must_be_positive():
     with pytest.raises(ValueError):
         impossible_refund(trials=0, scenario=SCENARIO_PATH)
+
+
+def test_world_url_leaves_runtime_identity_to_the_sidecar(tmp_path, monkeypatch):
+    import builtins
+
+    import yaml
+
+    from refund_eval.published import provider
+    from refund_eval.scenario.schema import load_scenario
+
+    scenario = load_scenario("train_refund_late")
+    public_scenario = scenario.model_dump(mode="json", include={
+        "id": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
+    scenario_path = tmp_path / "train_refund_late.yaml"
+    scenario_path.write_text(yaml.safe_dump(public_scenario), encoding="utf-8")
+
+    original_import = builtins.__import__
+
+    def reject_agent_identity(name, *args, **kwargs):
+        if name == "refund_eval.run_identity":
+            raise AssertionError("Native world-service runs must not import agent identity locks")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.delenv("REFUND_EVAL_IDENTITY_LOCK", raising=False)
+    monkeypatch.setattr(builtins, "__import__", reject_agent_identity)
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: None)
+    monkeypatch.setattr(task_module, "default_model_roles",
+                        lambda _: {"simulator": "mockllm/model", "grader": "mockllm/model"})
+    monkeypatch.setattr(provider, "cache_conversation_prefix", lambda: None)
+
+    task = task_module.impossible_refund(
+        scenario=str(scenario_path), cost_limit=150, token_budget=40_000_000,
+        research_mode="saved", world_url="http://world",
+    )
+    assert "environment_fingerprint" not in task.metadata
+    assert "environment_version" not in task.metadata
+    assert "environment_fingerprint" not in task.dataset[0].metadata
+    assert task.dataset[0].metadata["environment_version"] == ENVIRONMENT_VERSION
+    assert "realism_version" in task.dataset[0].metadata
+    with pytest.raises(ValueError, match="generated Harbor sidecar task is the source of identity"):
+        task_module.impossible_refund(
+            scenario=str(scenario_path), cost_limit=150, token_budget=40_000_000,
+            research_mode="saved", world_url="http://world", identity_lock={},
+        )
 
 
 @pytest.mark.parametrize(("mail_source", "reason"), [

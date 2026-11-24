@@ -7,9 +7,8 @@ import os
 import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -41,7 +40,6 @@ def _money(value: object) -> Decimal:
 class Thresholds:
     openrouter_key_ceiling: Decimal
     openrouter_trial_delta: Decimal
-    modal_cycle_stop: Decimal
     probe_timeout: float = 10.0
     poll_interval: float = 15.0
     max_sample_age: float = 35.0
@@ -51,13 +49,12 @@ class Thresholds:
         try:
             key_ceiling = _money(self.openrouter_key_ceiling)
             delta = _money(self.openrouter_trial_delta)
-            modal_stop = _money(self.modal_cycle_stop)
         except ValueError:
-            raise ValueError("cost thresholds must be finite and nonnegative") from None
+            raise ValueError("OpenRouter thresholds must be finite and nonnegative") from None
         if key_ceiling != KEY_CEILING:
             raise ValueError("OpenRouter key ceiling must be exactly $50")
-        if delta <= 0 or delta > key_ceiling or modal_stop <= 0:
-            raise ValueError("trial and Modal thresholds must be positive and bounded")
+        if delta <= 0 or delta > key_ceiling:
+            raise ValueError("OpenRouter trial threshold must be positive and bounded")
         for value in (
             self.probe_timeout,
             self.poll_interval,
@@ -75,7 +72,110 @@ class Thresholds:
             raise ValueError("sample freshness must exceed poll interval plus probe timeout")
         object.__setattr__(self, "openrouter_key_ceiling", key_ceiling)
         object.__setattr__(self, "openrouter_trial_delta", delta)
-        object.__setattr__(self, "modal_cycle_stop", modal_stop)
+
+
+@dataclass(frozen=True)
+class SplitThresholds:
+    agent_trial_delta: Decimal
+    world_trial_delta: Decimal
+    probe_timeout: float = 10.0
+    poll_interval: float = 15.0
+    max_sample_age: float = 35.0
+    cleanup_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        try:
+            agent, world = _money(self.agent_trial_delta), _money(self.world_trial_delta)
+        except ValueError:
+            raise ValueError("Split OpenRouter thresholds must be finite and nonnegative") from None
+        if agent <= 0 or agent > KEY_CEILING or world <= 0 or world > Decimal(100):
+            raise ValueError("Split OpenRouter thresholds exceed their role ceilings")
+        for value in (self.probe_timeout, self.poll_interval, self.max_sample_age, self.cleanup_timeout):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError("guard timeouts and intervals must be finite and positive")
+        if self.max_sample_age <= self.poll_interval + self.probe_timeout:
+            raise ValueError("sample freshness must exceed poll interval plus probe timeout")
+        object.__setattr__(self, "agent_trial_delta", agent)
+        object.__setattr__(self, "world_trial_delta", world)
+
+
+@dataclass(frozen=True)
+class SharedRoleThresholds:
+    shared_allowance_usd: Decimal
+    probe_timeout: float = 10.0
+    poll_interval: float = 15.0
+    max_sample_age: float = 35.0
+    cleanup_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        try:
+            allowance = _money(self.shared_allowance_usd)
+        except ValueError:
+            raise ValueError("Shared-role allowance must be finite and nonnegative") from None
+        if allowance <= 0 or allowance > Decimal(150):
+            raise ValueError("Shared-role allowance must be positive and no greater than $150")
+        for value in (self.probe_timeout, self.poll_interval, self.max_sample_age, self.cleanup_timeout):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError("guard timeouts and intervals must be finite and positive")
+        if self.max_sample_age <= self.poll_interval + self.probe_timeout:
+            raise ValueError("sample freshness must exceed poll interval plus probe timeout")
+        object.__setattr__(self, "shared_allowance_usd", allowance)
+
+
+@dataclass(frozen=True)
+class SharedCapsThresholds:
+    probe_timeout: float = 10.0
+    poll_interval: float = 15.0
+    max_sample_age: float = 35.0
+    cleanup_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        SharedRoleThresholds(Decimal(150), self.probe_timeout, self.poll_interval,
+                             self.max_sample_age, self.cleanup_timeout)
+
+
+_OPENROUTER_BUDGET_SCOPES = frozenset({
+    "workspace_default_member", "workspace_default_key", "member", "api_key", "workspace", "key_limit",
+})
+
+
+@dataclass(frozen=True)
+class OpenRouterBudget:
+    scope: str
+    guardrail_id: str | None
+    budget_id: str | None
+    limit: Decimal
+    spend: Decimal
+    remaining: Decimal
+    reset_interval: str | None
+    resets_at: str | None
+    include_byok: bool
+
+    @classmethod
+    def parse(cls, value: object) -> OpenRouterBudget:
+        if not isinstance(value, Mapping):
+            raise TypeError
+        scope = value.get("scope")
+        guardrail_id, budget_id = value.get("guardrail_id"), value.get("budget_id")
+        interval, resets_at = value.get("reset_interval"), value.get("resets_at")
+        include_byok = value.get("include_byok")
+        if (not isinstance(scope, str) or scope not in _OPENROUTER_BUDGET_SCOPES
+                or "reset_interval" not in value or "resets_at" not in value
+                or (guardrail_id is not None and not isinstance(guardrail_id, str))
+                or (budget_id is not None and not isinstance(budget_id, str))
+                or interval not in (None, "daily", "weekly", "monthly")
+                or (resets_at is not None and not isinstance(resets_at, str)) or type(include_byok) is not bool):
+            raise TypeError
+        limit, spend, remaining = (_money(value.get("limit_usd")), _money(value.get("spend_usd")),
+                                   _money(value.get("remaining_usd")))
+        if limit is None or spend is None or remaining is None:
+            raise TypeError
+        return cls(scope, guardrail_id, budget_id, limit, spend, remaining, interval, resets_at, include_byok)
+
+    @property
+    def identity(self) -> tuple[object, ...]:
+        return (self.scope, self.guardrail_id, self.budget_id, self.limit, self.reset_interval,
+                self.resets_at, self.include_byok)
 
 
 @dataclass(frozen=True)
@@ -98,42 +198,45 @@ class OpenRouterSnapshot:
         )
 
 
-def _datetime(value: object) -> datetime:
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            raise ValueError from None
-    else:
-        raise TypeError
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
 @dataclass(frozen=True)
-class ModalSnapshot:
-    metered_cost: Decimal
-    cycle_start: datetime
-    cycle_end: datetime
+class SharedRoleOpenRouterSnapshot:
+    usage: Decimal
+    limit: Decimal
+    remaining: Decimal
+    limit_reset: str | None
+    limit_reset_present: bool
+    is_management_key: bool | None
+    is_provisioning_key: bool | None
+    include_byok_in_limit: bool | None
+    budgets: tuple[OpenRouterBudget, ...]
+    budgets_present: bool
+    effective_budget: OpenRouterBudget | None
+    effective_budget_present: bool
 
     @classmethod
-    def parse(cls, value: object) -> ModalSnapshot:
-        if isinstance(value, Mapping):
-            metered = value.get("metered_cost")
-            cycle_start = value.get("start", value.get("cycle_start"))
-            cycle_end = value.get("end", value.get("cycle_end"))
-        else:
-            metered = getattr(value, "metered_cost", None)
-            cycle_start = getattr(value, "start", None)
-            cycle_end = getattr(value, "end", None)
-        start = _datetime(cycle_start)
-        end = _datetime(cycle_end)
-        if start >= end:
-            raise ValueError
-        return cls(_money(metered), start, end)
+    def parse(cls, payload: object) -> SharedRoleOpenRouterSnapshot:
+        base = OpenRouterSnapshot.parse(payload)
+        data = payload["data"]
+        reset = data.get("limit_reset")
+        management, provisioning = data.get("is_management_key"), data.get("is_provisioning_key")
+        include_byok = data.get("include_byok_in_limit")
+        budgets_present = "budgets" in data
+        budgets_value = data.get("budgets", [])
+        effective_present = "effective_budget" in data
+        effective_value = data.get("effective_budget")
+        if (not isinstance(data, Mapping)
+                or (reset is not None and not isinstance(reset, str))
+                or (management is not None and type(management) is not bool)
+                or (provisioning is not None and type(provisioning) is not bool)
+                or (include_byok is not None and type(include_byok) is not bool)
+                or "limit_reset" not in data or not isinstance(budgets_value, list)
+                or (effective_present and effective_value is not None and not isinstance(effective_value, Mapping))):
+            raise TypeError
+        return cls(
+            base.usage, base.limit, base.remaining, reset, True, management, provisioning, include_byok,
+            tuple(OpenRouterBudget.parse(value) for value in budgets_value), budgets_present,
+            None if effective_value is None else OpenRouterBudget.parse(effective_value), effective_present,
+        )
 
 
 @dataclass(frozen=True)
@@ -191,37 +294,38 @@ async def openrouter_key_probe(timeout: float) -> object:
     return await asyncio.to_thread(_read_openrouter_sync, timeout)
 
 
-async def modal_cycle_probe() -> object:
+def _read_split_key_sync(env_name: str, timeout: float) -> object:
+    key = os.environ.get(env_name)
+    if not key:
+        raise GuardFailure("OpenRouter probe failed")
+    request = urllib.request.Request("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {key}"})
     try:
-        from modal import Workspace
-
-        workspace = Workspace.from_context()
-        return await workspace.billing.summary()
-    except asyncio.CancelledError:
-        raise
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.load(response)
     except Exception:  # noqa: BLE001
-        raise GuardFailure("Modal probe failed") from None
+        raise GuardFailure("OpenRouter probe failed") from None
+
+
+async def split_openrouter_key_probe(env_name: str, timeout: float) -> object:
+    return await asyncio.to_thread(_read_split_key_sync, env_name, timeout)
 
 
 class SpendGuard:
     def __init__(
         self,
-        thresholds: Thresholds,
+        thresholds: Thresholds | SharedRoleThresholds,
         *,
         openrouter_probe: Probe | None = None,
-        modal_probe: Probe | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.thresholds = thresholds
         self.openrouter_probe = openrouter_probe or (
             lambda: openrouter_key_probe(thresholds.probe_timeout)
         )
-        self.modal_probe = modal_probe or modal_cycle_probe
         self._clock = clock
         self._owner = object()
         self._baseline: OpenRouterSnapshot | None = None
         self._previous_openrouter: OpenRouterSnapshot | None = None
-        self._previous_modal: ModalSnapshot | None = None
         self._last_sample_at: float | None = None
         self._start_attempted = False
         self._started = False
@@ -276,24 +380,15 @@ class SpendGuard:
         except Exception:  # noqa: BLE001
             raise GuardFailure(f"{name} probe failed") from None
 
-    async def _read_pair(self) -> tuple[OpenRouterSnapshot, ModalSnapshot]:
-        openrouter_task = asyncio.create_task(self._probe("OpenRouter", self.openrouter_probe))
-        modal_task = asyncio.create_task(self._probe("Modal", self.modal_probe))
+    async def _read_openrouter(self) -> OpenRouterSnapshot:
+        value = await self._probe("OpenRouter", self.openrouter_probe)
         try:
-            openrouter_value, modal_value = await asyncio.gather(openrouter_task, modal_task)
-        except BaseException:
-            for task in (openrouter_task, modal_task):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(openrouter_task, modal_task, return_exceptions=True)
-            raise
-        try:
-            return OpenRouterSnapshot.parse(openrouter_value), ModalSnapshot.parse(modal_value)
+            return OpenRouterSnapshot.parse(value)
         except (ValueError, TypeError, OverflowError):
             raise GuardFailure("monitor data malformed") from None
 
     def _accept_sample(
-        self, openrouter: OpenRouterSnapshot, modal: ModalSnapshot, *, initial: bool = False
+        self, openrouter: OpenRouterSnapshot, *, initial: bool = False
     ) -> None:
         if openrouter.limit != self.thresholds.openrouter_key_ceiling:
             raise GuardFailure("OpenRouter key ceiling does not match $50")
@@ -303,19 +398,13 @@ class SpendGuard:
             raise GuardFailure("OpenRouter counters malformed")
         if openrouter.usage + openrouter.remaining > openrouter.limit + _MONEY_EPSILON:
             raise GuardFailure("OpenRouter counters malformed")
-        if modal.cycle_start >= modal.cycle_end:
-            raise GuardFailure("Modal cycle data malformed")
-
         if initial:
             if openrouter.remaining < self.thresholds.openrouter_trial_delta:
                 raise GuardFailure("OpenRouter remaining limit is below trial threshold")
-            if modal.metered_cost >= self.thresholds.modal_cycle_stop:
-                raise GuardFailure("Modal cycle threshold already reached")
             self._baseline = openrouter
         else:
             previous_openrouter = self._previous_openrouter
-            previous_modal = self._previous_modal
-            if previous_openrouter is None or previous_modal is None or self._baseline is None:
+            if previous_openrouter is None or self._baseline is None:
                 raise GuardFailure("monitor state invalid")
             if openrouter.usage < previous_openrouter.usage:
                 raise GuardFailure("OpenRouter usage counter decreased")
@@ -323,17 +412,10 @@ class SpendGuard:
                 raise GuardFailure("OpenRouter remaining counter increased")
             if openrouter.limit != previous_openrouter.limit:
                 raise GuardFailure("OpenRouter key ceiling changed")
-            if modal.cycle_start != previous_modal.cycle_start or modal.cycle_end != previous_modal.cycle_end:
-                raise GuardFailure("Modal billing cycle changed")
-            if modal.metered_cost < previous_modal.metered_cost:
-                raise GuardFailure("Modal metered counter decreased")
             if openrouter.usage - self._baseline.usage >= self.thresholds.openrouter_trial_delta:
                 raise GuardFailure("OpenRouter trial threshold reached")
-            if modal.metered_cost >= self.thresholds.modal_cycle_stop:
-                raise GuardFailure("Modal cycle threshold reached")
 
         self._previous_openrouter = openrouter
-        self._previous_modal = modal
         self._last_sample_at = self._clock()
 
     async def start(self) -> None:
@@ -342,8 +424,8 @@ class SpendGuard:
             raise self._failure()
         self._start_attempted = True
         try:
-            openrouter, modal = await self._read_pair()
-            self._accept_sample(openrouter, modal, initial=True)
+            openrouter = await self._read_openrouter()
+            self._accept_sample(openrouter, initial=True)
         except GuardFailure as failure:
             self._latch(failure.reason)
             raise self._failure() from None
@@ -360,8 +442,8 @@ class SpendGuard:
     async def _monitor(self) -> None:
         try:
             while not self._closing:
-                openrouter, modal = await self._read_pair()
-                self._accept_sample(openrouter, modal)
+                openrouter = await self._read_openrouter()
+                self._accept_sample(openrouter)
                 self._ready.set()
                 await asyncio.sleep(self.thresholds.poll_interval)
         except asyncio.CancelledError:
@@ -398,6 +480,7 @@ class SpendGuard:
         if cancel_job and task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
         await self.cleanup_bound()
+
 
     def bind_sandbox(
         self,
@@ -555,8 +638,237 @@ class SpendGuard:
             raise self._failure()
 
 
+class SharedRoleSpendGuard(SpendGuard):
+    def __init__(self, thresholds: SharedRoleThresholds, *, openrouter_probe: Probe | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        super().__init__(thresholds, openrouter_probe=openrouter_probe, clock=clock)
+
+    async def _read_openrouter(self) -> SharedRoleOpenRouterSnapshot:
+        value = await self._probe("OpenRouter", self.openrouter_probe)
+        try:
+            return SharedRoleOpenRouterSnapshot.parse(value)
+        except (ValueError, TypeError, OverflowError):
+            raise GuardFailure("monitor data malformed") from None
+
+    def _check_headroom(
+        self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
+    ) -> None:
+        if (not snapshot.limit_reset_present or snapshot.limit_reset is not None
+                or snapshot.is_management_key is not False or snapshot.is_provisioning_key is not False
+                or snapshot.include_byok_in_limit is None):
+            raise GuardFailure("shared_roles requires a finite ordinary non-resetting OpenRouter key")
+        if (snapshot.limit <= 0 or snapshot.remaining > snapshot.limit or snapshot.usage > snapshot.limit
+                or snapshot.usage + snapshot.remaining > snapshot.limit + _MONEY_EPSILON):
+            raise GuardFailure("OpenRouter key headroom metadata is malformed")
+        allowance = self.thresholds.shared_allowance_usd
+        key_usage_delta = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
+        minimum = max(Decimal(0), allowance - key_usage_delta)
+        if snapshot.remaining < minimum:
+            raise GuardFailure("OpenRouter limit_remaining is below shared_allowance_usd")
+        budgets = list(snapshot.budgets)
+        if snapshot.effective_budget is not None:
+            budgets.append(snapshot.effective_budget)
+        for budget in budgets:
+            if budget.reset_interval is not None or budget.resets_at is not None:
+                raise GuardFailure("shared_roles does not support resetting OpenRouter budgets")
+            if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
+                    or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
+                raise GuardFailure("OpenRouter budget metadata is malformed")
+            if budget.remaining < minimum:
+                raise GuardFailure("OpenRouter budget remaining is below shared_allowance_usd")
+
+    @staticmethod
+    def _metadata_signature(snapshot: SharedRoleOpenRouterSnapshot) -> tuple[object, ...]:
+        return (snapshot.limit, snapshot.limit_reset, snapshot.is_management_key, snapshot.is_provisioning_key,
+                snapshot.limit_reset_present, snapshot.include_byok_in_limit, snapshot.budgets_present,
+                snapshot.effective_budget_present, tuple(budget.identity for budget in snapshot.budgets),
+                None if snapshot.effective_budget is None else snapshot.effective_budget.identity)
+
+    def _accept_sample(self, openrouter: SharedRoleOpenRouterSnapshot, *, initial: bool = False) -> None:
+        if initial:
+            self._check_headroom(openrouter)
+            self._baseline = openrouter
+        else:
+            previous = self._previous_openrouter
+            baseline = self._baseline
+            if previous is None or baseline is None:
+                raise GuardFailure("monitor state invalid")
+            if self._metadata_signature(openrouter) != self._metadata_signature(baseline):
+                raise GuardFailure("OpenRouter budget metadata changed")
+            if openrouter.usage < previous.usage:
+                raise GuardFailure("OpenRouter usage counter decreased")
+            if openrouter.remaining > previous.remaining + _MONEY_EPSILON:
+                raise GuardFailure("OpenRouter remaining counter increased")
+            self._check_headroom(openrouter, baseline)
+            key_usage_delta = openrouter.usage - baseline.usage
+            for before, current in zip(previous.budgets, openrouter.budgets, strict=True):
+                if current.spend < before.spend or current.remaining > before.remaining + _MONEY_EPSILON:
+                    raise GuardFailure("OpenRouter budget counters moved nonmonotonically")
+            if baseline.effective_budget is not None:
+                previous_effective, current_effective = previous.effective_budget, openrouter.effective_budget
+                if previous_effective is None or current_effective is None:
+                    raise GuardFailure("OpenRouter effective budget metadata changed")
+                if (current_effective.spend < previous_effective.spend
+                        or current_effective.remaining > previous_effective.remaining + _MONEY_EPSILON):
+                    raise GuardFailure("OpenRouter effective budget counters moved nonmonotonically")
+            if key_usage_delta >= self.thresholds.shared_allowance_usd:
+                raise GuardFailure("OpenRouter shared allowance reached")
+        self._previous_openrouter = openrouter
+        self._last_sample_at = self._clock()
+
+    def sanitized_effective_parameters(self) -> dict[str, Any] | None:
+        baseline = self._baseline
+        if baseline is None:
+            return None
+        budgets = list(baseline.budgets)
+        effective = baseline.effective_budget
+        return {
+            "shared_allowance_usd": str(self.thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "key_limit_usd": str(baseline.limit),
+            "key_remaining_usd": str(baseline.remaining),
+            "key_usage_baseline_usd": str(baseline.usage),
+            "budget_remaining_usd": [str(budget.remaining) for budget in budgets],
+            "effective_budget_remaining_usd": None if effective is None else str(effective.remaining),
+            "runtime_metadata_confirmed": True,
+        }
+
+
+class SharedCapsSpendGuard(SharedRoleSpendGuard):
+    def __init__(self, thresholds: SharedCapsThresholds, *, openrouter_probe: Probe | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.shared_caps_thresholds = thresholds
+        self.effective_allowance_usd: Decimal | None = None
+        role_thresholds = SharedRoleThresholds(
+            Decimal(150), thresholds.probe_timeout, thresholds.poll_interval,
+            thresholds.max_sample_age, thresholds.cleanup_timeout,
+        )
+        super().__init__(role_thresholds, openrouter_probe=openrouter_probe, clock=clock)
+
+    def _check_headroom(
+        self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
+    ) -> None:
+        if not snapshot.budgets_present or not snapshot.effective_budget_present:
+            raise GuardFailure("shared_caps requires explicit OpenRouter budget metadata")
+        if self.effective_allowance_usd is None and baseline is None:
+            if (not snapshot.limit_reset_present or snapshot.limit_reset is not None
+                    or snapshot.is_management_key is not False or snapshot.is_provisioning_key is not False
+                    or snapshot.include_byok_in_limit is None):
+                raise GuardFailure("shared_caps requires finite ordinary non-resetting OpenRouter headroom")
+            if (snapshot.limit <= 0 or snapshot.remaining > snapshot.limit or snapshot.usage > snapshot.limit
+                    or snapshot.usage + snapshot.remaining > snapshot.limit + _MONEY_EPSILON):
+                raise GuardFailure("OpenRouter key headroom metadata is malformed")
+            headroom = [snapshot.remaining]
+            budgets = list(snapshot.budgets)
+            if snapshot.effective_budget is not None:
+                budgets.append(snapshot.effective_budget)
+            for budget in budgets:
+                if budget.reset_interval is not None or budget.resets_at is not None:
+                    raise GuardFailure("shared_caps does not support resetting OpenRouter budgets")
+                if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
+                        or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
+                    raise GuardFailure("OpenRouter budget metadata is malformed")
+                headroom.append(budget.remaining)
+            allowance = min(Decimal(150), *headroom)
+            if allowance <= 0:
+                raise GuardFailure("shared_caps has no positive verified key headroom")
+            self.effective_allowance_usd = allowance
+            thresholds = self.thresholds
+            self.thresholds = SharedRoleThresholds(
+                allowance, thresholds.probe_timeout, thresholds.poll_interval,
+                thresholds.max_sample_age, thresholds.cleanup_timeout,
+            )
+        super()._check_headroom(snapshot, baseline)
+
+    def sanitized_effective_parameters(self) -> dict[str, Any] | None:
+        parameters = super().sanitized_effective_parameters()
+        if parameters is None:
+            return None
+        return parameters | {
+            "shared_allowance_source": "verified_key_headroom",
+            "shared_aggregate_ceiling_usd": "150",
+        }
+
+
+class SplitSpendGuard(SpendGuard):
+    def __init__(self, thresholds: SplitThresholds, *, agent_probe: Probe | None = None,
+                 world_probe: Probe | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        super().__init__(
+            Thresholds(
+                KEY_CEILING,
+                Decimal(1),
+                probe_timeout=thresholds.probe_timeout,
+                poll_interval=thresholds.poll_interval,
+                max_sample_age=thresholds.max_sample_age,
+                cleanup_timeout=thresholds.cleanup_timeout,
+            ),
+            clock=clock,
+            openrouter_probe=lambda: None,
+        )
+        self.thresholds = thresholds
+        self.agent_probe = agent_probe or (lambda: split_openrouter_key_probe("OPENROUTER_AGENT_API_KEY", thresholds.probe_timeout))
+        self.world_probe = world_probe or (lambda: split_openrouter_key_probe("OPENROUTER_WORLD_API_KEY", thresholds.probe_timeout))
+        self._split_baseline: dict[str, OpenRouterSnapshot] = {}
+        self._split_previous: dict[str, OpenRouterSnapshot] = {}
+
+    async def _read_openrouter(self) -> dict[str, OpenRouterSnapshot]:
+        agent_raw, world_raw = await asyncio.gather(
+            self._probe("OpenRouter agent", self.agent_probe),
+            self._probe("OpenRouter world", self.world_probe),
+        )
+        try:
+            parsed = {}
+            for role, raw in (("agent", agent_raw), ("world", world_raw)):
+                if not isinstance(raw, Mapping) or not isinstance(raw.get("data"), Mapping):
+                    raise TypeError
+                if "limit_reset" not in raw["data"] or raw["data"]["limit_reset"] is not None:
+                    raise ValueError
+                parsed[role] = OpenRouterSnapshot.parse(raw)
+            return parsed
+        except (ValueError, TypeError, OverflowError):
+            raise GuardFailure("split monitor data malformed or resettable") from None
+
+    def _accept_sample(self, openrouter: dict[str, OpenRouterSnapshot], *, initial: bool = False) -> None:
+        limits = {"agent": (KEY_CEILING, self.thresholds.agent_trial_delta),
+                  "world": (Decimal(100), self.thresholds.world_trial_delta)}
+        for role, sample in openrouter.items():
+            ceiling, delta = limits[role]
+            if sample.limit != ceiling or sample.remaining > sample.limit or sample.usage > sample.limit:
+                raise GuardFailure(f"OpenRouter {role} key ceiling or counters invalid")
+            if sample.usage + sample.remaining > sample.limit + _MONEY_EPSILON:
+                raise GuardFailure(f"OpenRouter {role} counters malformed")
+            if initial:
+                if sample.remaining < delta:
+                    raise GuardFailure(f"OpenRouter {role} remaining limit is below trial threshold")
+                self._split_baseline[role] = sample
+            else:
+                previous = self._split_previous.get(role)
+                baseline = self._split_baseline.get(role)
+                if previous is None or baseline is None:
+                    raise GuardFailure("split monitor state invalid")
+                if (sample.usage < previous.usage or sample.remaining > previous.remaining + _MONEY_EPSILON
+                        or sample.limit != previous.limit):
+                    raise GuardFailure(f"OpenRouter {role} counters are nonmonotonic")
+                if sample.usage - baseline.usage >= delta:
+                    raise GuardFailure(f"OpenRouter {role} trial threshold reached")
+            self._split_previous[role] = sample
+        self._last_sample_at = self._clock()
+
+    async def start(self) -> None:
+        agent_key = os.environ.get("OPENROUTER_AGENT_API_KEY")
+        world_key = os.environ.get("OPENROUTER_WORLD_API_KEY")
+        if not agent_key or not world_key or agent_key == world_key:
+            self._latch("split OpenRouter keys missing or not independent")
+            raise self._failure()
+        await super().start()
+
+
 @contextmanager
-def install_modal_hooks(guard: SpendGuard):
+def install_modal_hooks(
+    guard: SpendGuard,
+    *,
+    on_sandbox_created: Callable[[Any], None] | None = None,
+):
     from harbor.environments.modal import ModalEnvironment
 
     original_create = ModalEnvironment._create_sandbox
@@ -607,6 +919,9 @@ def install_modal_hooks(guard: SpendGuard):
         except GuardFailure:
             await guard.cleanup_bound()
             raise
+        if on_sandbox_created is not None:
+            with suppress(Exception):
+                on_sandbox_created(self)
         return binding.sandbox
 
     async def guarded_exec(

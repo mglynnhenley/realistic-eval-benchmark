@@ -12,9 +12,9 @@ newest-first entry below with the current fingerprint, printed by
 environment file names and contents, excluding Git-ignored files and Python
 caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
-Computing it requires Git and a checkout so private local data is never
-included by an unfiltered fallback. The changelog test checks the version,
-fingerprint and bump kind.
+Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
+source tree validates its source manifest file allowlist before hashing it.
+The changelog test checks the version, fingerprint and bump kind.
 
 Run the CI changelog check locally with
 `uv run --frozen pytest -q tests/test_environment_version.py`. Native task
@@ -24,11 +24,140 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.6 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 9704d16033a7eecd0560c00d149b9617fb17917f592b11df1fc9e1011f2faac7
+- Trial round: none. Offline validation only.
+- Changes: record sanitized exception types and repository-relative frames when Inspect returns a failed inprocess evaluation (MAT-130).
+
+## 8.5 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 3a5060c85f47e424698a7f6eb19abefa125ae0c4eb4ad85c8dd993ec2b6e1109
+- Trial round: none. Offline validation only.
+- Changes: remove the unused `new_mail_count` wrapper; wake-up counts continue to derive from the active `new_mail_ids` path.
+
+## 8.4 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 8b1fa02b97f1591d42f94165fd7da40a05a6047ed4c18e54faa6337b1e631ca4
+- Trial round: none. Offline validation only.
+- Changes: scan the most recent 100 Inspect transcript events for the active tool span before falling back to the existing 200-event lookup (MAT-167).
+
+## 8.3 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 782d77fcd820c46af6e7a25887d025e8eb80af51a4077f76b92f83744df0324f
+- Trial round: none; offline validation only, no paid calls.
+- Changes: pin remaining Python/uv and Debian build inputs; add source,
+  resolved-scenario and immutable local browser image locks that reject
+  unavailable or mismatched identities before model-cost setup; include
+  requested-deadline overrides in lock creation and validation. Native Harbor
+  artifact locks remain unsupported (MAT-64).
+
+## 8.2 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 12ca8f7dfe905cc2337742e4a71050bca5c5738bc29f2fac70ad3c28039bc658
+- Trial round: none; offline validation only.
+- Changes: add the opt-in `shared_caps` guarded mode, deriving a fixed per-run aggregate allowance from verified finite key/budget headroom while preserving the saved manifest and existing shared-role ledger; require explicit key budget metadata and runtime binding before target/world requests; allow the independent requested deadline in this mode.
+
+## 8.1 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: f18ee32428609b89d2fc2bcc16b4801834335a905f24886fc464da96df7a5408
+- Trial round: none; offline validation only.
+- Changes: carry an independent requested deadline through native `shared_roles` task arguments while preserving defaults and world/company data.
+
+## 8.0 — 2026-11-23
+- Kind: behaviour round
+- Fingerprint: cbba3aabaa9eb65fb1aedae5da01e80eda33ce4ce2036885dae10190c70c88a0
+- Trial round: not run; synthetic verification only. Any native round requires separate authorization.
+- Changes: reject wake-up requests at or after the simulated session cutoff instead of confirming a time when the agent cannot resume. Earlier mail and valid wake-up requests retain their existing behaviour (MAT-117).
+
+## 7.17 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 531ec81288488128c28631fb1e5cc9d846050d45b9cd2d5074a6b1256b0837cc
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Mark invalid multipart charset declarations as undecodable, including NUL-containing defaults and part headers, while preserving raw payloads.
+
+## 7.16 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 6e665b5a1a143f3718fa71fd5e3b47ddc2f521cec59cc29d013a77300d3966a9
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Preserve correspondence fixes through 7.15, harden Markdown code spans, and retain multipart transfer-encoded values and `_charset_` decoding.
+- Merged main: retain one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance from origin/main 292b151 (original 7.13 fingerprint e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd).
+
+## 7.15 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: cb983641e0085d92f97ec160be1adeca62d708fc928e4170d86c6b035f140f93
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Safely render untrusted correspondence metadata, decode text-only multipart submissions, and retain explicit empty outbound bodies.
+
+## 7.14 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 0bf216587ab0d34d8cfa8a63c9ae68ac02831d0c588c29e5ce2fece841daea80
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Secure private correspondence outputs and correct read-marker direction, immediate form timing, saved browser-body decoding, silent interaction provenance, and JSONL Unicode separator handling.
+
+## 7.13 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 6d7d013fb224e8d6e38adff14cb86cb7654302cd0478a249ac56c34e10baa90e
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Add the offline private correspondence exporter and merge split-key routing and strict independent budget enforcement; no new trial or behavior round.
+## 7.12 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 27654f1bce57fb61d41243cff8fcae0db19cf393243fec687ed55c0d525f4f73
+- Trial round: none; offline validation only.
+- Changes: add split-key routing and strict local budgets with request-matched settlement evidence; attest role-specific sources, reject encrypted reasoning without a documented token bound, limit split batches to Laura, and print monitored split-launch guidance.
+
+## 7.11 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: a8557cafc4480ce83b34c3c582b26f7a0acebfc69df59cb176e56069d2ff4abb
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Write allowlisted native world status and ordered action/result metadata for the host-side installed-agent timeline, without adding telemetry to agent context, tools, canonical trial records or the public wheel (MAT-168).
+
+## 7.10 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 407f72faf66045b3d36f61accf141b960c87ec67528b68ce730f9b8f14fe566a
+- Trial round: none; offline validation only.
+- Changes: remove the arbitrary simulated-duration ceiling and separate the explicit requested task deadline from the session horizon and frozen claim evidence.
+
+## 7.9 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: 0bdd56442b2b22671533b80a9efbaa74e629e423bdfa35b0aa300514ca77fa93
+- Trial round: none; offline validation only.
+- Changes: Require defaulted fields in fixed-object Anthropic company-action schemas to reduce strict-output grammar complexity while preserving local CompanyAction defaults.
+
+## 7.8 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: 52a9a403be15febd3df20be309cc107962e5354d50f750d26ef14ca4a6251b53
+- Trial round: none; offline validation only.
+- Changes: omit only the default temperature from Anthropic open-world company-action structured requests when provider routing requires support for every parameter; preserve non-default and unrelated sampling settings.
+
+## 7.7 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: 407da4b2ed8271c34cff1c547bde0cfe0fc2403aadbcbe7cbc4d93a10afa20a4
+- Trial round: none; offline validation only.
+- Changes: classify explicit embedded invalid-request rejections as permanent, preserve billing holds, and record a distinct safe stop without changing requests (MAT-130).
+
+## 7.6 — 2026-11-20
+- Kind: trivial batch
+- Fingerprint: a363a49b11ef57c879a610e6d78a107eda5462bd775b595e2a0717990c82137b
+- Trial round: none; offline validation only. The synthetic single-contact acceptance probe is prepared but unrun under the no-paid-call instruction.
+- Changes: Adapt Anthropic OpenRouter company-action schemas to Claude structured-output constraints and require parameter-capable provider routing while preserving existing price ceilings (MAT-160).
+## 7.5 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f
+- Trial round: none; offline validation only.
+- Changes: require native Harbor tasks to install an approved wheel with a verified SHA-256; keep scripted parity fixtures test-only (MAT-154).
+
+## 7.4 — 2026-11-19
+- Kind: trivial batch
+- Fingerprint: 3787e53be3db7d37d31b273d2d3bc86c8cc4d167ec509048f8d33eddd624916f
+- Trial round: none; offline validation only.
+- Changes: include the error-screening module without importing simulator modules at package startup, and limit the installed agent scenario to the public request/profile/time inputs (MAT-153).
+
 ## 7.3 — 2026-11-19
 - Kind: trivial batch
-- Fingerprint: 669c9240eed4dd5f276e3f91766619573b15f70763522219d3c233fe65169943
-- Trial round: none; no workflow run in this change.
-- Changes: add private startup markers and redacted exception locations to the local inprocess parity workflow (MAT-130).
+- Fingerprint: 2dcc1662aadff75128d6a4b27b7e288586635e7b6793bd2e53351b80a0b8bfe1
+- Trial round: none; offline validation only.
+- Changes: require verified browser network isolation before native Harbor world startup exposes agent tools (MAT-152).
 
 ## 7.2 — 2026-11-18
 - Kind: trivial batch

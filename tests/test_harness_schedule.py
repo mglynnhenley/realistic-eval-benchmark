@@ -298,6 +298,21 @@ def _saved_wakeup_world(stamp, previous=None):
     return load_world()
 
 
+@pytest.mark.parametrize("at", ["2026-10-25 02:00", "2026-10-25 02:01"])
+async def test_wakeup_rejects_session_cutoff_without_replacing_request(at):
+    from inspect_ai.tool import ToolError
+
+    from refund_eval.agent.harness import schedule_wakeup
+    from refund_eval.world.state import load_world
+    from refund_eval.world.store import SESSION_END_KEY, world_store
+
+    before = _saved_wakeup_world("2026-10-25T00:00:00+00:00", datetime(2026, 10, 25, 1, 59, tzinfo=UTC))
+    world_store().set(SESSION_END_KEY, "2026-10-25T02:00:00+00:00")
+    with pytest.raises(ToolError, match="before the simulated session ends"):
+        await schedule_wakeup()(at)
+    assert load_world().requested_wakeup == before.requested_wakeup
+
+
 @pytest.mark.parametrize("at", ["2026-03-29 01:00", "2026-03-29 01:30", "2026-03-29 01:59"])
 async def test_wakeup_rejects_skipped_london_hour_without_replacing_request(at):
     from inspect_ai.tool import ToolError

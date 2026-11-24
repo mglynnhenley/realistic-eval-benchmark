@@ -24,7 +24,7 @@ class WorldSettings(BaseModel):
     scenario: str = RunConfig.model_fields["scenario"].default  # name or YAML path
     seed: int | None = Field(default=None, ge=0)  # None draws one; either way it is recorded in the world
     sim_weeks: float = Field(default_factory=lambda data: load_scenario(data["scenario"]).sim_weeks,
-                             gt=0, le=12)
+                             gt=0, allow_inf_nan=False)
     max_turns: int = Field(default=RunConfig.model_fields["max_turns"].default, ge=1)
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS
     research_mode: Literal["auto", "live", "saved"] = RunConfig.model_fields["research_mode"].default
@@ -33,8 +33,10 @@ class WorldSettings(BaseModel):
     simulator_model: str = DEFAULT_ROLE_MODEL
     grader_model: str = DEFAULT_GRADER_MODEL
     world_cost_limit: CostCap | None = None
+    strict_budget: bool = False
     company_simulator: str | None = None
     # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
     # (in a network namespace where the host allows one), as on the Inspect path.
     browser_runtime: Literal["docker", "subprocess"] = "docker"
+    require_verified_browser_isolation: bool = False
     output_dir: str = DEFAULT_OUTPUT_DIR  # state.json, events.jsonl and browser/ (network audit, browser files)

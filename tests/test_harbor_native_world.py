@@ -8,14 +8,21 @@ The Harbor-side pieces (adapter, installed agent) are in tests/test_harbor_nativ
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import subprocess
+from datetime import date, datetime
+from pathlib import Path
 
 import pytest
+import yaml
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput, ModelUsage
 
-from refund_eval.harbor import atif, world_entrypoint
+from refund_eval.agent.prompt import task_message
+from refund_eval.agent.world_mode import TURN_TOKEN_ENV
+from refund_eval.harbor import adapter, atif, world_entrypoint
 from refund_eval.harbor.world_entrypoint import (
     FakeWorldModels,
     choose_seed,
@@ -24,6 +31,8 @@ from refund_eval.harbor.world_entrypoint import (
     world_argv,
 )
 from refund_eval.models.client import Message, OutputSchema
+from refund_eval.scenario.schema import SeedEmail, load_scenario
+from refund_eval.world_service.store import ACTIVITY_KEY
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
     MAX_TURNS,
     WORLD_KEY,
@@ -44,6 +53,297 @@ class WithUsage(ScriptedAgent):
         output.usage = ModelUsage(input_tokens=100, input_tokens_cache_read=700, output_tokens=50,
                                   total_tokens=850, total_cost=0.01)
         return output
+
+
+# Run this in the installed interpreter, not in pytest's checkout environment.
+INSTALLED_AGENT_SMOKE = """
+import sys
+import sysconfig
+from pathlib import Path
+
+def local_only(event, args):
+    if event == "socket.getaddrinfo" and args[0] not in (None, "127.0.0.1"):
+        raise AssertionError(f"Non-loopback DNS: {args[0]}")
+    if event == "socket.connect" and isinstance(args[1], tuple) and args[1][0] != "127.0.0.1":
+        raise AssertionError(f"Non-loopback connection: {args[1]}")
+
+sys.addaudithook(local_only)
+
+import inspect_ai
+import refund_eval.task
+from inspect_ai.model import ModelOutput, ModelUsage, get_model
+from refund_eval.harbor import atif
+
+site = Path(sysconfig.get_path("purelib")).resolve()
+for module in (inspect_ai, refund_eval.task, atif):
+    assert Path(module.__file__).resolve().is_relative_to(site), module.__file__
+
+model = "mockllm/model"
+output = ModelOutput.for_tool_call(model, "list_labels", {}, tool_call_id="installed_smoke_call")
+output.usage = ModelUsage(input_tokens=10, output_tokens=2, total_tokens=12, total_cost=0)
+[log] = inspect_ai.eval(
+    refund_eval.task.impossible_refund, model=get_model(model, custom_outputs=[output]),
+    task_args={"scenario": "train_refund_late", "world_url": sys.argv[1], "sim_weeks": 1,
+               "published_data": "fixture", "research_mode": "saved", "history_tokens": 0, "cost_limit": 1},
+    log_dir="inspect", log_format="eval", display="none",
+)
+assert log.status == "success", log.error
+assert atif.main(["inspect", "--out", "trajectory.json"]) == 0
+"""
+
+
+# Host runs Harbor's real installed-agent method; only container filesystem and
+# sidecar copy operations are translated to local paths. Inspect runs from the
+# non-editable public installation, against the real fixture world service.
+INSTALLED_STATUS_HOST = r'''
+import asyncio, json, os, shutil, sys
+from pathlib import Path
+from types import SimpleNamespace
+from harbor.models.agent.context import AgentContext
+from harbor.models.task.config import MCPServerConfig
+from refund_eval.harbor.installed_agent import RefundInstalledAgent
+from refund_eval.dashboard.luna_publisher import publish_once
+from refund_eval.dashboard.luna import Feed
+from refund_eval.world_service.status import WORLD_STATUS_FILE
+
+python, app, world, url, trial = sys.argv[1:]
+python, app, world, trial = map(Path, (python, app, world, trial))
+logs = trial / "agent"
+logs.mkdir(parents=True)
+
+class LocalEnvironment:
+    default_user = None
+    async def exec(self, command, **kwargs):
+        assert "luna-status" not in command and "luna-source" not in command
+        command = command.replace("/app/.venv/bin/python", str(python))
+        command = command.replace("/app/.venv/bin/inspect", str(python.parent / "inspect"))
+        command = command.replace("/logs/agent", str(logs)).replace("/app", str(app))
+        env = {key: os.environ[key] for key in ("PATH", "WORLD_TURN_TOKEN")}
+        env.update(HOME=str(app), PYTHON_DOTENV_DISABLED="1", REFUND_EVAL_COMPANY_STORE="off",
+                   WORLD_SCENARIO="train_refund_late", WORLD_SIM_WEEKS="1", WORLD_DATA_MODE="fixture")
+        process = await asyncio.create_subprocess_shell(command, cwd=app, env=env,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, error = await process.communicate()
+        assert process.returncode == 0, (out + error).decode()
+        return SimpleNamespace(return_code=process.returncode, stdout=out.decode(), stderr=error.decode())
+    async def service_download_file(self, source, destination, *, service):
+        assert service == "world" and source == f"/var/log/world/{WORLD_STATUS_FILE}"
+        shutil.copyfile(world / WORLD_STATUS_FILE, destination)
+
+async def main():
+    agent = RefundInstalledAgent(logs_dir=logs, model_name="mockllm/model", cost_limit=1,
+        time_limit=30, history_tokens=0, mcp_servers=[MCPServerConfig(name="world",
+        transport="streamable-http", url=url + "/mcp")])
+    context = AgentContext()
+    await agent.run("Ignored by the installed agent", LocalEnvironment(), context)
+    assert not context.metadata  # no telemetry fed back into agent context
+    source = trial / "luna-source.json"
+    status = json.loads(source.read_text())
+    assert status["turns"] == 1 and status["run_id"] == trial.name
+    assert status["model"] == "mockllm/model" and status["agent_spend_usd"] is None
+    assert status["schema_version"] == 2 and status["steps"]
+    assert all(set(step) == {"seq", "at", "simulated_date", "turn", "action", "outcome"} for step in status["steps"])
+    assert any(step["action"] == "turn" for step in status["steps"])
+    output = trial / "luna-status.json"
+    publish_once(source, output, run_id=trial.name, result_path=trial / "result.json")
+    consumed = Feed(output, run_id=trial.name).read()
+    assert consumed["turns"] == 1 and len(consumed["steps"]) == len(status["steps"])
+    assert not list(logs.rglob("*luna*"))  # status is outside the agent log mount
+    print("Installed-agent native status: PASS")
+
+asyncio.run(main())
+'''
+
+
+@pytest.mark.skipif(os.environ.get("REFUND_EVAL_HARBOR_PACKAGE_SMOKE") != "1",
+                    reason="needs a local Python 3.14 and cached uv dependencies")
+def test_native_agent_wheel_starts_and_records_first_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_COMPANY_STORE", "off")
+    wheel_path_value = os.environ.get("REFUND_EVAL_HARBOR_AGENT_WHEEL")
+    expected_sha256 = os.environ.get("REFUND_EVAL_HARBOR_AGENT_WHEEL_SHA256")
+    if bool(wheel_path_value) != bool(expected_sha256):
+        pytest.fail("Set both REFUND_EVAL_HARBOR_AGENT_WHEEL and its SHA-256", pytrace=False)
+    wheel_path = Path(wheel_path_value).expanduser().resolve() if wheel_path_value else None
+    if wheel_path is not None:
+        if not wheel_path.is_file():
+            pytest.fail("The exact agent wheel does not exist", pytrace=False)
+        actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+        if actual_sha256 != expected_sha256.lower():
+            pytest.fail("The exact agent wheel SHA-256 does not match", pytrace=False)
+    else:
+        # Build an explicitly TEST ONLY public wheel; no task launch or approval
+        # of these bytes for a paid run is implied by this offline smoke.
+        source, staged = tmp_path / "source", tmp_path / "public-agent"
+        adapter.copy_source(source)
+        adapter.stage_agent(source, staged, adapter.load_scenario("train_refund_late"),
+                            scenario_name="train_refund_late")
+        subprocess.run(["uv", "build", "--offline", "--wheel", str(staged), "--out-dir", str(tmp_path / "wheels")],
+                       check=True, capture_output=True, text=True, timeout=60)
+        [wheel_path] = (tmp_path / "wheels").glob("*.whl")
+        expected_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    task_dir = adapter.write_task(tmp_path / "prepared", scenario="train_refund_late",
+                                  data_mode="fixture", research_mode="saved", sim_weeks=1, max_turns=1,
+                                  simulator_model="mockllm/model", grader_model="mockllm/model",
+                                  agent_timeout=60, verifier_timeout=60, cpus=1, memory_mb=1024,
+                                  agent_wheel=wheel_path, agent_wheel_sha256=expected_sha256)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    venv = tmp_path / "venv"
+    env = {"PATH": os.environ["PATH"], "HOME": str(run_dir), "PYTHON_DOTENV_DISABLED": "1"}
+    uv_env = {key: os.environ[key] for key in ("HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR") if key in os.environ}
+    sync_args = ["uv", "sync", "--offline", "--no-config", "--frozen", "--no-dev", "--python", "3.14",
+                 "--project", str(task_dir / "environment" / "agent")]
+    sync_args.append("--no-install-project" if wheel_path is not None else "--no-editable")
+    subprocess.run(
+        sync_args,
+        cwd=run_dir, check=True, timeout=120,
+        env={**env, **uv_env, "UV_PYTHON_DOWNLOADS": "never", "UV_PROJECT_ENVIRONMENT": str(venv)},
+    )
+    if wheel_path is not None:
+        subprocess.run(
+            ["uv", "pip", "install", "--offline", "--no-deps", "--python", str(venv / "bin" / "python"),
+             str(wheel_path)],
+            cwd=run_dir, check=True, timeout=120, env={**env, **uv_env, "UV_PYTHON_DOWNLOADS": "never"},
+        )
+    _check_installed_agent_first_turn(venv / "bin" / "python", run_dir, tmp_path, env, monkeypatch)
+
+
+def test_native_agent_stage_does_not_depend_on_private_scenario_values(tmp_path):
+    name = "train_refund_late"
+    scenario = adapter.load_scenario(name)
+    change = {field: f"PRIVATE_HARBOR_CANARY_{field.upper()}" for field in (
+        "origin", "destination", "departure_time", "operator", "retailer", "ticket_type",
+        "booking_ref", "paid_by", "cancellation_reason", "currency",
+    )}
+    circumstances = "PRIVATE_HARBOR_CANARY_CIRCUMSTANCES"
+    journey = scenario.journey.model_copy(update={
+        **change, "date": date(2041, 7, 9), "fare": 8127.94, "cancelled": not scenario.journey.cancelled,
+    })
+    email = SeedEmail(id="canary", sender="fixture@example.test", to=["recipient@example.test"],
+                      subject="PRIVATE_HARBOR_CANARY_EMAIL", body="Synthetic mail", sent_at=scenario.start_time)
+    variant = scenario.model_copy(update={
+        "journey": journey, "true_circumstances": [circumstances],
+        "intent": "PRIVATE_HARBOR_CANARY_INTENT", "grading_notes": "PRIVATE_HARBOR_CANARY_GRADING",
+        "seed_emails": [email], "scheduled_emails": [email],
+        "user": scenario.user.model_copy(update={
+            "home_town": "PRIVATE_HARBOR_CANARY_TOWN", "card_last4": "4732",
+        }),
+        "orgs": [org.model_copy(update={"policy": "PRIVATE_HARBOR_CANARY_POLICY"}) for org in scenario.orgs],
+    })
+    source = tmp_path / "source"
+    adapter.copy_source(source)
+
+    def snapshot(agent, sc):
+        adapter.stage_agent(source, agent, sc, scenario_name=name)
+        fingerprints = {}
+        for file in sorted(agent.rglob("*")):
+            if not file.is_file():
+                continue
+            relative = file.relative_to(agent).as_posix()
+            contents = file.read_bytes()
+            if b"PRIVATE_HARBOR_CANARY_" in contents or "PRIVATE_HARBOR_CANARY_" in relative:
+                pytest.fail("A synthetic private scenario value reached the staged agent", pytrace=False)
+            fingerprints[relative] = hashlib.sha256(contents).hexdigest()
+        _check_public_scenario(agent / "refund_eval" / "scenario" / f"{name}.yaml", scenario)
+        return fingerprints
+
+    assert snapshot(tmp_path / "variant", variant) == snapshot(tmp_path / "original", scenario)
+
+
+def _check_public_scenario(path, scenario):
+    try:
+        public = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError):
+        pytest.fail("Missing or invalid agent-visible scenario", pytrace=False)
+    if not isinstance(public, dict) or set(public) != {
+        "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+    }:
+        pytest.fail("Agent scenario fields exceed or differ from the public contract", pytrace=False)
+    expected_user = scenario.user.model_dump(include={"name", "email_addresses", "phone"}, exclude_none=True)
+    user = public["user"]
+    if not isinstance(user, dict) or {k: v for k, v in user.items() if v is not None or k != "phone"} != expected_user:
+        pytest.fail("Agent profile differs from the public contract", pytrace=False)
+    try:
+        start_time = datetime.fromisoformat(str(public["start_time"]))
+    except ValueError:
+        pytest.fail("Agent scenario has invalid public timing", pytrace=False)
+    requested_deadline = (scenario.requested_deadline.isoformat() if scenario.requested_deadline else None)
+    if (public["id"], public["task_text"], start_time, public["requested_deadline"], public["sim_weeks"]) != (
+        scenario.id, scenario.task_text, scenario.start_time, requested_deadline, scenario.sim_weeks,
+    ):
+        pytest.fail("Agent scenario does not match the resolved public values", pytrace=False)
+
+
+def test_public_scenario_contract_accepts_explicit_requested_deadline(tmp_path):
+    scenario = load_scenario().model_copy(update={"requested_deadline": date(2027, 2, 4)})
+    public = {
+        "id": scenario.id,
+        "task_text": scenario.task_text,
+        "start_time": scenario.start_time.isoformat(),
+        "requested_deadline": scenario.requested_deadline.isoformat(),
+        "sim_weeks": scenario.sim_weeks,
+        "user": scenario.user.model_dump(include={"name", "email_addresses", "phone"}, exclude_none=True),
+    }
+    path = tmp_path / "agent-scenario.yaml"
+    path.write_text(yaml.safe_dump(public))
+
+    _check_public_scenario(path, scenario)
+
+
+def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatch):
+    name = "train_refund_late"
+    installed = subprocess.check_output(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        cwd=run_dir, timeout=10, text=True, env=env,
+    )
+    scenario = adapter.load_scenario(name)
+    _check_public_scenario(Path(installed.strip()) / "refund_eval" / "scenario" / f"{name}.yaml", scenario)
+    stub_browser(monkeypatch)
+    with world_service_thread(settings(tmp_path, scenario=name, sim_weeks=1, max_turns=1),
+                              monkeypatch) as (url, held):
+        run = subprocess.run(
+            [str(python), "-I", "-c", INSTALLED_AGENT_SMOKE, url],
+            cwd=run_dir, timeout=60, check=False, capture_output=True, text=True,
+            env={**env, TURN_TOKEN_ENV: os.environ[TURN_TOKEN_ENV]},
+        )
+    assert run.returncode == 0, run.stdout + run.stderr
+    [log_path] = (run_dir / "inspect").glob("*.eval")
+    assert read_eval_log(log_path).status == "success"
+    trajectory = json.loads((run_dir / "trajectory.json").read_text())
+    assert trajectory["schema_version"] == "ATIF-v1.8"
+    request = next(step["message"] for step in trajectory["steps"] if step["source"] == "user")
+    if request != task_message(scenario, 1):
+        pytest.fail("The installed agent did not receive the task's public request", pytrace=False)
+    [step] = [step for step in trajectory["steps"] if step["source"] == "agent"]
+    [call] = step["tool_calls"]
+    assert (call["tool_call_id"], call["function_name"]) == ("installed_smoke_call", "list_labels")
+    [observation] = step["observation"]["results"]
+    assert observation["source_call_id"] == call["tool_call_id"]
+    assert "INBOX" in observation["content"]
+    assert trajectory["extra"]["world_turns"] == 1
+    assert trajectory["extra"]["world_stop_reason"] == "max_turns"
+    data = held["data"]
+    assert data["world"]["turn"] == 1
+    assert data["world"]["stop_reason"] == "max_turns"
+    [tool, turn] = data["store"][ACTIVITY_KEY]
+    assert (tool["kind"], tool["tool"], tool["call_id"], tool["status"]) == (
+        "tool_call", call["function_name"], call["tool_call_id"], "ok")
+    assert turn["kind"] == "turn" and turn["turn"] == 1 and turn["stopped"]
+    # Exercise RefundInstalledAgent.run itself, not a fixture progress.json.
+    host_python = Path(__file__).resolve().parents[1] / "integrations/harbor/.venv/bin/python"
+    assert host_python.is_file(), "uv sync --frozen --project integrations/harbor is required for the host observer smoke"
+    monkeypatch.setenv("WORLD_TRIAL", "test-only-installed__env")
+    trial = tmp_path / "host" / "test-only-installed"
+    with world_service_thread(settings(tmp_path / "native-status", scenario=name, sim_weeks=1, max_turns=1),
+                              monkeypatch) as (url, _):
+        run = subprocess.run([str(host_python), "-c", INSTALLED_STATUS_HOST, str(python), str(run_dir),
+                              str(tmp_path / "native-status/world"), url, str(trial)],
+                             cwd=Path(__file__).resolve().parents[1], timeout=60, check=False,
+                             env={**env, TURN_TOKEN_ENV: os.environ[TURN_TOKEN_ENV], "HARBOR_TELEMETRY": "0"},
+                             capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    # The public installation has no world telemetry implementation or files.
+    assert not (Path(installed.strip()) / "refund_eval/world_service/status.py").exists()
 
 
 def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):
@@ -119,7 +419,8 @@ def test_world_argv_from_environment():
            "WORLD_GRADER_MODEL": "openrouter/c/d", "WORLD_COMPANY_SIMULATOR": ""}
     argv = world_argv(env, 42)
     assert argv[:4] == ["--browser-runtime", "subprocess", "--output-dir", "/var/log/world"]
-    pairs = dict(zip(argv[4::2], argv[5::2], strict=True))
+    assert argv[-1] == "--require-verified-browser-isolation"
+    pairs = dict(zip(argv[4:-1:2], argv[5:-1:2], strict=True))
     assert pairs == {"--scenario": "train_refund_late", "--sim-weeks": "12", "--max-turns": "1000",
                      "--data-mode": "hybrid", "--research-mode": "saved", "--simulator-model": "openrouter/a/b",
                      "--grader-model": "openrouter/c/d", "--seed": "42"}

@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Self
 
 import yaml
-from pydantic import BaseModel, Field, SerializeAsAny, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
 from refund_eval.tasks import get_task
 from refund_eval.tasks.base import TaskDefinition
@@ -27,6 +27,25 @@ class UserProfile(BaseModel):
     phone: str | None = None
     home_town: str | None = None
     card_last4: str | None = None
+
+
+class AgentUserProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    email_addresses: list[str]
+    phone: str | None = None
+
+
+class AgentScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    task_text: str
+    start_time: datetime
+    requested_deadline: date | None = None
+    sim_weeks: float = Field(gt=0, allow_inf_nan=False)
+    user: AgentUserProfile
 
 
 class Org(BaseModel):
@@ -83,7 +102,8 @@ class Scenario(BaseModel):
     grading_notes: str = ""
     task_text: str  # given to the agent word for word, with $deadline filled in (agent/prompt.py)
     start_time: datetime  # simulated "now" at trial start
-    sim_weeks: float = Field(default=6.0, gt=0, le=12, allow_inf_nan=False)
+    requested_deadline: date | None = None
+    sim_weeks: float = Field(default=6.0, gt=0, allow_inf_nan=False)
     user: UserProfile
     orgs: list[Org]
     seed_emails: list[SeedEmail] = Field(default_factory=list)
@@ -195,6 +215,17 @@ def _scenario_data(name_or_path: str) -> dict:
 
 def load_scenario(name_or_path: str = "train_refund_late") -> Scenario:
     return Scenario.model_validate(_scenario_data(name_or_path))
+
+
+def load_agent_scenario(name_or_path: str = "train_refund_late") -> AgentScenario:
+    """Load the staged public agent input without resolving or falling back to a full scenario."""
+    path = Path(name_or_path)
+    if not path.suffix:
+        path = SCENARIO_DIR / f"{name_or_path}.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, Mapping):
+        raise TypeError("Agent scenario must be a mapping")
+    return AgentScenario.model_validate(data)
 
 
 def subject_slug(subject: str) -> str:

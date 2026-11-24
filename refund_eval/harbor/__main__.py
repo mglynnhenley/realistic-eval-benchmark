@@ -32,13 +32,14 @@ from refund_eval.scenario.schema import load_scenario, scenario_names
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = """FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS browser-node
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 COPY --from=browser-node /usr/local/bin/node /usr/local/bin/node
 COPY --from=browser-node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers NODE_ENV=production
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy UV_PYTHON=3.12 TIKTOKEN_CACHE_DIR=/opt/tiktoken
+RUN printf '%s\\n' 'Types: deb' 'URIs: https://snapshot.debian.org/archive/debian/20261118T000000Z/' 'Suites: bookworm bookworm-updates' 'Components: main' 'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' 'Types: deb' 'URIs: https://snapshot.debian.org/archive/debian-security/20261118T000000Z/' 'Suites: bookworm-security' 'Components: main' 'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' > /etc/apt/sources.list.d/debian.sources
 WORKDIR /app
 COPY source/ /app/
 RUN mkdir -p /opt/browser && cp refund_eval/published/browser_runtime/package*.json refund_eval/published/browser_runtime/server.mjs /opt/browser/
@@ -61,6 +62,11 @@ def prepare(
     from harbor.models.job.config import JobConfig
     from harbor.models.task.task import Task
 
+    if settings.identity_lock is not None:
+        raise ValueError(
+            "Exact browser artifact locks are supported only for local Docker runs; "
+            "Harbor browser artifacts are not identified."
+        )
     if settings.trial_deadlines is not None:
         settings = TrialSettings.model_validate(settings.model_dump(mode="json"))
     if settings.trial_deadlines is not None and concurrency != trials * len(models or ([model] if model else [])):
@@ -109,7 +115,7 @@ def prepare(
     # Never upload the checkout root, .env, .secrets, logs, or local node_modules.
     files = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
-         "refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"], cwd=ROOT,
+         "refund_eval", "scout", "pyproject.toml", "uv.lock", ".python-version", "README.md", "LICENSE"], cwd=ROOT,
     ).decode().split("\0")
     task_dir = destination / "task"
     source = task_dir / "environment/source"
@@ -311,6 +317,7 @@ def main() -> None:
                         default=TrialSettings.model_fields["scenario"].default)
     parser.add_argument("--seed", type=int,
                         help="Non-negative seed for simulated randomness; omit to draw one per trial")
+    parser.add_argument("--identity-lock", help="Run identity lock manifest path or JSON object")
     parser.add_argument("--research-mode", choices=["auto", "live", "saved"], default=argparse.SUPPRESS,
                         help="Open-world research: committed dossiers when fresh, always live, or saved only")
     parser.add_argument("--secret", action="append", default=[], help="Modal secret name; repeatable")

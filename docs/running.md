@@ -2,6 +2,9 @@
 
 The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a real Chromium browser. An open-world simulator answers intercepted emails and website submissions. See [architecture.md](architecture.md) for the design and [harbor.md](harbor.md) for isolated Modal or Docker batches.
 
+See the identity-lock guide at docs/identity-locks.md to pin and enforce
+source, scenario, and local browser-runtime identities for repeatable runs.
+
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. Then:
@@ -76,7 +79,7 @@ Pass task settings as `-T name=value`:
 | `company_simulator` | none | Override the simulator implementation for every company, for example `concordia`. Personal contacts are unchanged. |
 | `research_mode` | `auto` | Use fresh saved company dossiers; research missing or stale ones. `saved` never searches; `live` researches every trial where supported. |
 | `max_turns` | `1000` | Maximum target model generations. |
-| `sim_weeks` | `6` | Maximum simulated duration. |
+| `sim_weeks` | `6` | Simulated session horizon in weeks; any positive finite duration. |
 | `cost_limit` | required for default late refund; `1` for bills | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
 | `token_budget` | none; `40000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
@@ -86,6 +89,26 @@ Pass task settings as `-T name=value`:
 | `resume_log` | none | Continue a `.eval` log or dashboard `snapshot.json` with the same target model. |
 | `browser_runtime` | `docker` | Local browser runtime; Harbor uses its packaged `subprocess`. |
 | `artifact_dir` | `.context/artifacts` | Browser audit artifact root. |
+
+The scenario's optional `requested_deadline` is a separate user-facing date; it
+does not set the session horizon. For example, a one-year horizon can be configured
+without moving the requested task deadline:
+
+```yaml
+requested_deadline: 2027-02-04
+sim_weeks: 52.142857142857146  # 365 days
+```
+
+Only a `$deadline` placeholder in `task_text` uses `requested_deadline`; literal
+dates are otherwise not rewritten. Native `shared_roles` preparation accepts an
+explicit requested deadline for `train_refund_late` and applies it to an
+agent-only task-text projection, leaving the canonical scenario and world data
+unchanged. Omitting it preserves the existing literal task date.
+
+The CLI `--sim-weeks` option and task setting `-T sim_weeks=...` continue to
+override the scenario horizon without changing `requested_deadline`. Simulated
+time uses Python `datetime`; an extreme duration whose resulting date is outside
+its representable range cannot be calculated.
 
 Inspect also accepts `message_limit`, `token_limit`, `time_limit` and `working_limit`. Use `--max-samples N` to limit concurrent CLI trials.
 
@@ -169,6 +192,8 @@ uv run python -m refund_eval.sim.rules --scenario train_refund_late \
 Without `--save` it only prints. `--org KEY` limits it to named organisations. Dropped grounds are listed under `errors`. Trials never generate rules with `research_mode=saved` or fixture web.
 
 Dynamic, non-committed companies can be researched and saved on first contact for reuse by later trials that share the store. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
+
+See [company rules](architecture.md#company-rules) for the tool-call and request-attempt limits on first-contact research.
 
 Native Harbor task preparation first harvests available artifacts from previously registered local job roots for the selected scenario, then snapshots its sanitized entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. A host-only `.native-jobs/` registry tracks prepared jobs roots; it is not copied into task, agent or world inputs. Sequentially prepared native tasks therefore reuse prior companies without a manual harvest or model calls.
 
