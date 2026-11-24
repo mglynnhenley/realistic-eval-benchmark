@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.3 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: a3cd0c01fb59813d59c103a1cc74308a1bd7f6840b44233db45ae67a69a7e5e3
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Add local Transect review and opt-in external judging for saved trials, preserving unknown coverage and keeping trial execution unchanged.
+
 ## 9.2 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: c66a8d13f667eb3f32ba2aa2cc0843cfa0ccb768dd0d8b0996a72d901fa09d5c
