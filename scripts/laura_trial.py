@@ -180,6 +180,8 @@ def _validate_compose_overlay(path: Path) -> None:
     if not isinstance(services, dict):
         raise SetupFailure
     for service in services.values():
+        if service is None:
+            continue
         if not isinstance(service, dict):
             raise SetupFailure
         if any(service.get(key) for key in ("build", "develop", "env_file", "label_file")):

@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 9.1 — 2026-12-12
+## 9.2 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 82fdfa9fba1f93e4078a02f373bc12524e6fa459f320e1c7b187962de683aa15
-- Trial round: none. Offline launcher verification only.
-- Changes: disable benchmark-side monetary spend validation for explicit no-application-price-cutoff runs while retaining provider-key controls and cleanup after early failures.
+- Fingerprint: 860bcdd3575b793f40bd6bb3cafca4472c81f5249d6364923d4be90a366537d0
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Honor explicit no-price-cutoff mode through Luna launches and preserve final artifact collection after a latched guard failure; strict-mode monetary enforcement remains unchanged.
+
+## 9.1 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 7c42676db3373a514de62279baa6c24be69d7fcd7542a36531d20755255b2a5f
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Retain private agent and simulator trace checkpoints through cancellation and failed final collection, with isolated Inspect snapshots and durable private storage.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round

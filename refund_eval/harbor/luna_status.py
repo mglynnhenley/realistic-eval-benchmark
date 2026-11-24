@@ -8,6 +8,10 @@ from pathlib import Path
 
 from refund_eval.dashboard.luna import check_step_update, timestamp, validate
 from refund_eval.dashboard.luna_events import MAX_FEED_BYTES
+from refund_eval.harbor.private_traces import (
+    PRIVATE_WORLD_LOGS_ROOT,
+    has_private_world_bind,
+)
 from refund_eval.world_service.status import (
     ACTION_SUMMARIES,
     WORLD_FIELDS,
@@ -26,7 +30,12 @@ class NativeStatus:
     async def observe(self, environment):
         with tempfile.TemporaryDirectory(prefix="luna-operator-status-") as directory:
             local = Path(directory) / WORLD_STATUS_FILE
-            await environment.service_download_file(f"/var/log/world/{WORLD_STATUS_FILE}", local, service="world")
+            if has_private_world_bind(environment):
+                await environment.download_file(f"{PRIVATE_WORLD_LOGS_ROOT}/{WORLD_STATUS_FILE}", local)
+            else:
+                await environment.service_download_file(
+                    f"/var/log/world/{WORLD_STATUS_FILE}", local, service="world",
+                )
             with local.open("rb") as handle:
                 raw = handle.read(MAX_FEED_BYTES + 1)
             if len(raw) > MAX_FEED_BYTES:

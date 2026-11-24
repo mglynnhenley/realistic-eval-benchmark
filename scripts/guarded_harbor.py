@@ -28,10 +28,12 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
+import tempfile
 import tomllib
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,11 @@ from refund_eval.harbor.adapter import (
     AGENT_IMPORT_PATH,
     verify_split_budget_task_sources,
     verify_split_budget_wheel,
+)
+from refund_eval.harbor.private_traces import (
+    PRIVATE_AGENT_BUFFER_ROOT,
+    PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+    PRIVATE_WORLD_LOGS_ROOT,
 )
 from refund_eval.models.shared_role_spend_ledger import (
     SHARED_CAPS_HEADROOM_BOUND_ENV,
@@ -77,6 +84,100 @@ _ROLE_KEY_REFERENCE = re.compile(r"\$(?:\{)?(OPENROUTER_API_KEY|OPENROUTER_AGENT
 
 class LauncherFailure(RuntimeError):
     pass
+
+
+@contextmanager
+def private_world_bind_mount_adapter():
+    from harbor.environments.base import BaseEnvironment
+    from harbor.environments.modal import ModalEnvironment, _ModalDinD
+
+    original = BaseEnvironment._mount_targets
+    original_start = _ModalDinD.start
+
+    def mount_targets(environment, *, writable_only: bool = False):
+        targets = original(environment, writable_only=writable_only)
+        if isinstance(environment, ModalEnvironment):
+            for target in (PRIVATE_WORLD_LOGS_ROOT, PRIVATE_AGENT_BUFFER_ROOT):
+                if target not in targets:
+                    targets.append(target)
+        return targets
+
+    async def start(strategy, force_build: bool):
+        environment = strategy._env
+        had_marker = hasattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
+        previous_marker = getattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, None)
+        setattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+        try:
+            with private_world_compose_bind(environment):
+                await original_start(strategy, force_build)
+        except (Exception, asyncio.CancelledError):
+            if had_marker:
+                setattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, previous_marker)
+            else:
+                delattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
+            raise
+
+    BaseEnvironment._mount_targets = mount_targets
+    _ModalDinD.start = start
+    try:
+        yield
+    finally:
+        BaseEnvironment._mount_targets = original
+        _ModalDinD.start = original_start
+
+
+@contextmanager
+def private_world_compose_bind(environment):
+    original_dir = environment.environment_dir
+    with tempfile.TemporaryDirectory(prefix="guarded-modal-world-logs-") as temporary:
+        isolated_dir = Path(temporary) / "environment"
+        shutil.copytree(original_dir, isolated_dir)
+        compose_path = isolated_dir / "docker-compose.yaml"
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        services = compose.get("services") if isinstance(compose, dict) else None
+        main = services.get("main") if isinstance(services, dict) else None
+        world = services.get("world") if isinstance(services, dict) else None
+        main_volumes = main.get("volumes") if isinstance(main, dict) else None
+        world_volumes = world.get("volumes") if isinstance(world, dict) else None
+        if isinstance(main, dict) and "volumes" not in main:
+            main_volumes = main.setdefault("volumes", [])
+        if not isinstance(main_volumes, list) or not isinstance(world_volumes, list):
+            raise LauncherFailure("guarded Modal task must have main and world volume lists")
+        world_mounts = [index for index, volume in enumerate(world_volumes)
+                        if volume == "world-logs:/var/log/world"]
+        if len(world_mounts) != 1:
+            raise LauncherFailure("guarded Modal task must have one named world-log volume")
+
+        buffer_target = "/refund-eval-private/inspect-data"
+        buffer_mount = f"inspect-buffer:{buffer_target}"
+        private_buffer_mount = f"{PRIVATE_AGENT_BUFFER_ROOT}:{buffer_target}"
+        existing_buffer_mounts = [index for index, volume in enumerate(main_volumes)
+                                  if isinstance(volume, str) and volume.endswith(f":{buffer_target}")]
+        if len(existing_buffer_mounts) > 1:
+            raise LauncherFailure("guarded Modal task has duplicate Inspect buffer mounts")
+        if existing_buffer_mounts:
+            if main_volumes[existing_buffer_mounts[0]] not in {buffer_mount, private_buffer_mount}:
+                raise LauncherFailure("guarded Modal task has an unexpected Inspect buffer mount")
+            main_volumes[existing_buffer_mounts[0]] = private_buffer_mount
+        else:
+            main_volumes.append(private_buffer_mount)
+
+        volumes = compose.setdefault("volumes", {})
+        if not isinstance(volumes, dict):
+            raise LauncherFailure("guarded Modal task has an invalid top-level volume map")
+        volumes.setdefault("inspect-buffer", {})
+        if any(
+            isinstance(volume, str) and volume.startswith("role-budget:")
+            for volume in (*main_volumes, *world_volumes)
+        ):
+            volumes.setdefault("role-budget", {})
+        world_volumes[world_mounts[0]] = f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world"
+        compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+        environment.environment_dir = isolated_dir
+        try:
+            yield
+        finally:
+            environment.environment_dir = original_dir
 
 
 def _decimal_argument(value: str) -> Decimal:
@@ -183,16 +284,25 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
             raise ValueError
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
-        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+        if not isinstance(compose, dict) or set(compose) not in ({"services"}, {"services", "volumes"}):
+            raise ValueError
+        if compose.get("volumes", {}) not in (
+            {},
+            {"world-logs": None},
+            {"world-logs": None, "inspect-buffer": None},
+        ):
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
             raise ValueError
-        if compose["volumes"] != {"world-logs": None}:
-            raise ValueError
         main = services["main"]
         world_service = services["world"]
-        if main != {"depends_on": {"world": {"condition": "service_healthy"}}}:
+        if (not isinstance(main, dict)
+                or set(main) - {"depends_on", "environment", "volumes"}
+                or "depends_on" not in main
+                or main["depends_on"] != {"world": {"condition": "service_healthy"}}
+                or main.get("environment", {}) not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main.get("volumes", []) not in ([], ["inspect-buffer:/refund-eval-private/inspect-data"])):
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -230,16 +340,28 @@ def _shared_roles_compose_values(
         if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
             raise ValueError
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
-        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+        if not isinstance(compose, dict) or set(compose) not in ({"services"}, {"services", "volumes"}):
             raise ValueError
-        if compose["volumes"] != {"world-logs": None, "role-budget": None}:
+        if compose.get("volumes", {}) not in (
+            {},
+            {"world-logs": None, "role-budget": None},
+            {"world-logs": None, "inspect-buffer": None, "role-budget": None},
+        ):
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
             raise ValueError
         main, world_service = services["main"], services["world"]
-        if main != {"depends_on": {"world": {"condition": "service_healthy"}},
-                    "volumes": ["role-budget:/var/lib/refund-eval/role-budget"]}:
+        if (not isinstance(main, dict)
+                or set(main) - {"depends_on", "environment", "volumes"}
+                or "depends_on" not in main
+                or main["depends_on"] != {"world": {"condition": "service_healthy"}}
+                or main.get("environment", {}) not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main.get("volumes", []) not in (
+                    ["inspect-buffer:/refund-eval-private/inspect-data", "role-budget:/var/lib/refund-eval/role-budget"],
+                    ["role-budget:/var/lib/refund-eval/role-budget", "inspect-buffer:/refund-eval-private/inspect-data"],
+                    ["role-budget:/var/lib/refund-eval/role-budget"],
+                )):
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -700,10 +822,11 @@ def run_guarded_config(
             hooks["before_job_run"] = before_job_run
         if on_guard_ready is not None:
             hooks["on_guard_ready"] = on_guard_ready
-        trial_failure = _trial_failure_reason(
-            asyncio.run(run_guarded_job(config, thresholds, **hooks)),
-            verifier_disabled=config.verifier.disable,
-        )
+        with private_world_bind_mount_adapter():
+            trial_failure = _trial_failure_reason(
+                asyncio.run(run_guarded_job(config, thresholds, **hooks)),
+                verifier_disabled=config.verifier.disable,
+            )
     except GuardFailure as failure:
         print(
             f"guard_failed={failure.reason} cleanup_uncertain={str(failure.cleanup_uncertain).lower()}",
