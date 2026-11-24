@@ -297,14 +297,15 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
     shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
     if shared_role_mode not in (None, "", "disabled", "shared_roles", "shared_caps"):
         raise WorldSpendLedgerError("Target shared-role budget mode is invalid")
-    if (shared_role_mode == "shared_caps"
+    if (shared_role_mode == "shared_caps" and usage_reporting_mode != "usage_only"
             and os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"):
         raise WorldSpendLedgerError("Target shared_caps task has no verified headroom binding")
     if cap_raw is None and tokens_raw is None and shared_role_mode not in {"shared_roles", "shared_caps"}:
         yield
         return
     cap = _money(cap_raw)
-    if cap is None or cap <= 0 or not tokens_raw or not tokens_raw.isdecimal() or int(tokens_raw) <= 0:
+    if ((usage_reporting_mode != "usage_only" and (cap is None or cap <= 0))
+            or not tokens_raw or not tokens_raw.isdecimal() or int(tokens_raw) <= 0):
         raise WorldSpendLedgerError("Target dollar budget configuration is invalid")
     api = getattr(model, "api", None)
     if not isinstance(api, OpenRouterAPI) or api.base_url.rstrip("/") != "https://openrouter.ai/api/v1":

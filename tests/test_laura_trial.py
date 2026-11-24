@@ -581,6 +581,69 @@ def test_shared_caps_refuses_before_job_and_binds_immutable_headroom(
         assert record["shared_allowance_source"] == "verified_key_headroom"
 
 
+def test_actual_native_launcher_keeps_cleanup_after_shared_caps_guard_failure(tmp_path):
+    native = _native_run_input(tmp_path)
+    wheel, digest = _write_public_split_wheel(tmp_path / "shared-caps-wheel")
+    native.values.update({
+        "openrouter_key_mode": "shared_caps",
+        "usage_reporting_mode": "usage_only",
+        "agent_max_output_tokens": 2048,
+        "cost_limit": 50,
+        "world_cost_limit": 100,
+        "agent_wheel": str(wheel),
+        "agent_wheel_sha256": digest,
+    })
+    native.input_path.write_text(json.dumps(native.values), encoding="utf-8")
+    config = NativeBatchConfig.model_validate_json(native.input_path.read_bytes())
+    run_record = batch.prepare(native.prepared_dir, config)
+    manifest_path = native.prepared_dir / "laura-setup.json"
+    laura_trial.save_setup(run_record.with_name("job.yaml"), manifest_path)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    events_path = tmp_path / "launcher-events.jsonl"
+    environment = os.environ.copy()
+    environment.update({
+        "UV_OFFLINE": "1",
+        "OPENROUTER_API_KEY": "offline-launcher-fixture-key",
+        "PYTHONPATH": str(repo_root / "tests" / "fixtures" / "native_launcher_mock"),
+        "REFUND_EVAL_NATIVE_LAUNCHER_MOCK_EVENTS": str(events_path),
+    })
+    result = subprocess.run(
+        [
+            str(repo_root / "scripts" / "harbor"), "python", "-m", "scripts.laura_trial", "run",
+            "--manifest", str(manifest_path), "--job-name", "mat-197-cleanup-fixture",
+            "--probe-timeout", "0.5", "--poll-interval", "0.05",
+            "--max-sample-age", "1.5", "--cleanup-timeout", "1.0",
+        ],
+        cwd=repo_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "guard_failed=shared_caps requires a finite ordinary non-resetting OpenRouter key cleanup_uncertain=false" in result.stderr, (
+        result.stdout + result.stderr
+    )
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    names = [event["event"] for event in events]
+    erosion_sample = next(event for event in events if event["event"] == "probe" and event["count"] == 3)
+    assert erosion_sample["remaining"] == "0"
+    assert "job_continued_after_headroom_erosion" in names
+    assert "collection_succeeded" in names
+    assert "collection_failed" not in names
+    assert names.index("collection_succeeded") < names.index("sandbox_terminated")
+    collected = events_path.with_suffix(".collected") / "runner.log"
+    assert collected.read_text(encoding="utf-8") == "fixture Harbor log\n"
+    parameters = json.loads(
+        (native.prepared_dir / "jobs" / "mat-197-cleanup-fixture" / "effective_parameters.json").read_text()
+    )
+    assert parameters["shared_allowance_source"] == "not_enforced_by_benchmark"
+    assert not (native.prepared_dir / "runtime-inputs" / "mat-197-cleanup-fixture").exists()
+
+
 def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard(
     tmp_path, monkeypatch, capsys
 ):

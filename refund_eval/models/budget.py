@@ -298,7 +298,7 @@ class BudgetedWorldModels:
         raise AssertionError("unreachable retry loop")
 
     async def _complete_legacy(self, role: Role, messages: Sequence[Message], settings: dict[str, Any]) -> Completion:
-        if self.status != "available":
+        if self.status != "available" and not self.usage_reporting_only:
             raise ModelLimitExceeded(f"World model allowance is {self.status}; no further requests")
         if settings.get("max_tokens") is None:
             settings = {**settings, "max_tokens": WORLD_MAX_OUTPUT_TOKENS, "default_output_cap": True}
@@ -334,7 +334,7 @@ class BudgetedWorldModels:
                     return completion
                 raise ModelLimitExceeded("World model request did not report a valid charge")
             self.spent += cost
-            if self.spent >= self.limit:
+            if self.spent >= self.limit and not self.usage_reporting_only:
                 self._mark("exhausted")
                 if completion.provider_error_type == "invalid_request":
                     self._reject_request()

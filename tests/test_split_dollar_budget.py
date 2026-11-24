@@ -221,7 +221,8 @@ def test_usage_only_target_skips_tariffs_and_generation_lookup(monkeypatch, repo
     model.api.reported_cost = reported_cost
     monkeypatch.setenv("REFUND_EVAL_USAGE_REPORTING_MODE", "usage_only")
     monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
-    monkeypatch.setenv(SHARED_CAPS_HEADROOM_BOUND_ENV, "true")
+    monkeypatch.setenv(SHARED_CAPS_HEADROOM_BOUND_ENV, "false")
+    monkeypatch.delenv("REFUND_EVAL_AGENT_DOLLAR_CAP")
     monkeypatch.setattr(dollar_budget, "openrouter_tariffs", lambda *_: pytest.fail("tariff lookup"))
 
     async def run():

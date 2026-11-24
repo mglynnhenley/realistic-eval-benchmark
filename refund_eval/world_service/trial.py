@@ -175,7 +175,7 @@ class WorldTrial:
     async def __aenter__(self) -> Self:
         settings = self.settings
         shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
-        if (shared_role_mode == "shared_caps"
+        if (shared_role_mode == "shared_caps" and settings.usage_reporting_mode != "usage_only"
                 and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
                      or settings.world_cost_limit is None)):
             raise WorldSpendLedgerError("World shared_caps task has no verified headroom binding")
@@ -185,7 +185,9 @@ class WorldTrial:
                              if self._model_client is None else
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
-            if shared_role_mode in {"shared_roles", "shared_caps"}:
+            if shared_role_mode == "shared_caps" and settings.usage_reporting_mode == "usage_only":
+                pass
+            elif shared_role_mode in {"shared_roles", "shared_caps"}:
                 shared_config = SharedRoleBudgetConfig.from_environment()
                 if (shared_config.scenario != settings.scenario
                         or shared_config.models["simulator"] != model_mapping["simulator"]

@@ -1336,6 +1336,27 @@ async def test_usage_only_world_unknown_cost_stays_unknown_without_retry(monkeyp
     assert completion.failed is True
     assert completion.usage is not None and completion.usage.cost is None
     assert budget.status == "unknown"
-    with pytest.raises(ModelLimitExceeded, match="no further requests"):
-        await budget.complete("simulator", [Message("user", "later priced response")])
-    assert recorded.calls == 1
+    later = await budget.complete("simulator", [Message("user", "later unknown response")])
+    assert later.failed is True
+    assert recorded.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_usage_only_world_reports_known_cost_above_configured_cap_without_stopping(monkeypatch):
+    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+
+    class Recorded:
+        def model_name(self, role):
+            return "openrouter/test-world"
+
+        async def complete(self, role, messages, **settings):
+            return Completion(
+                text="returned", message=Message("assistant", "returned"),
+                usage=Usage(cost=101.0), failed=False,
+            )
+
+    budget = BudgetedWorldModels(Recorded(), 100, lambda: None, prices={}, usage_reporting_only=True)
+    completion = await budget.complete("simulator", [Message("user", "hello")])
+    assert completion.usage is not None and completion.usage.cost == 101.0
+    assert budget.spent == 101
+    assert budget.status == "available"

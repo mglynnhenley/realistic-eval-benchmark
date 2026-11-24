@@ -798,12 +798,13 @@ def _shared_role_thresholds(args: argparse.Namespace, allowance: Any) -> SharedR
         raise SetupFailure("shared_roles_allowance_invalid") from None
 
 
-def _shared_caps_thresholds(args: argparse.Namespace) -> SharedCapsThresholds:
+def _shared_caps_thresholds(args: argparse.Namespace, *, usage_reporting_only: bool = False) -> SharedCapsThresholds:
     if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
         raise SetupFailure("shared_caps_rejects_operator_allowance_flags")
     return SharedCapsThresholds(
         probe_timeout=args.probe_timeout, poll_interval=args.poll_interval,
         max_sample_age=args.max_sample_age, cleanup_timeout=args.cleanup_timeout,
+        usage_reporting_only=usage_reporting_only,
     )
 
 
@@ -1414,7 +1415,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise SetupFailure("saved_shared_role_config_invalid") from None
                 thresholds = _shared_role_thresholds(args, role_config.allowance_usd)
             elif shared_caps:
-                thresholds = _shared_caps_thresholds(args)
+                thresholds = _shared_caps_thresholds(
+                    args,
+                    usage_reporting_only=agent_env.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict") == "usage_only",
+                )
             else:
                 thresholds = _shared_thresholds(args)
             parameters = _saved_effective_parameters(config, thresholds)
@@ -1433,7 +1437,9 @@ def main(argv: list[str] | None = None) -> int:
             elif native_config.openrouter_key_mode == "shared_roles":
                 thresholds = _shared_role_thresholds(args, native_config.shared_allowance_usd)
             elif native_config.openrouter_key_mode == "shared_caps":
-                thresholds = _shared_caps_thresholds(args)
+                thresholds = _shared_caps_thresholds(
+                    args, usage_reporting_only=native_config.usage_reporting_mode == "usage_only"
+                )
             else:
                 thresholds = _shared_thresholds(args)
             parameters = _native_effective_parameters(native_config, thresholds)
@@ -1457,7 +1463,7 @@ def main(argv: list[str] | None = None) -> int:
     effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
     def record_guard_metadata(metadata: dict[str, Any]) -> None:
-        if isinstance(thresholds, SharedCapsThresholds):
+        if isinstance(thresholds, SharedCapsThresholds) and not thresholds.usage_reporting_only:
             try:
                 _bind_shared_caps_allowance(config, Decimal(metadata["shared_allowance_usd"]))
             except (KeyError, InvalidOperation, TypeError, ValueError, SetupFailure):
