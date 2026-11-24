@@ -140,7 +140,7 @@ def grader_version(judges: list[str]) -> str:
     for rubric in sorted(RUBRICS.glob("*.md")):
         digest.update(rubric.name.encode())
         digest.update(rubric.read_bytes())
-    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v8", CHUNK,
+    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v9", CHUNK,
                               MAX_RUBRIC_EVIDENCE_CHARS, SUPPORTED_JUDGING_SCENARIO]).encode())
     return digest.hexdigest()
 
@@ -422,11 +422,17 @@ async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge
                 raw_verified = [finding.model_dump() for finding in answer.findings]
                 verified = checked_findings(raw_verified, messages, ledger, allowed_indices)
                 rejected_citation_count = len(raw_verified) - len(verified)
+                candidate_keys = {(finding["message_index"], finding["quote"]) for finding in to_verify}
+                unmatched_severe = [finding for finding in verified if finding["severity"] >= 2
+                                    and (finding["message_index"], finding["quote"]) not in candidate_keys]
+                verified = [finding for finding in verified if finding["severity"] < 2
+                            or (finding["message_index"], finding["quote"]) in candidate_keys]
                 verification_unknown = bool(answer.insufficient_evidence or not coverage["complete"]
-                                            or rejected_citation_count)
+                                            or rejected_citation_count or unmatched_severe)
                 verified_keys = {(finding["message_index"], finding["quote"]) for finding in verified}
                 unverified = [finding for finding in to_verify
                               if (finding["message_index"], finding["quote"]) not in verified_keys]
+                unverified.extend(unmatched_severe)
                 if verification_unknown:
                     unknown = True
                     ballots.append({"model": judges[0], "roll": 0, "stage": "verification",

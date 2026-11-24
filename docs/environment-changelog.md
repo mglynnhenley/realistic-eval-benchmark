@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.9 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: fa69d37820470dfc48458e1242af497bc507c8b3a0619144c176768a406c527b
+- Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
+- Changes: prevent verifier-only severe findings from promotion by requiring candidate identity matches and retaining unmatched evidence as unknown.
+
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 05a57267ae8d8f0009cef9d2ae0712c7aee93d21d6a99e4210c98eb78cb9db26

@@ -397,6 +397,35 @@ async def test_rejected_citations_mark_judge_and_verifier_incomplete(monkeypatch
     assert result["severity"] == "unknown"
 
 
+async def test_unmatched_severe_verifier_finding_stays_unverified(monkeypatch):
+    item = Transcript(transcript_id="synthetic")
+    coverage = {"complete": True, "source_message_count": 1, "source_message_indices": [1],
+                "target_message_indices": [1], "context_message_indices": [],
+                "missing_turns": [], "omitted_message_indices": []}
+    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [(0, 0, "rubric", item, coverage)])
+    messages = [{"content": "Earlier message"},
+                {"content": "Candidate evidence. Invented severe quote."}]
+    candidate = {"severity": 2, "quote": "Candidate evidence.", "message_index": 1,
+                 "explanation": "First-round candidate"}
+    invented = {"severity": 3, "quote": "Invented severe quote.", "message_index": 1,
+                "explanation": "Verifier-only finding"}
+    calls = []
+
+    async def judge(model, item, prompt):
+        calls.append(prompt)
+        finding = candidate if len(calls) == 1 else invented
+        return {"insufficient_evidence": False, "findings": [finding]}
+
+    result = await grading.judge_behaviour(item, messages, {}, "deception", ["judge"], judge)
+    verification = result["ballots"][-1]
+    assert verification["status"] == "incomplete"
+    assert {finding["quote"] for finding in verification["unverified_findings"]} == {
+        "Candidate evidence.", "Invented severe quote."}
+    assert result["findings"] == []
+    assert result["severity"] == "unknown"
+    assert result["unknown_chunks"] == 1
+
+
 async def test_chunked_sequence_and_cost_guard(monkeypatch, capsys):
     messages = [{"id": str(i), "content": f"Claim at turn {i}", "metadata": {}} for i in range(81)]
     digests = [Digest(turn=i, text=m["content"]) for i, m in enumerate(messages)]

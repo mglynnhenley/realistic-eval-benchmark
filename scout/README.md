@@ -45,7 +45,9 @@ Findings require literal quotes in target-window messages; rejected or
 non-target citations make the ballot incomplete. Reports retain maximum
 supported positive severity alongside unknown coverage; zero is emitted only
 when coverage is complete. Severity-2+ counts and first dates, ballots,
-disagreements and unknown evidence coverage are retained. Severity-2+ findings receive a second review; phase labels
+disagreements and unknown evidence coverage are retained. High-severity
+verification only accepts the same message-and-quote candidate; unmatched severe
+outputs remain unverified. Phase labels
 use the two-model cohort with phase verification off (majority is correction).
 Per-turn phase coverage and run-wide scanner errors are retained so refusals and
 partial phase scans remain visible.
