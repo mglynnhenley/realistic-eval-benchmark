@@ -41,7 +41,8 @@ from refund_eval.models.shared_role_spend_ledger import (
     SharedRoleSpendLedgerError,
 )
 from refund_eval.output_paths import validate_private_output
-from refund_eval.scenario.schema import AgentScenario
+from refund_eval.scenario import schema as scenario_schema
+from refund_eval.scenario.schema import AgentScenario, load_scenario
 from scripts import guarded_harbor
 from scripts.offline_spend_guard import (
     KEY_CEILING,
@@ -378,6 +379,78 @@ def _task_identity(task_path: Path) -> dict[str, Any]:
     return {"path": str(task_path), "entries": entries, "sha256": _digest_entries(entries)}
 
 
+def _wheel_scenario_bytes(
+    archive: zipfile.ZipFile, members: list[zipfile.ZipInfo], scenario_member: str
+) -> bytes:
+    matches = [info for info in members if info.filename == scenario_member]
+    scenario_parts = PurePosixPath(scenario_member).parts
+    aliases = []
+    for info in members:
+        parts = PurePosixPath(info.filename).parts
+        for index in range(max(0, len(parts) - len(scenario_parts) - 1)):
+            if (parts[index].endswith(".data")
+                    and parts[index + 1] in {"purelib", "platlib"}
+                    and parts[index + 2:] == scenario_parts):
+                aliases.append(info)
+                break
+    if len(matches) != 1 or aliases:
+        raise SetupFailure
+    return archive.read(matches[0])
+
+
+def _load_inherited_agent_scenario(
+    archive: zipfile.ZipFile, members: list[zipfile.ZipInfo], scenario_id: str
+) -> AgentScenario:
+    try:
+        scenario_root = (REPO_ROOT / "refund_eval" / "scenario").resolve(strict=True)
+        loader_root = Path(scenario_schema.SCENARIO_DIR).resolve(strict=True)
+    except OSError:
+        raise SetupFailure from None
+    if scenario_root != loader_root:
+        raise SetupFailure
+
+    seen = set()
+    current = scenario_id
+    while True:
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", current) or current in seen:
+            raise SetupFailure
+        seen.add(current)
+        scenario_relative = Path("refund_eval") / "scenario" / f"{current}.yaml"
+        source_path = REPO_ROOT / scenario_relative
+        if not source_path.exists():
+            scenario_relative = Path("refund_eval") / "scenario" / "archive" / f"{current}.yaml"
+            source_path = REPO_ROOT / scenario_relative
+        scenario_member = scenario_relative.as_posix()
+        scenario_bytes = _wheel_scenario_bytes(archive, members, scenario_member)
+        try:
+            source_stat = source_path.lstat()
+            source_bytes = source_path.read_bytes()
+        except OSError:
+            raise SetupFailure from None
+        if not stat.S_ISREG(source_stat.st_mode) or source_bytes != scenario_bytes:
+            raise SetupFailure
+        source_data = yaml.safe_load(scenario_bytes)
+        if not isinstance(source_data, dict):
+            raise SetupFailure
+        parent = source_data.get("extends")
+        if parent is None:
+            break
+        if not isinstance(parent, str):
+            raise SetupFailure
+        current = parent
+
+    resolved = load_scenario(scenario_id)
+    public_data = resolved.model_dump(mode="json", include={
+        "id": True,
+        "task_text": True,
+        "start_time": True,
+        "requested_deadline": True,
+        "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
+    return AgentScenario.model_validate(public_data)
+
+
 def _public_validation_result(task_path: Path) -> dict[str, str]:
     agent_dir = task_path / "environment" / "agent"
     wheel_manifest_path = agent_dir / "agent-wheel.json"
@@ -416,21 +489,14 @@ def _public_validation_result(task_path: Path) -> dict[str, str]:
         scenario_member = f"refund_eval/scenario/{task_metadata['scenario']}.yaml"
         with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
             members = archive.infolist()
-            matches = [info for info in members if info.filename == scenario_member]
-            scenario_parts = PurePosixPath(scenario_member).parts
-            aliases = []
-            for info in members:
-                parts = PurePosixPath(info.filename).parts
-                for index in range(max(0, len(parts) - len(scenario_parts) - 1)):
-                    if (parts[index].endswith(".data")
-                            and parts[index + 1] in {"purelib", "platlib"}
-                            and parts[index + 2:] == scenario_parts):
-                        aliases.append(info)
-                        break
-            if len(matches) != 1 or aliases:
-                raise SetupFailure
-            scenario_bytes = archive.read(matches[0])
-        scenario = AgentScenario.model_validate(yaml.safe_load(scenario_bytes))
+            scenario_bytes = _wheel_scenario_bytes(archive, members, scenario_member)
+            public_scenario = yaml.safe_load(scenario_bytes)
+            try:
+                scenario = AgentScenario.model_validate(public_scenario)
+            except ValidationError:
+                scenario = _load_inherited_agent_scenario(
+                    archive, members, task_metadata["scenario"]
+                )
         if scenario.id != task_metadata["scenario"]:
             raise SetupFailure
     except (OSError, UnicodeError, ValueError, TypeError, KeyError, yaml.YAMLError,
