@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -25,6 +26,13 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+
+from tests.inspect_eval_support import (
+    inspect_python,
+)
+from tests.inspect_eval_support import (
+    partial_inspect_eval_bytes as _partial_inspect_eval_bytes,
+)
 
 pytestmark = pytest.mark.harbor
 
@@ -57,6 +65,35 @@ from refund_eval.sim import company_store
 from scripts.laura_trial import main as laura_trial_main
 
 
+@pytest.fixture(autouse=True)
+def _use_test_private_trace_root(tmp_path, monkeypatch):
+    from refund_eval.harbor import private_traces
+
+    monkeypatch.setattr(private_traces, "TRACE_ROOT", tmp_path / "partial-traces")
+
+
+def _captured_trace_file(directory, source_name):
+    manifest = json.loads((directory / "manifest.json").read_text())
+    relative_path = manifest["files"][source_name]["path"]
+    assert relative_path is not None
+    return directory / relative_path
+
+
+def _stage_shared_caps_job(out, wheel, digest):
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="shared_caps", usage_reporting_mode="usage_only", agent_max_output_tokens=4096,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    batch.prepare(out, config)
+    job_values = yaml.safe_load((out / "job.yaml").read_bytes())
+    job_values["environment"]["kwargs"] = {"disable_application_price_cutoffs": True}
+    (out / "job.yaml").write_text(yaml.safe_dump(job_values, sort_keys=False))
+    return JobConfig.model_validate(job_values)
+
+
 def _write_inert_wheel(directory):
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
     dist_info = "synthetic_agent-0.0.0.dist-info"
@@ -65,6 +102,8 @@ def _write_inert_wheel(directory):
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
+    for member in adapter.REQUIRED_AGENT_WHEEL_MEMBERS:
+        files.setdefault(member, (adapter.ROOT / member).read_bytes())
     record_name = f"{dist_info}/RECORD"
     rows = []
     for name, content in files.items():
@@ -368,10 +407,15 @@ def test_task_loads_with_harbors_task_model(generated):
 def test_compose_world_sidecar(generated):
     environment = generated / "train_refund_late" / "environment"
     compose = yaml.safe_load((environment / "docker-compose.yaml").read_text())
-    assert compose["services"]["main"] == {"depends_on": {"world": {"condition": "service_healthy"}}}
+    assert compose["services"]["main"] == {
+        "depends_on": {"world": {"condition": "service_healthy"}},
+        "environment": {"XDG_DATA_HOME": "/refund-eval-private/inspect-data"},
+        "volumes": ["inspect-buffer:/refund-eval-private/inspect-data"],
+    }
     world = compose["services"]["world"]
     assert world["build"] == {"context": "${CONTEXT_DIR}", "dockerfile": "world/Dockerfile"}
-    assert world["volumes"] == ["world-logs:/var/log/world"] and "world-logs" in compose["volumes"]
+    assert world["volumes"] == ["world-logs:/var/log/world"]
+    assert compose["volumes"] == {"world-logs": None, "inspect-buffer": None}
     assert world["security_opt"] == ["seccomp=unconfined"]
     assert world["environment"]["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY:-}"
     assert world["environment"]["WORLD_TRIAL"] == "${COMPOSE_PROJECT_NAME}"
@@ -384,6 +428,81 @@ def test_compose_world_sidecar(generated):
     assert "HEALTHCHECK" in dockerfile and "8000" in dockerfile and "refund_eval.harbor.world_entrypoint" in dockerfile
     for text in (dockerfile, (environment / "docker-compose.yaml").read_text()):
         assert "__" not in text.replace("__env", "")
+
+
+def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
+    from harbor.environments.modal import ModalEnvironment, _ModalDinD
+
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_AGENT_BUFFER_ROOT,
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from scripts.guarded_harbor import private_world_bind_mount_adapter
+
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir()
+    compose_path = environment_dir / "docker-compose.yaml"
+    compose_path.write_text(
+        "services:\n  main:\n    volumes:\n      - inspect-buffer:/refund-eval-private/inspect-data\n"
+        "  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n  inspect-buffer:\n",
+        encoding="utf-8",
+    )
+    environment = object.__new__(ModalEnvironment)
+    environment._mounts = [{"type": "bind", "source": "/logs/agent", "target": "/logs/agent"}]
+    environment.environment_dir = environment_dir
+    original_mounts = list(environment._mounts)
+    second_environment = object.__new__(ModalEnvironment)
+    second_environment._mounts = list(environment._mounts)
+    second_environment.environment_dir = environment_dir
+    observed = {}
+
+    async def start(strategy, _force_build):
+        await asyncio.sleep(0.01)
+        directory = strategy._env.environment_dir
+        observed[strategy._env] = (
+            directory,
+            (directory / "docker-compose.yaml").read_text(encoding="utf-8"),
+        )
+
+    monkeypatch.setattr(_ModalDinD, "start", start)
+    strategy = object.__new__(_ModalDinD)
+    strategy._env = environment
+    second_strategy = object.__new__(_ModalDinD)
+    second_strategy._env = second_environment
+    with private_world_bind_mount_adapter():
+        assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets(writable_only=True)
+        assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets()
+        assert PRIVATE_AGENT_BUFFER_ROOT in environment._mount_targets()
+        source = f"{PRIVATE_WORLD_LOGS_ROOT}/state.json"
+        assert strategy._host_log_path(source) == source
+        assert strategy._host_log_path(PRIVATE_AGENT_BUFFER_ROOT + "/samplebuffer/db.sqlite") == (
+            PRIVATE_AGENT_BUFFER_ROOT + "/samplebuffer/db.sqlite"
+        )
+        assert strategy._host_log_path("/run/state.json") is None
+
+        async def start_both():
+            await asyncio.gather(strategy.start(False), second_strategy.start(False))
+
+        asyncio.run(start_both())
+    assert len(observed) == 2
+    assert len({entry[0] for entry in observed.values()}) == 2
+    for directory, compose in observed.values():
+        assert f"- {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in compose
+        assert f"- {PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in compose
+        assert "\n      - world-logs:/var/log/world" not in compose
+        assert not directory.exists()
+    assert compose_path.read_text(encoding="utf-8") == (
+        "services:\n  main:\n    volumes:\n      - inspect-buffer:/refund-eval-private/inspect-data\n"
+        "  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n  inspect-buffer:\n"
+    )
+    assert environment._mounts == original_mounts
+    assert second_environment._mounts == original_mounts
+    assert environment.environment_dir == second_environment.environment_dir == environment_dir
+    assert getattr(environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
+    assert getattr(second_environment, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE)
 
 
 @pytest.mark.parametrize("mode", ["auto", "saved", "live"])
@@ -1882,11 +2001,9 @@ def test_inspect_command(tmp_path):
     command = make_agent(tmp_path, cost_limit=150, token_budget=40_000_000, history_tokens=60000, time_limit=36000,
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
-    assert run.startswith('mkdir -p /logs/agent/inspect; REFUND_EVAL_KILL_FILE=/app/.context/KILL '
-                          'REFUND_EVAL_TARGET_CHARGES_DIR=/logs/agent/target-charge-receipts '
-                          '/app/.venv/bin/inspect eval '
-                          '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
-                          'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
+    assert run.startswith("mkdir -p /logs/agent/inspect; XDG_DATA_HOME=")
+    assert "REFUND_EVAL_TARGET_CHARGES_DIR=/logs/agent/target-charge-receipts" in run
+    assert "trace_mirror" not in command and "/mnt/refund-world-logs" not in command
     for part in ("--model openrouter/anthropic/claude-opus-5.5", "--max-retries 0", "-M max_retries=0",
                  "-M strict_tools=false", "-M reasoning_enabled=true",
                  "-T world_url=http://world:8000", '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
@@ -1926,15 +2043,23 @@ def test_options_are_validated(tmp_path):
 
 async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path):
     from refund_eval.harbor.luna_status import NativeStatus
-    from refund_eval.world_service.status import world_status
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from refund_eval.world_service.status import WORLD_STATUS_FILE, world_status
 
     source = tmp_path / "world-status.json"
     source.write_text(json.dumps(world_status({"world": {"turn": 1}}, "train_refund__abc__env")))
 
     class StatusEnvironment:
-        async def service_download_file(self, remote, destination, *, service):
-            assert service == "world" and remote == "/var/log/world/luna-world-status.json"
+        async def download_file(self, remote, destination):
+            assert remote == f"{PRIVATE_WORLD_LOGS_ROOT}/{WORLD_STATUS_FILE}"
             shutil.copyfile(source, destination)
+
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=object())
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
 
     agent = make_agent(tmp_path)
     observer = NativeStatus(agent.logs_dir, agent.model_name)
@@ -1947,6 +2072,19 @@ async def test_native_status_pins_world_identity_and_retains_last_good(tmp_path)
     assert output.read_bytes() == last  # no renewed heartbeat for an unavailable/wrong-run source
     assert not (agent.logs_dir / "luna-source.json").exists()
 
+    class UnguardedModalStatusEnvironment:
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=object())
+
+        async def service_download_file(self, remote, destination, *, service):
+            assert remote == f"/var/log/world/{WORLD_STATUS_FILE}"
+            assert service == "world"
+            shutil.copyfile(source, destination)
+
+    source.write_text(json.dumps(world_status({"world": {"turn": 3}}, "train_refund__abc__env")))
+    unguarded_observer = NativeStatus(agent.logs_dir, agent.model_name)
+    assert await unguarded_observer.safe_observe(UnguardedModalStatusEnvironment())
+
 
 class Environment:
     def __init__(self, on_run=None):
@@ -1957,6 +2095,819 @@ class Environment:
         if "inspect eval" in command and self.on_run is not None:
             await self.on_run(self)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+
+async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tmp_path, monkeypatch):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+    )
+
+    source_capture = PrivateTraceCapture("generation-check", native=True, root=tmp_path / "spool")
+    source = next(source for source in source_capture.sources if source.name == "simulator_state")
+
+    class MutableEnvironment:
+        def __init__(self):
+            self.value = b'{"turn":1}'
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, _remote, destination):
+            Path(destination).write_bytes(self.value)
+
+    environment = MutableEnvironment()
+    await source_capture._capture_source(environment, source)
+    previous_path = _captured_trace_file(source_capture.directory, source.name)
+    previous_manifest = source_capture.manifest_path.read_bytes()
+    environment.value = b'{"turn":2}'
+
+    original_write_manifest = source_capture._write_manifest
+
+    def fail_manifest_pointer():
+        raise OSError("simulated manifest pointer failure")
+
+    monkeypatch.setattr(source_capture, "_write_manifest", fail_manifest_pointer)
+    with pytest.raises(OSError, match="manifest pointer failure"):
+        await source_capture._capture_source(environment, source)
+
+    assert source_capture.manifest_path.read_bytes() == previous_manifest
+    assert previous_path.read_bytes() == b'{"turn":1}'
+    generation_directory = source_capture.directory / "generations" / source.name
+    assert len(list(generation_directory.iterdir())) == 2
+
+    monkeypatch.setattr(source_capture, "_write_manifest", original_write_manifest)
+    await source_capture._capture_source(environment, source)
+    current_path = _captured_trace_file(source_capture.directory, source.name)
+    assert current_path != previous_path
+    assert current_path.read_bytes() == b'{"turn":2}'
+    assert not previous_path.exists()
+    for _ in range(20):
+        await source_capture._capture_source(environment, source)
+    assert len(list(generation_directory.iterdir())) == 1
+
+
+async def test_cancelled_generation_pruner_cannot_delete_new_current_checkpoint(tmp_path, monkeypatch):
+    import threading
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+    )
+
+    capture = PrivateTraceCapture("cancelled-pruner", native=True, root=tmp_path / "spool")
+    source = next(source for source in capture.sources if source.name == "simulator_state")
+
+    class MutableEnvironment:
+        def __init__(self):
+            self.value = b'{"turn":1}'
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, _remote, destination):
+            Path(destination).write_bytes(self.value)
+
+    environment = MutableEnvironment()
+    await capture._capture_source(environment, source)
+    environment.value = b'{"turn":2}'
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    original_prune = private_traces._prune_generations
+
+    def paused_prune(directory, obsolete):
+        entered.set()
+        assert release.wait(timeout=5)
+        try:
+            original_prune(directory, obsolete)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(private_traces, "_prune_generations", paused_prune)
+    pending = asyncio.create_task(capture._capture_source(environment, source))
+    assert await asyncio.to_thread(entered.wait, 5)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    environment.value = b'{"turn":3}'
+    monkeypatch.setattr(private_traces, "_prune_generations", original_prune)
+    await capture._capture_source(environment, source)
+    final_path = _captured_trace_file(capture.directory, source.name)
+    release.set()
+    assert await asyncio.to_thread(finished.wait, 5)
+    assert final_path.is_file() and final_path.read_bytes() == b'{"turn":3}'
+    assert _captured_trace_file(capture.directory, source.name) == final_path
+
+
+def test_guarded_modal_adapts_old_shared_caps_task_without_mutating_source(tmp_path, approved_split_budget_wheel):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_AGENT_BUFFER_ROOT,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from scripts.guarded_harbor import private_world_compose_bind, validate_job_config
+
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "shared-caps-batch"
+    job = _stage_shared_caps_job(out, wheel, digest)
+    task_path = Path(job.tasks[0].path)
+    compose_path = task_path / "environment/docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text())
+    assert compose["services"]["main"]["volumes"] == [
+        "inspect-buffer:/refund-eval-private/inspect-data",
+        "role-budget:/var/lib/refund-eval/role-budget",
+    ]
+    assert validate_job_config(job) is None
+    compose["services"]["main"]["volumes"].remove("inspect-buffer:/refund-eval-private/inspect-data")
+    compose["services"]["main"].pop("environment")
+    compose.pop("volumes")
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False))
+    original_compose = compose_path.read_bytes()
+    assert validate_job_config(job) is None
+
+    environment = SimpleNamespace(environment_dir=task_path / "environment")
+    with private_world_compose_bind(environment):
+        adapted_path = environment.environment_dir / "docker-compose.yaml"
+        adapted = yaml.safe_load(adapted_path.read_text())
+        assert environment.environment_dir != task_path / "environment"
+        assert "inspect-buffer" in adapted["volumes"]
+        assert adapted["volumes"]["role-budget"] == {}
+        assert f"{PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in adapted["services"]["main"]["volumes"]
+        assert "role-budget:/var/lib/refund-eval/role-budget" in adapted["services"]["main"]["volumes"]
+        assert f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in adapted["services"]["world"]["volumes"]
+        assert not any("/var/log/world" in volume for volume in adapted["services"]["main"]["volumes"])
+        assert compose_path.read_bytes() == original_compose
+
+    assert environment.environment_dir == task_path / "environment"
+    assert compose_path.read_bytes() == original_compose
+
+
+async def test_trace_storage_failures_are_preflighted_and_nonfatal_after_start(
+    tmp_path, monkeypatch, caplog,
+):
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    original_atomic_write = private_traces._atomic_write
+
+    def fail_storage(*_args, **_kwargs):
+        raise OSError("private storage unavailable")
+
+    monkeypatch.setattr(private_traces, "_atomic_write", fail_storage)
+    with pytest.raises(OSError, match="private storage unavailable"):
+        PrivateTraceCapture("preflight", root=tmp_path / "unavailable")
+
+    monkeypatch.setattr(private_traces, "_atomic_write", original_atomic_write)
+    capture = PrivateTraceCapture("started", root=tmp_path / "available")
+    monkeypatch.setattr(capture, "_write_manifest", fail_storage)
+
+    async def fail_capture(_environment):
+        raise OSError("checkpoint unavailable")
+
+    monkeypatch.setattr(capture, "capture", fail_capture)
+    await capture.safe_capture(object())
+    capture.finish("agent_succeeded")
+    assert "Private trace availability error after startup" in caplog.text
+    assert "Private trace availability error writing final manifest" in caplog.text
+
+
+def test_private_trace_creation_fsyncs_each_new_directory_parent(tmp_path, monkeypatch):
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    fsynced = []
+    original_fsync = private_traces._fsync_directory
+
+    def record_fsync(directory):
+        fsynced.append(Path(directory))
+        original_fsync(directory)
+
+    monkeypatch.setattr(private_traces, "_fsync_directory", record_fsync)
+    root = tmp_path / "new-data" / "partial-traces"
+    capture = PrivateTraceCapture("ancestor-fsync", root=root)
+    assert tmp_path in fsynced
+    assert root.parent in fsynced
+    assert root in fsynced
+    assert capture.directory.stat().st_mode & 0o777 == 0o700
+
+
+async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
+    from refund_eval.grading.verifier import read_eval_messages
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+
+    class NonModalFiles:
+        def __init__(self):
+            self.service_paths = []
+
+        async def download_dir(self, remote, destination):
+            assert remote == "/logs/agent/inspect"
+            Path(destination).mkdir(parents=True, exist_ok=True)
+            (Path(destination) / "run.eval").write_bytes(partial_eval)
+
+        async def service_download_file(self, remote, destination, *, service):
+            assert service == "world"
+            self.service_paths.append(remote)
+            files = {
+                "/var/log/world/state.json": b'{"turn":4}',
+                "/var/log/world/events.jsonl": b'{"event":"retained"}\n',
+            }
+            Path(destination).write_bytes(files[remote])
+
+        async def exec(self, *_args, **_kwargs):
+            raise AssertionError("trace capture must not use sandbox exec")
+
+    capture = PrivateTraceCapture("offline-nonmodal", native=True, root=tmp_path / "spool")
+    await capture.capture(NonModalFiles())
+    messages = read_eval_messages(_captured_trace_file(capture.directory, "agent_eval"))
+    assert any("recoverable partial agent event" in str(message["content"]) for message in messages)
+    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":4}'
+    assert _captured_trace_file(capture.directory, "simulator_events").read_bytes() == b'{"event":"retained"}\n'
+
+    class ListFiles:
+        async def aio(self, _directory):
+            return [SimpleNamespace(name="run.eval")]
+
+    class UnguardedModalFiles(NonModalFiles):
+        def __init__(self):
+            super().__init__()
+            self.direct_paths = []
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+
+        async def download_file(self, remote, destination):
+            self.direct_paths.append(remote)
+            assert remote == "/logs/agent/inspect/run.eval"
+            Path(destination).write_bytes(partial_eval)
+
+    unguarded_modal = UnguardedModalFiles()
+    unguarded_capture = PrivateTraceCapture(
+        "offline-unguarded-modal", native=True, root=tmp_path / "spool-unguarded-modal",
+    )
+    await unguarded_capture.capture(unguarded_modal)
+    assert unguarded_modal.direct_paths == ["/logs/agent/inspect/run.eval"]
+    assert set(unguarded_modal.service_paths) == {
+        "/var/log/world/state.json", "/var/log/world/events.jsonl",
+    }
+
+
+@pytest.mark.parametrize(
+    ("native", "guarded_modal"),
+    [(True, True), (True, False), (False, False)],
+    ids=["guarded-native", "unguarded-native", "legacy"],
+)
+async def test_active_inspect_sample_events_survive_process_kill(tmp_path, native, guarded_modal):
+    import sqlite3
+
+    from refund_eval.harbor import inspect_snapshotter
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+        active_sample_snapshot_path,
+    )
+
+    data_home = tmp_path / "inspect-data"
+    ready = tmp_path / "buffer-ready"
+    log_directory = "/logs/agent/inspect" if native else "/logs/artifacts/refund"
+    child = textwrap.dedent(f"""
+        import os
+        import time
+        from pathlib import Path
+        from inspect_ai.event._model import ModelEvent
+        from inspect_ai.event._tool import ToolEvent
+        from inspect_ai.log._log import EvalSampleSummary
+        from inspect_ai.log._recorders.buffer.database import SampleBufferDatabase
+        from inspect_ai.log._recorders.types import SampleEvent
+        from inspect_ai.model import ChatMessageUser, GenerateConfig, ModelOutput
+
+        database = SampleBufferDatabase(
+            location={(log_directory + "/run.eval")!r}, log_images=False,
+        )
+        database.start_sample(EvalSampleSummary(
+            id="active-sample", epoch=1, input="active prompt", target="done",
+        ))
+        database.log_events([
+            SampleEvent(
+                id="active-sample", epoch=1,
+                event=ModelEvent(
+                    model="mockllm/model",
+                    input=[ChatMessageUser(content="active model prompt")],
+                    tools=[], tool_choice="auto", config=GenerateConfig(),
+                    output=ModelOutput.from_content("mockllm/model", "active model payload"),
+                ),
+            ),
+            SampleEvent(
+                id="active-sample", epoch=1,
+                event=ToolEvent(
+                    id="tool-1", function="offline_tool",
+                    arguments={{"request": "active tool payload"}},
+                    result="active tool result",
+                ),
+            ),
+        ])
+        Path(os.environ["TRACE_READY_FILE"]).write_text(str(database.db_path))
+        time.sleep(60)
+    """)
+    child_env = {**os.environ, "XDG_DATA_HOME": str(data_home), "TRACE_READY_FILE": str(ready)}
+    process = await asyncio.create_subprocess_exec(
+        inspect_python(), "-c", child, cwd=Path(__file__).resolve().parents[1],
+        env=child_env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        deadline = asyncio.get_running_loop().time() + 10
+        while not ready.exists() and process.returncode is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.05)
+        if not ready.exists():
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
+            stderr = await process.stderr.read() if process.stderr is not None else b""
+            pytest.fail(f"Inspect buffer did not record events: {stderr.decode(errors='replace')}")
+    finally:
+        if process.returncode is None:
+            process.kill()
+        await asyncio.wait_for(process.wait(), timeout=5)
+    assert process.returncode is not None and process.returncode < 0
+
+    source_capture = PrivateTraceCapture(
+        "active-sample", native=native, root=tmp_path / "spool",
+    )
+    source = next(source for source in source_capture.sources if source.name == "agent_active_samples")
+    database_path = Path(ready.read_text())
+    local_snapshot = inspect_snapshotter.snapshot_path(data_home)
+    inspect_snapshotter._publish(database_path, local_snapshot)
+    remote_snapshot = active_sample_snapshot_path("active-sample", source.buffer_root)
+
+    class Filesystem:
+        pass
+
+    class CapturingEnvironment:
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=Filesystem())) if native else None
+            if guarded_modal:
+                setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            assert remote == remote_snapshot.as_posix()
+            shutil.copyfile(local_snapshot, destination)
+
+        async def download_dir(self, remote, destination):
+            assert remote == remote_snapshot.parent.as_posix()
+            shutil.copyfile(local_snapshot, Path(destination) / remote_snapshot.name)
+
+        async def exec(self, *_args, **_kwargs):
+            raise AssertionError("active trace capture must not use sandbox exec")
+
+    await source_capture._capture_source(CapturingEnvironment(), source)
+    captured = _captured_trace_file(source_capture.directory, source.name)
+    with sqlite3.connect(f"{captured.as_uri()}?mode=ro", uri=True) as database:
+        sample_data = database.execute(
+            "SELECT data FROM samples WHERE id = ? AND epoch = ?",
+            ("active-sample", 1),
+        ).fetchone()[0]
+        events = [json.loads(row[0]) for row in database.execute(
+            "SELECT data FROM events WHERE sample_id = ? AND sample_epoch = ? ORDER BY id",
+            ("active-sample", 1),
+        )]
+        pools = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+        call_pools = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+    assert json.loads(sample_data).get("completed_at") is None
+    assert [event["event"] for event in events] == ["model", "tool"]
+    assert "active model payload" in json.dumps({"events": events, "calls": call_pools})
+    assert "active model prompt" in json.dumps(pools)
+    assert "active tool result" in json.dumps(events)
+
+
+async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_failed_collection(
+    tmp_path, approved_split_budget_wheel,
+):
+    import sqlite3
+
+    from refund_eval.harbor.inspect_snapshotter import snapshot_path
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+        active_sample_snapshot_path,
+        private_inspect_data_home,
+    )
+    from refund_eval.harbor.target_charges import (
+        TARGET_CHARGES_DIRECTORY,
+        TARGET_CHARGES_ENV,
+    )
+    from refund_eval.world.event_log import EVENTS_KEY, record
+    from refund_eval.world.state import WORLD_KEY, World
+    from refund_eval.world_service.store import EVENTS_FILE, MemoryStore, OutputWriter
+    from scripts import guarded_harbor
+    from scripts.guarded_harbor import validate_job_config
+
+    wheel, digest = approved_split_budget_wheel
+    staged_job = _stage_shared_caps_job(tmp_path / "staged-shared-caps", wheel, digest)
+    assert validate_job_config(staged_job) is None
+    task_path = Path(staged_job.tasks[0].path)
+    compose_path = task_path / "environment/docker-compose.yaml"
+    staged_compose = yaml.safe_load(compose_path.read_text())
+    main_volumes = staged_compose["services"]["main"]["volumes"]
+    world_volumes = staged_compose["services"]["world"]["volumes"]
+    buffer_target = next(volume for volume in main_volumes if volume.startswith("inspect-buffer:")).split(":", 1)[1]
+    world_target = next(volume for volume in world_volumes if volume.startswith("world-logs:")).split(":", 1)[1]
+    staged_environment = SimpleNamespace(environment_dir=task_path / "environment")
+    with guarded_harbor.private_world_compose_bind(staged_environment):
+        guarded_compose = yaml.safe_load((staged_environment.environment_dir / "docker-compose.yaml").read_text())
+        guarded_main_volumes = guarded_compose["services"]["main"]["volumes"]
+        guarded_world_volumes = guarded_compose["services"]["world"]["volumes"]
+        buffer_mount = next(volume for volume in guarded_main_volumes if volume.endswith(f":{buffer_target}"))
+        world_mount = next(volume for volume in guarded_world_volumes if volume.endswith(f":{world_target}"))
+        buffer_root = Path(buffer_mount.split(":", 1)[0])
+        world_root = Path(world_mount.split(":", 1)[0])
+
+    run_id = "real-inspect-active"
+    staged_data_home = private_inspect_data_home(run_id, buffer_root)
+    local_agent_root = tmp_path / "agent-data"
+    data_home = local_agent_root / staged_data_home.relative_to(buffer_root)
+    expected_buffer_snapshot = active_sample_snapshot_path(run_id, buffer_root)
+    assert snapshot_path(data_home).relative_to(local_agent_root) == expected_buffer_snapshot.relative_to(buffer_root)
+    expected_world_events = (world_root / "events.jsonl").as_posix()
+    marker = tmp_path / "sample-active"
+    task_args_file = tmp_path / "inspect-task-args.json"
+    task_file = tmp_path / "offline-inspect-task.py"
+    task_source = textwrap.dedent(f"""
+        import asyncio, json, os
+        from pathlib import Path
+        from inspect_ai import Task, task
+        from inspect_ai.dataset import Sample
+        from inspect_ai.model import ChatCompletionChoice, ChatMessageAssistant, ModelOutput, get_model
+        from inspect_ai.solver import solver, use_tools
+        from inspect_ai.tool import ToolCall, tool
+
+        @tool
+        def offline_tool():
+            '''Return a deterministic response for the active-sample test.'''
+            async def execute(request: str):
+                '''Return the requested fixture response.
+
+                Args:
+                    request: The offline request to return.
+                '''
+                return "active tool result"
+            return execute
+
+        @solver
+        def pause_sample():
+            async def solve(state, generate):
+                state = await generate(state)
+                Path({str(marker)!r}).write_text("active")
+                while True:
+                    await asyncio.sleep(0.02)
+            return solve
+
+        @task
+        def offline_inspect(task_id=None, scenario=None, task_text=None, **kwargs):
+            if isinstance(task_text, list):
+                task_text = ",".join(task_text)
+            Path(os.environ["INSPECT_TASK_ARGS_FILE"]).write_text(json.dumps({{
+                "task_id": task_id, "scenario": scenario, "task_text": task_text,
+                "target_charge_receipts": os.environ.get("REFUND_EVAL_TARGET_CHARGES_DIR"),
+            }}))
+            tool_call = ModelOutput(
+                model="mockllm/model",
+                choices=[ChatCompletionChoice(
+                    message=ChatMessageAssistant(content="", tool_calls=[ToolCall(
+                        id="tool-1", function="offline_tool", arguments={{"request": "active request"}},
+                    )]), stop_reason="tool_calls",
+                )],
+            )
+            model = get_model("mockllm/model", custom_outputs=[
+                tool_call, ModelOutput.from_content("mockllm/model", "model response after tool"),
+            ], memoize=False)
+            return Task(
+                dataset=[Sample(input="Run the offline tool")],
+                solver=[use_tools(offline_tool()), pause_sample()],
+                model=model,
+            )
+    """)
+    task_file.write_text(task_source)
+    installed_site = tmp_path / "installed-agent-wheel"
+    wheel_install = await asyncio.to_thread(
+        subprocess.run,
+        ["uv", "pip", "install", "--offline", "--no-deps", "--target", str(installed_site), str(wheel)],
+        check=False, capture_output=True, text=True,
+    )
+    assert wheel_install.returncode == 0, wheel_install.stderr
+    run_logs = tmp_path / run_id / "agent"
+    agent_logs = tmp_path / "installed-agent-logs"
+    instruction = "Preserve 'quotes', spaces, and $WORLD_SCENARIO literally."
+    inspect_cli = adapter.ROOT / ".venv/bin/inspect"
+    agent_python = adapter.ROOT / ".venv/bin/python"
+    assert inspect_cli.is_file()
+    assert agent_python.is_file()
+    environment_vars = {
+        **os.environ,
+        "XDG_DATA_HOME": str(data_home),
+        "INSPECT_TASK_ARGS_FILE": str(task_args_file),
+        "INSPECT_CLI": str(inspect_cli),
+        "AGENT_PYTHON": str(agent_python),
+        "INSTALLED_SITE": str(installed_site),
+        "TEST_APP": str(tmp_path),
+        "TEST_PRIVATE_ROOT": str(local_agent_root),
+        "TEST_AGENT_LOGS": str(agent_logs),
+        "TEST_RUN_LOGS": str(run_logs),
+        "TEST_INSTRUCTION": instruction,
+        "WORLD_TASK_ID": "offline-task",
+        "WORLD_SCENARIO": "train_refund_late",
+        "WORLD_SIM_WEEKS": "1",
+        "WORLD_DATA_MODE": "fixture",
+    }
+    environment_vars.update({
+        "PYTHONPATH": os.pathsep.join(filter(None, (str(installed_site), os.environ.get("PYTHONPATH", "")))),
+    })
+    launcher = textwrap.dedent("""\
+        import os, sys
+        from pathlib import Path
+        from refund_eval.harbor import installed_agent
+        assert Path(installed_agent.__file__).resolve().is_relative_to(Path(os.environ["INSTALLED_SITE"]))
+        installed_agent.PYTHON = os.environ["AGENT_PYTHON"]
+        installed_agent.INSPECT = os.environ["INSPECT_CLI"]
+        installed_agent.APP = os.environ["TEST_APP"]
+        installed_agent.PRIVATE_AGENT_BUFFER_ROOT = os.environ["TEST_PRIVATE_ROOT"]
+        agent = installed_agent.RefundInstalledAgent(
+            logs_dir=Path(os.environ["TEST_RUN_LOGS"]),
+            model_name="openrouter/anthropic/claude-opus-5.5",
+            mcp_servers=[], forward_task_instruction=True,
+        )
+        agent.environment_logs_dir = Path(os.environ["TEST_AGENT_LOGS"])
+        print(agent.inspect_command(os.environ["TEST_INSTRUCTION"]))
+    """)
+    generated = await asyncio.to_thread(
+        subprocess.run, [sys.executable, "-c", launcher], cwd=tmp_path, env=environment_vars,
+        capture_output=True, text=True, check=False,
+    )
+    assert generated.returncode == 0, generated.stderr
+    command = generated.stdout.strip()
+    charge_assignment = (
+        f"{TARGET_CHARGES_ENV}={shlex.quote(str(agent_logs / TARGET_CHARGES_DIRECTORY))}"
+    )
+    assert charge_assignment in command
+    assert command.index(charge_assignment) < command.index("refund_eval.harbor.inspect_snapshotter run")
+    model_reference = "openrouter/anthropic/claude-opus-5.5"
+    assert command.count(model_reference) == 1
+    command = command.replace(model_reference, "mockllm/model")
+    task_reference = (
+        f'"$({agent_python} -c \'import os, refund_eval.task; '
+        'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"'
+    )
+    assert command.count(task_reference) == 1
+    command = command.replace(task_reference, shlex.quote(os.path.relpath(task_file, tmp_path)))
+    snapshotter_command = command.split("refund_eval.harbor.inspect_snapshotter run", 1)[1]
+    assert charge_assignment not in snapshotter_command.split(" -- ", 1)[1]
+    process = await asyncio.create_subprocess_shell(
+        command, cwd=tmp_path, env=environment_vars,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
+    )
+    remote_snapshot = snapshot_path(data_home)
+
+    def checkpoint_has_agent_and_tool_events():
+        if not remote_snapshot.is_file():
+            return False
+        try:
+            with sqlite3.connect(f"{remote_snapshot.as_uri()}?mode=ro", uri=True) as database:
+                events = [json.loads(row[0]) for row in database.execute("SELECT data FROM events")]
+                messages = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+                calls = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+                samples = [json.loads(row[0]) for row in database.execute("SELECT data FROM samples")]
+            event_types = {event.get("event") for event in events}
+            evidence = json.dumps({"events": events, "messages": messages, "calls": calls})
+            return (
+                {"model", "tool"} <= event_types
+                and any(sample.get("completed_at") is None for sample in samples)
+                and "active request" in evidence
+                and "active tool result" in evidence
+            )
+        except sqlite3.Error:
+            return False
+
+    def inspect_log():
+        path = agent_logs / "inspect.log"
+        return path.read_text(errors="replace") if path.is_file() else "Inspect log was not created"
+
+    try:
+        deadline = asyncio.get_running_loop().time() + 15
+        while (not marker.exists() or not checkpoint_has_agent_and_tool_events()) and process.returncode is None:
+            if asyncio.get_running_loop().time() >= deadline:
+                if process.returncode is None:
+                    os.killpg(process.pid, 9)
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                stderr = await process.stderr.read() if process.stderr else b""
+                pytest.fail(f"Inspect did not publish an active checkpoint: {inspect_log()} {stderr.decode(errors='replace')}")
+            await asyncio.sleep(0.05)
+        if not marker.exists():
+            if process.returncode is None:
+                os.killpg(process.pid, 9)
+                await asyncio.wait_for(process.wait(), timeout=5)
+            stderr = await process.stderr.read() if process.stderr else b""
+            pytest.fail(f"Inspect exited before the active sample checkpoint: {inspect_log()} {stderr.decode(errors='replace')}")
+        assert marker.is_file() and process.returncode is None
+        os.killpg(process.pid, 9)
+        await asyncio.wait_for(process.wait(), timeout=5)
+        task_arguments = json.loads(task_args_file.read_text())
+        assert task_arguments == {
+            "task_id": "offline-task", "scenario": "train_refund_late", "task_text": instruction,
+            "target_charge_receipts": str(agent_logs / TARGET_CHARGES_DIRECTORY),
+        }
+    finally:
+        if process.returncode is None:
+            os.killpg(process.pid, 9)
+            await process.wait()
+
+    capture = PrivateTraceCapture(run_id, native=True, root=tmp_path / "spool")
+    agent_source = next(source for source in capture.sources if source.name == "agent_active_samples")
+    world_source = next(source for source in capture.sources if source.name == "simulator_events")
+    assert Path(agent_source.buffer_root) == buffer_root
+    assert world_source.remote_path == expected_world_events
+    world_time = datetime(2026, 10, 12, tzinfo=UTC)
+    world_state = World(start_time=world_time, now=world_time).model_dump(mode="json")
+    world_store = MemoryStore({WORLD_KEY: world_state})
+    record(world_store, None, world_state)
+    next_world_state = {**world_state, "turn": 1}
+    record(world_store, world_state, next_world_state)
+    assert [event["kind"] for event in world_store[EVENTS_KEY]] == ["world_init", "turn"]
+    world_store.set(WORLD_KEY, next_world_state)
+    world_output = tmp_path / "simulator-world-output"
+    OutputWriter(world_output).write(world_store, settings={"scenario": "train_refund_late"})
+    world_snapshot_path = world_output / EVENTS_FILE
+    world_snapshot = world_snapshot_path.read_bytes()
+    world_events = [json.loads(line) for line in world_snapshot.splitlines()]
+    assert [event["kind"] for event in world_events] == ["world_init", "turn"]
+
+    class OfflineEnvironment:
+        _sandbox = SimpleNamespace(filesystem=object())
+
+        def __init__(self):
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            if remote == expected_buffer_snapshot.as_posix():
+                shutil.copyfile(remote_snapshot, destination)
+            elif remote == world_source.remote_path:
+                shutil.copyfile(world_snapshot_path, destination)
+            else:
+                raise FileNotFoundError(remote)
+
+        async def download_dir(self, remote, destination):
+            raise RuntimeError("final artifact collection failed")
+
+    offline = OfflineEnvironment()
+    with pytest.raises(RuntimeError, match="final artifact collection failed"):
+        await offline.download_dir("final-artifacts", tmp_path)
+    await capture._capture_source(offline, agent_source)
+    await capture._capture_source(offline, world_source)
+    saved = _captured_trace_file(capture.directory, agent_source.name)
+    with sqlite3.connect(f"{saved.as_uri()}?mode=ro", uri=True) as database:
+        events = [json.loads(row[0]) for row in database.execute("SELECT data FROM events ORDER BY id")]
+        messages = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+        calls = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+    assert {event["event"] for event in events} >= {"model", "tool"}
+    evidence = json.dumps({"events": events, "messages": messages, "calls": calls})
+    assert "active request" in evidence and "active tool result" in evidence
+    saved_world_events = _captured_trace_file(capture.directory, world_source.name).read_bytes()
+    assert saved_world_events == world_snapshot
+    assert [json.loads(line)["kind"] for line in saved_world_events.splitlines()] == ["world_init", "turn"]
+
+
+async def test_active_sample_snapshot_validation_does_not_block_run_monitoring(tmp_path, monkeypatch):
+    import sqlite3
+    import time
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+        TraceSource,
+        active_sample_snapshot_path,
+    )
+
+    capture = PrivateTraceCapture("async-snapshot-validation", native=True, root=tmp_path / "spool")
+    buffer_root = tmp_path / "agent-buffer"
+    source = TraceSource("agent_active_samples", None, "active-samples.sqlite", buffer_root=str(buffer_root))
+    remote_snapshot = active_sample_snapshot_path(capture.run_id, buffer_root)
+    remote_snapshot.parent.mkdir(parents=True)
+    with sqlite3.connect(remote_snapshot) as database:
+        database.execute("CREATE TABLE events (data TEXT)")
+        database.execute("INSERT INTO events VALUES (?)", ('{"event":"model"}',))
+
+    class OfflineEnvironment:
+        _sandbox = SimpleNamespace(filesystem=object())
+
+        def __init__(self):
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            assert remote == remote_snapshot.as_posix()
+            shutil.copyfile(remote_snapshot, destination)
+
+    original_validate = private_traces._validate_active_sample_snapshot
+
+    def delayed_validate(path, timeout):
+        time.sleep(0.15)
+        original_validate(path, timeout)
+
+    monkeypatch.setattr(private_traces, "_validate_active_sample_snapshot", delayed_validate)
+    task = asyncio.create_task(
+        capture._download_active_sample_buffer(OfflineEnvironment(), source, tmp_path / "host-snapshot.sqlite"),
+    )
+    monitor_ticks = 0
+    while not task.done():
+        monitor_ticks += 1
+        await asyncio.sleep(0.01)
+    await task
+    assert monitor_ticks >= 5
+
+
+async def test_inspect_snapshotter_backup_respects_sqlite_busy_timeout(tmp_path):
+    import sqlite3
+    import time
+
+    from refund_eval.harbor.inspect_snapshotter import (
+        BACKUP_TIMEOUT_SECONDS,
+        _publish,
+    )
+
+    database_path = tmp_path / "active-samples.db"
+    destination = tmp_path / "snapshot" / "active-samples.sqlite"
+    with sqlite3.connect(database_path) as database:
+        database.execute("CREATE TABLE events (data TEXT)")
+        database.execute("INSERT INTO events VALUES (?)", ('{"event":"model"}',))
+    lock = sqlite3.connect(database_path, isolation_level=None)
+    lock.execute("BEGIN EXCLUSIVE")
+    task = asyncio.create_task(asyncio.to_thread(_publish, database_path, destination))
+    started = time.monotonic()
+    done, _ = await asyncio.wait({task}, timeout=BACKUP_TIMEOUT_SECONDS + 0.5)
+    elapsed = time.monotonic() - started
+    lock.rollback()
+    lock.close()
+    assert done, "SQLite backup exceeded its configured busy and backup timeout"
+    with pytest.raises((sqlite3.Error, TimeoutError)):
+        await task
+    assert elapsed < BACKUP_TIMEOUT_SECONDS + 0.5
+    assert not destination.exists()
+    assert not list(destination.parent.glob(".active-samples-*"))
+
+
+async def test_native_partial_traces_survive_short_run_cancellation_and_collection_failure(tmp_path):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from refund_eval.world_service.status import WORLD_STATUS_FILE, world_status
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+
+    class ListFiles:
+        async def aio(self, _directory):
+            return [SimpleNamespace(name="run.eval")]
+
+    class TraceEnvironment(Environment):
+        def __init__(self):
+            self.started, self.release = asyncio.Event(), asyncio.Event()
+            self.files = {
+                "/logs/agent/inspect/run.eval": partial_eval,
+                f"{PRIVATE_WORLD_LOGS_ROOT}/state.json": b'{"turn":1}',
+                f"{PRIVATE_WORLD_LOGS_ROOT}/events.jsonl": b'{"event":"private"}\n',
+                f"{PRIVATE_WORLD_LOGS_ROOT}/{WORLD_STATUS_FILE}": json.dumps(
+                    world_status({"world": {"turn": 1}}, "train_refund__abc__env")
+                ).encode(),
+            }
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+            super().__init__(on_run=self.run_agent)
+
+        async def run_agent(self, _environment):
+            self.started.set()
+            await self.release.wait()
+
+        async def download_file(self, source, destination):
+            Path(destination).write_bytes(self.files[source])
+
+        async def download_dir(self, _source, _target):
+            raise RuntimeError("usage monitor blocked final artifact collection")
+
+    environment = TraceEnvironment()
+    agent = make_agent(tmp_path, model_name="mockllm/model")
+    run = asyncio.create_task(agent.run("ignored", environment, AgentContext()))
+    await asyncio.wait_for(environment.started.wait(), timeout=5)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=5)
+    with pytest.raises(RuntimeError, match="usage monitor blocked"):
+        await environment.download_dir("/var/log/world", tmp_path)
+    [spool] = list((tmp_path / "partial-traces").iterdir())
+    from refund_eval.grading.verifier import read_eval_messages
+    messages = read_eval_messages(_captured_trace_file(spool, "agent_eval"))
+    assert any("recoverable partial agent event" in str(message["content"])
+               for message in messages)
+    assert _captured_trace_file(spool, "simulator_events").read_bytes() == b'{"event":"private"}\n'
+    manifest = json.loads((spool / "manifest.json").read_text())
+    assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
+    assert manifest["collection_status"] == "incomplete"
+    feed = (agent.logs_dir.parent / "luna-source.json").read_text()
+    assert "recoverable partial agent event" not in feed and "private event" not in feed
 
 
 async def test_run_executes_inspect_in_app_and_forwards_the_kill_switch(tmp_path, monkeypatch):
@@ -2026,7 +2977,7 @@ def test_installed_task_detects_forwarded_kill_file(tmp_path, monkeypatch):
     monkeypatch.delenv("REFUND_EVAL_KILL_FILE", raising=False)
     assert killswitch.kill_reason() is None
     command = make_agent(tmp_path).inspect_command()
-    assignment = command.split("; ", 1)[1].split()[0]
+    assignment = next(token for token in command.split() if token.startswith("REFUND_EVAL_KILL_FILE="))
     key, value = assignment.split("=", 1)
     monkeypatch.setenv(key, value)
     assert killswitch.kill_reason() == f"kill file {stop}"
