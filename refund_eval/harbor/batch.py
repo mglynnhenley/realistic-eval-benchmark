@@ -48,6 +48,7 @@ class NativeBatchConfig(RunConfig):
     openrouter_key_mode: Literal["shared", "split", "shared_roles", "shared_caps"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
     usage_reporting_mode: Literal["strict", "usage_only"] = "strict"
+    disable_application_price_cutoffs: bool = False
     disable_verifier: bool = False
     requested_deadline: date | None = None
     shared_allowance_usd: CostCap | None = None
@@ -59,6 +60,10 @@ class NativeBatchConfig(RunConfig):
     def _validate_spend_caps(self) -> NativeBatchConfig:
         if self.usage_reporting_mode == "usage_only" and self.openrouter_key_mode != "shared_caps":
             raise ValueError("usage_only reporting requires shared_caps outer key monitoring")
+        if self.disable_application_price_cutoffs and (
+            self.usage_reporting_mode != "usage_only" or self.openrouter_key_mode != "shared_caps"
+        ):
+            raise ValueError("disabling application price cutoffs requires usage_only shared_caps mode")
         if self.requested_deadline is not None and self.openrouter_key_mode not in {"shared_roles", "shared_caps"}:
             raise ValueError("requested_deadline is only valid in a guarded shared-key mode")
         if self.suite is not None:
@@ -206,6 +211,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
         usage_reporting_mode=config.usage_reporting_mode,
+        disable_application_price_cutoffs=config.disable_application_price_cutoffs,
         shared_allowance_usd=shared_allowance, shared_role_budget_config=shared_role_budget_config,
         requested_deadline=config.requested_deadline,
         suite_task=spec["suite_task"],
@@ -292,6 +298,16 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     }
     if config.usage_reporting_mode == "usage_only":
         effective_parameters["cost_limit_enforcement"] = "response_reported_observed_not_pre_call"
+    if config.disable_application_price_cutoffs:
+        effective_parameters.update({
+            "agent_cost_limits_usd": None,
+            "world_cost_limit_usd": None,
+            "cost_limit_enforcement": "application_price_cutoffs_disabled",
+            "effective_application_price_cutoffs_usd": {"agent": None, "world": None},
+            "shared_caps_guard_role_limits_usd": {
+                "agent": caps[targets[0]], "world": config.world_cost_limit,
+            },
+        })
     if config.openrouter_key_mode == "split":
         effective_parameters.update({
             "openrouter_key_mode": "split",
@@ -315,9 +331,12 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
             "agent_max_output_tokens": config.agent_max_output_tokens,
             "shared_aggregate_ceiling_usd": "150",
             "shared_allowance_source": "verified_key_headroom",
-            "role_caps_usd": {"target": str(caps[targets[0]]), "world": str(config.world_cost_limit)},
             "runtime_metadata_confirmed": False,
         })
+        if not config.disable_application_price_cutoffs:
+            effective_parameters["role_caps_usd"] = {
+                "target": str(caps[targets[0]]), "world": str(config.world_cost_limit),
+            }
         if config.requested_deadline is not None:
             effective_parameters["requested_deadline"] = config.requested_deadline.isoformat()
     record_data = {
@@ -327,9 +346,12 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "job": {"path": job_path.name, "sha256": hashlib.sha256(job_bytes).hexdigest(), "max_retries": 0},
         "seed_policy": tomllib.loads((tasks[0] / "task.toml").read_text(encoding="utf-8"))["metadata"]["seed_policy"],
         "total_trials": total,
-        "target_cost_limits_usd": caps,
-        "world_cost_limit_usd_per_trial": config.world_cost_limit,
+        "target_cost_limits_usd": None if config.disable_application_price_cutoffs else caps,
+        "world_cost_limit_usd_per_trial": None if config.disable_application_price_cutoffs else config.world_cost_limit,
         "effective_parameters": effective_parameters,
+        **({"shared_caps_guard_role_limits_usd": {
+            "agent": caps[targets[0]], "world": config.world_cost_limit,
+        }} if config.disable_application_price_cutoffs else {}),
         **({"limits": limits} if limits is not None else {}),
     }
     if config.suite is not None:

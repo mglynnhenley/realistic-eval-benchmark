@@ -35,6 +35,7 @@ class WorldSettings(BaseModel):
     world_cost_limit: CostCap | None = None
     strict_budget: bool = False
     usage_reporting_mode: Literal["strict", "usage_only"] = "strict"
+    disable_application_price_cutoffs: bool = False
     company_simulator: str | None = None
     # The browser runs in this service: a network-disabled Docker container, or a Node subprocess
     # (in a network namespace where the host allows one), as on the Inspect path.
