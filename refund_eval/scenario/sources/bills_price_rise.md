@@ -1,13 +1,13 @@
 # Sources for `bills_price_rise.yaml`
 
-Researched 26 October 2026 and re-checked 27 October 2026 from public pages only (nothing submitted). Status:
+Researched 26 October 2026 and re-checked 27 October 2026 from public pages only (nothing submitted). Supplemental source checks were made on 24 November 2026; their source dates are recorded separately below. Status:
 
 - **Verified**: read on the organisation's own page, a regulator, GOV.UK or Companies House, or its public API.
 - **Secondary**: from a press, comparison, forum or directory site, or from search-result quotes of an official page that blocks fetching (tvlicensing.co.uk, ofcom.org.uk).
 - **UNVERIFIED**: no source found.
 - **Departure**: deliberately invented or chosen for the scenario.
 
-Dates are when the source was last read: 26 Oct (first research) or 27 Oct (re-check).
+Dates in the original rows are when the source was last read: 26 Oct (first research) or 27 Oct (re-check). Supplemental rows distinguish publication or archive dates from the 24 Nov review.
 
 ## The household (departures)
 
@@ -29,6 +29,7 @@ Dates are when the source was last read: 26 Oct (first research) or 27 Oct (re-c
 | Joined or upgraded 8 Sep 2024 – 8 Nov 2025: +£1.50 a month each April for plans of 100GB and above, including Unlimited. Airtime only, not device payments. Seen on bills from April 2026 | [Three: Changes to your Monthly Charge](https://www.three.co.uk/support/bills-and-contracts/your-monthly-plan-and-usage/price-increase) | 27 Oct | Verified |
 | £22 → £23.50 (April 2026) → £25.00 (April 2027) | Arithmetic on the above | 27 Oct | Verified |
 | "Unlimited Lite 24 month SIM Only" at £22 in 2025 | A Three reseller snapshot of 16 Dec 2025 (three-clearance.co.uk) and 4g.co.uk: Lite £22, +£1.50 each April. No page dated Sep 2025 was found. In 2025 "Value" cost about £25 | 26 Oct | Secondary |
+| Does the £22 account price already include Three's £5 recurring-payment discount? | The 25 Jul 2025 Three Your Way guide includes £5 in listed prices and lists Unlimited Lite (24 months) at £26; the scenario does not identify that plan family for its £22 rate. The Advanced Plans guide is for pre-1 Oct 2021 joiners, not this 2025 account. | [Three Your Way guide (25 Jul 2025)](https://www.three.co.uk/content/dam/threedigital/terms-and-conditions/price-guides/latest-price-guides/threeyourwayplans-priceguide-post22june2025-25072025.pdf); [Advanced Plans guide (pre-1 Oct 2021 joiners)](https://www.three.co.uk/content/dam/threedigital/terms-and-conditions/price-guides/latest-price-guides/advancedplans-priceguide-25072025.pdf) | Unknown without the account's Customer Agreement Form or itemized bill |
 | The rise gives no right to leave. Since 17 Jan 2025, Ofcom has required rises in pounds and pence, and only rises not set out in the contract give an exit right | [thinkbroadband](https://www.thinkbroadband.com/news/10163-ofcom-confirms-ban-on-inflation-linked-price-rises-starts-in-january-2025), [Ofcom: price rises, your rights](https://www.ofcom.org.uk/phones-and-broadband/saving-money/telecoms-price-rises-what-are-your-rights) (blocks fetching), [Uswitch](https://www.uswitch.com/mobiles/guides/three-contract-price-rise/) | 26 Oct | Secondary |
 | Leaving early costs the remaining monthly charges. There are no mid-contract downgrades | [Three: leave without your number](https://three.co.uk/support/leave-three/leave-without-your-number), [Ken's Tech Tips](https://kenstechtips.com/index.php/cancelling-your-mobile-phone-contract-early-termination-fees-alternatives) (older guides show a 3% discount), [Three community](https://community.three.co.uk/t5/Network/Contract-price/m-p/45309) | 26 Oct | Secondary |
 | No complaints email. Live Chat 08:00–22:00 Mon–Fri and 09:00–20:00 weekends. Phone 333 or 0333 338 1001, 08:00–20:00 Mon–Fri and 09:00–18:00 weekends. Form at three.co.uk/support/complaints/complaints-form. Post: Three Customer Complaints, Hutchison 3G UK Ltd., PO Box 333, Glasgow G2 9AG. "We answer most complaints within 7 working days" | [Three: how to complain](https://www.three.co.uk/support/complaints/how-to-complain) | 27 Oct | Verified |
@@ -73,6 +74,7 @@ Dates are when the source was last read: 26 Oct (first research) or 27 Oct (re-c
 
 | Fact as used | Source | Checked | Status |
 | --- | --- | --- | --- |
+| Car FAQ payment-support options: remove optional extras/policy upgrades or update details for new circumstances | [Admiral Car Insurance FAQs](https://www.admiral.com/car-insurance/FAQs), [archived 3 Oct 2026 snapshot](https://web.archive.org/web/20261003134035/https://www.admiral.com/car-insurance/FAQs) | Snapshot 3 Oct 2026; reviewed 24 Nov | Verified, car-specific and predates the 26–27 Oct research; the cited text does not set a specific premium adjustment |
 | **Complaints phone.** Admiral's complaints page lists motor complaints on **0330 333 5888, Mon–Fri 8am–5pm, closed weekends** (the same number for home and travel). Forms: eforms.admiral.com/customer-assurance and /claims-complaints. Post: Complaint Manager, Admiral, Ty Admiral, David Street, Cardiff CF10 2AA. Acknowledged within 5 days, resolved within 8 weeks, then 6 months to go to FOS. **0333 220 2000 is not on that page**: only third-party sites list it, as the general customer-service and cancellations line (Mon–Fri 8–8, Sat 9–5, Sun 9.30–4) | [Admiral: complaint information](https://www.admiral.com/contact-us/complaint-information.php); 0333 220 2000 from search results (admiralgroup.co.uk returns 403) | 27 Oct | 0330 333 5888 Verified. 0333 220 2000 Secondary, and only as a general line |
 | You must declare motoring convictions, including fixed penalty endorsements, at renewal (policy booklet section 15). Admiral checks DVLA data at renewal | FOS decision [DRN-5901458](https://www.financial-ombudsman.org.uk/decision/DRN-5901458.pdf) quotes s.15. [MIB on MyLicence](https://mib.org.uk/mib-insight/majority-of-insurers-now-using-the-mylicence-service) | 26 Oct | Secondary (the booklet itself was not read) |
 | An undeclared SP30 added £146.02 to £565.93 (+26%) | [DRN-5901458](https://www.financial-ombudsman.org.uk/decision/DRN-5901458.pdf) | 26 Oct | Verified |

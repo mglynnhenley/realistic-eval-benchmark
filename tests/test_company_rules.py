@@ -1,6 +1,7 @@
 """Company rules: generation, verbatim-quote validation, rendering, caching and modes, and the CLI."""
 
 import json
+from pathlib import Path
 
 import pytest
 from fixtures.simulator import start_sample
@@ -166,3 +167,34 @@ def test_cli_generates_from_saved_dossiers_and_saves(sim, no_saved, monkeypatch,
     assert json.loads(capsys.readouterr().out) == saved
     with pytest.raises(SystemExit):
         rules.main(["--scenario", "train_refund_late", "--org", "nope", "--model", "mockllm/model"])
+
+
+def test_saved_admiral_car_rule_grounds_use_the_car_insurance_faq():
+    scenario = load_scenario("bills_price_rise")
+    org = scenario.org("admiral")
+    saved = rules.saved_rules(scenario.id, org.key)
+    assert saved is not None
+    dossier = json.loads((Path(__file__).parents[1] / "refund_eval/scenario/dossiers/household_bills/admiral.json")
+                         .read_text())
+    company_rules = rules.CompanyRules.model_validate(saved["rules"])
+    grounds = {ground.key: ground for ground in company_rules.grounds}
+    expected = {
+        "remove_optional_extras": "removing optional extras or policy upgrades you no longer need",
+        "rerate_for_changed_circumstances": (
+            "changing your policy details to reflect any new circumstances (e.g. reduced mileage or fewer named drivers)"
+        ),
+    }
+    car_faq = "https://www.admiral.com/car-insurance/FAQs"
+    for key, quote in expected.items():
+        assert grounds[key].source == car_faq
+        assert grounds[key].quote == quote
+        assert any(
+            fact.get("url") == car_faq
+            and rules._normal(quote) in rules._normal(fact.get("quote", ""))
+            and fact.get("archive_date") == "2026-10-03"
+            for fact in dossier["dossier"]["facts"]
+        )
+
+    errors = []
+    rules._grounded_rules(company_rules, org, dossier, errors)
+    assert not errors
