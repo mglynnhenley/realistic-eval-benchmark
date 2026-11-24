@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ TRACE_ROOT = Path.home() / "refund-eval-data" / "partial-traces"
 TRACE_INTERVAL_SECONDS = 1.0
 TRANSFER_TIMEOUT_SECONDS = 5.0
 PRIVATE_WORLD_LOGS_ROOT = "/refund-eval-private/world-logs"
+PRIVATE_AGENT_BUFFER_ROOT = "/refund-eval-private/inspect-data"
+LEGACY_INSPECT_DATA_ROOT = "/tmp/refund-eval-inspect-data"
 PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE = "_refund_eval_private_world_bind_enabled"
 AGENT_EVAL_LOG_DIRECTORY = "/logs/agent/inspect"
 
@@ -31,14 +34,26 @@ class TraceSource:
     list_directory: str | None = None
     fallback_path: str | None = None
     fallback_service: str | None = None
+    database_root: str | None = None
+    database_log_directory: str | None = None
 
 
 LEGACY_TRACE_SOURCES = (
     TraceSource("agent_eval", None, "agent.eval", "/logs/artifacts/refund"),
+    TraceSource(
+        "agent_active_samples", None, "agent-active-samples.sqlite",
+        database_root=f"{LEGACY_INSPECT_DATA_ROOT}/inspect_ai/samplebuffer",
+        database_log_directory="/logs/artifacts/refund",
+    ),
     TraceSource("runtime_snapshot", "/logs/agent/progress/snapshot.json", "runtime-snapshot.json"),
 )
 NATIVE_TRACE_SOURCES = (
     TraceSource("agent_eval", None, "agent.eval", AGENT_EVAL_LOG_DIRECTORY),
+    TraceSource(
+        "agent_active_samples", None, "agent-active-samples.sqlite",
+        database_root=f"{PRIVATE_AGENT_BUFFER_ROOT}/inspect_ai/samplebuffer",
+        database_log_directory=AGENT_EVAL_LOG_DIRECTORY,
+    ),
     TraceSource("simulator_state", f"{PRIVATE_WORLD_LOGS_ROOT}/state.json", "simulator-state.json",
                 fallback_path="/var/log/world/state.json", fallback_service="world"),
     TraceSource("simulator_events", f"{PRIVATE_WORLD_LOGS_ROOT}/events.jsonl", "simulator-events.jsonl",
@@ -178,19 +193,24 @@ class PrivateTraceCapture:
             temp_path = Path(temporary)
             try:
                 async with asyncio.timeout(TRANSFER_TIMEOUT_SECONDS):
-                    remote_path = source.remote_path
-                    if remote_path is None:
-                        remote_path = await self._latest_eval_log(environment, source.list_directory)
-                        if remote_path is None:
-                            await self._download_latest_eval_directory(environment, source.list_directory, temp_path)
-                        else:
-                            await environment.download_file(remote_path, temp_path)
-                    elif source.fallback_path and not has_private_world_bind(environment):
-                        await environment.service_download_file(
-                            source.fallback_path, temp_path, service=source.fallback_service,
+                    if source.database_root and source.database_log_directory:
+                        await self._download_active_sample_buffer(
+                            environment, source, temp_path,
                         )
                     else:
-                        await environment.download_file(remote_path, temp_path)
+                        remote_path = source.remote_path
+                        if remote_path is None:
+                            remote_path = await self._latest_eval_log(environment, source.list_directory)
+                            if remote_path is None:
+                                await self._download_latest_eval_directory(environment, source.list_directory, temp_path)
+                            else:
+                                await environment.download_file(remote_path, temp_path)
+                        elif source.fallback_path and not has_private_world_bind(environment):
+                            await environment.service_download_file(
+                                source.fallback_path, temp_path, service=source.fallback_service,
+                            )
+                        else:
+                            await environment.download_file(remote_path, temp_path)
                 if source.filename.endswith(".eval"):
                     await asyncio.to_thread(_validate_eval_archive, temp_path)
                 size, digest = await asyncio.to_thread(
@@ -218,6 +238,69 @@ class PrivateTraceCapture:
                 await self._record_failure(source, error)
             finally:
                 temp_path.unlink(missing_ok=True)
+
+    @staticmethod
+    async def _download_active_sample_buffer(environment, source: TraceSource, destination: Path) -> None:
+        log_directory = source.database_log_directory
+        if log_directory is None or source.database_root is None:
+            raise RuntimeError("Inspect sample buffer location is unavailable")
+        eval_path = await PrivateTraceCapture._latest_eval_log(environment, log_directory)
+        if eval_path is None:
+            with tempfile.TemporaryDirectory(prefix="private-trace-eval-name-") as staging:
+                await environment.download_dir(log_directory, staging)
+                evals = list(Path(staging).glob("*.eval"))
+                if not evals:
+                    raise FileNotFoundError("no Inspect .eval log is available")
+                eval_name = max(evals, key=lambda path: (path.stat().st_mtime_ns, path.name)).name
+        else:
+            eval_name = Path(eval_path).name
+        log_dir_hash = hashlib.sha256(log_directory.rstrip("/\\").encode("utf-8")).hexdigest()
+        database_directory = f"{source.database_root}/{log_dir_hash}"
+        with tempfile.TemporaryDirectory(prefix="private-trace-sample-buffer-") as staging:
+            staging_dir = Path(staging)
+            if has_modal_filesystem(environment) and has_private_world_bind(environment):
+                filesystem = environment._sandbox.filesystem
+                entries = await filesystem.list_files.aio(database_directory)
+                names = {
+                    Path(str(getattr(entry, "name", getattr(entry, "path", entry)))).name
+                    for entry in entries
+                }
+                databases = sorted(
+                    name for name in names
+                    if name.startswith(f"{eval_name}.") and name.endswith(".db")
+                )
+                if not databases:
+                    raise FileNotFoundError("active Inspect sample buffer is unavailable")
+                database_name = databases[-1]
+                files = [database_name, *(database_name + suffix for suffix in ("-wal", "-shm"))]
+                for name in files:
+                    if name not in names:
+                        continue
+                    await environment.download_file(
+                        f"{database_directory}/{name}", staging_dir / name,
+                    )
+            else:
+                await environment.download_dir(database_directory, staging_dir)
+                databases = sorted(
+                    path.name for path in staging_dir.iterdir()
+                    if path.name.startswith(f"{eval_name}.") and path.name.endswith(".db")
+                )
+                if not databases:
+                    raise FileNotFoundError("active Inspect sample buffer is unavailable")
+                database_name = databases[-1]
+
+            database_path = staging_dir / database_name
+            if not database_path.is_file():
+                raise FileNotFoundError("active Inspect sample buffer database is unavailable")
+            with sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True) as reader:
+                with sqlite3.connect(destination) as snapshot:
+                    reader.backup(snapshot)
+                    integrity = snapshot.execute("PRAGMA integrity_check").fetchone()
+                    if integrity is None or integrity[0] != "ok":
+                        raise RuntimeError("invalid active Inspect sample buffer snapshot")
+                    events = snapshot.execute("SELECT COUNT(*) FROM events").fetchone()
+                    if events is None or events[0] == 0:
+                        raise RuntimeError("active Inspect sample buffer has no recorded events")
 
     @staticmethod
     async def _latest_eval_log(environment, directory: str | None) -> str | None:

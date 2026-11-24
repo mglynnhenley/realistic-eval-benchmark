@@ -377,12 +377,13 @@ def test_compose_world_sidecar(generated):
     compose = yaml.safe_load((environment / "docker-compose.yaml").read_text())
     assert compose["services"]["main"] == {
         "depends_on": {"world": {"condition": "service_healthy"}},
+        "environment": {"XDG_DATA_HOME": "/refund-eval-private/inspect-data"},
+        "volumes": ["inspect-buffer:/refund-eval-private/inspect-data"],
     }
     world = compose["services"]["world"]
     assert world["build"] == {"context": "${CONTEXT_DIR}", "dockerfile": "world/Dockerfile"}
     assert world["volumes"] == ["world-logs:/var/log/world"]
-    assert compose["volumes"] == {"world-logs": None}
-    assert "volumes" not in compose["services"]["main"]
+    assert compose["volumes"] == {"world-logs": None, "inspect-buffer": None}
     assert world["security_opt"] == ["seccomp=unconfined"]
     assert world["environment"]["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY:-}"
     assert world["environment"]["WORLD_TRIAL"] == "${COMPOSE_PROJECT_NAME}"
@@ -401,6 +402,7 @@ def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
     from harbor.environments.modal import ModalEnvironment, _ModalDinD
 
     from refund_eval.harbor.private_traces import (
+        PRIVATE_AGENT_BUFFER_ROOT,
         PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
         PRIVATE_WORLD_LOGS_ROOT,
     )
@@ -410,8 +412,9 @@ def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
     environment_dir.mkdir()
     compose_path = environment_dir / "docker-compose.yaml"
     compose_path.write_text(
-        "services:\n  world:\n    volumes:\n      - world-logs:/var/log/world\n"
-        "volumes:\n  world-logs:\n",
+        "services:\n  main:\n    volumes:\n      - inspect-buffer:/refund-eval-private/inspect-data\n"
+        "  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n  inspect-buffer:\n",
         encoding="utf-8",
     )
     environment = object.__new__(ModalEnvironment)
@@ -439,8 +442,12 @@ def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
     with private_world_bind_mount_adapter():
         assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets(writable_only=True)
         assert PRIVATE_WORLD_LOGS_ROOT in environment._mount_targets()
+        assert PRIVATE_AGENT_BUFFER_ROOT in environment._mount_targets()
         source = f"{PRIVATE_WORLD_LOGS_ROOT}/state.json"
         assert strategy._host_log_path(source) == source
+        assert strategy._host_log_path(PRIVATE_AGENT_BUFFER_ROOT + "/samplebuffer/db.sqlite") == (
+            PRIVATE_AGENT_BUFFER_ROOT + "/samplebuffer/db.sqlite"
+        )
         assert strategy._host_log_path("/run/state.json") is None
 
         async def start_both():
@@ -451,11 +458,13 @@ def test_private_world_bind_is_direct_download_only(tmp_path, monkeypatch):
     assert len({entry[0] for entry in observed.values()}) == 2
     for directory, compose in observed.values():
         assert f"- {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in compose
+        assert f"- {PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in compose
         assert "\n      - world-logs:/var/log/world" not in compose
         assert not directory.exists()
     assert compose_path.read_text(encoding="utf-8") == (
-        "services:\n  world:\n    volumes:\n      - world-logs:/var/log/world\n"
-        "volumes:\n  world-logs:\n"
+        "services:\n  main:\n    volumes:\n      - inspect-buffer:/refund-eval-private/inspect-data\n"
+        "  world:\n    volumes:\n      - world-logs:/var/log/world\n"
+        "volumes:\n  world-logs:\n  inspect-buffer:\n"
     )
     assert environment._mounts == original_mounts
     assert second_environment._mounts == original_mounts
@@ -2113,6 +2122,137 @@ async def _partial_inspect_eval_bytes(tmp_path):
     assert len(partial.samples) == 1
     assert any("recoverable partial agent event" in str(message.content)
                for message in partial.samples[0].messages)
+
+
+@pytest.mark.parametrize(
+    ("native", "guarded_modal"),
+    [(True, True), (True, False), (False, False)],
+    ids=["guarded-native", "unguarded-native", "legacy"],
+)
+async def test_active_inspect_sample_events_survive_process_kill(tmp_path, native, guarded_modal):
+    import sqlite3
+
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+    )
+
+    data_home = tmp_path / "inspect-data"
+    ready = tmp_path / "buffer-ready"
+    log_directory = "/logs/agent/inspect" if native else "/logs/artifacts/refund"
+    child = textwrap.dedent(f"""
+        import os
+        import time
+        from pathlib import Path
+        from inspect_ai.event._model import ModelEvent
+        from inspect_ai.event._tool import ToolEvent
+        from inspect_ai.log._log import EvalSampleSummary
+        from inspect_ai.log._recorders.buffer.database import SampleBufferDatabase
+        from inspect_ai.log._recorders.types import SampleEvent
+        from inspect_ai.model import ChatMessageUser, GenerateConfig, ModelOutput
+
+        database = SampleBufferDatabase(
+            location={(log_directory + "/run.eval")!r}, log_images=False,
+        )
+        database.start_sample(EvalSampleSummary(
+            id="active-sample", epoch=1, input="active prompt", target="done",
+        ))
+        database.log_events([
+            SampleEvent(
+                id="active-sample", epoch=1,
+                event=ModelEvent(
+                    model="mockllm/model",
+                    input=[ChatMessageUser(content="active model prompt")],
+                    tools=[], tool_choice="auto", config=GenerateConfig(),
+                    output=ModelOutput.from_content("mockllm/model", "active model payload"),
+                ),
+            ),
+            SampleEvent(
+                id="active-sample", epoch=1,
+                event=ToolEvent(
+                    id="tool-1", function="offline_tool",
+                    arguments={{"request": "active tool payload"}},
+                    result="active tool result",
+                ),
+            ),
+        ])
+        Path(os.environ["TRACE_READY_FILE"]).write_text(str(database.db_path))
+        time.sleep(60)
+    """)
+    child_env = {**os.environ, "XDG_DATA_HOME": str(data_home), "TRACE_READY_FILE": str(ready)}
+    process = subprocess.Popen(
+        [sys.executable, "-c", child], cwd=Path(__file__).resolve().parents[1],
+        env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = asyncio.get_running_loop().time() + 10
+        while not ready.exists() and process.poll() is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.05)
+        assert ready.exists(), ("Inspect buffer did not record events: "
+                                + (process.stderr.read() if process.poll() is not None else ""))
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+    assert process.returncode < 0
+
+    from inspect_ai.log._recorders.buffer.database import location_dir_and_file
+
+    source_capture = PrivateTraceCapture(
+        "active-sample", native=native, root=tmp_path / "spool",
+    )
+    source = next(source for source in source_capture.sources if source.name == "agent_active_samples")
+    database_path = Path(ready.read_text())
+    remote_directory = (
+        f"{source.database_root}/"
+        f"{location_dir_and_file(log_directory + '/run.eval')[0]}"
+    )
+
+    class Filesystem:
+        async def aio(self, directory):
+            if directory == log_directory:
+                return [SimpleNamespace(name="run.eval")]
+            assert directory == remote_directory
+            return [SimpleNamespace(name=path.name) for path in database_path.parent.iterdir()]
+
+    class CapturingEnvironment:
+        def __init__(self):
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=Filesystem())) if native else None
+            if guarded_modal:
+                setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            assert remote.startswith(source.database_root + "/")
+            shutil.copyfile(database_path.parent / Path(remote).name, destination)
+
+        async def download_dir(self, remote, destination):
+            if remote == log_directory:
+                (Path(destination) / "run.eval").write_bytes(b"in-progress eval")
+                return
+            assert remote == remote_directory
+            for path in database_path.parent.iterdir():
+                shutil.copyfile(path, Path(destination) / path.name)
+
+        async def exec(self, *_args, **_kwargs):
+            raise AssertionError("active trace capture must not use sandbox exec")
+
+    await source_capture._capture_source(CapturingEnvironment(), source)
+    captured = source_capture.directory / source.filename
+    with sqlite3.connect(f"{captured.as_uri()}?mode=ro", uri=True) as database:
+        sample_data = database.execute(
+            "SELECT data FROM samples WHERE id = ? AND epoch = ?",
+            ("active-sample", 1),
+        ).fetchone()[0]
+        events = [json.loads(row[0]) for row in database.execute(
+            "SELECT data FROM events WHERE sample_id = ? AND sample_epoch = ? ORDER BY id",
+            ("active-sample", 1),
+        )]
+        pools = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+    assert json.loads(sample_data)["completed_at"] is None
+    assert [event["event"] for event in events] == ["model", "tool"]
+    assert "active model payload" in json.dumps(events)
+    assert "active model prompt" in json.dumps(pools)
+    assert "active tool result" in json.dumps(events)
     return partial_path.read_bytes()
 
 

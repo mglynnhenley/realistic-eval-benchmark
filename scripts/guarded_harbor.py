@@ -51,6 +51,7 @@ from refund_eval.harbor.adapter import (
     verify_split_budget_wheel,
 )
 from refund_eval.harbor.private_traces import (
+    PRIVATE_AGENT_BUFFER_ROOT,
     PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
     PRIVATE_WORLD_LOGS_ROOT,
 )
@@ -95,8 +96,10 @@ def private_world_bind_mount_adapter():
 
     def mount_targets(environment, *, writable_only: bool = False):
         targets = original(environment, writable_only=writable_only)
-        if isinstance(environment, ModalEnvironment) and PRIVATE_WORLD_LOGS_ROOT not in targets:
-            targets.append(PRIVATE_WORLD_LOGS_ROOT)
+        if isinstance(environment, ModalEnvironment):
+            for target in (PRIVATE_WORLD_LOGS_ROOT, PRIVATE_AGENT_BUFFER_ROOT):
+                if target not in targets:
+                    targets.append(target)
         return targets
 
     async def start(strategy, force_build: bool):
@@ -131,11 +134,13 @@ def private_world_compose_bind(environment):
         shutil.copytree(original_dir, isolated_dir)
         compose_path = isolated_dir / "docker-compose.yaml"
         original = compose_path.read_text(encoding="utf-8")
-        marker = "      - world-logs:/var/log/world"
-        if original.count(marker) != 1:
+        world_marker = "      - world-logs:/var/log/world"
+        buffer_marker = "      - inspect-buffer:/refund-eval-private/inspect-data"
+        if original.count(world_marker) != 1 or original.count(buffer_marker) != 1:
             raise LauncherFailure("guarded Modal task must have one named world-log volume")
         compose_path.write_text(
-            original.replace(marker, f"      - {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world", 1),
+            original.replace(world_marker, f"      - {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world", 1)
+            .replace(buffer_marker, f"      - {PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data", 1),
             encoding="utf-8",
         )
         environment.environment_dir = isolated_dir
@@ -251,14 +256,18 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
         if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
             raise ValueError
-        if compose["volumes"] != {"world-logs": None}:
+        if compose["volumes"] != {"world-logs": None, "inspect-buffer": None}:
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
             raise ValueError
         main = services["main"]
         world_service = services["world"]
-        if main != {"depends_on": {"world": {"condition": "service_healthy"}}}:
+        if main != {
+            "depends_on": {"world": {"condition": "service_healthy"}},
+            "environment": {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT},
+            "volumes": ["inspect-buffer:/refund-eval-private/inspect-data"],
+        }:
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -298,7 +307,9 @@ def _shared_roles_compose_values(
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
         if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
             raise ValueError
-        if compose["volumes"] != {"world-logs": None, "role-budget": None}:
+        if compose["volumes"] != {
+            "world-logs": None, "inspect-buffer": None, "role-budget": None,
+        }:
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
@@ -306,7 +317,11 @@ def _shared_roles_compose_values(
         main, world_service = services["main"], services["world"]
         if main != {
             "depends_on": {"world": {"condition": "service_healthy"}},
-            "volumes": ["role-budget:/var/lib/refund-eval/role-budget"],
+            "environment": {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT},
+            "volumes": [
+                "inspect-buffer:/refund-eval-private/inspect-data",
+                "role-budget:/var/lib/refund-eval/role-budget",
+            ],
         }:
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {

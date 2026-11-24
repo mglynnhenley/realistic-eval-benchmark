@@ -78,7 +78,8 @@ class RefundInspectAgent(BaseAgent):
         execution = asyncio.create_task(environment.exec(
             "python -m refund_eval.harbor.worker --request /app/request.json "
             "> /logs/agent/worker.log 2>&1",
-            cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress"},
+            cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
+                              "XDG_DATA_HOME": "/tmp/refund-eval-inspect-data"},
             timeout_sec=request.settings.time_limit + 600,
         ))
         try:
@@ -161,7 +162,8 @@ class RefundInspectAgent(BaseAgent):
             execution = asyncio.create_task(environment.exec(
                 "exec python -m refund_eval.harbor.worker --request /app/request.json "
                 f"--worker-seconds {allowance:.6f} > /logs/agent/worker.log 2>&1",
-                cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress"},
+                cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
+                                  "XDG_DATA_HOME": "/tmp/refund-eval-inspect-data"},
                 timeout_sec=exec_timeout_seconds(worker_end),
             ))
             killed = False

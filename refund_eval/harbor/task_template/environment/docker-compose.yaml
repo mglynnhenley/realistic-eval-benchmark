@@ -6,6 +6,10 @@ services:
     depends_on:
       world:
         condition: service_healthy
+    environment:
+      XDG_DATA_HOME: /refund-eval-private/inspect-data
+    volumes:
+      - inspect-buffer:/refund-eval-private/inspect-data
     # ROLE_BUDGET_MAIN_VOLUME
 
   world:
@@ -47,4 +51,5 @@ services:
 
 volumes:
   world-logs:
+  inspect-buffer:
   # ROLE_BUDGET_VOLUME
