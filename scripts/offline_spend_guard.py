@@ -974,7 +974,8 @@ def install_modal_hooks(
     from harbor.environments.modal import ModalEnvironment
 
     original_create = ModalEnvironment._create_sandbox
-    original_download_dir = ModalEnvironment.download_dir
+    collection_methods = ("download_file", "download_dir", "service_download_file", "service_download_dir")
+    original_collection = {name: getattr(ModalEnvironment, name) for name in collection_methods}
     original_exec = ModalEnvironment._sdk_exec
     original_terminate = ModalEnvironment._terminate_sandbox
     collection_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
@@ -1050,24 +1051,28 @@ def install_modal_hooks(
             login=login,
         )
 
-    async def guarded_download_dir(self: object, *args: Any, **kwargs: Any) -> object:
-        token = collection_context.set(True)
-        try:
-            return await original_download_dir(self, *args, **kwargs)
-        finally:
-            collection_context.reset(token)
+    def guarded_collection(original: Callable[..., Any]) -> Callable[..., Any]:
+        async def collect(self: object, *args: Any, **kwargs: Any) -> object:
+            token = collection_context.set(True)
+            try:
+                return await original(self, *args, **kwargs)
+            finally:
+                collection_context.reset(token)
+        return collect
 
     async def guarded_terminate(self: object) -> None:
         await guard.terminate_environment(self)
 
     ModalEnvironment._create_sandbox = guarded_create
-    ModalEnvironment.download_dir = guarded_download_dir
+    for name, original in original_collection.items():
+        setattr(ModalEnvironment, name, guarded_collection(original))
     ModalEnvironment._sdk_exec = guarded_exec
     ModalEnvironment._terminate_sandbox = guarded_terminate
     try:
         yield
     finally:
         ModalEnvironment._create_sandbox = original_create
-        ModalEnvironment.download_dir = original_download_dir
+        for name, original in original_collection.items():
+            setattr(ModalEnvironment, name, original)
         ModalEnvironment._sdk_exec = original_exec
         ModalEnvironment._terminate_sandbox = original_terminate

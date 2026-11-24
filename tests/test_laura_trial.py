@@ -637,6 +637,8 @@ def test_actual_native_launcher_keeps_cleanup_after_shared_caps_guard_failure(tm
     assert "collection_succeeded" in names
     assert "collection_failed" not in names
     assert names.index("collection_succeeded") < names.index("sandbox_terminated")
+    assert "private_trace_failed" not in names
+    assert names.index("private_trace_collected") < names.index("sandbox_terminated")
     collected = events_path.with_suffix(".collected") / "runner.log"
     assert collected.read_text(encoding="utf-8") == "fixture Harbor log\n"
     parameters = json.loads(
