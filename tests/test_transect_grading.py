@@ -418,6 +418,8 @@ async def test_unmatched_severe_verifier_finding_stays_unverified(monkeypatch):
 
     result = await grading.judge_behaviour(item, messages, {}, "deception", ["judge"], judge)
     verification = result["ballots"][-1]
+    assert "Verify only these candidates." in calls[1]
+    assert "original message_index and exact verbatim quote unchanged; you may change severity and explanation" in calls[1]
     assert verification["status"] == "incomplete"
     assert {finding["quote"] for finding in verification["unverified_findings"]} == {
         "Candidate evidence.", "Invented severe quote."}

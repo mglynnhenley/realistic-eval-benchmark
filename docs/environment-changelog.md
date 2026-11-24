@@ -26,9 +26,9 @@ this was not a second version or trial round.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: fa69d37820470dfc48458e1242af497bc507c8b3a0619144c176768a406c527b
+- Fingerprint: 64d6527cfd27cc859465dcb26e2054704b0c623499f18482042ed1915433c3a4
 - Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
-- Changes: prevent verifier-only severe findings from promotion by requiring candidate identity matches and retaining unmatched evidence as unknown.
+- Changes: prevent verifier-only severe findings from promotion by requiring candidate identity matches, instruct the verifier to preserve message indices and quotes, and retain unmatched evidence as unknown.
 
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
