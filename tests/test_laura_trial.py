@@ -46,7 +46,7 @@ _PUBLIC_SCENARIO = {
 
 def _write_test_only_wheel(
     directory: Path, *, scenario=None, include_scenario=True, duplicate_scenario=False,
-    alias_scenario=False, raw_wheel=None
+    alias_scenario=False, raw_wheel=None, scenario_files: dict[str, bytes] | None = None,
 ) -> tuple[Path, str]:
     """Create inert dummy wheel bytes for offline fixture preparation only."""
     directory.mkdir(parents=True)
@@ -57,7 +57,10 @@ def _write_test_only_wheel(
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
-    if include_scenario:
+    if scenario_files is not None:
+        for name, content in scenario_files.items():
+            files[f"refund_eval/scenario/{name}.yaml"] = content
+    elif include_scenario:
         public_scenario = _PUBLIC_SCENARIO if scenario is None else scenario
         files[_PUBLIC_SCENARIO_MEMBER] = yaml.safe_dump(public_scenario, sort_keys=False).encode()
         if alias_scenario:
@@ -210,6 +213,29 @@ def _native_setup(
         jobs_dir=Path(job["jobs_dir"]),
         instruction=instruction,
         skill=skill,
+    )
+
+
+def _install_staged_scenario_wheel(
+    bundle: SimpleNamespace, scenario_files: dict[str, bytes], directory: Path
+) -> None:
+    wheel, wheel_sha256 = _write_test_only_wheel(
+        directory, include_scenario=False, scenario_files=scenario_files
+    )
+    staged_agent = bundle.task_path / "environment" / "agent"
+    staged_wheel = next((staged_agent / "wheels").glob("*.whl"))
+    wheel_manifest_path = staged_agent / "agent-wheel.json"
+    wheel_manifest = json.loads(wheel_manifest_path.read_text())
+    previous_sha256 = wheel_manifest["sha256"]
+    staged_wheel.write_bytes(wheel.read_bytes())
+    wheel_manifest["sha256"] = wheel_sha256
+    wheel_manifest_path.write_text(json.dumps(wheel_manifest), encoding="utf-8")
+
+    task_manifest_path = bundle.task_path / "task.toml"
+    task_manifest = task_manifest_path.read_text(encoding="utf-8")
+    assert task_manifest.count(previous_sha256) == 1
+    task_manifest_path.write_text(
+        task_manifest.replace(previous_sha256, wheel_sha256), encoding="utf-8"
     )
 
 
@@ -1272,6 +1298,29 @@ def test_public_validation_rejects_invalid_digest_valid_staged_wheel(
         metadata = tomllib.loads((bundle.task_path / "task.toml").read_text())["metadata"]
         assert wheel_manifest["sha256"] == metadata["agent_wheel_sha256"] == wheel_sha256
 
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
+
+
+def test_public_validation_rejects_unprojected_inherited_wheel(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    source_scenario_dir = Path(__file__).resolve().parents[1] / "refund_eval" / "scenario"
+    inherited_files = {
+        "archive/train_refund": (source_scenario_dir / "archive" / "train_refund.yaml").read_bytes(),
+        "train_refund_late": (source_scenario_dir / "train_refund_late.yaml").read_bytes(),
+    }
+    _install_staged_scenario_wheel(bundle, inherited_files, tmp_path / "unprojected-wheel")
+
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
+
+
+def test_public_validation_rejects_mismatched_public_scenario_id(tmp_path, monkeypatch):
+    bundle = _native_setup(
+        tmp_path, monkeypatch, scenario={**_PUBLIC_SCENARIO, "id": "different_scenario"},
+    )
     with pytest.raises(laura_trial.SetupFailure):
         laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
     assert not bundle.manifest_path.exists()

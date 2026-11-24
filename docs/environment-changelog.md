@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.7 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 85d595c79338892d2169acec8dc904eafe61a2c1d1384ec12694797314cb48d2
+- Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
+- Changes: add the local Transect structural/ledger review and opt-in paid judging for saved `train_refund_late` trials; include bounded prior-source context with target-only citations, retain confirmed severity while tracking incomplete coverage, preserve phase scan status, and protect local reports. Trial execution and baseline `scout/run.py` remain unchanged.
+
 ## 8.6 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: b81d0915d59d73bc8f1e5a6f642a83116072b1e5e619d34511ba7b9f9a18a385
-- Trial round: none. Offline validation only; no paid judging or transcript sends were used for verification.
-- Changes: add a local Transect structural/ledger review and optional paid judged mode for saved trials using capped, approved OpenRouter routes and local static reports (MAT-141/MAT-145). Trial execution and baseline `scout/run.py` remain unchanged.
+- Fingerprint: 9704d16033a7eecd0560c00d149b9617fb17917f592b11df1fc9e1011f2faac7
+- Trial round: none. Offline validation only.
+- Changes: record sanitized exception types and repository-relative frames when Inspect returns a failed inprocess evaluation (MAT-130).
 
 ## 8.5 — 2026-11-24
 - Kind: trivial batch

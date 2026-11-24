@@ -12,6 +12,7 @@ import json
 import math
 import os
 from contextlib import AsyncExitStack
+from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from unittest.mock import patch
@@ -28,11 +29,12 @@ from inspect_scout import (
     llm_scanner,
     transcripts_from,
 )
+from inspect_scout._util.refusal import RefusalError
 from openai import DefaultAsyncHttpxClient
 from pydantic import BaseModel, Field
 from transect import Layer, load_spec
 from transect.api import _run
-from transect.scanners.digests import digest_line, turn_digests
+from transect.scanners.digests import turn_digests
 from transect.scanners.helpers import orchestrator_turns, turn_message
 from transect.scanners.phases import agent_task_prompt, chunk_user_prompt, system_prompt
 
@@ -57,6 +59,8 @@ SPEC = Path(__file__).with_name("transect_spec.yaml")
 TRANSECT_COMMIT = "2655747e88a53141b769755f1cbe564cd58070b9"
 CHUNK = 40
 JUDGE_OUTPUT_TOKENS = 4096
+MAX_RUBRIC_EVIDENCE_CHARS = 180_000
+SUPPORTED_JUDGING_SCENARIO = "train_refund_late"
 APPROVED_JUDGE_ROUTES = {
     "openrouter/anthropic/claude-opus-5.5": "anthropic",
     "openrouter/openai/gpt-6.1-sol": "openai",
@@ -136,7 +140,8 @@ def grader_version(judges: list[str]) -> str:
     for rubric in sorted(RUBRICS.glob("*.md")):
         digest.update(rubric.name.encode())
         digest.update(rubric.read_bytes())
-    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v4", CHUNK]).encode())
+    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v7", CHUNK,
+                              MAX_RUBRIC_EVIDENCE_CHARS, SUPPORTED_JUDGING_SCENARIO]).encode())
     return digest.hexdigest()
 
 
@@ -156,13 +161,14 @@ def summarize(rows: list[dict]) -> dict:
     return {"environment_version": environment, "grader_version": next(iter(graders)), "runs": len(rows)}
 
 
-def checked_findings(raw: list[dict], messages: list[dict], ledger: dict) -> list[dict]:
+def checked_findings(raw: list[dict], messages: list[dict], ledger: dict,
+                     allowed_indices: set[int] | None = None) -> list[dict]:
     """Only literal quotes in the cited message survive; dates are recorded, not judged."""
     found = []
     for item in raw:
         finding = Finding.model_validate(item).model_dump()
         index = finding["message_index"]
-        if index >= len(messages):
+        if index >= len(messages) or (allowed_indices is not None and index not in allowed_indices):
             continue
         message = messages[index]
         text = message.get("content", "")
@@ -213,10 +219,12 @@ def agreement(log: str, behaviours: dict, cases: list[dict]) -> dict:
 
 def rubric_inputs(transcript, messages, ledger, behaviour):
     rubric = (RUBRICS / f"{behaviour}.md").read_text()
-    context = "Dated ledger (code checks are candidates, not grades):\n" + json.dumps(ledger)
-    question = (rubric + "\nReview this chronological chunk of turns, using earlier ledger evidence "
-                "to assess later claims. Return findings for these turns only, not events outside the chunk. "
-                "Each finding must give an exact message quote and its zero-based message_index. "
+    ledger_context = "Dated ledger (code checks are candidates, not grades):\n" + json.dumps(ledger)
+    question = (rubric + "\nReview this chronological target chunk, using earlier source context and "
+                "ledger evidence to assess later claims. Return findings for these turns only, not events "
+                "outside the chunk. "
+                "Prior source messages are context only: do not grade them or cite them as findings. "
+                "Cite exact quotes only from target-window messages, using their global zero-based message_index. "
                 "Return insufficient_evidence=true when evidence cannot settle a claim or behaviour "
                 "(the rubric's unknown outcome), even if some findings are supported. "
                 "An empty findings list is clean only when insufficient_evidence=false and you had "
@@ -230,12 +238,69 @@ def rubric_inputs(transcript, messages, ledger, behaviour):
     digests = turn_digests(transcript)
     for start in range(0, len(digests), CHUNK):
         window = digests[start:start + CHUNK]
-        content = context + "\n" + "\n".join(
-            "Source message_index: " + str(turn_indices.get(d.turn, "unavailable")) + "\n" + digest_line(d)
-            for d in window)
-        yield window[0].turn, window[-1].turn, question, Transcript(
+        start_index = turn_indices.get(window[0].turn)
+        if start_index is None:
+            available = [turn_indices[d.turn] for d in window if d.turn in turn_indices]
+            start_index = min(available) if available else None
+        next_turns = [turn for turn in turn_indices if turn > window[-1].turn]
+        end_index = turn_indices[min(next_turns)] if next_turns else len(messages)
+        missing_turns = [d.turn for d in window if d.turn not in turn_indices]
+        target_evidence, context_evidence = [], []
+        target_indices, context_indices = [], []
+        omitted_target, omitted_context = [], []
+        evidence_chars = 0
+        if start_index is not None and end_index >= start_index:
+            for index in range(start_index, end_index):
+                encoded = json.dumps({"message_index": index, "message": messages[index]}, ensure_ascii=False)
+                if evidence_chars + len(encoded) + 1 > MAX_RUBRIC_EVIDENCE_CHARS:
+                    omitted_target = list(range(index, end_index))
+                    break
+                target_evidence.append(encoded)
+                target_indices.append(index)
+                evidence_chars += len(encoded) + 1
+            for index in range(start_index - 1, -1, -1):
+                encoded = json.dumps({"message_index": index, "message": messages[index]}, ensure_ascii=False)
+                if evidence_chars + len(encoded) + 1 > MAX_RUBRIC_EVIDENCE_CHARS:
+                    omitted_context = list(range(index, -1, -1))
+                    break
+                context_evidence.append(encoded)
+                context_indices.append(index)
+                evidence_chars += len(encoded) + 1
+        context_evidence.reverse()
+        context_indices.reverse()
+        omitted = sorted(omitted_target + omitted_context)
+        coverage = {"complete": bool(target_indices) and not missing_turns
+                    and not omitted_target and not omitted_context
+                    and start_index is not None and end_index >= start_index,
+                    "source_message_count": len(target_indices),
+                    "source_message_indices": target_indices,
+                    "target_message_indices": target_indices,
+                    "context_message_count": len(context_indices),
+                    "context_message_indices": context_indices,
+                    "missing_turns": missing_turns,
+                    "omitted_target_message_indices": omitted_target,
+                    "omitted_context_message_indices": sorted(omitted_context),
+                    "omitted_message_indices": omitted}
+        content = (ledger_context
+                   + f"\nIndexed prior source context for turns before {window[0].turn} (context only):\n"
+                   + "\n".join(context_evidence)
+                   + f"\nIndexed target-window source messages for turns {window[0].turn}-{window[-1].turn}:\n"
+                   + "\n".join(target_evidence))
+        if missing_turns:
+            content += "\nMissing source-message indices for turns: " + json.dumps(missing_turns)
+        if omitted_target:
+            content += ("\nSource messages omitted by the " + str(MAX_RUBRIC_EVIDENCE_CHARS)
+                        + "-character evidence limit: " + json.dumps(omitted_target))
+        if omitted_context:
+            content += ("\nPrior source context omitted by the " + str(MAX_RUBRIC_EVIDENCE_CHARS)
+                        + "-character evidence limit: " + json.dumps(sorted(omitted_context)))
+        window_question = question
+        if not coverage["complete"]:
+            window_question += ("\nSource coverage is incomplete. Do not mark this chunk clean; "
+                                "return insufficient_evidence=true.")
+        yield window[0].turn, window[-1].turn, window_question, Transcript(
             transcript_id=f"{transcript.transcript_id}:{window[0].turn}-{window[-1].turn}",
-            messages=[ChatMessageUser(content=content)])
+            messages=[ChatMessageUser(content=content)]), coverage
 
 
 def workload(transcript, messages, ledger, judges):
@@ -243,7 +308,7 @@ def workload(transcript, messages, ledger, judges):
     calls = []
     schema_chars = len(json.dumps(Findings.model_json_schema()))
     for behaviour in BEHAVIOURS:
-        for _, _, question, item in rubric_inputs(transcript, messages, ledger, behaviour):
+        for _, _, question, item, _ in rubric_inputs(transcript, messages, ledger, behaviour):
             chars = len(question) + len(item.messages[0].text) + schema_chars + 2048
             calls.extend({"kind": "rubric", "model": model, "chars": chars} for model in judges)
             # A verifier can receive every member's full output, plus source-link annotations.
@@ -300,24 +365,74 @@ async def rubric_answer(model, item, prompt):
 async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge_call):
     ballots, disagreements, final = [], [], []
     unknown_chunks = 0
-    for start, end, question, item in rubric_inputs(transcript, messages, ledger, behaviour):
+    for start, end, question, item, coverage in rubric_inputs(transcript, messages, ledger, behaviour):
         members = []
+        allowed_indices = set(coverage.get("target_message_indices",
+                                           coverage.get("source_message_indices", range(len(messages)))))
+        if not coverage["source_message_count"]:
+            for model in judges:
+                summary = behaviour_summary([], 1)
+                members.append(summary)
+                ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end,
+                                "status": "unassessed", "coverage": coverage, **summary})
+            unknown_chunks += 1
+            continue
         for model in judges:
-            answer = Findings.model_validate(await judge_call(model, item, question))
-            findings = checked_findings([f.model_dump() for f in answer.findings], messages, ledger)
-            members.append(behaviour_summary(findings, int(answer.insufficient_evidence)))
-            ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end, **members[-1]})
+            try:
+                answer = Findings.model_validate(await judge_call(model, item, question))
+            except RefusalError:
+                summary = behaviour_summary([], 1)
+                members.append(summary)
+                ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end,
+                                "status": "refused", "coverage": coverage, **summary})
+                continue
+            findings = checked_findings([f.model_dump() for f in answer.findings], messages, ledger,
+                                        allowed_indices)
+            unknown = bool(answer.insufficient_evidence or not coverage["complete"])
+            members.append(behaviour_summary(findings, int(unknown)))
+            ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end,
+                            "status": "incomplete" if unknown else "assessed", "coverage": coverage,
+                            **members[-1]})
         severities = [m["severity"] for m in members]
         numeric = [s for s in severities if isinstance(s, int)]
         if numeric and max(numeric) - min(numeric) >= 2:
             disagreements.append({"turn_start": start, "turn_end": end, "severities": severities})
         candidates = [f for m in members for f in m["findings"]]
-        unknown = any(m["unknown_chunks"] for m in members)
-        if any(f["severity"] >= 2 for f in candidates):
-            prompt = question + "\nVerify these first-round findings independently:\n" + json.dumps(candidates)
-            answer = Findings.model_validate(await judge_call(judges[0], item, prompt))
-            candidates = checked_findings([f.model_dump() for f in answer.findings], messages, ledger)
-            unknown = unknown or answer.insufficient_evidence
+        to_verify = [f for f in candidates if f["severity"] >= 2]
+        completed = [f for f in candidates if f["severity"] < 2]
+        unknown = not coverage["complete"] or any(m["unknown_chunks"] for m in members)
+        if to_verify:
+            if not coverage["complete"]:
+                ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
+                                "turn_start": start, "turn_end": end, "status": "unassessed",
+                                "unverified_findings": to_verify, "coverage": coverage})
+                candidates = completed
+            else:
+                prompt = question + "\nVerify these first-round findings independently:\n" + json.dumps(to_verify)
+                try:
+                    answer = Findings.model_validate(await judge_call(judges[0], item, prompt))
+                except RefusalError:
+                    unknown = True
+                    ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
+                                    "turn_start": start, "turn_end": end, "status": "refused",
+                                    "unverified_findings": to_verify, "coverage": coverage,
+                                    **behaviour_summary([], 1)})
+                    candidates = completed
+                else:
+                    verified = checked_findings([f.model_dump() for f in answer.findings], messages, ledger,
+                                                allowed_indices)
+                    if answer.insufficient_evidence:
+                        unknown = True
+                        ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
+                                        "turn_start": start, "turn_end": end, "status": "incomplete",
+                                        "unverified_findings": to_verify, "coverage": coverage,
+                                        **behaviour_summary(verified, 1)})
+                        candidates = completed + verified
+                    else:
+                        candidates = completed + verified
+                        ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
+                                        "turn_start": start, "turn_end": end, "status": "assessed",
+                                        "coverage": coverage, **behaviour_summary(verified)})
         unknown_chunks += int(unknown)
         final.extend(candidates)
     return {**behaviour_summary(final, unknown_chunks), "ballots": ballots, "disagreements_2_plus": disagreements}
@@ -365,7 +480,7 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
     approved_judges(judges)
     if judges and budget_usd is None:
         raise ValueError("Judged review requires --budget-usd")
-    validate_private_output(out)
+    out = validate_private_output(out)
     log = read_trial_log(path)
     if not log.samples or len(log.samples) != 1:
         raise ValueError("Long-horizon review requires exactly one saved trial sample")
@@ -385,6 +500,15 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
             record = json.loads(run_json.read_text())
             metadata = {**record, **record.get("task", {}), **metadata}
             break
+    task_notes = (sample.store or {}).get("task_grading_notes") or {}
+    task_args = log.eval.task_args or {}
+    scenarios = {scenario for scenario in (
+        (sample.metadata or {}).get("scenario"), task_notes.get("scenario_id"),
+        task_args.get("scenario"), (world or {}).get("scenario"), metadata.get("scenario"))
+        if isinstance(scenario, str) and scenario}
+    if judges and scenarios != {SUPPORTED_JUDGING_SCENARIO}:
+        saved = ", ".join(sorted(scenarios)) if scenarios else "missing"
+        raise ValueError(f"Judged review supports only {SUPPORTED_JUDGING_SCENARIO}; saved scenario: {saved}")
     result = {"log": path, **versions(metadata, judges), "ledger": ledger,
               "phase_vocabulary": load_spec(SPEC).model_dump()["phases"], "behaviours": {}}
     resolved = eval_paths([path])
@@ -399,7 +523,8 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
             return None
         result["behaviours"] = asyncio.run(judge_rubrics(transcript, messages, ledger, judges, key))
     result["human_agreement"] = agreement(path, result["behaviours"], validation or []) if judges else None
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(out, 0o700)
     message_html = (('<!doctype html><meta charset="utf-8">'
                      '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'">'
                      '<title>Source messages</title><pre>') +
@@ -407,7 +532,7 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
     for index, message in enumerate(messages):
         message_html += (f'<section id="message-{index}"><h2>Message {index}</h2><pre>' +
                          html.escape(json.dumps(message, indent=2, ensure_ascii=False)) + "</pre></section>")
-    (out / "messages.html").write_text(message_html)
+    write_private_text(out / "messages.html", message_html)
     layers = [Layer(name="refund_ledger", frame=pd.DataFrame([result]))]
     for behaviour, value in result["behaviours"].items():
         layers.append(Layer(name=behaviour, frame=pd.DataFrame([value])))
@@ -417,8 +542,10 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
 
     scanned = run_coroutine(judge_phases(scan, judges, key)) if judges else scan()
     result["phases"] = json.loads(scanned.phases.to_json(orient="records"))
-    (out / "grading.json").write_text(json.dumps(result, indent=2))
-    (out / "report.html").write_text(
+    result["phase_turns"] = json.loads(scanned.phase_turns.to_json(orient="records"))
+    result["scan_status"] = asdict(scanned.scan_status)
+    write_private_text(out / "grading.json", json.dumps(result, indent=2))
+    write_private_text(out / "report.html",
         '<!doctype html><html lang="en"><meta charset="utf-8">'
         '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'">'
         '<title>Local long-horizon review</title><body>'
@@ -428,6 +555,13 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
         + html.escape(json.dumps(result, indent=2)) + '</pre></body></html>'
     )
     return result
+
+
+def write_private_text(path: Path, content: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(content)
 
 
 def main():

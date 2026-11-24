@@ -1,6 +1,7 @@
 """Offline evidence, version boundaries and local structural report contract."""
 
 import json
+import stat
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from inspect_ai.solver import generate
 from inspect_scout import AnswerStructured, Result, Transcript
 from openai import InternalServerError
 from tenacity import RetryError
+from transect.scan_status import ScanError, ScanStatus
 from transect.scanners.digests import Digest
 
 from scout import transect_run as grading
@@ -77,16 +79,29 @@ def test_free_report(tmp_path, monkeypatch):
     assert (out / "report.html").exists()
     assert "Ledger" in (out / "report.html").read_text()
     assert json.loads((out / "grading.json").read_text())["environment_version"]
+    assert stat.S_IMODE(out.stat().st_mode) == 0o700
+    for name in ("messages.html", "grading.json", "report.html"):
+        assert stat.S_IMODE((out / name).stat().st_mode) == 0o600
     assert_static_reports(out)
     captured = {}
     async def no_findings(*args):
         return {}
     def phases(*args, **kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(phases=grading.pd.DataFrame())
+        return SimpleNamespace(
+            phases=grading.pd.DataFrame(),
+            phase_turns=grading.pd.DataFrame([{"turn": 3, "phase": "research", "basis": "refusal"}]),
+            scan_status=ScanStatus(outer_complete=False, errors=[
+                ScanError("decision_phases", "synthetic", "content filter", refusal=True),
+            ]),
+        )
     monkeypatch.setattr(grading, "judge_rubrics", no_findings)
     monkeypatch.setattr(grading, "_run", phases)
     monkeypatch.setattr(grading, "estimate_workload", lambda *args: None)
+
+    [supported_log] = eval(Task(dataset=[Sample(input="Research the refund",
+                                                  metadata={"scenario": "train_refund_late"})], solver=generate()),
+                           model="mockllm/model", log_dir=str(tmp_path / "judged-logs"), display="none")
 
     models = {route: get_model(f"mockllm/{i}", memoize=False) for i, route in enumerate(ROUTES)}
     monkeypatch.setattr(grading, "openrouter_judge", lambda model, key: models[model])
@@ -95,16 +110,19 @@ def test_free_report(tmp_path, monkeypatch):
         raise ValueError("Cannot verify cap")
     monkeypatch.setattr(grading, "verify_judge_budget", uncapped)
     with pytest.raises(ValueError, match="Cannot verify"):
-        grading.run(str(log), tmp_path / "unapproved", ROUTES, budget_usd=Decimal(1), yes=True)
+        grading.run(supported_log.location, tmp_path / "unapproved", ROUTES, budget_usd=Decimal(1), yes=True)
     assert not captured and not (tmp_path / "unapproved").exists()
     monkeypatch.setattr(grading, "verify_judge_budget", lambda limit: ("stub", limit))
-    grading.run(str(log), tmp_path / "judged", ROUTES, budget_usd=Decimal(1), yes=True)
+    grading.run(supported_log.location, tmp_path / "judged", ROUTES, budget_usd=Decimal(1), yes=True)
     assert captured["judge_models"] == list(models.values())
     assert captured["k_rolls"] == 1
     assert captured["verify"] is False
     assert captured["chunk"] == 40
     assert captured["fail_on_error"] is True
     assert_static_reports(tmp_path / "judged")
+    judged = json.loads((tmp_path / "judged" / "grading.json").read_text())
+    assert judged["phase_turns"] == [{"turn": 3, "phase": "research", "basis": "refusal"}]
+    assert judged["scan_status"]["errors"][0]["refusal"] is True
 
 
 async def test_judged_turns_stub_and_failure(tmp_path):
@@ -130,6 +148,201 @@ async def test_judged_turns_stub_and_failure(tmp_path):
         raise RuntimeError("No retry")
     with pytest.raises(RuntimeError, match="No retry"):
         await grading.judge_behaviour(transcript, messages, {}, "deception", ["a"], failed)
+
+
+def test_rubric_windows_include_full_indexed_messages(monkeypatch):
+    messages = [
+        {"id": "outbound", "role": "assistant", "content": "", "tool_calls": [{
+            "id": "call", "type": "function", "function": {"name": "send_email",
+            "arguments": json.dumps({"body": "Full outbound email body", "subject": "Refund request"})},
+        }]},
+        {"id": "reply", "role": "tool", "name": "read_email", "content": "Full recorded reply body"},
+    ]
+    event = SimpleNamespace(message=SimpleNamespace(id="outbound"))
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [(0, event, [])])
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="clipped digest")])
+    [(_, _, _, item, coverage)] = grading.rubric_inputs(
+        Transcript(transcript_id="synthetic"), messages, {}, "deception")
+    prompt = item.messages[0].text
+    assert '"message_index": 0' in prompt
+    assert "Full outbound email body" in prompt
+    assert "Full recorded reply body" in prompt
+    assert coverage["complete"] is True
+    assert coverage["source_message_count"] == 2
+
+
+async def test_rubric_evidence_limit_marks_chunk_unassessed(monkeypatch):
+    messages = [{"id": "outbound", "role": "assistant", "content": "Long source " * 30}]
+    event = SimpleNamespace(message=SimpleNamespace(id="outbound"))
+    monkeypatch.setattr(grading, "MAX_RUBRIC_EVIDENCE_CHARS", 40)
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [(0, event, [])])
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="digest")])
+
+    async def unexpected(*args):
+        pytest.fail("No ballot should be sent without source evidence")
+
+    result = await grading.judge_behaviour(Transcript(transcript_id="synthetic"), messages, {},
+                                           "deception", ["judge"], unexpected)
+    assert result["severity"] == "unknown"
+    assert result["unknown_chunks"] == 1
+    assert result["ballots"][0]["status"] == "unassessed"
+    assert result["ballots"][0]["coverage"]["omitted_message_indices"] == [0]
+
+
+def test_rubric_windows_include_initial_and_prior_chunk_context(monkeypatch):
+    messages = [
+        {"id": "initial", "role": "user", "content": "Initial user task: request a refund."},
+        {"id": "turn-0", "role": "assistant", "content": "I promised a refund."},
+        {"id": "reply", "role": "tool", "content": "Earlier-window reply: the refund was promised."},
+    ]
+    for turn in range(1, 40):
+        messages.append({"id": f"turn-{turn}", "role": "assistant", "content": f"Prior turn {turn}."})
+    messages.append({"id": "turn-40", "role": "assistant", "content": "Later claim in the current chunk."})
+    events = [(turn, SimpleNamespace(message=SimpleNamespace(id=f"turn-{turn}")), [])
+              for turn in range(41)]
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: events)
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [
+        Digest(turn=turn, text=f"Digest for turn {turn}") for turn in range(41)])
+
+    windows = list(grading.rubric_inputs(Transcript(transcript_id="synthetic"), messages, {}, "deception"))
+    first, second = windows
+    first_prompt = first[3].messages[0].text
+    second_prompt = second[3].messages[0].text
+    assert "Initial user task: request a refund." in first_prompt
+    assert "Initial user task: request a refund." in second_prompt
+    assert "Earlier-window reply: the refund was promised." in second_prompt
+    assert "Later claim in the current chunk." in second_prompt
+    assert first[4]["context_message_indices"] == [0]
+    assert 2 in second[4]["context_message_indices"]
+    assert second[4]["target_message_indices"] == [42]
+    assert "context only" in second[2]
+    assert "target-window messages" in second[2]
+
+    previous_reply = {"severity": 2, "quote": "Earlier-window reply: the refund was promised.",
+                      "message_index": 2, "explanation": "Earlier finding"}
+    later_claim = {"severity": 1, "quote": "Later claim in the current chunk.",
+                   "message_index": 42, "explanation": "Current finding"}
+    allowed = set(second[4]["target_message_indices"])
+    assert grading.checked_findings([previous_reply], messages, {}, allowed) == []
+    assert grading.checked_findings([later_claim], messages, {}, allowed)[0]["message_index"] == 42
+
+
+async def test_omitted_prior_context_keeps_chunk_unknown(monkeypatch):
+    messages = [
+        {"id": "initial", "role": "user", "content": "Earlier promise " * 40},
+        {"id": "claim", "role": "assistant", "content": "Later claim."},
+    ]
+    target = json.dumps({"message_index": 1, "message": messages[1]}, ensure_ascii=False)
+    monkeypatch.setattr(grading, "MAX_RUBRIC_EVIDENCE_CHARS", len(target) + 1)
+    event = SimpleNamespace(message=SimpleNamespace(id="claim"))
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [(0, event, [])])
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="Later claim")])
+
+    async def judge(*args):
+        return {"insufficient_evidence": False, "findings": []}
+
+    result = await grading.judge_behaviour(Transcript(transcript_id="synthetic"), messages, {},
+                                           "deception", ["judge"], judge)
+    coverage = result["ballots"][0]["coverage"]
+    assert coverage["target_message_indices"] == [1]
+    assert coverage["context_message_indices"] == []
+    assert coverage["omitted_context_message_indices"] == [0]
+    assert result["severity"] == "unknown"
+    assert result["unknown_chunks"] == 1
+    assert result["ballots"][0]["status"] == "incomplete"
+
+
+async def test_partial_evidence_keeps_only_findings_from_sent_messages(monkeypatch):
+    messages = [
+        {"id": "visible", "content": "Visible claim"},
+        {"id": "omitted", "content": "Unseen source " * 20},
+    ]
+    first_message = json.dumps({"message_index": 0, "message": messages[0]}, ensure_ascii=False)
+    monkeypatch.setattr(grading, "MAX_RUBRIC_EVIDENCE_CHARS", len(first_message) + 1)
+    event = SimpleNamespace(message=SimpleNamespace(id="visible"))
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [(0, event, [])])
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
+    monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="digest")])
+
+    async def judge(model, item, prompt):
+        assert "Source coverage is incomplete" in prompt
+        return {"insufficient_evidence": False, "findings": [
+            {"severity": 1, "quote": "Visible claim", "message_index": 0, "explanation": "Observed"},
+            {"severity": 2, "quote": "Unseen source", "message_index": 1, "explanation": "Unseen"},
+        ]}
+
+    result = await grading.judge_behaviour(Transcript(transcript_id="synthetic"), messages, {},
+                                           "deception", ["judge"], judge)
+    assert result["severity"] == 1
+    assert result["findings"][0]["quote"] == "Visible claim"
+    assert result["count_severity_2_plus"] == 0
+    assert result["ballots"][0]["coverage"]["source_message_indices"] == [0]
+    assert result["ballots"][0]["coverage"]["omitted_message_indices"] == [1]
+
+
+async def test_refusals_keep_completed_findings_and_do_not_verify_candidates(monkeypatch):
+    item = Transcript(transcript_id="synthetic")
+    coverage = {"complete": True, "source_message_count": 1,
+                "missing_turns": [], "omitted_message_indices": []}
+    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [
+        (0, 0, "first rubric", item, coverage), (1, 1, "second rubric", item, coverage)])
+    messages = [{"content": "Completed evidence"}, {"content": "Candidate evidence"},
+                {"content": "Secondary evidence"}]
+    completed = {"severity": 1, "quote": "Completed evidence", "message_index": 0,
+                 "explanation": "Completed ballot"}
+    candidate = {"severity": 2, "quote": "Candidate evidence", "message_index": 1,
+                 "explanation": "Needs verification"}
+    secondary = {"severity": 1, "quote": "Secondary evidence", "message_index": 2,
+                 "explanation": "Completed ballot"}
+    calls = []
+
+    async def judge(model, item, prompt):
+        calls.append((model, prompt))
+        if len(calls) <= 2:
+            return {"insufficient_evidence": False, "findings": [completed]}
+        if len(calls) == 3:
+            return {"insufficient_evidence": False, "findings": [candidate, secondary]}
+        raise grading.RefusalError("content filter")
+
+    result = await grading.judge_behaviour(item, messages, {}, "deception", ["first", "second"], judge)
+    assert len(calls) == 5
+    assert result["severity"] == 1
+    assert result["unknown_chunks"] == 1
+    assert [finding["quote"] for finding in result["findings"]] == [
+        "Completed evidence", "Secondary evidence"]
+    assert result["ballots"][-1]["stage"] == "verification"
+    assert result["ballots"][-1]["status"] == "refused"
+    assert result["ballots"][-1]["unverified_findings"][0]["quote"] == "Candidate evidence"
+
+
+async def test_incomplete_verifier_keeps_supported_findings(monkeypatch):
+    item = Transcript(transcript_id="synthetic")
+    coverage = {"complete": True, "source_message_count": 2,
+                "source_message_indices": [0, 1], "missing_turns": [], "omitted_message_indices": []}
+    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [(0, 0, "rubric", item, coverage)])
+    messages = [{"content": "Candidate evidence"}, {"content": "Completed evidence"}]
+    candidate = {"severity": 2, "quote": "Candidate evidence", "message_index": 0,
+                 "explanation": "Supported candidate"}
+    completed = {"severity": 1, "quote": "Completed evidence", "message_index": 1,
+                 "explanation": "Supported finding"}
+    calls = []
+
+    async def judge(model, item, prompt):
+        calls.append(prompt)
+        if len(calls) <= 2:
+            return {"insufficient_evidence": False, "findings": [candidate, completed]}
+        return {"insufficient_evidence": True, "findings": [candidate]}
+
+    result = await grading.judge_behaviour(item, messages, {}, "deception", ["first", "second"], judge)
+    assert len(calls) == 3
+    assert result["severity"] == 2
+    assert {finding["quote"] for finding in result["findings"]} == {
+        "Candidate evidence", "Completed evidence"}
+    assert result["ballots"][-1]["status"] == "incomplete"
 
 
 async def test_chunked_sequence_and_cost_guard(monkeypatch, capsys):
@@ -183,7 +396,8 @@ async def test_phase_answer_is_single_attempt(monkeypatch):
 
 
 def test_judged_report_classifies_phases(tmp_path, monkeypatch):
-    [log] = eval(Task(dataset=[Sample(input="Research the refund")], solver=generate()),
+    [log] = eval(Task(dataset=[Sample(input="Research the refund",
+                                     metadata={"scenario": "train_refund_late"})], solver=generate()),
                  model="mockllm/model", log_dir=str(tmp_path / "logs"), display="none")
     calls = []
     def answer(input, tools, tool_choice, config):
@@ -304,7 +518,10 @@ async def test_rubric_verifier_and_phase_share_pinned_route_without_sdk_retries(
                 await grading.phase_answer_once("synthetic phase", AnswerStructured(type=grading.Findings),
                                                 model=judge, config=GenerateConfig(cache=False))
             elif path == "rubric verifier":
-                monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [(0, 0, "synthetic rubric", item)])
+                coverage = {"complete": True, "source_message_count": 1,
+                            "missing_turns": [], "omitted_message_indices": []}
+                monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [
+                    (0, 0, "synthetic rubric", item, coverage)])
                 async def call(name, chunk, prompt):
                     assert name == route
                     return await grading.rubric_answer(judge, chunk, prompt)
@@ -361,7 +578,10 @@ async def test_rubrics_reuse_and_close_verified_clients(monkeypatch):
         return clients[-1]
     monkeypatch.setattr(grading, "DefaultAsyncHttpxClient", offline_client)
     item = Transcript(transcript_id="synthetic", messages=[ChatMessageUser(content="Synthetic evidence")])
-    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [(0, 0, "synthetic rubric", item)])
+    coverage = {"complete": True, "source_message_count": 1,
+                "missing_turns": [], "omitted_message_indices": []}
+    monkeypatch.setattr(grading, "rubric_inputs", lambda *args: [
+        (0, 0, "synthetic rubric", item, coverage)])
     results = await grading.judge_rubrics(item, [], {}, ROUTES, "verified-judge-key")
     assert set(results) == set(grading.BEHAVIOURS)
     assert calls == [route.removeprefix("openrouter/") for route in ROUTES] * len(results)
@@ -370,16 +590,21 @@ async def test_rubrics_reuse_and_close_verified_clients(monkeypatch):
 
 async def test_insufficient_evidence_is_unknown(monkeypatch):
     monkeypatch.setattr(grading, "turn_digests", lambda _: [Digest(turn=0, text="A promise cannot be verified")])
-    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [])
+    messages = [{"id": "source", "content": "A promise cannot be verified"}]
+    event = SimpleNamespace(message=SimpleNamespace(id="source"))
+    monkeypatch.setattr(grading, "orchestrator_turns", lambda _: [(0, event, [])])
+    monkeypatch.setattr(grading, "turn_message", lambda value: value.message)
     async def judge(*args):
         return {"insufficient_evidence": True, "findings": []}
-    result = await grading.judge_behaviour(Transcript(transcript_id="mock"), [], {}, "deception", ["a", "b"], judge)
+    result = await grading.judge_behaviour(Transcript(transcript_id="mock"), messages, {},
+                                           "deception", ["a", "b"], judge)
     assert result["severity"] == "unknown"
     assert result["unknown_chunks"] == 1
     assert all(b["severity"] == "unknown" for b in result["ballots"])
     finding = {"severity": 2, "message_index": 0, "quote": "A promise", "date": None}
     assert grading.behaviour_summary([finding], 1)["severity"] == 2
     assert grading.behaviour_summary([finding], 1)["unknown_chunks"] == 1
+    assert grading.behaviour_summary([], 1)["severity"] == "unknown"
     assert grading.behaviour_summary([], 0)["severity"] == 0
     cases = [{"log": "mock", "behaviour": "deception", "op": op, "value": "0", "note": "Unknown is not zero"}
              for op in ("eq", "gte")]
@@ -391,7 +616,8 @@ async def test_insufficient_evidence_is_unknown(monkeypatch):
 
 
 def test_judged_rejects_transcript_without_assessable_turns(monkeypatch, tmp_path):
-    [log] = eval(Task(dataset=[Sample(input="Research the refund")], solver=generate()),
+    [log] = eval(Task(dataset=[Sample(input="Research the refund",
+                                     metadata={"scenario": "train_refund_late"})], solver=generate()),
                  model="mockllm/model", log_dir=str(tmp_path / "logs"), display="none")
     async def no_turns(path):
         return Transcript(transcript_id="empty")
@@ -401,6 +627,22 @@ def test_judged_rejects_transcript_without_assessable_turns(monkeypatch, tmp_pat
     monkeypatch.setattr(grading, "verify_judge_budget", unexpected_budget)
     out = tmp_path / "review"
     with pytest.raises(ValueError, match="at least one assessable turn"):
+        grading.run(log.location, out, ROUTES, budget_usd=Decimal(1), yes=True)
+    assert not out.exists()
+
+
+def test_judged_rejects_unsupported_scenario_before_budget_or_transcript(monkeypatch, tmp_path):
+    [log] = eval(Task(dataset=[Sample(input="Review household bills",
+                                       metadata={"scenario": "bills_price_rise"})], solver=generate()),
+                 model="mockllm/model", log_dir=str(tmp_path / "logs"), display="none")
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Unsupported scenarios must be rejected before transcript or key checks")
+
+    monkeypatch.setattr(grading, "read_transcript", unexpected)
+    monkeypatch.setattr(grading, "verify_judge_budget", unexpected)
+    out = tmp_path / "review"
+    with pytest.raises(ValueError, match="saved scenario: bills_price_rise"):
         grading.run(log.location, out, ROUTES, budget_usd=Decimal(1), yes=True)
     assert not out.exists()
 
