@@ -15,6 +15,13 @@ from refund_eval.harbor.deadlines import trial_deadlines
 from refund_eval.scenario.schema import load_scenario
 
 
+@pytest.fixture(autouse=True)
+def _use_test_private_trace_root(tmp_path, monkeypatch):
+    from refund_eval.harbor import private_traces
+
+    monkeypatch.setattr(private_traces, "TRACE_ROOT", tmp_path / "partial-traces")
+
+
 class Environment:
     def __init__(self, *, code=0, waiting=False, download_delay=0, missing_native=False):
         self.code, self.waiting, self.download_delay = code, waiting, download_delay
@@ -52,6 +59,12 @@ class Environment:
         target.write_text("{}")
 
 
+async def _partial_inspect_eval_bytes(tmp_path):
+    from tests.inspect_eval_support import partial_inspect_eval_bytes
+
+    return await partial_inspect_eval_bytes(tmp_path, "recoverable legacy agent event")
+
+
 def agent(path):
     return RefundInspectAgent(cost_limit=1, logs_dir=path, model_name="openrouter/example/offline", scenario="train_refund_late",
                               time_limit=1, trial_deadlines=trial_deadlines(1))
@@ -87,7 +100,8 @@ async def test_cancel_stops_closes_then_downloads_even_when_cancelled_again(tmp_
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert env.events.index("stop") < env.events.index("closed") < env.events.index("native")
+    last_native = len(env.events) - 1 - env.events[::-1].index("native")
+    assert env.events.index("stop") < env.events.index("closed") < last_native
     assert (tmp_path / "agent/collection.json").exists()
 
 
@@ -101,6 +115,69 @@ async def test_collection_hung_download_uses_one_fixed_bound(tmp_path):
                                    flush_seconds=.01, collect_seconds=.04, stop=False)
     assert time.monotonic() - start < .2
     await asyncio.sleep(.01)
+
+
+async def test_legacy_partial_traces_survive_cancellation_when_final_collection_is_blocked(tmp_path):
+    from pathlib import Path
+
+    from refund_eval.world.event_log import EVENTS_KEY
+
+    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
+    simulator_event = {"seq": 1, "kind": "message", "content": "legacy simulator event"}
+    snapshot = json.dumps({
+        "world": {"turn": 1},
+        "resume_state": {EVENTS_KEY: [simulator_event]},
+    }).encode()
+
+    class CounterBlocked(Environment):
+        def __init__(self):
+            super().__init__(waiting=True)
+            self.files = {
+                "/logs/artifacts/refund/run.eval": partial_eval,
+                "/logs/agent/progress/snapshot.json": snapshot,
+            }
+
+            class ListFiles:
+                async def aio(self, _directory):
+                    return [SimpleNamespace(name="run.eval")]
+
+            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
+
+        async def download_file(self, source, target):
+            self.events.append(source)
+            if source in self.files:
+                Path(target).write_bytes(self.files[source])
+            else:
+                raise RuntimeError("usage monitor blocked fixed-file collection")
+
+        async def download_dir(self, source, target):
+            self.events.append("native")
+            raise RuntimeError("usage monitor blocked final log collection")
+
+    environment = CounterBlocked()
+    context = AgentContext()
+    obj = agent(tmp_path / "agent")
+    run = asyncio.create_task(obj.run(load_scenario("train_refund_late").task_text, environment, context))
+    await environment.started.wait()
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    [spool] = list((tmp_path / "partial-traces").iterdir())
+    from refund_eval.grading.verifier import read_eval_messages
+
+    manifest = json.loads((spool / "manifest.json").read_text())
+    messages = read_eval_messages(spool / manifest["files"]["agent_eval"]["path"])
+    assert any("recoverable legacy agent event" in str(message["content"])
+               for message in messages)
+    saved_snapshot = json.loads(
+        (spool / manifest["files"]["runtime_snapshot"]["path"]).read_bytes()
+    )
+    assert saved_snapshot["resume_state"][EVENTS_KEY] == [simulator_event]
+    assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
+    assert manifest["files"]["agent_eval"]["status"] == "durable"
+    assert manifest["files"]["runtime_snapshot"]["status"] == "durable"
+    assert "native" in environment.events
+    assert "recoverable legacy agent event" not in (tmp_path / "agent/collection.json").read_text()
 
 
 @pytest.mark.parametrize("all_ready", [True, False])
