@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.15 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 3aa86084f58cfc47489aff1ea9977f7899ab6c0aaf568aeb5438c024d541ca5f
+- Trial round: none. Offline validation only; no launch.
+- Changes: pass OpenRouter target-charge receipt paths through the snapshotter wrapper environment.
+
 ## 8.14 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 301aab4cea4455a6e9e6afdefd0ee898e52672dbd913b4227a84b19917df3676

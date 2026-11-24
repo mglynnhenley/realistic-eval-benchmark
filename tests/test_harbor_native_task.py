@@ -2375,6 +2375,10 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         active_sample_snapshot_path,
         private_inspect_data_home,
     )
+    from refund_eval.harbor.target_charges import (
+        TARGET_CHARGES_DIRECTORY,
+        TARGET_CHARGES_ENV,
+    )
     from refund_eval.world.event_log import EVENTS_KEY, record
     from refund_eval.world.state import WORLD_KEY, World
     from refund_eval.world_service.store import EVENTS_FILE, MemoryStore, OutputWriter
@@ -2447,6 +2451,7 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
                 task_text = ",".join(task_text)
             Path(os.environ["INSPECT_TASK_ARGS_FILE"]).write_text(json.dumps({{
                 "task_id": task_id, "scenario": scenario, "task_text": task_text,
+                "target_charge_receipts": os.environ.get("REFUND_EVAL_TARGET_CHARGES_DIR"),
             }}))
             tool_call = ModelOutput(
                 model="mockllm/model",
@@ -2510,7 +2515,8 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         installed_agent.APP = os.environ["TEST_APP"]
         installed_agent.PRIVATE_AGENT_BUFFER_ROOT = os.environ["TEST_PRIVATE_ROOT"]
         agent = installed_agent.RefundInstalledAgent(
-            logs_dir=Path(os.environ["TEST_RUN_LOGS"]), model_name="mockllm/model",
+            logs_dir=Path(os.environ["TEST_RUN_LOGS"]),
+            model_name="openrouter/anthropic/claude-opus-5.5",
             mcp_servers=[], forward_task_instruction=True,
         )
         agent.environment_logs_dir = Path(os.environ["TEST_AGENT_LOGS"])
@@ -2522,12 +2528,22 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     )
     assert generated.returncode == 0, generated.stderr
     command = generated.stdout.strip()
+    charge_assignment = (
+        f"{TARGET_CHARGES_ENV}={shlex.quote(str(agent_logs / TARGET_CHARGES_DIRECTORY))}"
+    )
+    assert charge_assignment in command
+    assert command.index(charge_assignment) < command.index("refund_eval.harbor.inspect_snapshotter run")
+    model_reference = "openrouter/anthropic/claude-opus-5.5"
+    assert command.count(model_reference) == 1
+    command = command.replace(model_reference, "mockllm/model")
     task_reference = (
         f'"$({agent_python} -c \'import os, refund_eval.task; '
         'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"'
     )
     assert command.count(task_reference) == 1
     command = command.replace(task_reference, shlex.quote(os.path.relpath(task_file, tmp_path)))
+    snapshotter_command = command.split("refund_eval.harbor.inspect_snapshotter run", 1)[1]
+    assert charge_assignment not in snapshotter_command.split(" -- ", 1)[1]
     process = await asyncio.create_subprocess_shell(
         command, cwd=tmp_path, env=environment_vars,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
@@ -2580,6 +2596,7 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         task_arguments = json.loads(task_args_file.read_text())
         assert task_arguments == {
             "task_id": "offline-task", "scenario": "train_refund_late", "task_text": instruction,
+            "target_charge_receipts": str(agent_logs / TARGET_CHARGES_DIRECTORY),
         }
     finally:
         if process.returncode is None:
