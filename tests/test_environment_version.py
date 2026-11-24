@@ -109,6 +109,35 @@ def test_frozen_source_fingerprint_uses_only_manifest_backed_files(tmp_path, mon
     assert environment.environment_fingerprint() == digest.hexdigest()
 
 
+def test_legacy_frozen_fingerprint_does_not_require_host_only_guard(tmp_path, monkeypatch):
+    assert "scripts/offline_spend_guard.py" not in environment.ENVIRONMENT_PATHS
+    monkeypatch.setattr(environment, "ROOT", tmp_path)
+    monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("scenario",))
+    (tmp_path / "scenario").mkdir()
+    source = tmp_path / "scenario/rules.txt"
+    source.write_text("rules")
+    manifest = tmp_path / "refund_eval/_source_manifest.json"
+    manifest.parent.mkdir()
+    file_name, contents = b"scenario/rules.txt", b"rules"
+    source_digest = hashlib.sha256()
+    for value in (file_name, contents):
+        source_digest.update(len(value).to_bytes(8, "big"))
+        source_digest.update(value)
+    manifest.write_text(json.dumps({
+        "files": [file_name.decode()], "source_sha256": source_digest.hexdigest(),
+    }))
+    monkeypatch.setattr(
+        environment.subprocess, "check_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(environment.subprocess.CalledProcessError(128, "git")),
+    )
+    expected = hashlib.sha256()
+    for value in (file_name, contents):
+        expected.update(len(value).to_bytes(8, "big"))
+        expected.update(value)
+    assert environment.environment_fingerprint() == expected.hexdigest()
+    assert not (tmp_path / "scripts/offline_spend_guard.py").exists()
+
+
 def test_frozen_source_manifest_rejects_unsafe_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(environment, "ROOT", tmp_path)
     monkeypatch.setattr(environment, "ENVIRONMENT_PATHS", ("scenario",))
