@@ -11,8 +11,9 @@ Mapping, from the sample's messages in order:
 - `extra.sim_time` is the world's simulated time when the generation ran, from the world
   clock info events that world-service mode writes (`agent.world_mode.SIM_CLOCK_SOURCE`).
 `final_metrics` holds the sample's model usage totals (prompt tokens include cache reads and
-writes); `extra` holds the log's status, error, limit and file name. Images in messages are
-replaced by a placeholder.
+writes); OpenRouter actual cost comes from the target receipts, not Inspect's estimate.
+`extra` holds the log's status, error, limit and file name. Images in messages are replaced
+by a placeholder.
 """
 
 from __future__ import annotations
@@ -21,6 +22,11 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+
+from refund_eval.harbor.target_charges import (
+    TARGET_CHARGES_DIRECTORY,
+    target_charge_summary,
+)
 
 SCHEMA_VERSION = "ATIF-v1.8"
 AGENT_NAME = "refund-inspect"
@@ -53,7 +59,7 @@ def _prompt_tokens(usage: Any) -> int:
     return usage.input_tokens + (usage.input_tokens_cache_read or 0) + (usage.input_tokens_cache_write or 0)
 
 
-def _metrics(usage: Any) -> dict[str, Any] | None:
+def _metrics(usage: Any, *, openrouter: bool) -> dict[str, Any] | None:
     if usage is None:
         return None
     extra = {name: value for name in ("input_tokens_cache_write", "reasoning_tokens")
@@ -61,7 +67,10 @@ def _metrics(usage: Any) -> dict[str, Any] | None:
     metrics = {"prompt_tokens": _prompt_tokens(usage), "completion_tokens": usage.output_tokens,
                "cached_tokens": usage.input_tokens_cache_read or 0}
     if usage.total_cost is not None:
-        metrics["cost_usd"] = usage.total_cost
+        if openrouter:
+            extra["inspect_estimated_cost_usd"] = usage.total_cost
+        else:
+            metrics["cost_usd"] = usage.total_cost
     if extra:
         metrics["extra"] = extra
     return metrics
@@ -82,11 +91,12 @@ def _clock_by_message(events: list[Any]) -> tuple[dict[str, dict[str, Any]], dic
 
 
 def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unknown",
-            log_name: str | None = None) -> dict[str, Any]:
+            log_name: str | None = None, receipt_dir: Path | None = None) -> dict[str, Any]:
     """The ATIF trajectory of the log's single sample, as a JSON-ready dict."""
     if not log.samples:
         raise ValueError("The log has no samples")
     sample = log.samples[0]
+    openrouter = log.eval.model.startswith("openrouter/")
     generations, last_clock = _clock_by_message(sample.events)
     steps: list[dict[str, Any]] = []
     pending: dict[str, dict[str, Any]] = {}  # tool call id -> the agent step that made it
@@ -102,7 +112,7 @@ def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unk
                 step["timestamp"] = event.timestamp.isoformat()
                 step["model_name"] = event.output.model or event.model
                 step["llm_call_count"] = 1
-                if (metrics := _metrics(event.output.usage)) is not None:
+                if (metrics := _metrics(event.output.usage, openrouter=openrouter)) is not None:
                     step["metrics"] = metrics
                 if generation["clock"]:
                     step["extra"] = {"sim_time": generation["clock"].get("sim_time"),
@@ -139,7 +149,10 @@ def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unk
         "extra": {"model_usage": {name: u.model_dump(mode="json") for name, u in sample.model_usage.items()}},
     }
     if costs and all(cost is not None for cost in costs):
-        final_metrics["total_cost_usd"] = sum(costs)
+        if openrouter:
+            final_metrics["extra"]["inspect_estimated_cost_usd"] = sum(costs)
+        else:
+            final_metrics["total_cost_usd"] = sum(costs)
     extra: dict[str, Any] = {
         "inspect_log": log_name, "status": log.status, "eval_id": log.eval.eval_id, "task": log.eval.task,
         "error": sample.error.message if sample.error else (log.error.message if log.error else None),
@@ -147,6 +160,11 @@ def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unk
         "final_sim_time": last_clock.get("sim_time"), "world_stop_reason": last_clock.get("stop_reason"),
         "world_turns": last_clock.get("turn"),
     }
+    if openrouter:
+        receipts = target_charge_summary(receipt_dir)
+        extra["target_charges"] = receipts
+        if receipts["actual_cost_usd"] is not None:
+            final_metrics["total_cost_usd"] = receipts["actual_cost_usd"]
     return {
         "schema_version": SCHEMA_VERSION,
         "session_id": sample.uuid or log.eval.eval_id,
@@ -175,10 +193,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="Where to write the ATIF trajectory")
     parser.add_argument("--agent-name", default=AGENT_NAME)
     parser.add_argument("--agent-version", default="unknown")
+    parser.add_argument("--target-charge-receipts", type=Path, help="Override the target receipts directory")
     args = parser.parse_args(argv)
     path = latest_log(args.log)
+    receipt_dir = args.target_charge_receipts
+    if receipt_dir is None and path.parent.name == "inspect":
+        receipt_dir = path.parent.parent / TARGET_CHARGES_DIRECTORY
     trajectory = convert(read_eval_log(str(path)), agent_name=args.agent_name, agent_version=args.agent_version,
-                         log_name=path.name)
+                         log_name=path.name, receipt_dir=receipt_dir)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.out.with_suffix(".tmp")
     tmp.write_text(json.dumps(trajectory, ensure_ascii=False, indent=1), encoding="utf-8")

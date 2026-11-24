@@ -26,10 +26,16 @@ this was not a second version or trial round.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round
-- Fingerprint: 7f34399b37821ce3e50b2b60473b4af8536b67bcf9b671a26e35bb4b314550a2
+- Fingerprint: c6cd803158e9d2a296969b9bcf623d5972aff973ed7602921d7c5ce87d50ad16
 - Trial round: the same single approved Luna invocation; no additional trial is planned.
 - Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
   cutoffs while keeping response usage observational, provider failures real, and strict defaults.
+
+## 8.9 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: PENDING
+- Trial round: none. Offline validation only.
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown. Spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
 
 ## 8.8 — 2026-11-24
 - Kind: trivial batch

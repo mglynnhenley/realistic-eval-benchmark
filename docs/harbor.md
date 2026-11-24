@@ -350,6 +350,19 @@ Each trial collects the following:
 - `artifacts/agent-eval/`: a copy of the `.eval` for Scout. The verifier grades every key from the world's own records (its tool calls and `/turn`s, with the memory calls the agent reports labelled as agent-reported); with the `.eval` it only adds `crosscheck.*` keys. `refund_eval/grading/world_records.py` lists where the two can differ.
 - `verifier/`: `reward.json` and `details.json`.
 
+For native OpenRouter targets, `agent/target-charge-receipts/` contains one private JSON receipt
+per dispatched completion attempt. It records the generation ID and USD cost reported by OpenRouter
+when available, even if Inspect later rejects the completion or fails to write a trajectory. It
+contains no prompts, responses, or credentials and makes no extra provider calls. Use a fresh agent
+wheel containing the recorder.
+
+Harbor's target cost and the ATIF total report the sum of those response charges only when every
+recorded attempt has usable evidence. A missing receipt set, interrupted attempt, missing charge, or
+ambiguous generation ID leaves the actual total unknown (`null` in `extra.target_charges`).
+Inspect's tariff-based estimates remain separately labelled in ATIF metrics and still serve the
+existing Inspect cost limit. This evidence does not reconcile world charges, account spend, or any
+separate strict-budget settlement.
+
 The admin port is reachable only inside the world container. The browser's network namespace needs user namespaces, which Docker's default seccomp profile blocks, so the `world` service runs with `seccomp=unconfined`. `main` keeps Docker's defaults.
 
 In the adapter's sample job, each trial's seed is derived from the task version and the trial name. Set `WORLD_SEED` to replay a recorded seed there; prepared native batches instead use the frozen seed policy described above.
