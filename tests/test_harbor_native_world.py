@@ -123,6 +123,7 @@ class LocalEnvironment:
         command = command.replace("/app/.venv/bin/python", str(python))
         command = command.replace("/app/.venv/bin/inspect", str(python.parent / "inspect"))
         command = command.replace("/logs/agent", str(logs)).replace("/app", str(app))
+        command = command.replace("/refund-eval-private/inspect-data", str(trial / "inspect-buffer"))
         env = {key: os.environ[key] for key in ("PATH", "WORLD_TURN_TOKEN")}
         env.update(HOME=str(app), PYTHON_DOTENV_DISABLED="1", REFUND_EVAL_COMPANY_STORE="off",
                    WORLD_SCENARIO="train_refund_late", WORLD_SIM_WEEKS="1", WORLD_DATA_MODE="fixture")
@@ -347,8 +348,9 @@ def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatc
                              env={**env, TURN_TOKEN_ENV: os.environ[TURN_TOKEN_ENV], "HARBOR_TELEMETRY": "0"},
                              capture_output=True, text=True)
     assert run.returncode == 0, run.stdout + run.stderr
-    # The public installation has no world telemetry implementation or files.
-    assert not (Path(installed.strip()) / "refund_eval/world_service/status.py").exists()
+    # The public status schema is packaged; the private world implementation is not.
+    for module in ("trial.py", "settings.py", "server.py"):
+        assert not (Path(installed.strip()) / "refund_eval/world_service" / module).exists()
 
 
 def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):
