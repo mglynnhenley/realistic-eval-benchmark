@@ -33,9 +33,9 @@ this was not a second version or trial round.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: PENDING
+- Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc
 - Trial round: none. Offline validation only.
-- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown. Spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown.
 
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
