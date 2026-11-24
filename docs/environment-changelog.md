@@ -26,10 +26,9 @@ this was not a second version or trial round.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 5a20d2ed71193a8412202e0601cee228743fe5e6b4f57e6e3625b209647b1106
-- Trial round: none. Offline validation only; no launch.
-- Changes: spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
-
+- Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc
+- Trial round: none. Offline validation only.
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown. Spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3

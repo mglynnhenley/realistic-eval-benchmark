@@ -23,6 +23,10 @@ from inspect_ai.model import ModelOutput, ModelUsage
 from refund_eval.agent.prompt import task_message
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.harbor import adapter, atif, world_entrypoint
+from refund_eval.harbor.target_charges import (
+    TARGET_CHARGES_DIRECTORY,
+    TARGET_CHARGES_ENV,
+)
 from refund_eval.harbor.world_entrypoint import (
     FakeWorldModels,
     choose_seed,
@@ -37,6 +41,7 @@ from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse f
     MAX_TURNS,
     WORLD_KEY,
     ScriptedAgent,
+    _write_agent_scenario,
     offline,
     run_inspect,
     settings,
@@ -395,6 +400,83 @@ def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):
 def test_latest_log_needs_one(tmp_path):
     with pytest.raises(FileNotFoundError):
         atif.latest_log(tmp_path)
+
+
+@pytest.mark.parametrize("second_usage, second_cost, total", [
+    ({"cost": 0.005, "is_byok": False}, "0.005", 0.017),
+    ({"cost": 0, "is_byok": False}, "0", 0.012),
+    ({}, None, None),
+    ({"cost": 0.005, "is_byok": True}, None, None),
+    ({"cost": "NaN"}, None, None),
+    (None, None, None),
+], ids=["all-reported", "reported-zero", "missing", "byok", "invalid", "provider-error"])
+def test_native_openrouter_target_receipts(tmp_path, monkeypatch, second_usage, second_cost, total):
+    import httpx2
+    from inspect_ai import eval
+    from inspect_ai.model import get_model
+
+    from refund_eval import task
+    from refund_eval.published.provider import published_model_args
+
+    logs = tmp_path / "agent"
+    receipt_dir = logs / TARGET_CHARGES_DIRECTORY
+    monkeypatch.setenv(TARGET_CHARGES_ENV, str(receipt_dir))
+    monkeypatch.setattr(task, "register_openrouter_costs", lambda *_: None)
+    monkeypatch.setattr(task, "default_model_roles", lambda *_: {})
+    model_name = "openrouter/openai/gpt-6-astra"
+    scenario = _write_agent_scenario(tmp_path / "agent-scenario.yaml", load_scenario("train_refund_late"))
+    requests = []
+
+    def respond(request):
+        assert request.method == "POST" and request.url.path == "/api/v1/chat/completions"
+        requests.append(request)
+        n = len(requests)
+        assert n <= 2
+        if n == 2 and second_usage is None:
+            return httpx2.Response(402, json={"id": "gen-offline-2", "error": {"message": "Offline error."}})
+        return httpx2.Response(200, json={
+            "id": f"gen-offline-{n}", "object": "chat.completion", "created": 1,
+            "model": model_name.removeprefix("openrouter/"),
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Offline reply."},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105,
+                      **({"cost": 0.012} if n == 1 else second_usage)},
+        })
+
+    stub_browser(monkeypatch)
+    with world_service_thread(settings(tmp_path, scenario="train_refund_late", sim_weeks=1, max_turns=2),
+                              monkeypatch) as (url, _):
+        model = get_model(model_name, api_key="offline-placeholder", memoize=False, max_retries=0,
+                          http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+                          **published_model_args(model_name))
+        [log] = eval(task.impossible_refund, model=model, max_retries=0, display="none", log_format="eval",
+                     task_args={"scenario": scenario, "world_url": url, "sim_weeks": 1,
+                                "published_data": "fixture", "research_mode": "saved", "history_tokens": 0,
+                                "token_budget": 10000, "cost_limit": 1},
+                     log_dir=str(logs / "inspect"))
+    assert log.status == ("error" if second_usage is None else "success"), log.error
+    assert len(requests) == 2
+    rows = [json.loads(path.read_text(encoding="utf-8")) for path in receipt_dir.glob("*.json")]
+    receipts = {row["generation_id"]: row for row in rows}
+    assert set(receipts) == {"gen-offline-1", "gen-offline-2"}
+    first, second = (receipts[f"gen-offline-{n}"] for n in (1, 2))
+    assert set(first) == {"schema_version", "attempt_id", "status", "generation_id", "actual_cost_usd", "source"}
+    assert first["actual_cost_usd"] == "0.012" and first["source"] == "openrouter_response_usage"
+    assert second["actual_cost_usd"] == second_cost
+    assert second["status"] == ("failed" if second_usage is None else "response")
+
+    out = logs / "trajectory.json"
+    assert atif.main([str(logs / "inspect"), "--out", str(out)]) == 0
+    trajectory = json.loads(out.read_text(encoding="utf-8"))
+    summary = trajectory["extra"]["target_charges"]
+    assert summary["attempt_count"] == 2 and summary["unknown_attempt_count"] == int(total is None)
+    assert summary["actual_cost_usd"] == total
+    totals = trajectory["final_metrics"]
+    assert totals.get("total_cost_usd") == summary["actual_cost_usd"]
+    assert totals["extra"]["inspect_estimated_cost_usd"] == pytest.approx(0.00125 if second_usage is None else 0.0025)
+    for step in (step for step in trajectory["steps"] if step["source"] == "agent"):
+        assert "cost_usd" not in step["metrics"]
+        assert step["metrics"]["extra"]["inspect_estimated_cost_usd"] == pytest.approx(0.00125)
 
 
 # --------------------------------------------------------------------------- world entrypoint
