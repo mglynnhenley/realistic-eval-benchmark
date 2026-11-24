@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from inspect_ai.model import Model
+from inspect_ai.model._model_info import _get_model_info_direct
+from inspect_ai.model._model_output import ModelOutput
 from inspect_ai.model._providers.openrouter import SESSION_ID_HEADER, OpenRouterAPI
 from inspect_ai.model._providers.util.hooks import HttpxHooks
 from inspect_ai.util import LimitExceededError
@@ -282,6 +285,9 @@ def _apply_cache_markers(api: OpenRouterAPI, request: dict[str, Any], config: An
 
 @asynccontextmanager
 async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
+    usage_reporting_mode = os.environ.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict")
+    if usage_reporting_mode not in {"strict", "usage_only"}:
+        raise WorldSpendLedgerError("Target usage reporting mode is invalid")
     cap_raw = os.environ.get("REFUND_EVAL_AGENT_DOLLAR_CAP")
     tokens_raw = os.environ.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
     shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
@@ -304,6 +310,68 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
         raise WorldSpendLedgerError("Target dollar budget requires an OpenRouter model ID")
     if getattr(api, "client", None) is None or not isinstance(getattr(api, "model_args", None), dict):
         raise WorldSpendLedgerError("Target OpenRouter client cannot be safely configured")
+    if usage_reporting_mode == "usage_only":
+        if shared_role_mode != "shared_caps":
+            raise WorldSpendLedgerError("Usage-only reporting requires the shared_caps outer key monitor")
+        original_method = api._generate_completion
+        original_generate = getattr(api, "generate", None)
+        original_client = api.client
+        old_max_retries = api.model_args.get("max_retries")
+        model_info = _get_model_info_direct(model) if isinstance(model, Model) else None
+        old_model_cost = model_info.cost if model_info is not None else None
+        if model_info is not None:
+            model_info.cost = None
+        missing_cost = object()
+        old_reported_cost = getattr(api, "_usage_reporting_reported_cost", missing_cost)
+        api.model_args["max_retries"] = 0
+        api.client = api.client.with_options(max_retries=0)
+
+        async def response_only(request: dict[str, Any], config: Any) -> Any:
+            _apply_cache_markers(api, request, config)
+            _bounded_request(api, request, int(tokens_raw))
+            completion = await original_method(request, config)
+            usage = getattr(completion, "usage", None)
+            reported_cost = getattr(usage, "cost", None)
+            if reported_cost is None:
+                extra = getattr(usage, "model_extra", None)
+                reported_cost = extra.get("cost") if isinstance(extra, Mapping) else None
+            api._usage_reporting_reported_cost = _money(reported_cost)
+            return completion
+
+        async def response_only_generate(*args: Any, **kwargs: Any) -> Any:
+            result = await original_generate(*args, **kwargs)
+            output = result[0] if isinstance(result, tuple) else result
+            if isinstance(output, ModelOutput):
+                usage = output.usage
+                if usage is not None:
+                    usage.total_cost = None
+                metadata = dict(output.metadata or {})
+                cost = getattr(api, "_usage_reporting_reported_cost", None)
+                metadata["usage_reported_cost_usd"] = None if cost is None else float(cost)
+                output.metadata = metadata
+            return result
+
+        api._generate_completion = response_only
+        if original_generate is not None:
+            api.generate = response_only_generate
+        try:
+            yield
+        finally:
+            api._generate_completion = original_method
+            if original_generate is not None:
+                api.generate = original_generate
+            api.client = original_client
+            if model_info is not None:
+                model_info.cost = old_model_cost
+            if old_reported_cost is missing_cost:
+                delattr(api, "_usage_reporting_reported_cost")
+            else:
+                api._usage_reporting_reported_cost = old_reported_cost
+            if old_max_retries is None:
+                api.model_args.pop("max_retries", None)
+            else:
+                api.model_args["max_retries"] = old_max_retries
+        return
     tariffs = await anyio.to_thread.run_sync(openrouter_tariffs, [model_id])
     prices = tariffs.get(model_id) if isinstance(tariffs, Mapping) else None
     if not isinstance(prices, Mapping) or set(prices) != TARIFF_KEYS:

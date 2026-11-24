@@ -219,7 +219,8 @@ class WorldTrial:
                        BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist,
                                            prices=getattr(self._model_client, "tariffs", None) or {},
                                            ledger=self._spend_ledger,
-                                           scope=self._spend_scope, strict_budget=settings.strict_budget))
+                                           scope=self._spend_scope, strict_budget=settings.strict_budget,
+                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only"))
         try:
             init_world(scenario, settings.seed)
             store = world_store()

@@ -215,6 +215,28 @@ def test_target_hook_reserves_before_send_and_restores_sdk_settings(monkeypatch)
     assert ledger.scope == {"scenario": "train_refund_late", "models": {"agent": MODEL_ID}}
 
 
+@pytest.mark.parametrize("reported_cost", [Decimal("0.0123"), None], ids=["reported", "unknown"])
+def test_usage_only_target_skips_tariffs_and_generation_lookup(monkeypatch, reported_cost):
+    model, events, _, _ = _setup(monkeypatch, 50)
+    model.api.reported_cost = reported_cost
+    monkeypatch.setenv("REFUND_EVAL_USAGE_REPORTING_MODE", "usage_only")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv(SHARED_CAPS_HEADROOM_BOUND_ENV, "true")
+    monkeypatch.setattr(dollar_budget, "openrouter_tariffs", lambda *_: pytest.fail("tariff lookup"))
+
+    async def run():
+        async with dollar_budget.target_dollar_budget(model):
+            completion = await model.api._generate_completion(_request(), {})
+        return completion
+
+    completion = asyncio.run(run())
+    assert completion.usage.cost == reported_cost
+    assert events[0][0] == "send"
+    assert events[0][1]["max_tokens"] <= 16
+    assert "provider" not in events[0][1]["extra_body"]
+    assert model.api.client.generation_requests == 0
+
+
 def test_target_hook_rejects_second_bound_after_49_dollars_before_send(monkeypatch):
     request = _request()
     request["max_tokens"] = 4

@@ -744,6 +744,44 @@ def test_native_shared_roles_requested_deadline_reaches_target_without_world_ove
     assert metadata["rules_sha256"] == record["task"]["rules_sha256"]
 
 
+def test_usage_only_mode_preserves_finite_native_bounds(tmp_path, approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "usage-only"
+    deadline = date(2027, 2, 4)
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="hybrid", research_mode="auto",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, max_turns=3000, sim_weeks=365 / 7, time_limit=36000,
+        openrouter_key_mode="shared_caps", agent_max_output_tokens=4096, requested_deadline=deadline,
+        usage_reporting_mode="usage_only", disable_verifier=True, trials=1, concurrency=1,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    record_path = batch.prepare(out, config)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    task = Task(out / "train_refund_late")
+    metadata = task.config.metadata
+    compose = yaml.safe_load((out / "train_refund_late/environment/docker-compose.yaml").read_bytes())
+    world_env = compose["services"]["world"]["environment"]
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    [agent] = job.agents
+
+    assert record["effective_parameters"]["usage_reporting_mode"] == "usage_only"
+    assert record["effective_parameters"]["cost_limit_enforcement"] == "response_reported_observed_not_pre_call"
+    assert record["effective_parameters"]["max_turns"] == 3000
+    assert record["effective_parameters"]["worker_time_limit_seconds"] == 36000
+    assert record["effective_parameters"]["requested_deadline"] == deadline.isoformat()
+    assert metadata["usage_reporting_mode"] == "usage_only"
+    assert metadata["max_turns"] == 3000
+    assert metadata["requested_deadline"] == deadline.isoformat()
+    assert world_env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
+    assert agent.env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
+    assert agent.env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"] == "4096"
+    assert agent.kwargs["requested_deadline"] == deadline
+    assert agent.kwargs["cost_limit"] == 50
+    assert job.retry.max_retries == 0
+    assert job.verifier.disable is True
+
+
 @pytest.mark.parametrize("stale_source", [
     "refund_eval/task.py",
     "refund_eval/agent/prompt.py",
