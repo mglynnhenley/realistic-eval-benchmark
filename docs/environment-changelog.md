@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 9.1 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 221fc8167ecce68a4f4059324de6473e0ca20c5e0c638ca8d4b630639d023010
+- Fingerprint: 1c1cb43eb192e437a56f82d1b244388f647b92bd0466c49ba37d11ea3d16576a
 - Trial round: none. Offline validation only; no paid or live trials.
 - Changes: cite Admiral's car-specific FAQ for the saved car-rule grounds and record Three price-guide scope for the recurring-payment discount.
 
