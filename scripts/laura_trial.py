@@ -733,6 +733,14 @@ def _guard_parameters(
             "runtime_metadata_confirmed": False,
         }
     if isinstance(thresholds, SharedCapsThresholds):
+        if thresholds.disable_application_price_cutoffs:
+            return common | {
+                "openrouter_key_mode": "shared_caps",
+                "usage_reporting_mode": "usage_only",
+                "disable_application_price_cutoffs": True,
+                "shared_allowance_source": "not_enforced_by_benchmark",
+                "runtime_metadata_confirmed": False,
+            }
         return common | {
             "openrouter_key_mode": "shared_caps",
             "shared_aggregate_ceiling_usd": "150",
@@ -798,13 +806,15 @@ def _shared_role_thresholds(args: argparse.Namespace, allowance: Any) -> SharedR
         raise SetupFailure("shared_roles_allowance_invalid") from None
 
 
-def _shared_caps_thresholds(args: argparse.Namespace, *, usage_reporting_only: bool = False) -> SharedCapsThresholds:
+def _shared_caps_thresholds(
+    args: argparse.Namespace, *, disable_application_price_cutoffs: bool = False
+) -> SharedCapsThresholds:
     if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
         raise SetupFailure("shared_caps_rejects_operator_allowance_flags")
     return SharedCapsThresholds(
         probe_timeout=args.probe_timeout, poll_interval=args.poll_interval,
         max_sample_age=args.max_sample_age, cleanup_timeout=args.cleanup_timeout,
-        usage_reporting_only=usage_reporting_only,
+        disable_application_price_cutoffs=disable_application_price_cutoffs,
     )
 
 
@@ -902,6 +912,14 @@ def _native_effective_parameters(
         "effective_parameters_complete": True,
         "unavailable_fields": [],
     }
+    if config.disable_application_price_cutoffs:
+        effective.update({
+            "agent_cost_limit_usd": None,
+            "world_cost_limit_usd": None,
+            "usage_reporting_mode": "usage_only",
+            "disable_application_price_cutoffs": True,
+            "cost_limit_enforcement": "disabled",
+        })
     if split:
         effective.update({
             "openrouter_key_mode": "split",
@@ -920,14 +938,22 @@ def _native_effective_parameters(
         if config.requested_deadline is not None:
             effective["requested_deadline"] = config.requested_deadline.isoformat()
     elif shared_caps:
-        effective.update({
-            "openrouter_key_mode": "shared_caps",
-            "agent_max_output_tokens": config.agent_max_output_tokens,
-            "shared_aggregate_ceiling_usd": "150",
-            "shared_allowance_source": "verified_key_headroom",
-            "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
-            "runtime_metadata_confirmed": False,
-        })
+        if config.disable_application_price_cutoffs:
+            effective.update({
+                "openrouter_key_mode": "shared_caps",
+                "agent_max_output_tokens": config.agent_max_output_tokens,
+                "shared_allowance_source": "not_enforced_by_benchmark",
+                "runtime_metadata_confirmed": False,
+            })
+        else:
+            effective.update({
+                "openrouter_key_mode": "shared_caps",
+                "agent_max_output_tokens": config.agent_max_output_tokens,
+                "shared_aggregate_ceiling_usd": "150",
+                "shared_allowance_source": "verified_key_headroom",
+                "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
+                "runtime_metadata_confirmed": False,
+            })
         if config.requested_deadline is not None:
             effective["requested_deadline"] = config.requested_deadline.isoformat()
     return effective
@@ -943,6 +969,7 @@ _WORLD_ENVIRONMENT_FIELDS = {
     "WORLD_MAX_TURNS",
     "REFUND_EVAL_SHARED_ROLE_MODE",
     "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG",
+    "REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS",
 }
 
 
@@ -1067,6 +1094,9 @@ def _saved_effective_parameters(
     split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
     shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
     shared_caps = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_caps"
+    disable_application_price_cutoffs = (
+        world_env.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS") == "true"
+    )
     if (split != isinstance(thresholds, SplitThresholds)
             or shared_roles != isinstance(thresholds, SharedRoleThresholds)
             or shared_caps != isinstance(thresholds, SharedCapsThresholds)):
@@ -1245,6 +1275,14 @@ def _saved_effective_parameters(
         "effective_parameters_complete": not unknown,
         "unavailable_fields": unknown,
     }
+    if disable_application_price_cutoffs:
+        effective.update({
+            "agent_cost_limit_usd": None,
+            "world_cost_limit_usd": None,
+            "usage_reporting_mode": "usage_only",
+            "disable_application_price_cutoffs": True,
+            "cost_limit_enforcement": "disabled",
+        })
     if split:
         effective.update({
             "openrouter_key_mode": "split",
@@ -1263,14 +1301,22 @@ def _saved_effective_parameters(
         if requested_deadline is not None:
             effective["requested_deadline"] = requested_deadline
     elif shared_caps:
-        effective.update({
-            "openrouter_key_mode": "shared_caps",
-            "agent_max_output_tokens": agent_output_tokens,
-            "shared_aggregate_ceiling_usd": "150",
-            "shared_allowance_source": "verified_key_headroom",
-            "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
-            "runtime_metadata_confirmed": False,
-        })
+        if disable_application_price_cutoffs:
+            effective.update({
+                "openrouter_key_mode": "shared_caps",
+                "agent_max_output_tokens": agent_output_tokens,
+                "shared_allowance_source": "not_enforced_by_benchmark",
+                "runtime_metadata_confirmed": False,
+            })
+        else:
+            effective.update({
+                "openrouter_key_mode": "shared_caps",
+                "agent_max_output_tokens": agent_output_tokens,
+                "shared_aggregate_ceiling_usd": "150",
+                "shared_allowance_source": "verified_key_headroom",
+                "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
+                "runtime_metadata_confirmed": False,
+            })
         if requested_deadline is not None:
             effective["requested_deadline"] = requested_deadline
     return effective
@@ -1402,6 +1448,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
             total_time_limit = None
             config = prepare_fresh_job(args.manifest, args.job_name)
+            task_path = Path(config.tasks[0].path)
+            try:
+                task_environment = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+                task_environment = task_environment.get("environment", {}).get("env", {})
+                if not isinstance(task_environment, dict):
+                    raise TypeError
+                world_env = _world_environment(task_path, config, task_environment)
+            except (OSError, TypeError, tomllib.TOMLDecodeError):
+                raise SetupFailure("saved_world_environment_unresolvable") from None
             agent_env = config.agents[0].env or {}
             split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
             shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
@@ -1417,7 +1472,9 @@ def main(argv: list[str] | None = None) -> int:
             elif shared_caps:
                 thresholds = _shared_caps_thresholds(
                     args,
-                    usage_reporting_only=agent_env.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict") == "usage_only",
+                    disable_application_price_cutoffs=(
+                        world_env.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS") == "true"
+                    ),
                 )
             else:
                 thresholds = _shared_thresholds(args)
@@ -1438,7 +1495,7 @@ def main(argv: list[str] | None = None) -> int:
                 thresholds = _shared_role_thresholds(args, native_config.shared_allowance_usd)
             elif native_config.openrouter_key_mode == "shared_caps":
                 thresholds = _shared_caps_thresholds(
-                    args, usage_reporting_only=native_config.usage_reporting_mode == "usage_only"
+                    args, disable_application_price_cutoffs=native_config.disable_application_price_cutoffs
                 )
             else:
                 thresholds = _shared_thresholds(args)
@@ -1463,7 +1520,7 @@ def main(argv: list[str] | None = None) -> int:
     effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
     def record_guard_metadata(metadata: dict[str, Any]) -> None:
-        if isinstance(thresholds, SharedCapsThresholds) and not thresholds.usage_reporting_only:
+        if isinstance(thresholds, SharedCapsThresholds) and not thresholds.disable_application_price_cutoffs:
             try:
                 _bind_shared_caps_allowance(config, Decimal(metadata["shared_allowance_usd"]))
             except (KeyError, InvalidOperation, TypeError, ValueError, SetupFailure):

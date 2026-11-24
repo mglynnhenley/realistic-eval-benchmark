@@ -9,7 +9,7 @@ import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -129,11 +129,11 @@ class SharedCapsThresholds:
     poll_interval: float = 15.0
     max_sample_age: float = 35.0
     cleanup_timeout: float = 10.0
-    usage_reporting_only: bool = False
+    disable_application_price_cutoffs: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.usage_reporting_only, bool):
-            raise TypeError("usage_reporting_only must be a boolean")
+        if not isinstance(self.disable_application_price_cutoffs, bool):
+            raise TypeError("disable_application_price_cutoffs must be a boolean")
         SharedRoleThresholds(Decimal(150), self.probe_timeout, self.poll_interval,
                              self.max_sample_age, self.cleanup_timeout)
 
@@ -241,6 +241,45 @@ class SharedRoleOpenRouterSnapshot:
             tuple(OpenRouterBudget.parse(value) for value in budgets_value), budgets_present,
             None if effective_value is None else OpenRouterBudget.parse(effective_value), effective_present,
         )
+
+
+def _usage_high_water_sample(
+    previous: OpenRouterSnapshot, current: OpenRouterSnapshot
+) -> OpenRouterSnapshot:
+    return replace(
+        current,
+        usage=max(previous.usage, current.usage),
+        remaining=min(previous.remaining, current.remaining),
+    )
+
+
+def _budget_high_water_sample(
+    previous: OpenRouterBudget, current: OpenRouterBudget
+) -> OpenRouterBudget:
+    return replace(
+        current,
+        spend=max(previous.spend, current.spend),
+        remaining=min(previous.remaining, current.remaining),
+    )
+
+
+def _shared_role_high_water_sample(
+    previous: SharedRoleOpenRouterSnapshot, current: SharedRoleOpenRouterSnapshot
+) -> SharedRoleOpenRouterSnapshot:
+    budgets = tuple(
+        _budget_high_water_sample(before, sample)
+        for before, sample in zip(previous.budgets, current.budgets, strict=True)
+    )
+    effective_budget = current.effective_budget
+    if previous.effective_budget is not None and current.effective_budget is not None:
+        effective_budget = _budget_high_water_sample(previous.effective_budget, current.effective_budget)
+    return replace(
+        current,
+        usage=max(previous.usage, current.usage),
+        remaining=min(previous.remaining, current.remaining),
+        budgets=budgets,
+        effective_budget=effective_budget,
+    )
 
 
 @dataclass(frozen=True)
@@ -412,12 +451,12 @@ class SpendGuard:
             previous_openrouter = self._previous_openrouter
             if previous_openrouter is None or self._baseline is None:
                 raise GuardFailure("monitor state invalid")
-            if openrouter.usage < previous_openrouter.usage:
-                raise GuardFailure("OpenRouter usage counter decreased")
-            if openrouter.remaining > previous_openrouter.remaining + _MONEY_EPSILON:
+            if (openrouter.remaining > previous_openrouter.remaining + _MONEY_EPSILON
+                    and openrouter.usage >= previous_openrouter.usage):
                 raise GuardFailure("OpenRouter remaining counter increased")
             if openrouter.limit != previous_openrouter.limit:
                 raise GuardFailure("OpenRouter key ceiling changed")
+            openrouter = _usage_high_water_sample(previous_openrouter, openrouter)
             if openrouter.usage - self._baseline.usage >= self.thresholds.openrouter_trial_delta:
                 raise GuardFailure("OpenRouter trial threshold reached")
 
@@ -661,9 +700,7 @@ class SharedRoleSpendGuard(SpendGuard):
         except (ValueError, TypeError, OverflowError):
             raise GuardFailure("monitor data malformed") from None
 
-    def _check_headroom(
-        self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
-    ) -> None:
+    def _validate_headroom_snapshot(self, snapshot: SharedRoleOpenRouterSnapshot) -> None:
         if (not snapshot.limit_reset_present or snapshot.limit_reset is not None
                 or snapshot.is_management_key is not False or snapshot.is_provisioning_key is not False
                 or snapshot.include_byok_in_limit is None):
@@ -671,11 +708,6 @@ class SharedRoleSpendGuard(SpendGuard):
         if (snapshot.limit <= 0 or snapshot.remaining > snapshot.limit or snapshot.usage > snapshot.limit
                 or snapshot.usage + snapshot.remaining > snapshot.limit + _MONEY_EPSILON):
             raise GuardFailure("OpenRouter key headroom metadata is malformed")
-        allowance = self.thresholds.shared_allowance_usd
-        key_usage_delta = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
-        minimum = max(Decimal(0), allowance - key_usage_delta)
-        if snapshot.remaining < minimum:
-            raise GuardFailure("OpenRouter limit_remaining is below shared_allowance_usd")
         budgets = list(snapshot.budgets)
         if snapshot.effective_budget is not None:
             budgets.append(snapshot.effective_budget)
@@ -685,6 +717,20 @@ class SharedRoleSpendGuard(SpendGuard):
             if (budget.limit <= 0 or budget.remaining > budget.limit or budget.spend > budget.limit
                     or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
                 raise GuardFailure("OpenRouter budget metadata is malformed")
+
+    def _check_headroom(
+        self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
+    ) -> None:
+        self._validate_headroom_snapshot(snapshot)
+        allowance = self.thresholds.shared_allowance_usd
+        key_usage_delta = Decimal(0) if baseline is None else snapshot.usage - baseline.usage
+        minimum = max(Decimal(0), allowance - key_usage_delta)
+        if snapshot.remaining < minimum:
+            raise GuardFailure("OpenRouter limit_remaining is below shared_allowance_usd")
+        budgets = list(snapshot.budgets)
+        if snapshot.effective_budget is not None:
+            budgets.append(snapshot.effective_budget)
+        for budget in budgets:
             if budget.remaining < minimum:
                 raise GuardFailure("OpenRouter budget remaining is below shared_allowance_usd")
 
@@ -706,22 +752,24 @@ class SharedRoleSpendGuard(SpendGuard):
                 raise GuardFailure("monitor state invalid")
             if self._metadata_signature(openrouter) != self._metadata_signature(baseline):
                 raise GuardFailure("OpenRouter budget metadata changed")
-            if openrouter.usage < previous.usage:
-                raise GuardFailure("OpenRouter usage counter decreased")
-            if openrouter.remaining > previous.remaining + _MONEY_EPSILON:
+            self._validate_headroom_snapshot(openrouter)
+            if (openrouter.remaining > previous.remaining + _MONEY_EPSILON
+                    and openrouter.usage >= previous.usage):
                 raise GuardFailure("OpenRouter remaining counter increased")
-            self._check_headroom(openrouter, baseline)
-            key_usage_delta = openrouter.usage - baseline.usage
             for before, current in zip(previous.budgets, openrouter.budgets, strict=True):
-                if current.spend < before.spend or current.remaining > before.remaining + _MONEY_EPSILON:
+                if (current.remaining > before.remaining + _MONEY_EPSILON
+                        and current.spend >= before.spend):
                     raise GuardFailure("OpenRouter budget counters moved nonmonotonically")
             if baseline.effective_budget is not None:
                 previous_effective, current_effective = previous.effective_budget, openrouter.effective_budget
                 if previous_effective is None or current_effective is None:
                     raise GuardFailure("OpenRouter effective budget metadata changed")
-                if (current_effective.spend < previous_effective.spend
-                        or current_effective.remaining > previous_effective.remaining + _MONEY_EPSILON):
+                if (current_effective.remaining > previous_effective.remaining + _MONEY_EPSILON
+                        and current_effective.spend >= previous_effective.spend):
                     raise GuardFailure("OpenRouter effective budget counters moved nonmonotonically")
+            openrouter = _shared_role_high_water_sample(previous, openrouter)
+            self._check_headroom(openrouter, baseline)
+            key_usage_delta = openrouter.usage - baseline.usage
             if key_usage_delta >= self.thresholds.shared_allowance_usd:
                 raise GuardFailure("OpenRouter shared allowance reached")
         self._previous_openrouter = openrouter
@@ -756,10 +804,10 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
             thresholds.max_sample_age, thresholds.cleanup_timeout,
         )
         super().__init__(role_thresholds, openrouter_probe=openrouter_probe, clock=clock)
-        self.defer_monitor_cleanup = thresholds.usage_reporting_only
+        self.defer_monitor_cleanup = thresholds.disable_application_price_cutoffs
 
     async def _read_openrouter(self) -> SharedRoleOpenRouterSnapshot | tuple[object, ...]:
-        if not self.shared_caps_thresholds.usage_reporting_only:
+        if not self.shared_caps_thresholds.disable_application_price_cutoffs:
             return await super()._read_openrouter()
         value = await self._probe("OpenRouter", self.openrouter_probe)
         if not isinstance(value, Mapping) or not isinstance(value.get("data"), Mapping):
@@ -777,13 +825,13 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
     def _accept_sample(
         self, openrouter: SharedRoleOpenRouterSnapshot | tuple[object, ...], *, initial: bool = False
     ) -> None:
-        if not self.shared_caps_thresholds.usage_reporting_only:
+        if not self.shared_caps_thresholds.disable_application_price_cutoffs:
             super()._accept_sample(openrouter, initial=initial)
             return
         if (not isinstance(openrouter, tuple) or len(openrouter) != 4
                 or openrouter[0] is not None or openrouter[1] is not False
                 or openrouter[2] is not False or not isinstance(openrouter[3], bool)):
-            raise GuardFailure("shared_caps requires a finite ordinary non-resetting OpenRouter key")
+            raise GuardFailure("shared_caps requires an ordinary non-resetting OpenRouter key")
         if initial:
             self._provider_controls = openrouter
         elif self._provider_controls != openrouter:
@@ -826,7 +874,7 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
         super()._check_headroom(snapshot, baseline)
 
     def sanitized_effective_parameters(self) -> dict[str, Any] | None:
-        if self.shared_caps_thresholds.usage_reporting_only:
+        if self.shared_caps_thresholds.disable_application_price_cutoffs:
             return {
                 "shared_allowance_source": "not_enforced_by_benchmark",
                 "runtime_metadata_confirmed": False,
@@ -897,9 +945,12 @@ class SplitSpendGuard(SpendGuard):
                 baseline = self._split_baseline.get(role)
                 if previous is None or baseline is None:
                     raise GuardFailure("split monitor state invalid")
-                if (sample.usage < previous.usage or sample.remaining > previous.remaining + _MONEY_EPSILON
-                        or sample.limit != previous.limit):
+                if (sample.remaining > previous.remaining + _MONEY_EPSILON
+                        and sample.usage >= previous.usage):
+                    raise GuardFailure(f"OpenRouter {role} remaining counter increased")
+                if sample.limit != previous.limit:
                     raise GuardFailure(f"OpenRouter {role} counters are nonmonotonic")
+                sample = _usage_high_water_sample(previous, sample)
                 if sample.usage - baseline.usage >= delta:
                     raise GuardFailure(f"OpenRouter {role} trial threshold reached")
             self._split_previous[role] = sample

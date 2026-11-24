@@ -545,6 +545,16 @@ fall back to the operator-attested `shared_roles` mode. Its ledger coordinates o
 and world containers in this task, not other users of the key. Launch it only through the guarded
 launcher; finite provider headroom outside this task remains subject to concurrent external use.
 
+For a run that uses `usage_reporting_mode: "usage_only"`, target cost enforcement is disabled while
+per-response usage remains observable. The world normally still stops at its configured reported-cost
+threshold or after an unknown charge. A single prepared run can instead set
+`disable_application_price_cutoffs: true`; this is restricted to `usage_only` with `shared_caps` and
+disables both application-level price cutoffs while retaining response records, zero retries, and the
+ordinary provider-key control checks rather than a monetary headroom precondition. Non-price provider
+failures remain failures. The configured
+`$50`/`$100` values remain in the guarded role metadata but are not runtime application cutoffs in
+this opt-in mode; provider/account limits and finite workload and privacy controls are unchanged.
+
 ## Ten-task rail and bills suite
 
 [`harbor-long-horizon-suite.json`](harbor-long-horizon-suite.json) is the explicit `suite` array for

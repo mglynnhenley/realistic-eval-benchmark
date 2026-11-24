@@ -575,6 +575,39 @@ def test_cli_help_and_tokens(capsys, monkeypatch):
     assert cli_main([]) == 2
 
 
+def test_cli_reads_per_run_disabled_price_cutoffs(monkeypatch):
+    from refund_eval.world_service import __main__ as world_main
+
+    captured = {}
+
+    class StubWorldTrial:
+        def __init__(self, settings, model_client=None):
+            captured["settings"] = settings
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def serve_until_stopped(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setenv("WORLD_ADMIN_TOKEN", "admin")
+    monkeypatch.setenv("WORLD_TURN_TOKEN", "turn")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv("REFUND_EVAL_USAGE_REPORTING_MODE", "usage_only")
+    monkeypatch.setenv("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS", "true")
+    monkeypatch.setattr(world_service_trial, "WorldTrial", StubWorldTrial)
+    monkeypatch.setattr(server, "serve_until_stopped", serve_until_stopped)
+
+    assert world_main.main(["--scenario", "train_refund_late", "--world-cost-limit", "100"],
+                           model_client=object()) == 0
+    assert captured["settings"].disable_application_price_cutoffs is True
+    assert captured["settings"].world_cost_limit == 100
+    assert captured["settings"].usage_reporting_mode == "usage_only"
+
+
 class OutOfCredit(FakeModels):
     async def complete(self, role, messages, *, schema=None, **kwargs):
         raise ModelLimitExceeded("402: out of credit")
@@ -1336,27 +1369,82 @@ async def test_usage_only_world_unknown_cost_stays_unknown_without_retry(monkeyp
     assert completion.failed is True
     assert completion.usage is not None and completion.usage.cost is None
     assert budget.status == "unknown"
-    later = await budget.complete("simulator", [Message("user", "later unknown response")])
-    assert later.failed is True
-    assert recorded.calls == 2
+    with pytest.raises(ModelLimitExceeded, match="no further requests"):
+        await budget.complete("simulator", [Message("user", "later priced response")])
+    assert recorded.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_usage_only_world_reports_known_cost_above_configured_cap_without_stopping(monkeypatch):
-    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+async def test_usage_only_disabled_price_cutoffs_observe_costs_without_stopping(monkeypatch):
+    snapshots = []
+    monkeypatch.setattr(
+        world_budget, "world_store",
+        lambda: SimpleNamespace(set=lambda _key, value: snapshots.append(dict(value))),
+    )
 
     class Recorded:
+        def __init__(self):
+            self.calls = 0
+            self.responses = [150.0, None, 0.02]
+
         def model_name(self, role):
             return "openrouter/test-world"
 
         async def complete(self, role, messages, **settings):
+            self.calls += 1
+            cost = self.responses.pop(0)
             return Completion(
-                text="returned", message=Message("assistant", "returned"),
-                usage=Usage(cost=101.0), failed=False,
+                text="returned", message=Message("assistant", "returned"), usage=Usage(cost=cost)
             )
 
-    budget = BudgetedWorldModels(Recorded(), 100, lambda: None, prices={}, usage_reporting_only=True)
-    completion = await budget.complete("simulator", [Message("user", "hello")])
-    assert completion.usage is not None and completion.usage.cost == 101.0
-    assert budget.spent == 101
+    recorded = Recorded()
+    budget = BudgetedWorldModels(
+        recorded, 100, lambda: None, prices={}, usage_reporting_only=True,
+        disable_application_price_cutoffs=True,
+    )
+    completions = [
+        await budget.complete("simulator", [Message("user", str(index))]) for index in range(3)
+    ]
+
+    assert all(not completion.failed for completion in completions)
+    assert [completion.usage.cost for completion in completions] == [150.0, None, 0.02]
+    assert recorded.calls == 3
+    assert float(budget.spent) == pytest.approx(150.02)
     assert budget.status == "available"
+    assert any(
+        snapshot["status"] == "unknown" and snapshot["limit_usd"] is None
+        and snapshot["application_price_cutoffs_enabled"] is False
+        for snapshot in snapshots
+    )
+    assert snapshots[-1]["limit_usd"] is None
+    assert snapshots[-1]["application_price_cutoffs_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypatch):
+    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+
+    class FailedRecorded:
+        calls = 0
+
+        def model_name(self, role):
+            return "openrouter/test-world"
+
+        async def complete(self, role, messages, **settings):
+            self.calls += 1
+            return Completion(
+                text="", message=Message("assistant", ""), usage=Usage(cost=None), failed=True,
+                error={"type": "provider_error"},
+            )
+
+    recorded = FailedRecorded()
+    budget = BudgetedWorldModels(
+        recorded, 100, lambda: None, prices={}, usage_reporting_only=True,
+        disable_application_price_cutoffs=True,
+    )
+    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+        await budget.complete("simulator", [Message("user", "hello")])
+    assert recorded.calls == 1
+    with pytest.raises(ModelLimitExceeded, match="allowance is failed"):
+        await budget.complete("simulator", [Message("user", "later tool call")])
+    assert recorded.calls == 1

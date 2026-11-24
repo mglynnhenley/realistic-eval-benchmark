@@ -175,7 +175,13 @@ class WorldTrial:
     async def __aenter__(self) -> Self:
         settings = self.settings
         shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
-        if (shared_role_mode == "shared_caps" and settings.usage_reporting_mode != "usage_only"
+        if settings.disable_application_price_cutoffs and (
+            settings.usage_reporting_mode != "usage_only" or shared_role_mode != "shared_caps"
+        ):
+            raise WorldSpendLedgerError(
+                "Disabling application price cutoffs requires the shared_caps usage-only run mode"
+            )
+        if (shared_role_mode == "shared_caps" and not settings.disable_application_price_cutoffs
                 and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
                      or settings.world_cost_limit is None)):
             raise WorldSpendLedgerError("World shared_caps task has no verified headroom binding")
@@ -185,7 +191,7 @@ class WorldTrial:
                              if self._model_client is None else
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
-            if shared_role_mode == "shared_caps" and settings.usage_reporting_mode == "usage_only":
+            if shared_role_mode == "shared_caps" and settings.disable_application_price_cutoffs:
                 pass
             elif shared_role_mode in {"shared_roles", "shared_caps"}:
                 shared_config = SharedRoleBudgetConfig.from_environment()
@@ -201,7 +207,7 @@ class WorldTrial:
                 self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
             else:
                 raise WorldSpendLedgerError("World shared-role budget mode is invalid")
-            if self._spend_ledger.has_unresolved():
+            if self._spend_ledger is not None and self._spend_ledger.has_unresolved():
                 raise WorldSpendLedgerError(
                     f"World-spend ledger in {self._spend_ledger.path} has an unresolved reservation; "
                     "refusing to erase prior trial artifacts or resume paid work. Reconcile it or use a new output directory."
@@ -222,7 +228,8 @@ class WorldTrial:
                                            prices=getattr(self._model_client, "tariffs", None) or {},
                                            ledger=self._spend_ledger,
                                            scope=self._spend_scope, strict_budget=settings.strict_budget,
-                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only"))
+                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only",
+                                           disable_application_price_cutoffs=settings.disable_application_price_cutoffs))
         try:
             init_world(scenario, settings.seed)
             store = world_store()
@@ -296,11 +303,13 @@ class WorldTrial:
             boundary_config = fixture_web_config(ctx)
             provenance = {"data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
                           "web_dataset": FIXTURE_WEB_DATASET, "browser_image": DEFAULT_IMAGE,
+                          "browser_image_ref": DEFAULT_IMAGE,
                           "web_sha256": fingerprint(boundary_config), "inbox": inbox}
         else:
             boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
             provenance = {"data_mode": "hybrid", **mode_details, "mail": FIXTURE_MAIL_PROVENANCE,
-                          "browser_image": DEFAULT_IMAGE, "public_read_policy": "public_web",
+                          "browser_image": DEFAULT_IMAGE, "browser_image_ref": DEFAULT_IMAGE,
+                          "public_read_policy": "public_web",
                           "search_provider": "exa", "inbox": inbox}
         if data_mode == "hybrid" and scenario.id == "train_refund_late":
             # The booking pages and lookup the late-refund scenario serves itself (as published_tools does).

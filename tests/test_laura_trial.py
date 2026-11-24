@@ -587,6 +587,7 @@ def test_actual_native_launcher_keeps_cleanup_after_shared_caps_guard_failure(tm
     native.values.update({
         "openrouter_key_mode": "shared_caps",
         "usage_reporting_mode": "usage_only",
+        "disable_application_price_cutoffs": True,
         "agent_max_output_tokens": 2048,
         "cost_limit": 50,
         "world_cost_limit": 100,
@@ -624,7 +625,7 @@ def test_actual_native_launcher_keeps_cleanup_after_shared_caps_guard_failure(tm
     )
 
     assert result.returncode == 2, result.stdout + result.stderr
-    assert "guard_failed=shared_caps requires a finite ordinary non-resetting OpenRouter key cleanup_uncertain=false" in result.stderr, (
+    assert "guard_failed=shared_caps requires an ordinary non-resetting OpenRouter key cleanup_uncertain=false" in result.stderr, (
         result.stdout + result.stderr
     )
     events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]

@@ -335,6 +335,25 @@ def test_exact_headroom_allows_measured_normal_spend_without_rebasing():
     asyncio.run(run())
 
 
+def test_shared_role_normalizes_lagging_key_usage_before_workspace_headroom_check():
+    def sample(*, usage, remaining, budget_remaining):
+        return SharedRoleOpenRouterSnapshot.parse(_key_metadata(
+            usage=usage, limit=50, remaining=remaining,
+            budget_remaining=budget_remaining, budget_limit=100, budget_scope="workspace",
+        ))
+
+    guard = SharedRoleSpendGuard(SharedRoleThresholds(Decimal(10)))
+    guard._accept_sample(sample(usage=40, remaining=10, budget_remaining=10), initial=True)
+    guard._accept_sample(sample(usage=45, remaining=5, budget_remaining=5))
+    guard._accept_sample(sample(usage=42, remaining=8, budget_remaining=5))
+    assert guard._previous_openrouter.usage == Decimal(45)
+    assert guard._previous_openrouter.budgets[0].spend == Decimal(95)
+    assert guard._previous_openrouter.budgets[0].remaining == Decimal(5)
+
+    with pytest.raises(GuardFailure, match="budget remaining is below"):
+        guard._accept_sample(sample(usage=46, remaining=4, budget_remaining=3))
+
+
 @pytest.mark.parametrize("budget_field", ["budgets", "effective_budget"])
 def test_shared_role_guard_does_not_count_other_key_workspace_spend(budget_field):
     def sample(remaining):
@@ -500,7 +519,7 @@ def test_shared_caps_rejects_cent_of_headroom_erosion_without_slack():
         guard._check_headroom(eroded, baseline)
 
 
-def test_shared_caps_usage_only_ignores_monetary_headroom_metadata():
+def test_shared_caps_disabled_price_cutoffs_ignores_monetary_headroom_metadata():
     calls = 0
 
     async def probe():
@@ -515,7 +534,8 @@ def test_shared_caps_usage_only_ignores_monetary_headroom_metadata():
 
     guard = SharedCapsSpendGuard(
         SharedCapsThresholds(
-            probe_timeout=0.1, poll_interval=0.1, max_sample_age=1, usage_reporting_only=True
+            probe_timeout=0.1, poll_interval=0.1, max_sample_age=1,
+            disable_application_price_cutoffs=True,
         ),
         openrouter_probe=probe,
     )
