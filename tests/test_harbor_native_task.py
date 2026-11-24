@@ -54,6 +54,7 @@ from refund_eval.scenario.schema import (
     load_scenario,
 )
 from refund_eval.sim import company_store
+from scripts.laura_trial import main as laura_trial_main
 
 
 def _write_inert_wheel(directory):
@@ -780,6 +781,9 @@ def test_usage_only_mode_preserves_finite_native_bounds(tmp_path, approved_split
     assert agent.kwargs["cost_limit"] == 50
     assert job.retry.max_retries == 0
     assert job.verifier.disable is True
+    manifest = tmp_path / "usage-only-manifest.json"
+    assert laura_trial_main(["save", "--config", str(out / "job.yaml"), "--manifest", str(manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
 
 
 @pytest.mark.parametrize("stale_source", [
