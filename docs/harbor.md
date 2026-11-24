@@ -142,27 +142,36 @@ capture `/logs/artifacts/refund` `.eval` files and
 JSONL snapshots are trimmed to the last newline-terminated record before the
 host marks the copy durable.
 
-Each per-run directory is mode 0700, and its parent is fsync'd on creation.
-directory fsync'd. manifest.json records the last durable checkpoint and a
-Each host checkpoint is an immutable mode-0600 generation file. Its data is
-flushed and fsync'd before the generation directory is fsync'd; only then is
-manifest.json atomically updated and its parent fsync'd to point at it. Earlier
 generations remain in place if a later snapshot or manifest update fails.
-manifest.json records the last durable checkpoint and a
-sanitized error type independently for each source; a failed source does not
-replace its previous good copy. The manifest stays incomplete: a checkpoint
-is a file snapshot, not a guarantee that every event was captured or that
-Harbor's final artifact collection completed. Inspect `.eval` contents are
-recoverable only after Inspect has flushed them. Inspect's active SQLite sample
-buffer is checkpointed separately, including its WAL sidecars; the native
-buffer volume is outside agent log and artifact roots and contains agent-side
 data, not simulator state. Legacy buffers use a private `/tmp` path and the
-existing service-transfer path. A checkpoint captures SQLite transactions
-already committed when the copy is read; events written after that snapshot can
-still be lost. Host polling is nominally 1 second plus
-transfer time. Anything written after the last successful durable checkpoint
-can be lost; if capture or transfer stalls or fails, the unretained tail has
-no fixed bound.
+Each per-run directory is mode 0700, and its parent is fsync'd on creation.
+Each source checkpoint is an immutable mode-0600 file under
+`generations/<source>/`. Its data is flushed and fsync'd before the generation
+directory is fsync'd; only then is `manifest.json` atomically updated and its
+parent fsync'd to point at it. Earlier generations remain if a later snapshot
+or manifest update fails. The manifest records the last durable generation
+and a sanitized error type independently for each source; a failed source
+does not replace its previous good copy.
+
+The manifest stays incomplete: a checkpoint is a file snapshot, not a
+guarantee that every event was captured or that Harbor's final artifact
+collection completed. Inspect `.eval` contents are recoverable only after
+Inspect has flushed them. Inspect's active SQLite sample buffer is checkpointed
+separately, including its WAL sidecars; the native buffer volume is outside
+agent log and artifact roots and contains agent-side data, not simulator state.
+Legacy buffers use a private `/tmp` path and the existing service-transfer
+path. A checkpoint captures SQLite transactions already committed when the
+copy is read; events written after that snapshot can still be lost. Host
+polling is nominally 1 second plus transfer time. Anything written after the
+last successful durable checkpoint can be lost; if capture or transfer stalls
+or fails, the unretained tail has no fixed bound.
+
+Creating the private per-run directory and its initial manifest is a preflight
+requirement before the worker or Inspect task starts; failure there aborts
+before model work. After startup, trace and manifest storage failures are
+reported as availability errors when possible and never turn a successful
+trial into a failure. Only files referenced by the durable manifest pointer
+are claimed as retained.
 
 These artifacts can contain inbox contents. Keep run directories out of published
 results. Browser containment and tool boundaries are described in the

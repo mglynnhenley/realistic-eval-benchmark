@@ -2087,6 +2087,35 @@ async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tm
     assert previous_path.read_bytes() == b'{"turn":1}'
 
 
+async def test_trace_storage_failures_are_preflighted_and_nonfatal_after_start(
+    tmp_path, monkeypatch, caplog,
+):
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    original_atomic_write = private_traces._atomic_write
+
+    def fail_storage(*_args, **_kwargs):
+        raise OSError("private storage unavailable")
+
+    monkeypatch.setattr(private_traces, "_atomic_write", fail_storage)
+    with pytest.raises(OSError, match="private storage unavailable"):
+        PrivateTraceCapture("preflight", root=tmp_path / "unavailable")
+
+    monkeypatch.setattr(private_traces, "_atomic_write", original_atomic_write)
+    capture = PrivateTraceCapture("started", root=tmp_path / "available")
+    monkeypatch.setattr(capture, "_write_manifest", fail_storage)
+
+    async def fail_capture(_environment):
+        raise OSError("checkpoint unavailable")
+
+    monkeypatch.setattr(capture, "capture", fail_capture)
+    await capture.safe_capture(object())
+    capture.finish("agent_succeeded")
+    assert "Private trace availability error after startup" in caplog.text
+    assert "Private trace availability error writing final manifest" in caplog.text
+
+
 async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
     from inspect_ai.log import read_eval_log_async
 

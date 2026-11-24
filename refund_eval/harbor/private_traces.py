@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -24,6 +25,7 @@ PRIVATE_AGENT_BUFFER_ROOT = "/refund-eval-private/inspect-data"
 LEGACY_INSPECT_DATA_ROOT = "/tmp/refund-eval-inspect-data"
 PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE = "_refund_eval_private_world_bind_enabled"
 AGENT_EVAL_LOG_DIRECTORY = "/logs/agent/inspect"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -354,9 +356,15 @@ class PrivateTraceCapture:
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 -- telemetry never fails the benchmark
-            async with self._manifest_lock:
-                self.manifest["capture_error_type"] = type(error).__name__
-                self._write_manifest()
+            try:
+                async with self._manifest_lock:
+                    self.manifest["capture_error_type"] = type(error).__name__
+                    self._write_manifest()
+            except Exception as storage_error:  # noqa: BLE001 -- preserve the benchmark outcome
+                _LOGGER.error(
+                    "Private trace availability error after startup (%s; manifest write %s)",
+                    type(error).__name__, type(storage_error).__name__,
+                )
 
     async def watch(self, environment) -> None:
         while True:
@@ -371,4 +379,10 @@ class PrivateTraceCapture:
         if collection_status not in {"complete", "incomplete", "unconfirmed"}:
             collection_status = "unconfirmed"
         self.manifest.update(run_status=run_status, collection_status=collection_status, status="incomplete")
-        self._write_manifest()
+        try:
+            self._write_manifest()
+        except Exception as error:  # noqa: BLE001 -- a final checkpoint must not change a successful trial
+            _LOGGER.error(
+                "Private trace availability error writing final manifest (%s)",
+                type(error).__name__,
+            )
