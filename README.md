@@ -109,12 +109,15 @@ Credentials, inbox exports, logs, transcripts, browser audits, prepared jobs and
 | `refund_eval/runtime/` | Shared checkpoints, snapshots and interaction records |
 | `refund_eval/published/` | Mail, search, browser tools and network boundary |
 | `refund_eval/claims/` | Saved claim checklists, frozen evidence and offline factual assessment |
-| `refund_eval/grading/`, `scout/` | Code checks and post-run behaviour grading |
+| `refund_eval/grading/`, `scout/` | Code checks, post-run behaviour grading (`scout/run.py`) and local [Transect review](docs/trajectory-grading.md) (`scout/transect_run.py`) |
+| `refund_eval/realism/` | Continuous [realism improvement loop](docs/environment-improvement-loop.md) and its measurement machinery |
 | `refund_eval/awareness/` | Optional [eval-awareness probe](docs/awareness.md) over saved transcripts |
-| `refund_eval/dashboard/`, `harbor/` | Local UI and isolated batch execution, including the [native Harbor task](docs/harbor.md#native-harbor-task-new) |
+| `refund_eval/activation_monitor/` | Optional offline [activation-monitor prototype](docs/activation-monitor.md) |
+| `measurements/` | Standalone [rollout path-variance tool](measurements/README.md) (`uv run measurements/paths.py`) |
+| `refund_eval/dashboard/`, `harbor/` | Local UI, read-only [Luna viewer](docs/luna-dashboard.md) and isolated batch execution, including the [native Harbor task](docs/harbor.md#native-harbor-task-new) |
 | `refund_eval/world_service/`, `models/` | The trial's world served over MCP for world-service mode, and the world-side model client |
 | `refund_eval/parity/` | Free parity gate comparing the Inspect and native Harbor paths |
-| `scripts/`, `integrations/harbor/` | Preparation helpers and separate Harbor environment |
+| `scripts/`, `integrations/harbor/` | Preparation, trial and spend-guard helpers, and the separate Harbor environment |
 | `tests/`, `docs/` | Tests, [architecture](docs/architecture.md) and run guides |
 
 See [local verification](docs/running.md#validation) for the unit suite, lint and browser checks. Released under the [MIT licence](LICENSE).

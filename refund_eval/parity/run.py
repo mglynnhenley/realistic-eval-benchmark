@@ -1,4 +1,4 @@
-"""Run the parity scripts on three paths and compare them (migration step 19, the free parity gate).
+"""Run the parity scripts on three paths and compare them (the free parity gate).
 
     uv run python -m refund_eval.parity --out .context/parity [--scripts NAME ...] [--seed 7] [--skip-harbor]
 
@@ -591,7 +591,7 @@ def _cell(diffs: list, extra: str = "") -> str:
 
 def report(out: Path, seed: int, runs: dict, comparisons: dict, started: str) -> tuple[str, bool]:
     lines = [
-        "# Parity gate (migration step 19): old Inspect path vs native Harbor task", "",
+        "# Parity gate: old Inspect path vs native Harbor task", "",
         (f"Written by `python -m refund_eval.parity` at {started}: seed {seed}, fixture data, research mode saved, "
         "scripted mockllm target, fake world models, no API keys."), "",
         ("- **old**: native Inspect in-process (tools and world with the agent; real browser in its Docker "
