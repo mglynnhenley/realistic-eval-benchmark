@@ -166,6 +166,11 @@ def private_world_compose_bind(environment):
         if not isinstance(volumes, dict):
             raise LauncherFailure("guarded Modal task has an invalid top-level volume map")
         volumes.setdefault("inspect-buffer", {})
+        if any(
+            isinstance(volume, str) and volume.startswith("role-budget:")
+            for volume in (*main_volumes, *world_volumes)
+        ):
+            volumes.setdefault("role-budget", {})
         world_volumes[world_mounts[0]] = f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world"
         compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
         environment.environment_dir = isolated_dir

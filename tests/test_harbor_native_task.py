@@ -2192,6 +2192,7 @@ def test_guarded_modal_adapts_old_shared_caps_task_without_mutating_source(tmp_p
         adapted = yaml.safe_load(adapted_path.read_text())
         assert environment.environment_dir != task_path / "environment"
         assert "inspect-buffer" in adapted["volumes"]
+        assert adapted["volumes"]["role-budget"] == {}
         assert f"{PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in adapted["services"]["main"]["volumes"]
         assert "role-budget:/var/lib/refund-eval/role-budget" in adapted["services"]["main"]["volumes"]
         assert f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in adapted["services"]["world"]["volumes"]
