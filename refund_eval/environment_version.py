@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path, PurePosixPath
 
-ENVIRONMENT_VERSION = "8.8"
+ENVIRONMENT_VERSION = "8.9"
 ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
     "refund_eval/model_pricing.py", "refund_eval/model_io.py", "refund_eval/models", "refund_eval/world", "refund_eval/world_service",
@@ -16,7 +16,7 @@ ENVIRONMENT_PATHS = (
     "refund_eval/realism/track.py",
     "refund_eval/image-lock.json", "pyproject.toml", "uv.lock", ".python-version",
     "refund_eval/agent", "refund_eval/tasks", "refund_eval/grading",
-    "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scout",
+    "refund_eval/claims", "refund_eval/runtime", "refund_eval/config.py", "scripts/offline_spend_guard.py", "scout",
 )
 ROOT = Path(__file__).resolve().parents[1]
 

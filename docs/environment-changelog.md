@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.9 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: fa75344a414e0f1adc308e61da62449c9d71b2d7c009c2edc77f0fea0e4924a6
+- Trial round: none. Offline validation only; no launch.
+- Changes: spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
+
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3
