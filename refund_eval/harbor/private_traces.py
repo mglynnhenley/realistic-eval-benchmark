@@ -129,6 +129,13 @@ def _durable_metadata(path: Path, *, complete_jsonl: bool = False) -> tuple[int,
     return size, digest
 
 
+def _prune_generations(directory: Path, keep: Path) -> None:
+    for path in directory.iterdir():
+        if path != keep:
+            path.unlink(missing_ok=True)
+    _fsync_directory(directory)
+
+
 def _validate_eval_archive(path: Path) -> None:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -242,12 +249,21 @@ class PrivateTraceCapture:
                 generation_directory.mkdir(mode=0o700, exist_ok=True)
                 os.chmod(generation_directory, 0o700)
                 _fsync_directory(generation_root)
+                async with self._manifest_lock:
+                    record = self.manifest["files"][source.name]
+                    current = self.directory / record["path"] if record.get("path") else None
+                    if (record.get("sha256") == digest and record.get("bytes") == size
+                            and current is not None and current.is_file()):
+                        await asyncio.to_thread(_prune_generations, generation_directory, current)
+                        return
                 destination = generation_directory / f"{uuid4().hex}-{source.filename}"
                 os.replace(temp_path, destination)
                 _fsync_directory(generation_directory)
                 async with self._manifest_lock:
                     self._checkpoint += 1
                     record = self.manifest["files"][source.name]
+                    prior_record = record.copy()
+                    prior_checkpoint = self._checkpoint - 1
                     record.update(
                         status="durable",
                         attempts=record["attempts"] + 1,
@@ -258,7 +274,13 @@ class PrivateTraceCapture:
                         sha256=digest,
                         last_attempt_error_type=None,
                     )
-                    self._write_manifest()
+                    try:
+                        self._write_manifest()
+                    except Exception:
+                        self.manifest["files"][source.name] = prior_record
+                        self._checkpoint = prior_checkpoint
+                        raise
+                    await asyncio.to_thread(_prune_generations, generation_directory, destination)
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 -- independent source failures retain earlier snapshots
