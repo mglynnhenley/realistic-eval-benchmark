@@ -24,11 +24,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.3 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: a3cd0c01fb59813d59c103a1cc74308a1bd7f6840b44233db45ae67a69a7e5e3
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Add local Transect review and opt-in external judging for saved trials, preserving unknown coverage and keeping trial execution unchanged.
+
+## 9.2 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: c66a8d13f667eb3f32ba2aa2cc0843cfa0ccb768dd0d8b0996a72d901fa09d5c
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Correct the saved Admiral car-insurance rule citations and document Three recurring-payment discount scope without regenerating company rules.
+
 ## 9.1 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 923c19806f8ef44729030d45d999980d9b3cf9b9c7e33d44cd4bb436591d6337
-- Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
-- Changes: add the local Transect structural/ledger review and optional paid judging for saved `train_refund_late` trials; include bounded prior-source context with target-only citations, preserve unknown coverage, restrict severe verification to matching candidates, and protect local reports. Trial execution and baseline `scout/run.py` remain unchanged.
+- Fingerprint: 7c42676db3373a514de62279baa6c24be69d7fcd7542a36531d20755255b2a5f
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Retain private agent and simulator trace checkpoints through cancellation and failed final collection, with isolated Inspect snapshots and durable private storage.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round
@@ -36,6 +48,7 @@ this was not a second version or trial round.
 - Trial round: the same single approved Luna invocation; no additional trial is planned.
 - Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
   cutoffs while keeping response usage observational, provider failures real, and strict defaults.
+
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc

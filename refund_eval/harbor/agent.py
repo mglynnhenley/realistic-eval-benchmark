@@ -16,6 +16,11 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from refund_eval.harbor.config import TrialRequest, TrialSettings
+from refund_eval.harbor.private_traces import (
+    LEGACY_INSPECT_DATA_ROOT,
+    PrivateTraceCapture,
+    private_inspect_data_home,
+)
 from refund_eval.killswitch import kill_reason
 
 
@@ -41,8 +46,31 @@ class RefundInspectAgent(BaseAgent):
             raise RuntimeError(f"Inspect runtime is unavailable: {result.stderr}")
 
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
-        if self.options.trial_deadlines is not None:
-            return await self._run_bounded(instruction, environment, context)
+        capture = PrivateTraceCapture(
+            self.session_id or self.logs_dir.parent.name,
+        )
+        watcher = asyncio.create_task(capture.watch(environment))
+        terminal_status = "failed"
+        try:
+            if self.options.trial_deadlines is not None:
+                await self._run_bounded(instruction, environment, context)
+            else:
+                await self._run_unbounded(instruction, environment, context)
+            terminal_status = "agent_succeeded"
+        except asyncio.CancelledError:
+            terminal_status = "cancelled"
+            raise
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+            try:
+                await capture.safe_capture(environment)
+            finally:
+                if asyncio.current_task().cancelling():
+                    terminal_status = "cancelled"
+                capture.finish(terminal_status)
+
+    async def _run_unbounded(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         request = TrialRequest(
             instruction=instruction, model=self.model_name or "",
             settings=self.options, trial_id=self.session_id or self.logs_dir.parent.name,
@@ -54,7 +82,10 @@ class RefundInspectAgent(BaseAgent):
         execution = asyncio.create_task(environment.exec(
             "python -m refund_eval.harbor.worker --request /app/request.json "
             "> /logs/agent/worker.log 2>&1",
-            cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress"},
+            cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
+                              "XDG_DATA_HOME": str(private_inspect_data_home(
+                                  request.trial_id, LEGACY_INSPECT_DATA_ROOT,
+                              ))},
             timeout_sec=request.settings.time_limit + 600,
         ))
         try:
@@ -137,7 +168,10 @@ class RefundInspectAgent(BaseAgent):
             execution = asyncio.create_task(environment.exec(
                 "exec python -m refund_eval.harbor.worker --request /app/request.json "
                 f"--worker-seconds {allowance:.6f} > /logs/agent/worker.log 2>&1",
-                cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress"},
+                cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
+                                  "XDG_DATA_HOME": str(private_inspect_data_home(
+                                      request.trial_id, LEGACY_INSPECT_DATA_ROOT,
+                                  ))},
                 timeout_sec=exec_timeout_seconds(worker_end),
             ))
             killed = False
