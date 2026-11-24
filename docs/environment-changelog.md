@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.14 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 301aab4cea4455a6e9e6afdefd0ee898e52672dbd913b4227a84b19917df3676
+- Trial round: none. Offline validation only; no launch.
+- Changes: merge OpenRouter target-charge receipt accounting with private native trace capture and wheel preflight.
+
 ## 8.13 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 0b6babacf722a7db89810f353910e79f2c9b52d3797f441341a449238b4aa3c6

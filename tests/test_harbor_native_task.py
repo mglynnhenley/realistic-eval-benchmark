@@ -27,6 +27,10 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from tests.inspect_eval_support import (
+    partial_inspect_eval_bytes as _partial_inspect_eval_bytes,
+)
+
 pytestmark = pytest.mark.harbor
 
 pytest.importorskip("harbor.models.job.config")
@@ -1883,7 +1887,8 @@ def test_inspect_command(tmp_path):
     command = make_agent(tmp_path, cost_limit=150, token_budget=40_000_000, history_tokens=60000, time_limit=36000,
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
-    assert run.startswith("mkdir -p /logs/agent/inspect; ")
+    assert run.startswith("mkdir -p /logs/agent/inspect; XDG_DATA_HOME=")
+    assert "REFUND_EVAL_TARGET_CHARGES_DIR=/logs/agent/target-charge-receipts" in run
     assert "trace_mirror" not in command and "/mnt/refund-world-logs" not in command
     for part in ("--model openrouter/anthropic/claude-opus-5.5", "--max-retries 0", "-M max_retries=0",
                  "-M strict_tools=false", "-M reasoning_enabled=true",
@@ -1900,6 +1905,7 @@ def test_inspect_command(tmp_path):
     assert "-T task_id" not in default_with_instruction and "-T task_text" not in default_with_instruction
     mock = make_agent(tmp_path, model_name="mockllm/model").inspect_command()
     assert "-M " not in mock and "-T cost_limit" not in mock and "-T token_budget" not in mock
+    assert "REFUND_EVAL_TARGET_CHARGES_DIR" not in mock
 
 
 def test_inspect_command_forwards_task_instruction_safely(tmp_path):
@@ -1975,89 +1981,6 @@ class Environment:
         if "inspect eval" in command and self.on_run is not None:
             await self.on_run(self)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
-
-
-async def test_private_trace_capture_uses_file_api_and_isolates_source_failures(tmp_path, monkeypatch):
-    from inspect_ai.log import read_eval_log_async
-
-    from refund_eval.harbor import private_traces
-    from refund_eval.harbor.private_traces import PrivateTraceCapture
-
-    fsynced_directories = []
-    original_fsync_directory = private_traces._fsync_directory
-
-    def record_fsync(directory):
-        fsynced_directories.append(Path(directory))
-        original_fsync_directory(directory)
-
-    monkeypatch.setattr(private_traces, "_fsync_directory", record_fsync)
-
-    partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
-
-    class ListFiles:
-        async def aio(self, directory):
-            assert directory == "/logs/agent/inspect"
-            return [SimpleNamespace(name="run.eval")]
-
-    class DirectFilesOnly:
-        def __init__(self):
-            self.values = {
-                "/logs/agent/inspect/run.eval": partial_eval,
-                "/refund-eval-private/world-logs/state.json": b'{"turn":1}',
-                "/refund-eval-private/world-logs/events.jsonl": b'{"event":1}\n{"event":2}',
-            }
-            self.failures = {"simulator-events"}
-            self.exec_calls = 0
-            self._sandbox = SimpleNamespace(filesystem=SimpleNamespace(list_files=ListFiles()))
-            setattr(self, private_traces.PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
-
-        async def exec(self, *_args, **_kwargs):
-            self.exec_calls += 1
-            raise AssertionError("capture must not use sandbox exec")
-
-        async def download_file(self, remote, destination):
-            if remote.endswith("events.jsonl") and "simulator-events" in self.failures:
-                raise RuntimeError("blocked event-file transfer")
-            if remote.endswith(".eval") and "agent_eval" in self.failures:
-                raise RuntimeError("blocked agent-file transfer")
-            Path(destination).write_bytes(self.values[remote])
-
-    environment = DirectFilesOnly()
-    capture = PrivateTraceCapture("offline-native", native=True, root=tmp_path / "spool")
-    await capture.capture(environment)
-    first_agent_path = _captured_trace_file(capture.directory, "agent_eval")
-    first_agent = first_agent_path.read_bytes()
-    partial_log = await read_eval_log_async(first_agent_path)
-    assert len(partial_log.samples) == 1
-    assert any("recoverable partial agent event" in str(message.content)
-               for message in partial_log.samples[0].messages)
-    assert partial_log.status not in {"success", "error"}
-    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":1}'
-    assert json.loads(capture.manifest_path.read_text())["files"]["simulator_events"]["path"] is None
-    environment.values["/refund-eval-private/world-logs/state.json"] = b'{"turn":2}'
-    environment.failures = {"agent_eval"}
-    await capture.capture(environment)
-    assert _captured_trace_file(capture.directory, "agent_eval").read_bytes() == first_agent
-    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":2}'
-    assert _captured_trace_file(capture.directory, "simulator_events").read_bytes() == b'{"event":1}\n'
-    assert environment.exec_calls == 0
-    assert capture.directory.stat().st_mode & 0o777 == 0o700
-    assert capture.manifest_path.stat().st_mode & 0o777 == 0o600
-    assert tmp_path / "spool" in fsynced_directories
-    manifest = json.loads(capture.manifest_path.read_text())
-    assert manifest["status"] == "incomplete"
-    assert manifest["files"]["agent_eval"]["status"] == "durable"
-    assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
-    assert manifest["files"]["simulator_state"]["last_durable_checkpoint"] is not None
-    assert manifest["files"]["simulator_events"]["status"] == "durable"
-    assert all(_captured_trace_file(capture.directory, name).stat().st_mode & 0o777 == 0o600
-               for name in ("agent_eval", "simulator_state", "simulator_events"))
-    environment.failures = set()
-    environment.values["/logs/agent/inspect/run.eval"] = b"truncated .eval archive"
-    await capture.capture(environment)
-    assert _captured_trace_file(capture.directory, "agent_eval").read_bytes() == first_agent
-    manifest = json.loads(capture.manifest_path.read_text())
-    assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
 
 
 async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tmp_path, monkeypatch):
@@ -2313,36 +2236,6 @@ async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloa
     }
 
 
-async def _partial_inspect_eval_bytes(tmp_path):
-    from inspect_ai import Task, eval_async
-    from inspect_ai.dataset import Sample
-    from inspect_ai.log import read_eval_log_async
-    from inspect_ai.log._recorders.eval import EvalRecorder
-    from inspect_ai.model import ModelOutput, get_model
-    from inspect_ai.solver import generate
-
-    task = Task(dataset=[Sample(input="Summarize this test event.")], solver=generate())
-    model = get_model(
-        "mockllm/model",
-        custom_outputs=[ModelOutput.from_content("mockllm/model", "recoverable partial agent event")],
-        memoize=False,
-    )
-    [complete] = await eval_async(task, model=model, log_dir=str(tmp_path / "complete"), log_format="eval")
-    partial_path = tmp_path / "partial" / "run.eval"
-    partial_path.parent.mkdir(parents=True)
-    recorder = EvalRecorder(str(partial_path.parent))
-    await recorder.log_init(complete.eval, location=str(partial_path), clean=True)
-    await recorder.log_start(complete.eval, complete.plan)
-    await recorder.log_sample(complete.eval, complete.samples[0], write_through=True)
-    await recorder.flush(complete.eval)
-    await recorder.log_discard(complete.eval, keep_destination=True)
-    partial = await read_eval_log_async(partial_path)
-    assert len(partial.samples) == 1
-    assert any("recoverable partial agent event" in str(message.content)
-               for message in partial.samples[0].messages)
-    return partial_path.read_bytes()
-
-
 @pytest.mark.parametrize(
     ("native", "guarded_modal"),
     [(True, True), (True, False), (False, False)],
@@ -2482,6 +2375,9 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         active_sample_snapshot_path,
         private_inspect_data_home,
     )
+    from refund_eval.world.event_log import EVENTS_KEY, record
+    from refund_eval.world.state import WORLD_KEY, World
+    from refund_eval.world_service.store import EVENTS_FILE, MemoryStore, OutputWriter
     from scripts import guarded_harbor
     from scripts.guarded_harbor import validate_job_config
 
@@ -2695,7 +2591,20 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     world_source = next(source for source in capture.sources if source.name == "simulator_events")
     assert Path(agent_source.buffer_root) == buffer_root
     assert world_source.remote_path == expected_world_events
-    world_snapshot = b'{"event":"simulator-private-event"}\n'
+    world_time = datetime(2026, 10, 12, tzinfo=UTC)
+    world_state = World(start_time=world_time, now=world_time).model_dump(mode="json")
+    world_store = MemoryStore({WORLD_KEY: world_state})
+    record(world_store, None, world_state)
+    next_world_state = {**world_state, "turn": 1}
+    record(world_store, world_state, next_world_state)
+    assert [event["kind"] for event in world_store[EVENTS_KEY]] == ["world_init", "turn"]
+    world_store.set(WORLD_KEY, next_world_state)
+    world_output = tmp_path / "simulator-world-output"
+    OutputWriter(world_output).write(world_store, settings={"scenario": "train_refund_late"})
+    world_snapshot_path = world_output / EVENTS_FILE
+    world_snapshot = world_snapshot_path.read_bytes()
+    world_events = [json.loads(line) for line in world_snapshot.splitlines()]
+    assert [event["kind"] for event in world_events] == ["world_init", "turn"]
 
     class OfflineEnvironment:
         _sandbox = SimpleNamespace(filesystem=object())
@@ -2707,7 +2616,7 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
             if remote == expected_buffer_snapshot.as_posix():
                 shutil.copyfile(remote_snapshot, destination)
             elif remote == world_source.remote_path:
-                Path(destination).write_bytes(world_snapshot)
+                shutil.copyfile(world_snapshot_path, destination)
             else:
                 raise FileNotFoundError(remote)
 
@@ -2727,7 +2636,9 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     assert {event["event"] for event in events} >= {"model", "tool"}
     evidence = json.dumps({"events": events, "messages": messages, "calls": calls})
     assert "active request" in evidence and "active tool result" in evidence
-    assert _captured_trace_file(capture.directory, world_source.name).read_bytes() == world_snapshot
+    saved_world_events = _captured_trace_file(capture.directory, world_source.name).read_bytes()
+    assert saved_world_events == world_snapshot
+    assert [json.loads(line)["kind"] for line in saved_world_events.splitlines()] == ["world_init", "turn"]
 
 
 async def test_active_sample_snapshot_validation_does_not_block_run_monitoring(tmp_path, monkeypatch):
@@ -3015,7 +2926,9 @@ def test_atif_output_is_valid_for_harbor(tmp_path):
     assert agent_step.reasoning_content == "Check the inbox." and agent_step.message == "Checking."
     assert agent_step.observation.results[0].source_call_id == "call_1"
     assert agent_step.extra == {"sim_time": "2026-09-25T09:00:00+01:00", "sim_turn": 0}
-    assert model.final_metrics.total_cost_usd == 0.25 and model.final_metrics.total_prompt_tokens == 800
+    assert model.final_metrics.total_cost_usd is None and model.final_metrics.total_prompt_tokens == 800
+    assert model.final_metrics.extra["inspect_estimated_cost_usd"] == 0.25
+    assert agent_step.metrics.extra["inspect_estimated_cost_usd"] == 0.25
 
     agent = make_agent(tmp_path)
     agent.logs_dir.mkdir(parents=True)
@@ -3023,5 +2936,78 @@ def test_atif_output_is_valid_for_harbor(tmp_path):
     context = AgentContext()
     agent.populate_context_post_run(context)
     assert (context.n_input_tokens, context.n_cache_tokens, context.n_output_tokens, context.cost_usd) == (
-        800, 700, 50, 0.25)
+        800, 700, 50, None)
+    assert context.model_usage[agent.model_name].cost_usd is None
     assert context.metadata["inspect_log"] == "trial.eval" and "target model only" in context.metadata["cost_scope"]
+
+
+def test_openrouter_context_reads_charge_receipts_without_trajectory(tmp_path):
+    from refund_eval.harbor.target_charges import SOURCE, TARGET_CHARGES_DIRECTORY
+
+    agent = make_agent(tmp_path)
+    directory = agent.logs_dir / TARGET_CHARGES_DIRECTORY
+    directory.mkdir(parents=True)
+    (directory / "attempt.json").write_text(json.dumps({
+        "schema_version": 1, "attempt_id": "attempt", "status": "response",
+        "generation_id": "gen-offline-1", "source": SOURCE, "actual_cost_usd": "0.012",
+    }))
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd == 0.012
+    assert context.metadata["target_charges"]["attempt_count"] == 1
+
+    (directory / "interrupted.json").write_text(json.dumps({
+        "schema_version": 1, "attempt_id": "interrupted", "status": "pending",
+        "generation_id": None, "source": None, "actual_cost_usd": None,
+    }))
+    agent.populate_context_post_run(context)
+    assert context.cost_usd is None
+    assert context.metadata["target_charges"]["unknown_attempt_count"] == 1
+
+
+@pytest.mark.parametrize(("retained_receipts", "second_charge", "expected"), [
+    (0, "0.008", 0.02),
+    (1, "0.008", 0.02),
+    (1, None, None),
+])
+def test_openrouter_context_preserves_trajectory_summary_after_filtering(
+    tmp_path, retained_receipts, second_charge, expected,
+):
+    from refund_eval.harbor.target_charges import SOURCE, TARGET_CHARGES_DIRECTORY
+
+    agent = make_agent(tmp_path)
+    directory = agent.logs_dir / TARGET_CHARGES_DIRECTORY
+    directory.mkdir(parents=True)
+    paths = []
+    for number, charge in enumerate(("0.012", second_charge)):
+        path = directory / f"attempt-{number}.json"
+        path.write_text(json.dumps({
+            "schema_version": 1, "attempt_id": path.stem, "status": "response",
+            "generation_id": f"gen-offline-{number}", "source": SOURCE if charge is not None else None,
+            "actual_cost_usd": charge,
+        }))
+        paths.append(path)
+    trajectory = atif.convert(fake_log(), receipt_dir=directory)
+    (agent.logs_dir / "trajectory.json").write_text(json.dumps(trajectory))
+    for path in paths[retained_receipts:]:
+        path.unlink()
+
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd == expected
+    assert context.model_usage[agent.model_name].cost_usd == expected
+    assert context.metadata["target_charges"] == trajectory["extra"]["target_charges"]
+
+
+def test_openrouter_context_ignores_unmarked_trajectory_cost(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.logs_dir.mkdir(parents=True)
+    trajectory = atif.convert(fake_log())
+    del trajectory["extra"]["target_charges"]
+    trajectory["final_metrics"]["total_cost_usd"] = 0.25
+    (agent.logs_dir / "trajectory.json").write_text(json.dumps(trajectory))
+
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd is None
+    assert context.model_usage[agent.model_name].cost_usd is None
