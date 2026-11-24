@@ -357,7 +357,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
             if openrouter_key_mode in {"shared_roles", "shared_caps"}:
                 rendered = rendered.replace(
                     "    # ROLE_BUDGET_MAIN_VOLUME\n",
-                    "    volumes:\n      - role-budget:/var/lib/refund-eval/role-budget\n",
+                    "      - role-budget:/var/lib/refund-eval/role-budget\n",
                 ).replace(
                     "      # ROLE_BUDGET_WORLD_VOLUME\n",
                     "      - role-budget:/var/lib/refund-eval/role-budget\n"

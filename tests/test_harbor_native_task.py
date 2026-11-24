@@ -71,6 +71,21 @@ def _captured_trace_file(directory, source_name):
     return directory / relative_path
 
 
+def _stage_shared_caps_job(out, wheel, digest):
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="shared_caps", usage_reporting_mode="usage_only", agent_max_output_tokens=4096,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    batch.prepare(out, config)
+    job_values = yaml.safe_load((out / "job.yaml").read_bytes())
+    job_values["environment"]["kwargs"] = {"disable_application_price_cutoffs": True}
+    (out / "job.yaml").write_text(yaml.safe_dump(job_values, sort_keys=False))
+    return JobConfig.model_validate(job_values)
+
+
 def _write_inert_wheel(directory):
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
     dist_info = "synthetic_agent-0.0.0.dist-info"
@@ -2084,7 +2099,31 @@ async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tm
     current_path = _captured_trace_file(source_capture.directory, source.name)
     assert current_path != previous_path
     assert current_path.read_bytes() == b'{"turn":2}'
-    assert previous_path.read_bytes() == b'{"turn":1}'
+    assert not previous_path.exists()
+    for _ in range(20):
+        await source_capture._capture_source(environment, source)
+    assert len(list(generation_directory.iterdir())) == 1
+
+
+def test_shared_caps_fresh_staging_keeps_both_main_volumes_and_validates_sources(tmp_path, approved_split_budget_wheel):
+    from scripts.guarded_harbor import LauncherFailure, validate_job_config
+
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "shared-caps-batch"
+    job = _stage_shared_caps_job(out, wheel, digest)
+    task_path = Path(job.tasks[0].path)
+    compose_path = task_path / "environment/docker-compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text())
+    assert compose["services"]["main"]["volumes"] == [
+        "inspect-buffer:/refund-eval-private/inspect-data",
+        "role-budget:/var/lib/refund-eval/role-budget",
+    ]
+    assert validate_job_config(job) is None
+    compose["services"]["main"]["volumes"].remove("inspect-buffer:/refund-eval-private/inspect-data")
+    compose["volumes"].pop("inspect-buffer")
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False))
+    with pytest.raises(LauncherFailure, match="re-stage it with current batch preparation"):
+        validate_job_config(job)
 
 
 async def test_trace_storage_failures_are_preflighted_and_nonfatal_after_start(

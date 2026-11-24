@@ -502,6 +502,22 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
+    if split or shared_roles or shared_caps:
+        try:
+            compose = yaml.safe_load((task_path / "environment/docker-compose.yaml").read_text(encoding="utf-8"))
+            mounted = (
+                isinstance(compose, dict)
+                and isinstance(compose.get("volumes"), dict)
+                and "inspect-buffer" in compose["volumes"]
+                and "inspect-buffer:/refund-eval-private/inspect-data"
+                    in compose.get("services", {}).get("main", {}).get("volumes", [])
+            )
+        except (OSError, UnicodeError, yaml.YAMLError, AttributeError):
+            mounted = False
+        if not mounted:
+            raise LauncherFailure(
+                "saved shared-key task lacks the private Inspect buffer; re-stage it with current batch preparation"
+            )
     _validate_local_task_envs(task_path, split=split, shared_roles=shared_roles, shared_caps=shared_caps)
     try:
         task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
