@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.4 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 8b1fa02b97f1591d42f94165fd7da40a05a6047ed4c18e54faa6337b1e631ca4
+- Trial round: none. Offline validation only.
+- Changes: scan the most recent 100 Inspect transcript events for the active tool span before falling back to the existing 200-event lookup (MAT-167).
+
 ## 8.3 — 2026-11-23
 - Kind: trivial batch
 - Fingerprint: 782d77fcd820c46af6e7a25887d025e8eb80af51a4077f76b92f83744df0324f
