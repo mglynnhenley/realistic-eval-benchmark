@@ -1,7 +1,10 @@
 """Offline lifecycle controls: canonical policy, native log closure and unknown usage."""
 import asyncio
 import json
+import os
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +15,29 @@ from refund_eval.harbor.deadlines import VERSION, bounded, settle, trial_deadlin
 from refund_eval.realism import autonomous
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.world.state import WORLD_KEY
+
+
+@pytest.fixture(autouse=True)
+def linux_worker_process_files(monkeypatch):
+    """The sandbox worker is Linux-only; exercise its lifecycle on macOS too."""
+    if sys.platform == "linux":
+        return
+    stat = Path(f"/proc/{os.getpid()}/stat")
+    cmdline = Path(f"/proc/{os.getpid()}/cmdline")
+    read_text, read_bytes = Path.read_text, Path.read_bytes
+
+    def process_stat(path, *args, **kwargs):
+        if path == stat:
+            return f"{os.getpid()} (offline-worker) " + " ".join(["0"] * 19 + ["test-start-token"])
+        return read_text(path, *args, **kwargs)
+
+    def process_command(path, *args, **kwargs):
+        if path == cmdline:
+            return b"python\0-m\0refund_eval.harbor.worker\0"
+        return read_bytes(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", process_stat)
+    monkeypatch.setattr(Path, "read_bytes", process_command)
 
 
 def request():
@@ -225,6 +251,9 @@ def test_native_dispatch_rejects_wrong_outer_bound_without_start(tmp_path, outer
 async def test_worker_hung_close_stops_at_fixed_hard_bound(tmp_path, monkeypatch):
     from refund_eval.harbor import deadlines
 
+    # Check the lifecycle timer without starting the independently tested snapshot process.
+    monkeypatch.setattr(worker, "start_snapshotter", lambda *_args: None)
+    monkeypatch.setattr(worker, "stop_snapshotter", lambda *_args: None)
     req = request()
     release = asyncio.Event()
     tasks = []

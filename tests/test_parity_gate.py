@@ -15,9 +15,11 @@ import json
 import os
 import shutil
 import subprocess
+import zipfile
 
 import pytest
 
+from refund_eval.harbor.adapter import REQUIRED_AGENT_WHEEL_MEMBERS
 from refund_eval.parity import run
 from refund_eval.parity.scripts import SCRIPTS
 from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
@@ -26,7 +28,9 @@ from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
 @pytest.mark.parametrize("change", [None, "different", "missing_identity", "wrong_digest", "tampered", "manifest"])
 def test_harbor_reuse_checks_approved_wheel_before_launch(tmp_path, monkeypatch, change):
     wheel = tmp_path / "inert-0.0.1-py3-none-any.whl"
-    wheel.write_bytes(b"inert wheel bytes, never installed or launched")
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in REQUIRED_AGENT_WHEEL_MEMBERS:
+            archive.writestr(name, b'"""Inert fixture, never installed or launched."""\n')
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
     script = SCRIPTS["turn_cap"]
     task = tmp_path / "tasks" / script.scenario

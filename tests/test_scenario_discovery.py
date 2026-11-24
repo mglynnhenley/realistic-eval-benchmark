@@ -24,6 +24,8 @@ from refund_eval.world_service.settings import WorldSettings
 
 
 def _write_synthetic_wheel(directory):
+    from refund_eval.harbor.adapter import REQUIRED_AGENT_WHEEL_MEMBERS
+
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
     dist_info = "synthetic_agent-0.0.0.dist-info"
     files = {
@@ -31,6 +33,7 @@ def _write_synthetic_wheel(directory):
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
+    files.update({name: b'"""Inert offline wheel fixture."""\n' for name in REQUIRED_AGENT_WHEEL_MEMBERS})
     record_name = f"{dist_info}/RECORD"
     rows = []
     for name, content in files.items():
