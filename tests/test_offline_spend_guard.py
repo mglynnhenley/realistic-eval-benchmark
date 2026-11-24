@@ -36,7 +36,13 @@ from scripts.guarded_harbor import LauncherFailure, run_guarded_job, validate_jo
 from scripts.laura_trial import _print_local_job_log, _print_modal_dashboard
 from scripts.offline_spend_guard import (
     GuardFailure,
+    OpenRouterSnapshot,
+    SharedCapsSpendGuard,
+    SharedCapsThresholds,
+    SharedRoleOpenRouterSnapshot,
     SpendGuard,
+    SplitSpendGuard,
+    SplitThresholds,
     Thresholds,
     install_modal_hooks,
 )
@@ -562,7 +568,11 @@ def test_startup_probe_timeout_and_late_monitor_readiness_dispatch_nothing(tmp_p
     [
         [openrouter(), openrouter(), RuntimeError("hidden")],
         [openrouter(), openrouter(), openrouter(usage=10)],
-        [openrouter(usage=5), openrouter(usage=5), openrouter(usage=4)],
+        [
+            openrouter(usage=5, remaining=40),
+            openrouter(usage=5, remaining=40),
+            openrouter(usage=6, remaining=41),
+        ],
         [openrouter(), openrouter(), openrouter(usage="NaN")],
     ],
 )
@@ -1125,3 +1135,77 @@ def test_launcher_rejects_non_single_fresh_modal_jobs(tmp_path, updates):
     config.update(updates)
     with pytest.raises((LauncherFailure, ValueError)):
         validate_job_config(JobConfig.model_validate(config))
+
+
+def test_openrouter_usage_high_water_survives_decrease_and_keeps_threshold():
+    guard = SpendGuard(make_thresholds(openrouter_trial_delta=Decimal(8)))
+    for index, usage in enumerate((42, 46, 44, 49)):
+        guard._accept_sample(OpenRouterSnapshot.parse(openrouter(usage)), initial=index == 0)
+        if usage == 44:
+            assert guard._previous_openrouter.usage == Decimal(46)
+            assert guard._previous_openrouter.remaining == Decimal(4)
+
+    with pytest.raises(GuardFailure, match="OpenRouter trial threshold reached"):
+        guard._accept_sample(OpenRouterSnapshot.parse(openrouter(50)))
+
+
+def test_shared_caps_usage_and_budget_high_water_survive_decrease_and_keep_threshold():
+    def shared_caps_sample(usage):
+        remaining = Decimal(50) - Decimal(usage)
+        budget = {
+            "scope": "key_limit",
+            "guardrail_id": None,
+            "budget_id": None,
+            "limit_usd": 50,
+            "spend_usd": usage,
+            "remaining_usd": remaining,
+            "reset_interval": None,
+            "resets_at": None,
+            "include_byok": False,
+        }
+        return {
+            "data": {
+                "usage": usage,
+                "limit": 50,
+                "limit_remaining": remaining,
+                "limit_reset": None,
+                "is_management_key": False,
+                "is_provisioning_key": False,
+                "include_byok_in_limit": False,
+                "budgets": [budget],
+                "effective_budget": budget,
+            }
+        }
+
+    guard = SharedCapsSpendGuard(SharedCapsThresholds())
+    for index, usage in enumerate((42, 46, 44, 49)):
+        sample = SharedRoleOpenRouterSnapshot.parse(shared_caps_sample(usage))
+        guard._accept_sample(sample, initial=index == 0)
+        if usage == 44:
+            assert guard._previous_openrouter.usage == Decimal(46)
+            assert guard._previous_openrouter.remaining == Decimal(4)
+            assert guard._previous_openrouter.budgets[0].spend == Decimal(46)
+            assert guard._previous_openrouter.budgets[0].remaining == Decimal(4)
+            assert guard._previous_openrouter.effective_budget.spend == Decimal(46)
+
+    with pytest.raises(GuardFailure, match="OpenRouter shared allowance reached"):
+        guard._accept_sample(SharedRoleOpenRouterSnapshot.parse(shared_caps_sample(50)))
+
+
+def test_split_openrouter_usage_high_water_survives_decrease_and_keeps_threshold():
+    guard = SplitSpendGuard(SplitThresholds(Decimal(8), Decimal(8)))
+
+    def sample(agent_usage, world_usage):
+        return {
+            "agent": OpenRouterSnapshot.parse(openrouter(agent_usage, limit=50)),
+            "world": OpenRouterSnapshot.parse(openrouter(world_usage, limit=100)),
+        }
+
+    for index, usages in enumerate(((42, 82), (46, 86), (44, 84), (49, 89))):
+        guard._accept_sample(sample(*usages), initial=index == 0)
+        if index == 2:
+            assert guard._split_previous["agent"].usage == Decimal(46)
+            assert guard._split_previous["world"].usage == Decimal(86)
+
+    with pytest.raises(GuardFailure, match="OpenRouter agent trial threshold reached"):
+        guard._accept_sample(sample(50, 90))
