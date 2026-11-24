@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.4 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: cdb6e49b6073a4386bf3d69ba230f6486589fdf1ff28b9d85a7cbfcf573e46ac
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Honor explicit no-price-cutoff mode throughout Luna launches and preserve private file, service and directory downloads after guard failure; retain strict-mode enforcement.
+
 ## 9.3 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: a3cd0c01fb59813d59c103a1cc74308a1bd7f6840b44233db45ae67a69a7e5e3

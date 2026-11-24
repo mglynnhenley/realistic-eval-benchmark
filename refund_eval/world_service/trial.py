@@ -181,7 +181,7 @@ class WorldTrial:
             raise WorldSpendLedgerError(
                 "Disabling application price cutoffs requires the shared_caps usage-only run mode"
             )
-        if (shared_role_mode == "shared_caps"
+        if (shared_role_mode == "shared_caps" and not settings.disable_application_price_cutoffs
                 and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
                      or settings.world_cost_limit is None)):
             raise WorldSpendLedgerError("World shared_caps task has no verified headroom binding")
@@ -191,7 +191,9 @@ class WorldTrial:
                              if self._model_client is None else
                              {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
             self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
-            if shared_role_mode in {"shared_roles", "shared_caps"}:
+            if shared_role_mode == "shared_caps" and settings.disable_application_price_cutoffs:
+                pass
+            elif shared_role_mode in {"shared_roles", "shared_caps"}:
                 shared_config = SharedRoleBudgetConfig.from_environment()
                 if (shared_config.scenario != settings.scenario
                         or shared_config.models["simulator"] != model_mapping["simulator"]
@@ -205,7 +207,7 @@ class WorldTrial:
                 self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
             else:
                 raise WorldSpendLedgerError("World shared-role budget mode is invalid")
-            if self._spend_ledger.has_unresolved():
+            if self._spend_ledger is not None and self._spend_ledger.has_unresolved():
                 raise WorldSpendLedgerError(
                     f"World-spend ledger in {self._spend_ledger.path} has an unresolved reservation; "
                     "refusing to erase prior trial artifacts or resume paid work. Reconcile it or use a new output directory."

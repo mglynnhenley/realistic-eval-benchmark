@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import math
 import os
@@ -128,8 +129,11 @@ class SharedCapsThresholds:
     poll_interval: float = 15.0
     max_sample_age: float = 35.0
     cleanup_timeout: float = 10.0
+    disable_application_price_cutoffs: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.disable_application_price_cutoffs, bool):
+            raise TypeError("disable_application_price_cutoffs must be a boolean")
         SharedRoleThresholds(Decimal(150), self.probe_timeout, self.poll_interval,
                              self.max_sample_age, self.cleanup_timeout)
 
@@ -376,6 +380,8 @@ class SpendGuard:
         self._bindings: list[SandboxBinding] = []
         self.failure_reason: str | None = None
         self.cleanup_uncertain = False
+        self.defer_monitor_cleanup = False
+        self._cleanup_deferred = False
 
     @property
     def monitor_task(self) -> asyncio.Task[None] | None:
@@ -487,12 +493,12 @@ class SpendGuard:
                 await asyncio.sleep(self.thresholds.poll_interval)
         except asyncio.CancelledError:
             if not self._closing:
-                await self.fail_closed("monitor task stopped")
+                await self.fail_closed("monitor task stopped", defer_cleanup=self.defer_monitor_cleanup)
             raise
         except GuardFailure as failure:
-            await self.fail_closed(failure.reason)
+            await self.fail_closed(failure.reason, defer_cleanup=self.defer_monitor_cleanup)
         except Exception:  # noqa: BLE001
-            await self.fail_closed("monitor failed")
+            await self.fail_closed("monitor failed", defer_cleanup=self.defer_monitor_cleanup)
 
     async def ensure_healthy(self) -> None:
         if self.failure_reason is not None:
@@ -513,12 +519,16 @@ class SpendGuard:
         *,
         cleanup_uncertain: bool = False,
         cancel_job: bool = True,
+        defer_cleanup: bool = False,
     ) -> None:
         self._latch(reason, cleanup_uncertain=cleanup_uncertain)
+        if defer_cleanup:
+            self._cleanup_deferred = True
         task = self._job_task
         if cancel_job and task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
-        await self.cleanup_bound()
+        if not defer_cleanup:
+            await self.cleanup_bound()
 
 
     def bind_sandbox(
@@ -610,8 +620,9 @@ class SpendGuard:
             for binding in self._bindings:
                 await self._cleanup_binding_locked(binding)
 
-    async def authorize_exec(self, environment: object) -> None:
-        await self.ensure_healthy()
+    async def authorize_exec(self, environment: object, *, cleanup: bool = False) -> None:
+        if not cleanup or not self._cleanup_deferred:
+            await self.ensure_healthy()
         binding = next(
             (item for item in self._bindings if item.environment is environment), None
         )
@@ -787,11 +798,45 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.shared_caps_thresholds = thresholds
         self.effective_allowance_usd: Decimal | None = None
+        self._provider_controls: tuple[object, ...] | None = None
         role_thresholds = SharedRoleThresholds(
             Decimal(150), thresholds.probe_timeout, thresholds.poll_interval,
             thresholds.max_sample_age, thresholds.cleanup_timeout,
         )
         super().__init__(role_thresholds, openrouter_probe=openrouter_probe, clock=clock)
+        self.defer_monitor_cleanup = thresholds.disable_application_price_cutoffs
+
+    async def _read_openrouter(self) -> SharedRoleOpenRouterSnapshot | tuple[object, ...]:
+        if not self.shared_caps_thresholds.disable_application_price_cutoffs:
+            return await super()._read_openrouter()
+        value = await self._probe("OpenRouter", self.openrouter_probe)
+        if not isinstance(value, Mapping) or not isinstance(value.get("data"), Mapping):
+            raise GuardFailure("monitor data malformed")
+        data = value["data"]
+        if "limit_reset" not in data:
+            raise GuardFailure("monitor data malformed")
+        return (
+            data["limit_reset"],
+            data.get("is_management_key"),
+            data.get("is_provisioning_key"),
+            data.get("include_byok_in_limit"),
+        )
+
+    def _accept_sample(
+        self, openrouter: SharedRoleOpenRouterSnapshot | tuple[object, ...], *, initial: bool = False
+    ) -> None:
+        if not self.shared_caps_thresholds.disable_application_price_cutoffs:
+            super()._accept_sample(openrouter, initial=initial)
+            return
+        if (not isinstance(openrouter, tuple) or len(openrouter) != 4
+                or openrouter[0] is not None or openrouter[1] is not False
+                or openrouter[2] is not False or not isinstance(openrouter[3], bool)):
+            raise GuardFailure("shared_caps requires an ordinary non-resetting OpenRouter key")
+        if initial:
+            self._provider_controls = openrouter
+        elif self._provider_controls != openrouter:
+            raise GuardFailure("OpenRouter key controls changed")
+        self._last_sample_at = self._clock()
 
     def _check_headroom(
         self, snapshot: SharedRoleOpenRouterSnapshot, baseline: SharedRoleOpenRouterSnapshot | None = None
@@ -829,6 +874,12 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
         super()._check_headroom(snapshot, baseline)
 
     def sanitized_effective_parameters(self) -> dict[str, Any] | None:
+        if self.shared_caps_thresholds.disable_application_price_cutoffs:
+            return {
+                "shared_allowance_source": "not_enforced_by_benchmark",
+                "runtime_metadata_confirmed": False,
+                "provider_key_controls_confirmed": True,
+            }
         parameters = super().sanitized_effective_parameters()
         if parameters is None:
             return None
@@ -923,8 +974,13 @@ def install_modal_hooks(
     from harbor.environments.modal import ModalEnvironment
 
     original_create = ModalEnvironment._create_sandbox
+    collection_methods = ("download_file", "download_dir", "service_download_file", "service_download_dir")
+    original_collection = {name: getattr(ModalEnvironment, name) for name in collection_methods}
     original_exec = ModalEnvironment._sdk_exec
     original_terminate = ModalEnvironment._terminate_sandbox
+    collection_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
+        "harbor_collection_context", default=False
+    )
     raw_create = getattr(original_create, "__wrapped__", None)
     if raw_create is None:
         raise GuardFailure("pinned Harbor sandbox hook is unsupported")
@@ -984,7 +1040,7 @@ def install_modal_hooks(
         shell: str = "bash",
         login: bool = False,
     ) -> object:
-        await guard.authorize_exec(self)
+        await guard.authorize_exec(self, cleanup=collection_context.get())
         return await original_exec(
             self,
             command,
@@ -995,15 +1051,28 @@ def install_modal_hooks(
             login=login,
         )
 
+    def guarded_collection(original: Callable[..., Any]) -> Callable[..., Any]:
+        async def collect(self: object, *args: Any, **kwargs: Any) -> object:
+            token = collection_context.set(True)
+            try:
+                return await original(self, *args, **kwargs)
+            finally:
+                collection_context.reset(token)
+        return collect
+
     async def guarded_terminate(self: object) -> None:
         await guard.terminate_environment(self)
 
     ModalEnvironment._create_sandbox = guarded_create
+    for name, original in original_collection.items():
+        setattr(ModalEnvironment, name, guarded_collection(original))
     ModalEnvironment._sdk_exec = guarded_exec
     ModalEnvironment._terminate_sandbox = guarded_terminate
     try:
         yield
     finally:
         ModalEnvironment._create_sandbox = original_create
+        for name, original in original_collection.items():
+            setattr(ModalEnvironment, name, original)
         ModalEnvironment._sdk_exec = original_exec
         ModalEnvironment._terminate_sandbox = original_terminate

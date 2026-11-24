@@ -519,6 +519,41 @@ def test_shared_caps_rejects_cent_of_headroom_erosion_without_slack():
         guard._check_headroom(eroded, baseline)
 
 
+def test_shared_caps_disabled_price_cutoffs_ignores_monetary_headroom_metadata():
+    calls = 0
+
+    async def probe():
+        nonlocal calls
+        calls += 1
+        return {"data": {
+            "limit_reset": None,
+            "is_management_key": False,
+            "is_provisioning_key": False,
+            "include_byok_in_limit": True,
+        }}
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(
+            probe_timeout=0.1, poll_interval=0.1, max_sample_age=1,
+            disable_application_price_cutoffs=True,
+        ),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        await guard.start()
+        assert guard.effective_allowance_usd is None
+        assert guard.sanitized_effective_parameters() == {
+            "shared_allowance_source": "not_enforced_by_benchmark",
+            "runtime_metadata_confirmed": False,
+            "provider_key_controls_confirmed": True,
+        }
+        await guard.close()
+
+    asyncio.run(run())
+    assert calls >= 2
+
+
 def test_shared_caps_concurrency_and_unknown_retry_preserve_derived_hold(tmp_path):
     config = SharedRoleBudgetConfig(
         allowance_usd="70", role_limits_usd={"target": "50", "world": "100"},

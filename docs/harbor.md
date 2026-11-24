@@ -598,7 +598,8 @@ per-response usage remains observable. The world normally still stops at its con
 threshold or after an unknown charge. A single prepared run can instead set
 `disable_application_price_cutoffs: true`; this is restricted to `usage_only` with `shared_caps` and
 disables both application-level price cutoffs while retaining response records, zero retries, and the
-guarded saved-key headroom precondition. Non-price provider failures remain failures. The configured
+ordinary provider-key control checks rather than a monetary headroom precondition. Non-price provider
+failures remain failures. The configured
 `$50`/`$100` values remain in the guarded role metadata but are not runtime application cutoffs in
 this opt-in mode; provider/account limits and finite workload and privacy controls are unchanged.
 
