@@ -37,6 +37,7 @@ from asyncio import CancelledError
 from collections.abc import Iterator
 from contextlib import AsyncExitStack, contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Self
 
 import anyio
@@ -73,6 +74,7 @@ from refund_eval.agent.harness import (
 )
 from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import sim_deadline
+from refund_eval.harbor.target_charges import TARGET_CHARGES_ENV, record_target_charges
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.adapter import inspect_parameters, model_content
 from refund_eval.scenario.schema import AgentScenario
@@ -284,8 +286,11 @@ async def run_in_world(state: AgentState, *, scenario: AgentScenario, world_url:
         local = [world.local_tool(memory(initial_data={MEMORY_NOTES_PATH: MEMORY_TEMPLATE}))] if history_tokens else []
         ledger = view.world.token_ledger if budgeted else None
         split_target_budget = "REFUND_EVAL_AGENT_DOLLAR_CAP" in os.environ or "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS" in os.environ
-        model = get_model() if budgeted or split_target_budget else None
+        receipt_dir = os.environ.get(TARGET_CHARGES_ENV)
+        model = get_model() if budgeted or split_target_budget or receipt_dir else None
         async with AsyncExitStack() as budget_stack:
+            if receipt_dir and model is not None:
+                budget_stack.enter_context(record_target_charges(model.api, Path(receipt_dir)))
             if split_target_budget:
                 if model is None:
                     raise RuntimeError("split target model was not initialized")

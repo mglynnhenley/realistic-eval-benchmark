@@ -47,6 +47,7 @@ class NativeBatchConfig(RunConfig):
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
     openrouter_key_mode: Literal["shared", "split", "shared_roles", "shared_caps"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
+    usage_reporting_mode: Literal["strict", "usage_only"] = "strict"
     disable_verifier: bool = False
     requested_deadline: date | None = None
     shared_allowance_usd: CostCap | None = None
@@ -56,6 +57,8 @@ class NativeBatchConfig(RunConfig):
 
     @model_validator(mode="after")
     def _validate_spend_caps(self) -> NativeBatchConfig:
+        if self.usage_reporting_mode == "usage_only" and self.openrouter_key_mode != "shared_caps":
+            raise ValueError("usage_only reporting requires shared_caps outer key monitoring")
         if self.requested_deadline is not None and self.openrouter_key_mode not in {"shared_roles", "shared_caps"}:
             raise ValueError("requested_deadline is only valid in a guarded shared-key mode")
         if self.suite is not None:
@@ -202,6 +205,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         verifier_timeout=600, cpus=2, memory_mb=4096, world_seed="" if config.seed is None else str(config.seed),
         agent_wheel=config.agent_wheel, agent_wheel_sha256=config.agent_wheel_sha256,
         verified_wheel=verified_wheel, openrouter_key_mode=config.openrouter_key_mode,
+        usage_reporting_mode=config.usage_reporting_mode,
         shared_allowance_usd=shared_allowance, shared_role_budget_config=shared_role_budget_config,
         requested_deadline=config.requested_deadline,
         suite_task=spec["suite_task"],
@@ -226,11 +230,13 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
                         **({"forward_task_instruction": True} if config.suite is not None else {})},
              "env": ({"OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
-                      "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens)}
+                      "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens),
+                      "REFUND_EVAL_USAGE_REPORTING_MODE": config.usage_reporting_mode}
                      if config.openrouter_key_mode == "split" else
                      {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}",
                       "REFUND_EVAL_AGENT_DOLLAR_CAP": str(caps[model]),
                       "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": str(config.agent_max_output_tokens),
+                      "REFUND_EVAL_USAGE_REPORTING_MODE": config.usage_reporting_mode,
                       "REFUND_EVAL_SHARED_ROLE_MODE": config.openrouter_key_mode,
                       "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG": shared_role_budget_config,
                       **({SHARED_CAPS_HEADROOM_BOUND_ENV: "false"}
@@ -282,7 +288,10 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "requested_total_time_limit_seconds": None,
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested",
+        "usage_reporting_mode": config.usage_reporting_mode,
     }
+    if config.usage_reporting_mode == "usage_only":
+        effective_parameters["cost_limit_enforcement"] = "response_reported_observed_not_pre_call"
     if config.openrouter_key_mode == "split":
         effective_parameters.update({
             "openrouter_key_mode": "split",

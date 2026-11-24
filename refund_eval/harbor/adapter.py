@@ -65,7 +65,7 @@ AGENT_MODULES = {
     "": "__init__ config environment_version killswitch model_pricing output_paths task",
     "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
-    "harbor": "__init__ atif",
+    "harbor": "__init__ atif target_charges",
     "models": "__init__ client evidence replay shared_role_spend_ledger world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
@@ -83,6 +83,7 @@ SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/harness.py",
     "refund_eval/agent/prompt.py",
     "refund_eval/agent/world_mode.py",
+    "refund_eval/harbor/target_charges.py",
     "refund_eval/model_pricing.py",
     "refund_eval/models/world_spend_ledger.py",
     "refund_eval/models/shared_role_spend_ledger.py",
@@ -280,9 +281,14 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
                shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None,
                task_id: str | None = None, task_text: str | None = None, suite_task: bool = False,
-               requested_deadline: date | None = None) -> Path:
+               requested_deadline: date | None = None, usage_reporting_mode: str = "strict") -> Path:
     """Write OUT/<task_id>/ and return it."""
     from refund_eval.agent.prompt import task_message, with_requested_deadline
+
+    if usage_reporting_mode not in {"strict", "usage_only"}:
+        raise ValueError("Unsupported usage_reporting_mode")
+    if usage_reporting_mode == "usage_only" and openrouter_key_mode != "shared_caps":
+        raise ValueError("usage_only reporting requires shared_caps outer key monitoring")
 
     if verified_wheel is None:
         verified_wheel = read_verified_agent_wheel(agent_wheel, agent_wheel_sha256)
@@ -334,6 +340,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
         "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles", "shared_caps"} else "false",
+        "USAGE_REPORTING_MODE": usage_reporting_mode,
         "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
         "OPENROUTER_KEY_MODE": openrouter_key_mode,
         "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),

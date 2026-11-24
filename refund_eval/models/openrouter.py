@@ -292,10 +292,14 @@ class OpenRouterClient:
 
         roles = {"simulator": getattr(settings, "simulator_model", None) or DEFAULT_ROLE_MODEL,
                  "grader": getattr(settings, "grader_model", None) or DEFAULT_GRADER_MODEL}
-        require_reported_cost = getattr(settings, "world_cost_limit", None) is not None
-        strict_budget = bool(getattr(settings, "strict_budget", False))
+        usage_only = getattr(settings, "usage_reporting_mode", "strict") == "usage_only"
+        require_reported_cost = getattr(settings, "world_cost_limit", None) is not None and not usage_only
+        strict_budget = bool(getattr(settings, "strict_budget", False)) and not usage_only
         kwargs["pin_prices"] = require_reported_cost
         kwargs["strict_budget"] = strict_budget
+        if usage_only:
+            kwargs["tariffs"] = {}
+            prices = {}
         if require_reported_cost and not kwargs.get("tariffs"):
             from refund_eval.model_pricing import openrouter_tariffs
 
@@ -303,7 +307,7 @@ class OpenRouterClient:
                 kwargs["tariffs"] = openrouter_tariffs(roles.values())
             except (httpx.RequestError, httpx.HTTPStatusError, TypeError, ValueError):
                 kwargs["tariffs"] = {}
-        if prices is None:
+        if prices is None and not usage_only:
             from refund_eval.model_pricing import openrouter_prices
 
             try:
@@ -312,7 +316,10 @@ class OpenRouterClient:
                 if not require_reported_cost:
                     raise
                 prices = {}
-        return cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
+        client = cls(roles, prices=prices, require_reported_cost=require_reported_cost, **kwargs)
+        if usage_only:
+            client.client = client.client.with_options(max_retries=0)
+        return client
 
     def model_name(self, role: Role) -> str:
         if role not in self.roles:
