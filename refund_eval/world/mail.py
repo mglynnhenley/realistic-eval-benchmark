@@ -654,10 +654,6 @@ class Mailbox:
             return e
         return None
 
-    def is_user_sent(self, e: Email) -> bool:
-        return parse_address(e.sender) in self.user_addresses
-
-
 # --------------------------------------------------------------------------- CLI
 
 
