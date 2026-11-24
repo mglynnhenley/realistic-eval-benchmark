@@ -28,7 +28,7 @@ import contextlib
 import hmac
 import logging
 import signal
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import uvicorn
@@ -43,6 +43,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
+from refund_eval.world_service.startup_diagnostics import FirstRequestMiddleware
 from refund_eval.world_service.trial import WorldTrial
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,8 @@ class _ASGI:
         await self.manager.handle_request(scope, receive, send)
 
 
-def agent_app(trial: WorldTrial, *, turn_token: str) -> Starlette:
+def agent_app(trial: WorldTrial, *, turn_token: str,
+              on_first_request: Callable[[], None] | None = None) -> Starlette:
     """The agent-facing app: `/mcp` and the harness's `POST /turn`."""
     manager = StreamableHTTPSessionManager(app=mcp_server(trial))
 
@@ -135,8 +137,11 @@ def agent_app(trial: WorldTrial, *, turn_token: str) -> Starlette:
         async with manager.run():
             yield
 
-    return Starlette(routes=[Route("/mcp", endpoint=_ASGI(manager)), Route("/turn", turn, methods=["POST"])],
-                     lifespan=lifespan)
+    app = Starlette(routes=[Route("/mcp", endpoint=_ASGI(manager)), Route("/turn", turn, methods=["POST"])],
+                    lifespan=lifespan)
+    if on_first_request is not None:
+        app.add_middleware(FirstRequestMiddleware, on_first_request=on_first_request)
+    return app
 
 
 def _rpc_error(rid: Any, code: int, message: str) -> JSONResponse:
@@ -177,10 +182,12 @@ def _bound_port(server: uvicorn.Server) -> int:
 
 @contextlib.asynccontextmanager
 async def running(trial: WorldTrial, *, host: str = "0.0.0.0", port: int = 8000, admin_port: int = 9000,
-                  turn_token: str, admin_token: str) -> AsyncIterator[tuple[int, int]]:
+                  turn_token: str, admin_token: str,
+                  on_first_request: Callable[[], None] | None = None) -> AsyncIterator[tuple[int, int]]:
     """Serve both apps until the block exits; yields the bound (agent, admin) ports (0 picks free ones)."""
     servers = [
-        uvicorn.Server(uvicorn.Config(agent_app(trial, turn_token=turn_token), host=host, port=port,
+        uvicorn.Server(uvicorn.Config(agent_app(trial, turn_token=turn_token, on_first_request=on_first_request),
+                                      host=host, port=port,
                                       log_level="warning", lifespan="on")),
         uvicorn.Server(uvicorn.Config(admin_app(trial, admin_token=admin_token), host=ADMIN_HOST,
                                       port=admin_port, log_level="warning", lifespan="off")),

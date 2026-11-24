@@ -50,6 +50,11 @@ from refund_eval.harbor.world_entrypoint import (
     credentials_set,
 )
 from refund_eval.parity.scripts import SCRIPTS, Script
+from refund_eval.world_service.startup_diagnostics import (
+    StartupDiagnostics,
+    StartupMarker,
+    exception_type_name,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 HARBOR = REPO / "scripts" / "harbor"
@@ -125,7 +130,9 @@ def scripted_model(script: Script):
     return get_model("mockllm/model", custom_outputs=script)
 
 
-def _eval(script: Script, args: dict, log_dir: Path):
+def _eval(script: Script, args: dict, log_dir: Path, diagnostics: StartupDiagnostics | None = None):
+    if diagnostics is not None:
+        diagnostics.marker(StartupMarker.TASK_RUNNER_ENTERED)
     from inspect_ai import eval as inspect_eval
 
     cwd = os.getcwd()
@@ -133,6 +140,17 @@ def _eval(script: Script, args: dict, log_dir: Path):
     try:
         [log] = inspect_eval(TASK_FILE, task_args=args, model=scripted_model(script), log_dir=str(log_dir),
                              log_format="eval", display="none")
+        if diagnostics is not None:
+            try:
+                errors = [getattr(log, "error", None)]
+                errors.extend(
+                    getattr(sample, "error", None) for sample in (getattr(log, "samples", None) or [])
+                )
+                for error in errors:
+                    if error is not None:
+                        diagnostics.record_eval_error(error)
+            except BaseException:  # noqa: BLE001, S110
+                pass
     finally:
         os.chdir(cwd)
     return log
@@ -185,7 +203,7 @@ def run_old(script: Script, out: Path, seed: int) -> dict:
 # --------------------------------------------------------------------------- inprocess: world service on a thread
 
 
-def run_inprocess(script: Script, out: Path, seed: int) -> dict:
+def run_inprocess(script: Script, out: Path, seed: int, diagnostics: StartupDiagnostics | None = None) -> dict:
     from refund_eval.grading import verifier
     from refund_eval.harbor.world_entrypoint import FakeWorldModels
     from refund_eval.world_service import server
@@ -205,7 +223,11 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
     async def serve() -> None:
         async with (WorldTrial(settings, model_client=FakeWorldModels(FAKE_MODES[script.fake_models])) as trial,
                     server.running(trial, host="127.0.0.1", port=0, admin_port=0, turn_token=turn_token,
-                                   admin_token=admin_token) as (port, _)):
+                                   admin_token=admin_token,
+                                   on_first_request=(lambda: diagnostics.marker(StartupMarker.FIRST_REQUEST_RECEIVED))
+                                   if diagnostics is not None else None) as (port, _)):
+            if diagnostics is not None:
+                diagnostics.marker(StartupMarker.SERVER_READY)
             ready.put(f"http://127.0.0.1:{port}")
             while not stop.is_set():
                 await asyncio.sleep(0.02)
@@ -223,7 +245,7 @@ def run_inprocess(script: Script, out: Path, seed: int) -> dict:
     if isinstance(url, BaseException):
         raise url
     try:
-        log = _eval(script, inprocess_task_args(script, url, out), out / "logs")
+        log = _eval(script, inprocess_task_args(script, url, out), out / "logs", diagnostics=diagnostics)
     finally:
         stop.set()
         thread.join(600)
@@ -340,11 +362,27 @@ RUNNERS = {"old": run_old, "inprocess": run_inprocess, "harbor": run_harbor}
 
 def run_path(path: str, script: Script, out: Path, seed: int) -> dict:
     out.mkdir(parents=True, exist_ok=True)
+    diagnostics = None
+    if path == "inprocess":
+        try:
+            diagnostics = StartupDiagnostics(out)
+        except BaseException:  # noqa: BLE001
+            diagnostics = None
+        if diagnostics is not None:
+            diagnostics.prepare()
     started = time.monotonic()
     try:
-        result = {"ok": True, **RUNNERS[path](script, out, seed)}
+        if path == "inprocess":
+            result = {"ok": True, **RUNNERS[path](script, out, seed, diagnostics=diagnostics)}
+        else:
+            result = {"ok": True, **RUNNERS[path](script, out, seed)}
     except Exception as ex:  # noqa: BLE001 - recorded in the report
-        result = {"ok": False, "error": f"{type(ex).__name__}: {ex}"[:2000]}
+        if path == "inprocess":
+            if diagnostics is not None:
+                diagnostics.record_exception(ex)
+            result = {"ok": False, "error": exception_type_name(ex)}
+        else:
+            result = {"ok": False, "error": f"{type(ex).__name__}: {ex}"[:2000]}
     result["seconds"] = round(time.monotonic() - started, 1)
     _write(out / "run.json", result)
     return result

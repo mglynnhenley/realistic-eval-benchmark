@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.6 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 9704d16033a7eecd0560c00d149b9617fb17917f592b11df1fc9e1011f2faac7
+- Trial round: none. Offline validation only.
+- Changes: record sanitized exception types and repository-relative frames when Inspect returns a failed inprocess evaluation (MAT-130).
+
 ## 8.5 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 3a5060c85f47e424698a7f6eb19abefa125ae0c4eb4ad85c8dd993ec2b6e1109
