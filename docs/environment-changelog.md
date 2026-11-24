@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.5 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: bff0b5721b1b3c47771663bef2da2a35860614d9c2fff0077705e4cee56e3d88
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Move the Transect Git dependency to the dev group so `--no-dev` task images build without Git; trial execution is unchanged.
+
 ## 9.4 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: cdb6e49b6073a4386bf3d69ba230f6486589fdf1ff28b9d85a7cbfcf573e46ac
