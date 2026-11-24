@@ -12,9 +12,9 @@ newest-first entry below with the current fingerprint, printed by
 environment file names and contents, excluding Git-ignored files and Python
 caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
-Computing it requires Git and a checkout so private local data is never
-included by an unfiltered fallback. The changelog test checks the version,
-fingerprint and bump kind.
+Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
+source tree validates its source manifest file allowlist before hashing it.
+The changelog test checks the version, fingerprint and bump kind.
 
 Run the CI changelog check locally with
 `uv run --frozen pytest -q tests/test_environment_version.py`. Native task
@@ -23,6 +23,16 @@ Run the CI changelog check locally with
 version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
+
+## 8.3 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 782d77fcd820c46af6e7a25887d025e8eb80af51a4077f76b92f83744df0324f
+- Trial round: none; offline validation only, no paid calls.
+- Changes: pin remaining Python/uv and Debian build inputs; add source,
+  resolved-scenario and immutable local browser image locks that reject
+  unavailable or mismatched identities before model-cost setup; include
+  requested-deadline overrides in lock creation and validation. Native Harbor
+  artifact locks remain unsupported (MAT-64).
 
 ## 8.2 — 2026-11-23
 - Kind: trivial batch

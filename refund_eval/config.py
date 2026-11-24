@@ -134,6 +134,10 @@ class RunConfig(BaseModel):
     resume_log: str | None = Field(default=None, max_length=1000, pattern=r"\.eval$|snapshot\.json$")
     # A saved Gmail snapshot (.secrets/inboxes/<name>.json) instead of the bundled inbox.
     inbox_snapshot: str | None = Field(default=None, pattern=SNAPSHOT_NAME_PATTERN)
+    identity_lock: str | None = Field(
+        default=None, max_length=4096,
+        description="Expected local Docker browser identity; unsupported for Harbor subprocess or native sidecar artifacts.",
+    )
 
     @model_validator(mode="before")
     @classmethod

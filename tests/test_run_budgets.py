@@ -131,3 +131,5 @@ def test_world_service_task_preserves_native_research_metadata(monkeypatch):
     )
     assert "research_mode" not in task.metadata
     assert "research_mode" not in task.dataset[0].metadata
+    assert "environment_fingerprint" not in task.metadata
+    assert "environment_version" not in task.metadata

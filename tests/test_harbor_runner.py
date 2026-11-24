@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from harbor.models.job.config import JobConfig
 from harbor.models.task.task import Task
 
 from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
+from refund_eval.environment_version import environment_fingerprint
 from refund_eval.harbor.__main__ import main, prepare
 from refund_eval.harbor.agent import RefundInspectAgent
 from refund_eval.harbor.config import (
@@ -84,7 +86,7 @@ def test_prepare_freezes_source_without_secrets_and_validates_harbor_schema(tmp_
     assert task.config.environment.memory_mb == 4096
     assert (source / "refund_eval/scenario/inbox.json").is_file()
     manifest = json.loads((source / track.SOURCE_MANIFEST).read_text())
-    assert set(manifest) == {"schema_version", "commit", "dirty", "source_sha256"}
+    assert set(manifest) == {"schema_version", "commit", "dirty", "files", "source_sha256"}
     assert manifest["commit"] == subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     assert len(manifest["source_sha256"]) == 64
     assert not (source / ".git").exists()
@@ -125,6 +127,36 @@ def test_frozen_source_hash_is_deterministic_and_tracks_content_and_names(tmp_pa
     assert track.realism_version("s") == f"0123456-none{suffix}"
     memory.write_bytes(b"{}")
     assert track.realism_version("s") == f"0123456-44136fa3{suffix}"
+
+
+def test_legacy_frozen_source_imports_and_matches_its_locked_environment(tmp_path):
+    output = tmp_path / "legacy-job"
+    prepare(output, settings=published_settings(), model="openrouter/example/model")
+    source = output / "task" / "environment" / "source"
+    code = """
+import json
+from refund_eval.environment_version import environment_fingerprint
+from refund_eval.run_identity import current_run_identity
+identity = current_run_identity("train_refund_late", browser_runtime="subprocess")
+print(json.dumps({"fingerprint": environment_fingerprint(), "identity": identity}))
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(source)
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=source, env=env,
+        check=True, capture_output=True, text=True,
+    )
+    packaged = json.loads(result.stdout)
+    assert packaged["fingerprint"] == environment_fingerprint()
+    assert packaged["identity"]["runtime_identity_kind"] == "artifact_unlocked"
+    assert packaged["identity"]["runtime_identity"] is None
+
+
+def test_legacy_harbor_rejects_subprocess_artifact_lock_before_freezing_job(tmp_path):
+    output = tmp_path / "unsupported-lock"
+    with pytest.raises(ValueError, match="Harbor browser artifacts are not identified"):
+        prepare(output, settings=published_settings(identity_lock="unused"), model="openrouter/example/model")
+    assert not output.exists()
 
 
 def test_prepare_rejects_unignored_output_before_creating_job(tmp_path):
