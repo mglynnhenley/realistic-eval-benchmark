@@ -1032,6 +1032,51 @@ def test_usage_only_mode_preserves_finite_native_bounds(tmp_path, approved_split
     assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
 
 
+def test_usage_only_can_disable_application_price_cutoffs_under_shared_caps(
+        tmp_path, approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "usage-only-no-price-cutoffs"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="hybrid", research_mode="auto",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, max_turns=3000, sim_weeks=365 / 7, time_limit=36000,
+        openrouter_key_mode="shared_caps", agent_max_output_tokens=4096,
+        requested_deadline=date(2027, 2, 4), usage_reporting_mode="usage_only",
+        disable_application_price_cutoffs=True, disable_verifier=True, trials=1, concurrency=1,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    record_path = batch.prepare(out, config)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    task = Task(out / "train_refund_late")
+    metadata = task.config.metadata
+    compose = yaml.safe_load((out / "train_refund_late/environment/docker-compose.yaml").read_bytes())
+    world_env = compose["services"]["world"]["environment"]
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    [agent] = job.agents
+
+    assert config.disable_application_price_cutoffs is True
+    assert metadata["disable_application_price_cutoffs"] == "true"
+    assert world_env["REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS"] == "true"
+    assert world_env["WORLD_COST_LIMIT"] == "100.0"
+    assert agent.kwargs["cost_limit"] == 50
+    assert agent.env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
+    assert record["effective_parameters"]["effective_application_price_cutoffs_usd"] == {
+        "agent": None, "world": None,
+    }
+    assert record["effective_parameters"]["shared_caps_guard_role_limits_usd"] == {
+        "agent": 50, "world": 100,
+    }
+    assert record["target_cost_limits_usd"] is None
+    assert record["world_cost_limit_usd_per_trial"] is None
+    assert record["shared_caps_guard_role_limits_usd"] == {"agent": 50, "world": 100}
+    assert job.retry.max_retries == 0
+    assert job.verifier.disable is True
+
+    manifest = tmp_path / "usage-only-no-price-cutoffs-manifest.json"
+    assert laura_trial_main(["save", "--config", str(out / "job.yaml"), "--manifest", str(manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
+
+
 @pytest.mark.parametrize("stale_source", [
     "refund_eval/task.py",
     "refund_eval/agent/prompt.py",

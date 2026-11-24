@@ -24,6 +24,21 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.1 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 7c42676db3373a514de62279baa6c24be69d7fcd7542a36531d20755255b2a5f
+- Trial round: none. Offline validation only; no PR-head launch.
+- Changes: retain private agent and simulator checkpoints through cancellation or failed final
+  collection using agent-only Inspect snapshots and durable private storage; preserve the merged
+  spending and usage safeguards.
+
+## 9.0 — 2026-11-24
+- Kind: behaviour round
+- Fingerprint: 0d466f44d5bc036a8b39643f98cf4da3aeebb5a924aa5f25ba2c86494529b361
+- Trial round: the same single approved Luna invocation; no additional trial is planned.
+- Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
+  cutoffs while keeping response usage observational, provider failures real, and strict defaults.
+
 ## 8.15 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 3aa86084f58cfc47489aff1ea9977f7899ab6c0aaf568aeb5438c024d541ca5f
@@ -62,10 +77,9 @@ this was not a second version or trial round.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 5fa4844e13c9a6ddbbf169e89e2e17daf4fa9bffe0bad7a665c7c0e68474e4c3
-- Trial round: none. Offline validation only; no launch.
-- Changes: retain private live Harbor agent/simulator checkpoints with a guarded Modal-only world bind and direct transfers, while keeping non-Modal world volumes Compose-project scoped.
-
+- Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc
+- Trial round: none. Offline validation only.
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown. Spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3

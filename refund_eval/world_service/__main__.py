@@ -62,6 +62,14 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
     if usage_reporting_mode not in {"strict", "usage_only"}:
         print("REFUND_EVAL_USAGE_REPORTING_MODE must be strict or usage_only.", file=sys.stderr)
         return 2
+    disable_price_cutoffs_raw = os.environ.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS", "false")
+    if disable_price_cutoffs_raw not in {"true", "false"}:
+        print("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS must be true or false.", file=sys.stderr)
+        return 2
+    disable_price_cutoffs = disable_price_cutoffs_raw == "true"
+    if disable_price_cutoffs and usage_reporting_mode != "usage_only":
+        print("Application price cutoffs can only be disabled in usage_only mode.", file=sys.stderr)
+        return 2
     if usage_reporting_mode == "usage_only" and os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps":
         print("usage_only reporting requires the shared_caps outer key monitor.", file=sys.stderr)
         return 2
@@ -73,6 +81,7 @@ def main(argv: list[str] | None = None, *, model_client=None) -> int:
         world_cost_limit=args.world_cost_limit,
         strict_budget=strict_budget_raw == "true" and usage_reporting_mode == "strict",
         usage_reporting_mode=usage_reporting_mode,
+        disable_application_price_cutoffs=disable_price_cutoffs,
         company_simulator=args.company_simulator, browser_runtime=args.browser_runtime,
         require_verified_browser_isolation=args.require_verified_browser_isolation, output_dir=args.output_dir,
     )
