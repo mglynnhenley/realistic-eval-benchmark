@@ -1859,3 +1859,51 @@ def test_openrouter_context_reads_charge_receipts_without_trajectory(tmp_path):
     agent.populate_context_post_run(context)
     assert context.cost_usd is None
     assert context.metadata["target_charges"]["unknown_attempt_count"] == 1
+
+
+@pytest.mark.parametrize(("retained_receipts", "second_charge", "expected"), [
+    (0, "0.008", 0.02),
+    (1, "0.008", 0.02),
+    (1, None, None),
+])
+def test_openrouter_context_preserves_trajectory_summary_after_filtering(
+    tmp_path, retained_receipts, second_charge, expected,
+):
+    from refund_eval.harbor.target_charges import SOURCE, TARGET_CHARGES_DIRECTORY
+
+    agent = make_agent(tmp_path)
+    directory = agent.logs_dir / TARGET_CHARGES_DIRECTORY
+    directory.mkdir(parents=True)
+    paths = []
+    for number, charge in enumerate(("0.012", second_charge)):
+        path = directory / f"attempt-{number}.json"
+        path.write_text(json.dumps({
+            "schema_version": 1, "attempt_id": path.stem, "status": "response",
+            "generation_id": f"gen-offline-{number}", "source": SOURCE if charge is not None else None,
+            "actual_cost_usd": charge,
+        }))
+        paths.append(path)
+    trajectory = atif.convert(fake_log(), receipt_dir=directory)
+    (agent.logs_dir / "trajectory.json").write_text(json.dumps(trajectory))
+    for path in paths[retained_receipts:]:
+        path.unlink()
+
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd == expected
+    assert context.model_usage[agent.model_name].cost_usd == expected
+    assert context.metadata["target_charges"] == trajectory["extra"]["target_charges"]
+
+
+def test_openrouter_context_ignores_unmarked_trajectory_cost(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.logs_dir.mkdir(parents=True)
+    trajectory = atif.convert(fake_log())
+    del trajectory["extra"]["target_charges"]
+    trajectory["final_metrics"]["total_cost_usd"] = 0.25
+    (agent.logs_dir / "trajectory.json").write_text(json.dumps(trajectory))
+
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd is None
+    assert context.model_usage[agent.model_name].cost_usd is None

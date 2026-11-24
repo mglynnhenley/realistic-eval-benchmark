@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 8.7 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: b6c8ae311a051d966c3604e3d3af1efd96cd2867e112e2e3dd6a6bffedc2663e
+- Fingerprint: 57080ca5fda7b85419571ba0223433d9d21209f0c6c00885f0290be69aa4adf4
 - Trial round: none. Offline validation only.
 - Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown.
 
