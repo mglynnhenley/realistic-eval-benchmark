@@ -13,9 +13,9 @@ not establish that OpenRouter BYOK is absent. OpenRouter monitoring cannot
 prevent an in-flight call or billing delay from exceeding a threshold, and host
 failure or Modal cleanup failure can leave cleanup uncertain.
 
-Exit 0 means one finished trial with a valid verifier result and no recorded
-exceptions, regardless of its score. Trial failures reported by Harbor exit 1
-with a fixed reason, distinct from spend-guard failures.
+Exit 0 means one finished trial with no recorded exceptions and either a valid
+verifier result or an intentionally ungraded completion. Trial failures
+reported by Harbor exit 1 with a fixed reason, distinct from spend-guard failures.
 """
 
 from __future__ import annotations
@@ -626,7 +626,7 @@ async def run_guarded_job(
         await asyncio.shield(controller.close())
 
 
-def _trial_failure_reason(result: JobResult) -> str | None:
+def _trial_failure_reason(result: JobResult, *, verifier_disabled: bool = False) -> str | None:
     if result.n_total_trials != 1 or len(result.trial_results) != 1:
         return "unexpected_trial_count"
     trial = result.trial_results[0]
@@ -634,7 +634,7 @@ def _trial_failure_reason(result: JobResult) -> str | None:
         return "trial_exception"
     if result.finished_at is None or trial.finished_at is None:
         return "incomplete_result"
-    if not trial.reward_valid:
+    if not trial.reward_valid and not verifier_disabled:
         return "invalid_reward"
     return None
 
@@ -676,7 +676,8 @@ def run_guarded_config(
         if on_guard_ready is not None:
             hooks["on_guard_ready"] = on_guard_ready
         trial_failure = _trial_failure_reason(
-            asyncio.run(run_guarded_job(config, thresholds, **hooks))
+            asyncio.run(run_guarded_job(config, thresholds, **hooks)),
+            verifier_disabled=config.verifier.disable,
         )
     except GuardFailure as failure:
         print(
@@ -696,7 +697,10 @@ def run_guarded_config(
     if trial_failure is not None:
         print(f"guarded_harbor_job=failed reason={trial_failure}", file=sys.stderr)
         return 1
-    print("guarded_harbor_job=complete")
+    if config.verifier.disable:
+        print("guarded_harbor_job=complete grading=disabled")
+    else:
+        print("guarded_harbor_job=complete")
     return 0
 
 

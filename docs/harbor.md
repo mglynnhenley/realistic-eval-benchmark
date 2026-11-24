@@ -411,6 +411,9 @@ integer `agent_max_output_tokens`; there is no default because the request bound
 Combined planning-cap fields are not supported in split mode. Split batches are currently limited to
 `train_refund_late`; other scenarios remain available in shared mode.
 
+Set `"disable_verifier": true` for an explicitly ungraded run; it defaults to
+`false` and does not disable trace artifact collection.
+
 Example native JSON config; replace the approved wheel path and digest with the current public wheel:
 
 ```json
