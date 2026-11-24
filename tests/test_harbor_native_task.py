@@ -2105,8 +2105,65 @@ async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tm
     assert len(list(generation_directory.iterdir())) == 1
 
 
-def test_shared_caps_fresh_staging_keeps_both_main_volumes_and_validates_sources(tmp_path, approved_split_budget_wheel):
-    from scripts.guarded_harbor import LauncherFailure, validate_job_config
+async def test_cancelled_generation_pruner_cannot_delete_new_current_checkpoint(tmp_path, monkeypatch):
+    import threading
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+    )
+
+    capture = PrivateTraceCapture("cancelled-pruner", native=True, root=tmp_path / "spool")
+    source = next(source for source in capture.sources if source.name == "simulator_state")
+
+    class MutableEnvironment:
+        def __init__(self):
+            self.value = b'{"turn":1}'
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, _remote, destination):
+            Path(destination).write_bytes(self.value)
+
+    environment = MutableEnvironment()
+    await capture._capture_source(environment, source)
+    environment.value = b'{"turn":2}'
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    original_prune = private_traces._prune_generations
+
+    def paused_prune(directory, obsolete):
+        entered.set()
+        assert release.wait(timeout=5)
+        try:
+            original_prune(directory, obsolete)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(private_traces, "_prune_generations", paused_prune)
+    pending = asyncio.create_task(capture._capture_source(environment, source))
+    assert await asyncio.to_thread(entered.wait, 5)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    environment.value = b'{"turn":3}'
+    monkeypatch.setattr(private_traces, "_prune_generations", original_prune)
+    await capture._capture_source(environment, source)
+    final_path = _captured_trace_file(capture.directory, source.name)
+    release.set()
+    assert await asyncio.to_thread(finished.wait, 5)
+    assert final_path.is_file() and final_path.read_bytes() == b'{"turn":3}'
+    assert _captured_trace_file(capture.directory, source.name) == final_path
+
+
+def test_guarded_modal_adapts_old_shared_caps_task_without_mutating_source(tmp_path, approved_split_budget_wheel):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_AGENT_BUFFER_ROOT,
+        PRIVATE_WORLD_LOGS_ROOT,
+    )
+    from scripts.guarded_harbor import private_world_compose_bind, validate_job_config
 
     wheel, digest = approved_split_budget_wheel
     out = tmp_path / "shared-caps-batch"
@@ -2122,8 +2179,24 @@ def test_shared_caps_fresh_staging_keeps_both_main_volumes_and_validates_sources
     compose["services"]["main"]["volumes"].remove("inspect-buffer:/refund-eval-private/inspect-data")
     compose["volumes"].pop("inspect-buffer")
     compose_path.write_text(yaml.safe_dump(compose, sort_keys=False))
-    with pytest.raises(LauncherFailure, match="re-stage it with current batch preparation"):
-        validate_job_config(job)
+    original_compose = compose_path.read_bytes()
+    assert validate_job_config(job) is None
+
+    environment = SimpleNamespace(environment_dir=task_path / "environment")
+    with private_world_compose_bind(environment):
+        adapted_path = environment.environment_dir / "docker-compose.yaml"
+        adapted = yaml.safe_load(adapted_path.read_text())
+        assert environment.environment_dir != task_path / "environment"
+        assert "inspect-buffer" in adapted["volumes"]
+        assert "role-budget" in adapted["volumes"]
+        assert f"{PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in adapted["services"]["main"]["volumes"]
+        assert "role-budget:/var/lib/refund-eval/role-budget" in adapted["services"]["main"]["volumes"]
+        assert f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in adapted["services"]["world"]["volumes"]
+        assert not any("/var/log/world" in volume for volume in adapted["services"]["main"]["volumes"])
+        assert compose_path.read_bytes() == original_compose
+
+    assert environment.environment_dir == task_path / "environment"
+    assert compose_path.read_bytes() == original_compose
 
 
 async def test_trace_storage_failures_are_preflighted_and_nonfatal_after_start(
@@ -2489,10 +2562,61 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     environment_vars = {
         **os.environ, "XDG_DATA_HOME": str(data_home), "INSPECT_LOG_DIR": str(log_dir),
     }
-    process = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "refund_eval.harbor.inspect_snapshotter", "run",
-        "--log-dir", str(log_dir), "--", sys.executable, "-c", child,
-        cwd=Path(__file__).resolve().parents[1], env=environment_vars,
+    installed_site = tmp_path / "installed-agent-wheel"
+    wheel_install = await asyncio.to_thread(
+        subprocess.run,
+        ["uv", "pip", "install", "--offline", "--no-deps", "--target", str(installed_site), str(wheel)],
+        check=False, capture_output=True, text=True,
+    )
+    assert wheel_install.returncode == 0, wheel_install.stderr
+    child_path = tmp_path / "offline-inspect-child.py"
+    child_path.write_text(child)
+    argument_file = tmp_path / "inspect-arguments.json"
+    fake_inspect = tmp_path / "inspect"
+    fake_inspect.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import json, os, subprocess, sys
+        from pathlib import Path
+        Path(os.environ["INSPECT_ARGS_FILE"]).write_text(json.dumps(sys.argv[1:]))
+        raise SystemExit(subprocess.run([sys.executable, os.environ["INSPECT_CHILD"]]).returncode)
+    """))
+    fake_inspect.chmod(0o755)
+    run_logs = tmp_path / run_id / "agent"
+    agent_logs = tmp_path / "installed-agent-logs"
+    instruction = "Preserve 'quotes', spaces, and $WORLD_SCENARIO literally."
+    environment_vars.update({
+        "PYTHONPATH": os.pathsep.join(filter(None, (str(installed_site), os.environ.get("PYTHONPATH", "")))),
+        "INSPECT_ARGS_FILE": str(argument_file), "INSPECT_CHILD": str(child_path),
+        "FAKE_INSPECT": str(fake_inspect), "INSTALLED_SITE": str(installed_site),
+        "TEST_APP": str(tmp_path), "TEST_PRIVATE_ROOT": str(local_agent_root),
+        "TEST_AGENT_LOGS": str(agent_logs), "TEST_RUN_LOGS": str(run_logs),
+        "TEST_INSTRUCTION": instruction, "WORLD_TASK_ID": "offline-task",
+        "WORLD_SCENARIO": "train_refund_late", "WORLD_SIM_WEEKS": "1", "WORLD_DATA_MODE": "fixture",
+    })
+    launcher = textwrap.dedent("""\
+        import os, sys
+        from pathlib import Path
+        from refund_eval.harbor import installed_agent
+        assert Path(installed_agent.__file__).resolve().is_relative_to(Path(os.environ["INSTALLED_SITE"]))
+        installed_agent.PYTHON = sys.executable
+        installed_agent.INSPECT = os.environ["FAKE_INSPECT"]
+        installed_agent.APP = os.environ["TEST_APP"]
+        installed_agent.PRIVATE_AGENT_BUFFER_ROOT = os.environ["TEST_PRIVATE_ROOT"]
+        agent = installed_agent.RefundInstalledAgent(
+            logs_dir=Path(os.environ["TEST_RUN_LOGS"]), model_name="mockllm/model",
+            mcp_servers=[], forward_task_instruction=True,
+        )
+        agent.environment_logs_dir = Path(os.environ["TEST_AGENT_LOGS"])
+        print(agent.inspect_command(os.environ["TEST_INSTRUCTION"]))
+    """)
+    generated = await asyncio.to_thread(
+        subprocess.run, [sys.executable, "-c", launcher], cwd=tmp_path, env=environment_vars,
+        capture_output=True, text=True, check=False,
+    )
+    assert generated.returncode == 0, generated.stderr
+    command = generated.stdout.strip()
+    process = await asyncio.create_subprocess_shell(
+        command, cwd=tmp_path, env=environment_vars,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
     )
     remote_snapshot = snapshot_path(data_home)
@@ -2521,15 +2645,29 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         deadline = asyncio.get_running_loop().time() + 15
         while (not marker.exists() or not checkpoint_has_agent_and_tool_events()) and process.returncode is None:
             if asyncio.get_running_loop().time() >= deadline:
+                if process.returncode is None:
+                    os.killpg(process.pid, 9)
+                    await asyncio.wait_for(process.wait(), timeout=5)
                 stderr = await process.stderr.read() if process.stderr else b""
                 pytest.fail(f"Inspect did not publish an active checkpoint: {stderr.decode(errors='replace')}")
             await asyncio.sleep(0.05)
         if not marker.exists():
+            if process.returncode is None:
+                os.killpg(process.pid, 9)
+                await asyncio.wait_for(process.wait(), timeout=5)
             stderr = await process.stderr.read() if process.stderr else b""
             pytest.fail(f"Inspect exited before the active sample checkpoint: {stderr.decode(errors='replace')}")
         assert marker.is_file() and process.returncode is None
         os.killpg(process.pid, 9)
         await asyncio.wait_for(process.wait(), timeout=5)
+        arguments = json.loads(argument_file.read_text())
+        assert arguments[0] == "eval"
+        assert arguments[arguments.index("--model") + 1] == "mockllm/model"
+        assert "scenario=train_refund_late" in arguments
+        assert "task_id=offline-task" in arguments
+        assert f"task_text={instruction}" in arguments
+        task_index = arguments.index("eval") + 1
+        assert (tmp_path / arguments[task_index]).resolve() == installed_site / "refund_eval/task.py"
     finally:
         if process.returncode is None:
             os.killpg(process.pid, 9)
