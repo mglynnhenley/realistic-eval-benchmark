@@ -133,16 +133,39 @@ def private_world_compose_bind(environment):
         isolated_dir = Path(temporary) / "environment"
         shutil.copytree(original_dir, isolated_dir)
         compose_path = isolated_dir / "docker-compose.yaml"
-        original = compose_path.read_text(encoding="utf-8")
-        world_marker = "      - world-logs:/var/log/world"
-        buffer_marker = "      - inspect-buffer:/refund-eval-private/inspect-data"
-        if original.count(world_marker) != 1 or original.count(buffer_marker) != 1:
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        services = compose.get("services") if isinstance(compose, dict) else None
+        main = services.get("main") if isinstance(services, dict) else None
+        world = services.get("world") if isinstance(services, dict) else None
+        main_volumes = main.get("volumes") if isinstance(main, dict) else None
+        world_volumes = world.get("volumes") if isinstance(world, dict) else None
+        if not isinstance(main_volumes, list) or not isinstance(world_volumes, list):
+            raise LauncherFailure("guarded Modal task must have main and world volume lists")
+        world_mounts = [index for index, volume in enumerate(world_volumes)
+                        if volume == "world-logs:/var/log/world"]
+        if len(world_mounts) != 1:
             raise LauncherFailure("guarded Modal task must have one named world-log volume")
-        compose_path.write_text(
-            original.replace(world_marker, f"      - {PRIVATE_WORLD_LOGS_ROOT}:/var/log/world", 1)
-            .replace(buffer_marker, f"      - {PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data", 1),
-            encoding="utf-8",
-        )
+
+        buffer_target = "/refund-eval-private/inspect-data"
+        buffer_mount = f"inspect-buffer:{buffer_target}"
+        private_buffer_mount = f"{PRIVATE_AGENT_BUFFER_ROOT}:{buffer_target}"
+        existing_buffer_mounts = [index for index, volume in enumerate(main_volumes)
+                                  if isinstance(volume, str) and volume.endswith(f":{buffer_target}")]
+        if len(existing_buffer_mounts) > 1:
+            raise LauncherFailure("guarded Modal task has duplicate Inspect buffer mounts")
+        if existing_buffer_mounts:
+            if main_volumes[existing_buffer_mounts[0]] not in {buffer_mount, private_buffer_mount}:
+                raise LauncherFailure("guarded Modal task has an unexpected Inspect buffer mount")
+            main_volumes[existing_buffer_mounts[0]] = private_buffer_mount
+        else:
+            main_volumes.append(private_buffer_mount)
+
+        volumes = compose.setdefault("volumes", {})
+        if not isinstance(volumes, dict):
+            raise LauncherFailure("guarded Modal task has an invalid top-level volume map")
+        volumes.setdefault("inspect-buffer", {})
+        world_volumes[world_mounts[0]] = f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world"
+        compose_path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
         environment.environment_dir = isolated_dir
         try:
             yield
@@ -256,18 +279,21 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
         if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
             raise ValueError
-        if compose["volumes"] != {"world-logs": None, "inspect-buffer": None}:
+        if compose["volumes"] not in (
+            {"world-logs": None},
+            {"world-logs": None, "inspect-buffer": None},
+        ):
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
             raise ValueError
         main = services["main"]
         world_service = services["world"]
-        if main != {
-            "depends_on": {"world": {"condition": "service_healthy"}},
-            "environment": {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT},
-            "volumes": ["inspect-buffer:/refund-eval-private/inspect-data"],
-        }:
+        if (not isinstance(main, dict)
+                or set(main) != {"depends_on", "environment", "volumes"}
+                or main["depends_on"] != {"world": {"condition": "service_healthy"}}
+                or main["environment"] not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main["volumes"] not in ([], ["inspect-buffer:/refund-eval-private/inspect-data"])):
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -307,22 +333,24 @@ def _shared_roles_compose_values(
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
         if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
             raise ValueError
-        if compose["volumes"] != {
-            "world-logs": None, "inspect-buffer": None, "role-budget": None,
-        }:
+        if compose["volumes"] not in (
+            {"world-logs": None, "role-budget": None},
+            {"world-logs": None, "inspect-buffer": None, "role-budget": None},
+        ):
             raise ValueError
         services = compose["services"]
         if not isinstance(services, dict) or set(services) != {"main", "world"}:
             raise ValueError
         main, world_service = services["main"], services["world"]
-        if main != {
-            "depends_on": {"world": {"condition": "service_healthy"}},
-            "environment": {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT},
-            "volumes": [
-                "inspect-buffer:/refund-eval-private/inspect-data",
-                "role-budget:/var/lib/refund-eval/role-budget",
-            ],
-        }:
+        if (not isinstance(main, dict)
+                or set(main) != {"depends_on", "environment", "volumes"}
+                or main["depends_on"] != {"world": {"condition": "service_healthy"}}
+                or main["environment"] not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main["volumes"] not in (
+                    ["inspect-buffer:/refund-eval-private/inspect-data", "role-budget:/var/lib/refund-eval/role-budget"],
+                    ["role-budget:/var/lib/refund-eval/role-budget", "inspect-buffer:/refund-eval-private/inspect-data"],
+                    ["role-budget:/var/lib/refund-eval/role-budget"],
+                )):
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -502,22 +530,6 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     task_path = task.path.expanduser()
     if not task_path.is_dir() or not (task_path / "task.toml").is_file():
         raise LauncherFailure("job task must be a present local task directory")
-    if split or shared_roles or shared_caps:
-        try:
-            compose = yaml.safe_load((task_path / "environment/docker-compose.yaml").read_text(encoding="utf-8"))
-            mounted = (
-                isinstance(compose, dict)
-                and isinstance(compose.get("volumes"), dict)
-                and "inspect-buffer" in compose["volumes"]
-                and "inspect-buffer:/refund-eval-private/inspect-data"
-                    in compose.get("services", {}).get("main", {}).get("volumes", [])
-            )
-        except (OSError, UnicodeError, yaml.YAMLError, AttributeError):
-            mounted = False
-        if not mounted:
-            raise LauncherFailure(
-                "saved shared-key task lacks the private Inspect buffer; re-stage it with current batch preparation"
-            )
     _validate_local_task_envs(task_path, split=split, shared_roles=shared_roles, shared_caps=shared_caps)
     try:
         task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
