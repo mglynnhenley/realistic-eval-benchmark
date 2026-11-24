@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.5 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 3a5060c85f47e424698a7f6eb19abefa125ae0c4eb4ad85c8dd993ec2b6e1109
+- Trial round: none. Offline validation only.
+- Changes: remove the unused `new_mail_count` wrapper; wake-up counts continue to derive from the active `new_mail_ids` path.
+
 ## 8.4 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 8b1fa02b97f1591d42f94165fd7da40a05a6047ed4c18e54faa6337b1e631ca4
