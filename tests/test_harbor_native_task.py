@@ -28,6 +28,9 @@ import pytest
 import yaml
 
 from tests.inspect_eval_support import (
+    inspect_python,
+)
+from tests.inspect_eval_support import (
     partial_inspect_eval_bytes as _partial_inspect_eval_bytes,
 )
 
@@ -2287,8 +2290,7 @@ def test_private_trace_creation_fsyncs_each_new_directory_parent(tmp_path, monke
 
 
 async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
-    from inspect_ai.log import read_eval_log_async
-
+    from refund_eval.grading.verifier import read_eval_messages
     from refund_eval.harbor.private_traces import PrivateTraceCapture
 
     partial_eval = await _partial_inspect_eval_bytes(tmp_path / "inspect")
@@ -2316,8 +2318,8 @@ async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloa
 
     capture = PrivateTraceCapture("offline-nonmodal", native=True, root=tmp_path / "spool")
     await capture.capture(NonModalFiles())
-    log = await read_eval_log_async(_captured_trace_file(capture.directory, "agent_eval"))
-    assert any("recoverable partial agent event" in str(message.content) for message in log.samples[0].messages)
+    messages = read_eval_messages(_captured_trace_file(capture.directory, "agent_eval"))
+    assert any("recoverable partial agent event" in str(message["content"]) for message in messages)
     assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":4}'
     assert _captured_trace_file(capture.directory, "simulator_events").read_bytes() == b'{"event":"retained"}\n'
 
@@ -2406,7 +2408,7 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
     """)
     child_env = {**os.environ, "XDG_DATA_HOME": str(data_home), "TRACE_READY_FILE": str(ready)}
     process = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", child, cwd=Path(__file__).resolve().parents[1],
+        inspect_python(), "-c", child, cwd=Path(__file__).resolve().parents[1],
         env=child_env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
     )
     try:
@@ -2896,10 +2898,10 @@ async def test_native_partial_traces_survive_short_run_cancellation_and_collecti
     with pytest.raises(RuntimeError, match="usage monitor blocked"):
         await environment.download_dir("/var/log/world", tmp_path)
     [spool] = list((tmp_path / "partial-traces").iterdir())
-    from inspect_ai.log import read_eval_log_async
-    partial_log = await read_eval_log_async(_captured_trace_file(spool, "agent_eval"))
-    assert any("recoverable partial agent event" in str(message.content)
-               for message in partial_log.samples[0].messages)
+    from refund_eval.grading.verifier import read_eval_messages
+    messages = read_eval_messages(_captured_trace_file(spool, "agent_eval"))
+    assert any("recoverable partial agent event" in str(message["content"])
+               for message in messages)
     assert _captured_trace_file(spool, "simulator_events").read_bytes() == b'{"event":"private"}\n'
     manifest = json.loads((spool / "manifest.json").read_text())
     assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
