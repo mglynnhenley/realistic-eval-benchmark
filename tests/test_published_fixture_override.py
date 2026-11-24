@@ -97,6 +97,36 @@ def test_default_task_does_not_add_override_metadata_or_solver_argument(monkeypa
     assert "fixture_path" not in captured
 
 
+@pytest.mark.parametrize("usage_reporting_mode", [None, "usage_only"], ids=["strict-default", "usage-only"])
+def test_native_task_skips_catalog_precondition_and_inspect_cost_limit_in_usage_only(
+    monkeypatch, usage_reporting_mode
+):
+    if usage_reporting_mode is None:
+        monkeypatch.delenv("REFUND_EVAL_USAGE_REPORTING_MODE", raising=False)
+    else:
+        monkeypatch.setenv("REFUND_EVAL_USAGE_REPORTING_MODE", usage_reporting_mode)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv("INSPECT_EVAL_MODEL", "openrouter/anthropic/claude-opus-5")
+    monkeypatch.setattr(
+        task_module, "load_agent_scenario", lambda _scenario: task_module.load_scenario("train_refund_late")
+    )
+    catalog_calls = []
+    monkeypatch.setattr(
+        task_module, "register_openrouter_costs", lambda models: catalog_calls.append(tuple(models))
+    )
+
+    task = task_module.impossible_refund(
+        cost_limit=50, scenario="train_refund_late", world_url="http://world"
+    )
+
+    if usage_reporting_mode == "usage_only":
+        assert task.cost_limit is None
+        assert catalog_calls == []
+    else:
+        assert task.cost_limit == 50
+        assert catalog_calls
+
+
 async def test_adapter_forwards_override_explicitly(monkeypatch, tmp_path):
     path = str(inbox(tmp_path / "inbox.json"))
     calls = []
