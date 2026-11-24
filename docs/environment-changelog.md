@@ -27,10 +27,8 @@ this was not a second version or trial round.
 ## 9.1 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 7c42676db3373a514de62279baa6c24be69d7fcd7542a36531d20755255b2a5f
-- Trial round: none. Offline validation only; no PR-head launch.
-- Changes: retain private agent and simulator checkpoints through cancellation or failed final
-  collection using agent-only Inspect snapshots and durable private storage; preserve the merged
-  spending and usage safeguards.
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Retain private agent and simulator trace checkpoints through cancellation and failed final collection, with isolated Inspect snapshots and durable private storage.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round
@@ -38,42 +36,6 @@ this was not a second version or trial round.
 - Trial round: the same single approved Luna invocation; no additional trial is planned.
 - Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
   cutoffs while keeping response usage observational, provider failures real, and strict defaults.
-
-## 8.15 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: 3aa86084f58cfc47489aff1ea9977f7899ab6c0aaf568aeb5438c024d541ca5f
-- Trial round: none. Offline validation only; no launch.
-- Changes: pass OpenRouter target-charge receipt paths through the snapshotter wrapper environment.
-
-## 8.14 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: 301aab4cea4455a6e9e6afdefd0ee898e52672dbd913b4227a84b19917df3676
-- Trial round: none. Offline validation only; no launch.
-- Changes: merge OpenRouter target-charge receipt accounting with private native trace capture and wheel preflight.
-
-## 8.13 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: 0b6babacf722a7db89810f353910e79f2c9b52d3797f441341a449238b4aa3c6
-- Trial round: none. Offline validation only; no launch.
-- Changes: preflight supplied native wheels for the launcher and trace snapshot modules, preserve legacy Compose fields in guarded copies, and serialize task arguments for Inspect's real CLI parser.
-
-## 8.12 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: ddeff0f24e3b6c337cdebeed1d73f32abfd5742b041fd8d94f4cf1d5c6695140
-- Trial round: none. Offline validation only; no launch.
-- Changes: package the native Inspect snapshotter and private-trace dependencies in the installed agent wheel, preserve old task Compose files through guarded temporary adaptation, and make generation pruning safe across cancelled captures.
-
-## 8.11 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: 803987895e58b17452c725dcd153b179f8e331173cd7c969081071b96c8b9310
-- Trial round: none. Offline validation only; no launch.
-- Changes: snapshot live Inspect buffers with the agent-side SQLite online backup helper, bound unchanged trace generations, and preserve inspect-buffer mounts through guarded shared-budget staging.
-
-## 8.10 — 2026-11-24
-- Kind: trivial batch
-- Fingerprint: ba9debcc2a811008231e84f5d4dd2e59c031d40f6462cbe6cb3e04aace0b70f9
-- Trial round: none. Offline validation only; no launch.
-- Changes: capture active Inspect sample buffers and retain private traces through crash-consistent generations, preflight storage validation and durable directory creation.
 
 ## 8.9 — 2026-11-24
 - Kind: trivial batch

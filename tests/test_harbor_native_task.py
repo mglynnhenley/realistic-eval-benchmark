@@ -952,8 +952,16 @@ def test_native_shared_roles_requested_deadline_reaches_target_without_world_ove
         "PYTHONPATH": str(installed_package),
         "PYTHON_DOTENV_DISABLED": "1",
     })
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_python = subprocess.run(
+        [
+            "uv", "run", "--project", str(repo_root), "--frozen",
+            "python", "-c", "import sys; print(sys.executable)",
+        ],
+        cwd=repo_root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
     result = subprocess.run(
-        [sys.executable, "-c", script, str(installed_package / "refund_eval" / "task.py"), *task_cli_args],
+        [repo_python, "-c", script, str(installed_package / "refund_eval" / "task.py"), *task_cli_args],
         cwd=tmp_path, env=child_env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr + result.stdout
@@ -1030,6 +1038,63 @@ def test_usage_only_mode_preserves_finite_native_bounds(tmp_path, approved_split
     manifest = tmp_path / "usage-only-manifest.json"
     assert laura_trial_main(["save", "--config", str(out / "job.yaml"), "--manifest", str(manifest)]) == 0
     assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
+
+
+def test_compose_overlay_skips_null_without_bypassing_other_services(tmp_path):
+    from scripts.laura_trial import SetupFailure, _validate_compose_overlay
+
+    overlay = tmp_path / "compose.yaml"
+    overlay.write_text("services:\n  agent: null\n", encoding="utf-8")
+    _validate_compose_overlay(overlay)
+
+    overlay.write_text(yaml.safe_dump({
+        "services": {"agent": None, "unsafe": {"build": "."}},
+    }, sort_keys=False), encoding="utf-8")
+    with pytest.raises(SetupFailure):
+        _validate_compose_overlay(overlay)
+
+
+def test_laura_setup_verifies_null_service_overlay_offline(tmp_path, approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "batch"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=1, world_cost_limit=1, trials=1, concurrency=1,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    batch.prepare(out, config)
+
+    compose_overlay = tmp_path / "compose-overlay.yaml"
+    compose_overlay.write_text("services:\n  agent: null\n", encoding="utf-8")
+    job_path = out / "job.yaml"
+    job_document = yaml.safe_load(job_path.read_bytes())
+    job_document["environment"]["extra_docker_compose"] = [str(compose_overlay)]
+    job_path.write_text(yaml.safe_dump(job_document, sort_keys=False), encoding="utf-8")
+
+    manifest = tmp_path / "laura-setup.json"
+    assert laura_trial_main(["save", "--config", str(job_path), "--manifest", str(manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
+
+
+@pytest.mark.parametrize("service", [
+    False,
+    [],
+    "not-a-service",
+    {"build": "."},
+    {"develop": {"watch": []}},
+    {"env_file": [".env"]},
+    {"label_file": ["labels.env"]},
+    {"extends": {"file": "other-compose.yaml"}},
+    {"volumes": ["./workspace:/workspace"]},
+])
+def test_compose_overlay_rejects_invalid_or_unsafe_service_values(tmp_path, service):
+    from scripts.laura_trial import SetupFailure, _validate_compose_overlay
+
+    overlay = tmp_path / "compose.yaml"
+    overlay.write_text(yaml.safe_dump({"services": {"agent": service}}, sort_keys=False), encoding="utf-8")
+    with pytest.raises(SetupFailure):
+        _validate_compose_overlay(overlay)
 
 
 def test_usage_only_can_disable_application_price_cutoffs_under_shared_caps(
@@ -1575,6 +1640,7 @@ def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
         "OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
         "REFUND_EVAL_AGENT_DOLLAR_CAP": "50.0",
         "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "2048",
+        "REFUND_EVAL_USAGE_REPORTING_MODE": "strict",
     }
     assert "OPENROUTER_WORLD_API_KEY" not in agent.env
     assert world_env["OPENROUTER_API_KEY"] == "${OPENROUTER_WORLD_API_KEY}"
