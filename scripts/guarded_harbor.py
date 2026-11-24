@@ -263,6 +263,12 @@ def _shared_roles_compose_values(
                 or task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
                 or metadata.get("usage_reporting_mode", "strict") != expected_usage_reporting_mode
                 or world.get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict") != expected_usage_reporting_mode
+                or metadata.get("disable_application_price_cutoffs", "false")
+                    not in {"true", "false"}
+                or world.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS", "false")
+                    != metadata.get("disable_application_price_cutoffs", "false")
+                or (metadata.get("disable_application_price_cutoffs", "false") == "true"
+                    and (expected_mode != "shared_caps" or expected_usage_reporting_mode != "usage_only"))
                 or world.get("WORLD_STRICT_BUDGET") != "true"
                 or world.get("OPENROUTER_API_KEY") != "${OPENROUTER_API_KEY:-}"):
             raise ValueError

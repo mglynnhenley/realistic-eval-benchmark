@@ -175,6 +175,12 @@ class WorldTrial:
     async def __aenter__(self) -> Self:
         settings = self.settings
         shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+        if settings.disable_application_price_cutoffs and (
+            settings.usage_reporting_mode != "usage_only" or shared_role_mode != "shared_caps"
+        ):
+            raise WorldSpendLedgerError(
+                "Disabling application price cutoffs requires the shared_caps usage-only run mode"
+            )
         if (shared_role_mode == "shared_caps"
                 and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
                      or settings.world_cost_limit is None)):
@@ -220,7 +226,8 @@ class WorldTrial:
                                            prices=getattr(self._model_client, "tariffs", None) or {},
                                            ledger=self._spend_ledger,
                                            scope=self._spend_scope, strict_budget=settings.strict_budget,
-                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only"))
+                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only",
+                                           disable_application_price_cutoffs=settings.disable_application_price_cutoffs))
         try:
             init_world(scenario, settings.seed)
             store = world_store()

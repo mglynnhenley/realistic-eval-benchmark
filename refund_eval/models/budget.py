@@ -83,13 +83,17 @@ class BudgetedWorldModels:
                  prices: Mapping[str, Mapping[str, float]] | None = None,
                  ledger: WorldSpendLedger | None = None,
                  scope: Mapping[str, Any] | None = None, strict_budget: bool = False,
-                 usage_reporting_only: bool = False) -> None:
+                 usage_reporting_only: bool = False,
+                 disable_application_price_cutoffs: bool = False) -> None:
         self.recorded = recorded
         self.limit = Decimal(str(limit))
         self.prices = None if prices is None else {name: dict(tariff) for name, tariff in prices.items()}
         if ledger is not None and self.prices is None:
             raise ValueError("A world-spend ledger requires complete reservation tariffs")
         self.usage_reporting_only = usage_reporting_only
+        if disable_application_price_cutoffs and not usage_reporting_only:
+            raise ValueError("Disabling application price cutoffs requires usage-only reporting")
+        self.disable_application_price_cutoffs = disable_application_price_cutoffs
         self.ledger = ((ledger or WorldSpendLedger.in_memory(self.limit, scope))
                        if self.prices is not None and not usage_reporting_only else None)
         self.spent = Decimal(0)
@@ -109,7 +113,13 @@ class BudgetedWorldModels:
 
     def _mark(self, status: str) -> None:
         self.status = status
-        snapshot = {"limit_usd": float(self.limit), "spent_usd": float(self.spent), "status": status}
+        snapshot = {
+            "limit_usd": None if self.disable_application_price_cutoffs else float(self.limit),
+            "spent_usd": float(self.spent),
+            "status": status,
+        }
+        if self.disable_application_price_cutoffs:
+            snapshot["application_price_cutoffs_enabled"] = False
         if self.ledger is not None:
             snapshot.update(reserved_usd=float(self.reserved), committed_usd=float(self.spent + self.reserved))
         world_store().set(WORLD_BUDGET_KEY, snapshot)
@@ -298,7 +308,7 @@ class BudgetedWorldModels:
         raise AssertionError("unreachable retry loop")
 
     async def _complete_legacy(self, role: Role, messages: Sequence[Message], settings: dict[str, Any]) -> Completion:
-        if self.status != "available":
+        if self.status != "available" and not self.disable_application_price_cutoffs:
             raise ModelLimitExceeded(f"World model allowance is {self.status}; no further requests")
         if settings.get("max_tokens") is None:
             settings = {**settings, "max_tokens": WORLD_MAX_OUTPUT_TOKENS, "default_output_cap": True}
@@ -330,11 +340,17 @@ class BudgetedWorldModels:
                 if completion.provider_error_type == "invalid_request":
                     self._reject_request()
                 if self.usage_reporting_only:
+                    if completion.failed and self.disable_application_price_cutoffs:
+                        self._mark("failed")
+                        self.persist()
+                        raise ModelLimitExceeded(
+                            "Usage-only world request failed; automatic retries are disabled"
+                        )
                     self.persist()
                     return completion
                 raise ModelLimitExceeded("World model request did not report a valid charge")
             self.spent += cost
-            if self.spent >= self.limit:
+            if self.spent >= self.limit and not self.disable_application_price_cutoffs:
                 self._mark("exhausted")
                 if completion.provider_error_type == "invalid_request":
                     self._reject_request()

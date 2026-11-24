@@ -24,6 +24,13 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.0 — 2026-11-24
+- Kind: behaviour round
+- Fingerprint: f657978bcd4a9095e831fabfcfba6532233fa135bace4d26a24eddfea09bb863
+- Trial round: the same single approved Luna invocation; no additional trial is planned.
+- Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
+  cutoffs while keeping response usage observational, provider failures real, and strict defaults.
+
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3

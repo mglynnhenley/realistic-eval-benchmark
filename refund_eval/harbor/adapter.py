@@ -280,7 +280,8 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
                verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
                shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None,
                task_id: str | None = None, task_text: str | None = None, suite_task: bool = False,
-               requested_deadline: date | None = None, usage_reporting_mode: str = "strict") -> Path:
+               requested_deadline: date | None = None, usage_reporting_mode: str = "strict",
+               disable_application_price_cutoffs: bool = False) -> Path:
     """Write OUT/<task_id>/ and return it."""
     from refund_eval.agent.prompt import task_message, with_requested_deadline
 
@@ -288,6 +289,10 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         raise ValueError("Unsupported usage_reporting_mode")
     if usage_reporting_mode == "usage_only" and openrouter_key_mode != "shared_caps":
         raise ValueError("usage_only reporting requires shared_caps outer key monitoring")
+    if disable_application_price_cutoffs and (
+        usage_reporting_mode != "usage_only" or openrouter_key_mode != "shared_caps"
+    ):
+        raise ValueError("disabling application price cutoffs requires usage_only shared_caps mode")
 
     if verified_wheel is None:
         verified_wheel = read_verified_agent_wheel(agent_wheel, agent_wheel_sha256)
@@ -340,6 +345,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
         "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles", "shared_caps"} else "false",
         "USAGE_REPORTING_MODE": usage_reporting_mode,
+        "DISABLE_APPLICATION_PRICE_CUTOFFS": "true" if disable_application_price_cutoffs else "false",
         "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
         "OPENROUTER_KEY_MODE": openrouter_key_mode,
         "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),
