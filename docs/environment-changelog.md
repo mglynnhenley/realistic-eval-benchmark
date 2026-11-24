@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.9 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 41268c36b2991f94aef7736ef766c87093ffa1194a6f10e6e3ba398388bbaa87
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Remove the unused identity-lock serialization helper without changing lock creation or validation.
+
 ## 9.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 9e66738262dbbb72d8279fcbcdf87b9f5edf56423b446a579123c78db7098a7c

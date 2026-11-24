@@ -189,13 +189,6 @@ def validate_identity_lock(
     return lock, expected_id
 
 
-def freeze_identity_lock(value: str | None) -> str | None:
-    """Return a canonical JSON representation of a local identity lock."""
-    if value is None:
-        return None
-    return json.dumps(load_identity_lock(value), sort_keys=True, separators=(",", ":"))
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", required=True)
