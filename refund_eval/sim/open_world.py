@@ -187,7 +187,7 @@ def _directive(record: dict | None, org: Org, name: str) -> str | None:
 
 def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict]) -> None:
     dossier = (record or {}).get("dossier")
-    if not dossier:
+    if not dossier or not examples:
         return
     persona = dossier.get("persona")
     if not isinstance(persona, dict):

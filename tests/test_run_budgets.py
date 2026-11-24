@@ -120,14 +120,26 @@ def test_task_applies_late_budget_before_constructing_harness(monkeypatch, resea
         task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, research_mode="live")
 
 
-def test_world_service_task_preserves_native_research_metadata(monkeypatch):
+def test_world_service_task_preserves_native_research_metadata(tmp_path, monkeypatch):
     import importlib
+
+    import yaml
+
+    from refund_eval.scenario.schema import load_scenario
+
+    scenario = load_scenario("train_refund_late")
+    public_scenario = scenario.model_dump(mode="json", include={
+        "id": True, "task_text": True, "start_time": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
+    scenario_path = tmp_path / "train_refund_late.yaml"
+    scenario_path.write_text(yaml.safe_dump(public_scenario), encoding="utf-8")
 
     task_module = importlib.import_module("refund_eval.task")
     monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
     monkeypatch.setattr(task_module, "_eval_model_name", lambda: "mockllm/model")
     task = task_module.impossible_refund(
-        scenario="train_refund_late", cost_limit=5, research_mode="auto", world_url="http://world",
+        scenario=str(scenario_path), cost_limit=5, research_mode="auto", world_url="http://world",
     )
     assert "research_mode" not in task.metadata
     assert "research_mode" not in task.dataset[0].metadata

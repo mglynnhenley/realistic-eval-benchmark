@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.5 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: be752810bb62be421a29a37a24eeedc419253f6dccef57984ac66f2edc708e5c
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Avoid mutating frozen dossiers in `_apply_example_reply_from` when no examples are present, and update stale world-service and simulator test fixtures.
+
 ## 9.4 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: cdb6e49b6073a4386bf3d69ba230f6486589fdf1ff28b9d85a7cbfcf573e46ac
