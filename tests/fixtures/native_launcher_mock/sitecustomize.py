@@ -145,6 +145,11 @@ if _events_path is not None:
                     _record("collection_succeeded", content=(collection / "runner.log").read_text())
                 except offline_spend_guard.GuardFailure as error:
                     _record("collection_failed", error=type(error).__name__, message=str(error))
+                try:
+                    await environment.download_file("/logs/agent/private-trace.tar.gz", collection / "private-trace")
+                    _record("private_trace_collected")
+                except offline_spend_guard.GuardFailure as error:
+                    _record("private_trace_failed", error=type(error).__name__, message=str(error))
                 finally:
                     await environment.stop(delete=True)
                     _record("environment_stopped")

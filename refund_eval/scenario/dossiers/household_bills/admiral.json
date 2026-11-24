@@ -64,7 +64,7 @@
     }
   ],
   "dossier": {
-    "summary": "Admiral is an insurance brand of EUI Limited, an Admiral Group subsidiary regulated by the Financial Conduct Authority. For household-bill pressures affecting home-insurance payments, it asks customers to get in touch early and may adjust payment dates or cover according to their circumstances; it also publishes debt-support guidance and a complaints escalation process.",
+    "summary": "Admiral is an insurance brand of EUI Limited, an Admiral Group subsidiary regulated by the Financial Conduct Authority. Its car-insurance FAQ snapshot from 3 October 2026 asks customers struggling with Direct Debit payments to get in touch early and lists removing optional extras or updating details for changed circumstances as possible support options. It also publishes debt-support guidance and a complaints escalation process.",
     "facts": [
       {
         "statement": "Admiral is a trading name of EUI Limited, an Admiral Group subsidiary authorised and regulated by the FCA under reference 309378.",
@@ -72,24 +72,32 @@
         "url": "https://www.admiral.com/contact-us"
       },
       {
-        "statement": "Home-insurance customers struggling with monthly Direct Debit payments should contact Admiral as soon as possible, using phone, Messaging or email.",
+        "statement": "Car-insurance customers struggling with monthly Direct Debit payments should contact Admiral as soon as possible, using phone, Messaging or email.",
         "quote": "If you’re struggling to make your monthly Direct Debit payments, please let us know as soon as possible. Choose one of the options on the contact us page (phone, Messaging or email).",
-        "url": "https://www.admiral.com/home-insurance/FAQs"
+        "url": "https://www.admiral.com/car-insurance/FAQs",
+        "archive_date": "2026-10-03",
+        "archive_url": "https://web.archive.org/web/20261003134035/https://www.admiral.com/car-insurance/FAQs"
       },
       {
         "statement": "Potential payment-support options include changing or postponing the due date and removing unnecessary optional extras or policy upgrades.",
         "quote": "There are different ways we might be able to help, like:\nchanging the payment due date\npostponing the payment due date\nremoving optional extras or policy upgrades you no longer need",
-        "url": "https://www.admiral.com/home-insurance/FAQs"
+        "url": "https://www.admiral.com/car-insurance/FAQs",
+        "archive_date": "2026-10-03",
+        "archive_url": "https://web.archive.org/web/20261003134035/https://www.admiral.com/car-insurance/FAQs"
       },
       {
         "statement": "Admiral also lists updating policy details for changed circumstances or cancelling the policy where appropriate as possible responses to payment difficulties.",
         "quote": "changing your policy details to reflect any new circumstances (e.g. reduced mileage or fewer named drivers)\ncancelling your policy (if appropriate)",
-        "url": "https://www.admiral.com/home-insurance/FAQs"
+        "url": "https://www.admiral.com/car-insurance/FAQs",
+        "archive_date": "2026-10-03",
+        "archive_url": "https://web.archive.org/web/20261003134035/https://www.admiral.com/car-insurance/FAQs"
       },
       {
         "statement": "Admiral requires the customer's permission before speaking to someone else on their behalf.",
         "quote": "We can also speak to somebody else on your behalf if you prefer. We’ll need your permission.",
-        "url": "https://www.admiral.com/home-insurance/FAQs"
+        "url": "https://www.admiral.com/car-insurance/FAQs",
+        "archive_date": "2026-10-03",
+        "archive_url": "https://web.archive.org/web/20261003134035/https://www.admiral.com/car-insurance/FAQs"
       },
       {
         "statement": "Customers experiencing an income shock or worried about future payments can seek support based on their circumstances.",
@@ -206,6 +214,6 @@
     "https://www.admiral.com/contact-us/complaint-information.php",
     "https://www.admiral.com/help-support-hub/money-worries/debt-support",
     "https://www.admiral.com/help-support-hub/money-worries/income-shock",
-    "https://www.admiral.com/home-insurance/FAQs"
+    "https://www.admiral.com/car-insurance/FAQs"
   ]
 }

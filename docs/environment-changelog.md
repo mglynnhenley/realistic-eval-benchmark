@@ -24,11 +24,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.3 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 1faf32d26ece5f51cf3c57d6001152d599447b37d9308e532ea0a75c06bed8b3
+- Trial round: none. Offline launcher verification only.
+- Changes: disable benchmark-side monetary spend validation for explicit no-application-price-cutoff runs while retaining provider-key controls and cleanup after early failures.
+
 ## 9.2 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 860bcdd3575b793f40bd6bb3cafca4472c81f5249d6364923d4be90a366537d0
+- Fingerprint: c66a8d13f667eb3f32ba2aa2cc0843cfa0ccb768dd0d8b0996a72d901fa09d5c
 - Trial round: none. Offline integration checks only; no paid execution.
-- Changes: Honor explicit no-price-cutoff mode through Luna launches and preserve final artifact collection after a latched guard failure; strict-mode monetary enforcement remains unchanged.
+- Changes: Correct the saved Admiral car-insurance rule citations and document Three recurring-payment discount scope without regenerating company rules.
 
 ## 9.1 — 2026-11-24
 - Kind: trivial batch
