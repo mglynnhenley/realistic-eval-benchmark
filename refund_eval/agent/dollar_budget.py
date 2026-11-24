@@ -196,6 +196,18 @@ def _text_only_message(message: Mapping[str, Any]) -> bool:
     return role == "assistant" and content is None and (bool(tool_calls) or function_call is not None)
 
 
+def _clamp_output_tokens(request: dict[str, Any], cap: int) -> None:
+    output_limits = [request[name] for name in ("max_tokens", "max_completion_tokens") if name in request]
+    if any(type(value) is not int or value <= 0 for value in output_limits):
+        raise WorldSpendLedgerError("Target request has an invalid output-token bound")
+    if not output_limits:
+        request["max_tokens"] = cap
+    else:
+        for name in ("max_tokens", "max_completion_tokens"):
+            if name in request:
+                request[name] = min(cap, request[name])
+
+
 def _bounded_request(api: OpenRouterAPI, request: dict[str, Any], cap: int) -> None:
     if api.responses_api or api.emulate_tools or api.models or api.provider or api.transforms:
         raise WorldSpendLedgerError("Target dollar budget does not support alternate OpenRouter routes")
@@ -223,15 +235,7 @@ def _bounded_request(api: OpenRouterAPI, request: dict[str, Any], cap: int) -> N
         for m in messages
     ):
         raise WorldSpendLedgerError("Target dollar budget requires text-only messages")
-    output_limits = [request[name] for name in ("max_tokens", "max_completion_tokens") if name in request]
-    if any(type(value) is not int or value <= 0 for value in output_limits):
-        raise WorldSpendLedgerError("Target request has an invalid output-token bound")
-    if not output_limits:
-        request["max_tokens"] = cap
-    else:
-        for name in ("max_tokens", "max_completion_tokens"):
-            if name in request:
-                request[name] = min(cap, request[name])
+    _clamp_output_tokens(request, cap)
     extra = request.get("extra_body")
     if extra is None:
         extra = {}
@@ -333,7 +337,7 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
 
         async def response_only(request: dict[str, Any], config: Any) -> Any:
             _apply_cache_markers(api, request, config)
-            _bounded_request(api, request, int(tokens_raw))
+            _clamp_output_tokens(request, int(tokens_raw))
             completion = await original_method(request, config)
             usage = getattr(completion, "usage", None)
             reported_cost = getattr(usage, "cost", None)

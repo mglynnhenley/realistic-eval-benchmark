@@ -632,6 +632,66 @@ async def test_usage_only_inspect_provider_failure_sends_once_and_cleans_up(monk
     assert len(requests) == 1
 
 
+async def test_usage_only_inspect_tool_call_round_trip_skips_text_sizing(monkeypatch):
+    _enable_usage_only_target(monkeypatch)
+    monkeypatch.setattr(
+        dollar_budget, "openrouter_tariffs",
+        lambda *_: pytest.fail("usage_only must not load tariffs"),
+    )
+    requests = []
+
+    def transport(request):
+        assert request.url.path == "/api/v1/chat/completions"
+        payload = json.loads(request.content)
+        assert payload["max_tokens"] == 16
+        requests.append(payload)
+        response = _chat_response(
+            request,
+            tool_call=len(requests) == 1,
+            reasoning_details=(
+                [{"type": "reasoning.summary", "summary": "synthetic detail"}]
+                if len(requests) == 1 else None
+            ),
+        )
+        if len(requests) == 1:
+            assert json.loads(response.content)["choices"][0]["message"]["content"] is None
+        return response
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            "openrouter/anthropic/claude-opus-5",
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=32, max_retries=3, cache_prompt=False),
+            stream=False,
+        )
+        async with dollar_budget.target_dollar_budget(model):
+            assert model.config.max_retries == 0
+            tool_output = await model.generate(
+                "Synthetic lookup request.",
+                tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+            )
+            assistant_message = tool_output.choices[0].message
+            call = assistant_message.tool_calls[0]
+            final_output = await model.generate(
+                [
+                    ChatMessageUser(content="Synthetic lookup request."),
+                    assistant_message,
+                    ChatMessageTool(
+                        content="Synthetic tool result.", tool_call_id=call.id, function=call.function
+                    ),
+                    ChatMessageUser(content="Summarize the synthetic result."),
+                ],
+                tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+            )
+
+    assert len(requests) == 2
+    assert any(message.get("role") == "assistant" and message.get("tool_calls") for message in requests[1]["messages"])
+    assert any(message.get("role") == "tool" for message in requests[1]["messages"])
+    assert final_output.completion == "Offline bounded response."
+    assert final_output.metadata["usage_reported_cost_usd"] == 0.0001
+
+
 @pytest.mark.parametrize("reported_cost", [0.0123, None], ids=["reported-cost", "unknown-cost"])
 async def test_usage_only_world_client_skips_tariff_and_generation_lookups(monkeypatch, reported_cost):
     from refund_eval import model_pricing

@@ -570,6 +570,114 @@ def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp
         [sys.executable, "-c", loader_check], cwd=tmp_path, env=environment,
         check=True, capture_output=True, text=True,
     )
+    replay_check = textwrap.dedent("""
+        import asyncio
+        import json
+        import os
+        from pathlib import Path
+
+        import httpx2
+        from inspect_ai.model import ChatMessageTool, ChatMessageUser, GenerateConfig, get_model
+        from inspect_ai.tool import ToolInfo, ToolParams
+        import refund_eval.agent.dollar_budget as budget
+
+        assert Path(budget.__file__).resolve().is_relative_to(
+            Path(os.environ["PUBLIC_WHEEL_INSTALL"]).resolve()
+        )
+        budget.openrouter_tariffs = lambda *_: (_ for _ in ()).throw(
+            AssertionError("usage_only must not load tariffs")
+        )
+        requests = []
+
+        def transport(request):
+            assert request.url.path == "/api/v1/chat/completions"
+            payload = json.loads(request.content)
+            assert payload["max_tokens"] == 16
+            requests.append(payload)
+            if len(requests) == 1:
+                message = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call-offline",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"},
+                    }],
+                }
+                finish_reason = "tool_calls"
+            else:
+                assert any(
+                    item.get("role") == "assistant" and item.get("tool_calls")
+                    for item in payload["messages"]
+                )
+                assert any(item.get("role") == "tool" for item in payload["messages"])
+                message = {"role": "assistant", "content": "Offline replay complete."}
+                finish_reason = "stop"
+            return httpx2.Response(200, request=request, json={
+                "id": f"offline-{len(requests)}",
+                "object": "chat.completion",
+                "created": 0,
+                "model": payload["model"],
+                "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11},
+            })
+
+        async def main():
+            async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+                model = get_model(
+                    "openrouter/anthropic/claude-opus-5",
+                    http_client=client,
+                    memoize=False,
+                    config=GenerateConfig(max_tokens=32, max_retries=2, cache_prompt=False),
+                    stream=False,
+                )
+                async with budget.target_dollar_budget(model):
+                    assert model.config.max_retries == 0
+                    first = await model.generate(
+                        "Synthetic request.",
+                        tools=[ToolInfo(name="lookup", description="Offline lookup.", parameters=ToolParams())],
+                    )
+                    assistant = first.choices[0].message
+                    call = assistant.tool_calls[0]
+                    final = await model.generate([
+                        ChatMessageUser(content="Synthetic request."),
+                        assistant,
+                        ChatMessageTool(
+                            content="Synthetic tool result.", tool_call_id=call.id, function=call.function
+                        ),
+                        ChatMessageUser(content="Summarize the synthetic result."),
+                    ])
+                    assert first.metadata["usage_reported_cost_usd"] is None
+                    assert first.usage.total_cost is None
+                    assert final.metadata["usage_reported_cost_usd"] is None
+                    assert final.usage.total_cost is None
+                assert model.config.max_retries == 2
+            assert len(requests) == 2
+
+        asyncio.run(main())
+    """)
+    replay_environment = {
+        **environment,
+        "OPENROUTER_API_KEY": "offline-key",
+        "REFUND_EVAL_USAGE_REPORTING_MODE": "usage_only",
+        "REFUND_EVAL_SHARED_ROLE_MODE": "shared_caps",
+        "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND": "true",
+        "REFUND_EVAL_AGENT_DOLLAR_CAP": "50",
+        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "16",
+        "WORLD_SCENARIO": "train_refund_late",
+    }
+    repo_root = Path(__file__).resolve().parents[1]
+    replay_python = subprocess.run(
+        [
+            "uv", "run", "--project", str(repo_root), "--frozen", "--no-sync",
+            "python", "-c", "import sys; print(sys.executable)",
+        ],
+        cwd=repo_root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [replay_python, "-c", replay_check], cwd=tmp_path, env=replay_environment,
+        check=True, capture_output=True, text=True,
+    )
 
 
 @pytest.mark.parametrize("days", [365, 730])
