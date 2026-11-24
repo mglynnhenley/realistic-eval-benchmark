@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 8.3 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: c18b8a1ca1633699f38333e481b743a7a555adf8df441a3b0448139e7c405082
+- Fingerprint: 782d77fcd820c46af6e7a25887d025e8eb80af51a4077f76b92f83744df0324f
 - Trial round: none; offline validation only, no paid calls.
 - Changes: pin remaining Python/uv and Debian build inputs; add source,
   resolved-scenario and immutable local browser image locks that reject
