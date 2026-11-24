@@ -75,6 +75,29 @@ def _fsync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+def _mkdir_durable(directory: Path, mode: int = 0o700) -> None:
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        parent = current.parent
+        if parent == current:
+            raise FileNotFoundError(current)
+        current = parent
+    if not current.is_dir():
+        raise NotADirectoryError(current)
+    for path in reversed(missing):
+        try:
+            path.mkdir(mode=mode)
+        except FileExistsError:
+            if not path.is_dir():
+                raise
+        os.chmod(path, mode)
+        _fsync_directory(path.parent)
+    if not missing:
+        os.chmod(directory, mode)
+
+
 def _atomic_write(path: Path, content: bytes) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
     try:
@@ -129,20 +152,12 @@ class PrivateTraceCapture:
 
     def __init__(self, run_id: str, *, native: bool = False, root: Path | None = None) -> None:
         if root is None:
-            data_root = TRACE_ROOT.parent
-            if not data_root.exists():
-                data_root.mkdir(mode=0o700)
-            elif not data_root.is_dir():
-                raise NotADirectoryError(data_root)
             root = TRACE_ROOT
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(root, 0o700)
+        _mkdir_durable(root)
         safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:64] or "run"
         digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
         self.directory = root / f"{safe_id}-{digest}-{uuid4().hex[:8]}"
-        self.directory.mkdir(mode=0o700)
-        os.chmod(self.directory, 0o700)
-        _fsync_directory(root)
+        _mkdir_durable(self.directory)
         self.sources = NATIVE_TRACE_SOURCES if native else LEGACY_TRACE_SOURCES
         self._manifest_lock = asyncio.Lock()
         self._source_locks = {source.name: asyncio.Lock() for source in self.sources}
@@ -304,15 +319,17 @@ class PrivateTraceCapture:
             database_path = staging_dir / database_name
             if not database_path.is_file():
                 raise FileNotFoundError("active Inspect sample buffer database is unavailable")
-            with sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True) as reader:
-                with sqlite3.connect(destination) as snapshot:
-                    reader.backup(snapshot)
-                    integrity = snapshot.execute("PRAGMA integrity_check").fetchone()
-                    if integrity is None or integrity[0] != "ok":
-                        raise RuntimeError("invalid active Inspect sample buffer snapshot")
-                    events = snapshot.execute("SELECT COUNT(*) FROM events").fetchone()
-                    if events is None or events[0] == 0:
-                        raise RuntimeError("active Inspect sample buffer has no recorded events")
+            with (
+                sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True) as reader,
+                sqlite3.connect(destination) as snapshot,
+            ):
+                reader.backup(snapshot)
+                integrity = snapshot.execute("PRAGMA integrity_check").fetchone()
+                if integrity is None or integrity[0] != "ok":
+                    raise RuntimeError("invalid active Inspect sample buffer snapshot")
+                events = snapshot.execute("SELECT COUNT(*) FROM events").fetchone()
+                if events is None or events[0] == 0:
+                    raise RuntimeError("active Inspect sample buffer has no recorded events")
 
     @staticmethod
     async def _latest_eval_log(environment, directory: str | None) -> str | None:

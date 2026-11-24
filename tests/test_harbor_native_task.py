@@ -2116,6 +2116,26 @@ async def test_trace_storage_failures_are_preflighted_and_nonfatal_after_start(
     assert "Private trace availability error writing final manifest" in caplog.text
 
 
+def test_private_trace_creation_fsyncs_each_new_directory_parent(tmp_path, monkeypatch):
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import PrivateTraceCapture
+
+    fsynced = []
+    original_fsync = private_traces._fsync_directory
+
+    def record_fsync(directory):
+        fsynced.append(Path(directory))
+        original_fsync(directory)
+
+    monkeypatch.setattr(private_traces, "_fsync_directory", record_fsync)
+    root = tmp_path / "new-data" / "partial-traces"
+    capture = PrivateTraceCapture("ancestor-fsync", root=root)
+    assert tmp_path in fsynced
+    assert root.parent in fsynced
+    assert root in fsynced
+    assert capture.directory.stat().st_mode & 0o777 == 0o700
+
+
 async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
     from inspect_ai.log import read_eval_log_async
 
@@ -2204,6 +2224,7 @@ async def _partial_inspect_eval_bytes(tmp_path):
     assert len(partial.samples) == 1
     assert any("recoverable partial agent event" in str(message.content)
                for message in partial.samples[0].messages)
+    return partial_path.read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -2262,21 +2283,25 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
         time.sleep(60)
     """)
     child_env = {**os.environ, "XDG_DATA_HOME": str(data_home), "TRACE_READY_FILE": str(ready)}
-    process = subprocess.Popen(
-        [sys.executable, "-c", child], cwd=Path(__file__).resolve().parents[1],
-        env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", child, cwd=Path(__file__).resolve().parents[1],
+        env=child_env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
     )
     try:
         deadline = asyncio.get_running_loop().time() + 10
-        while not ready.exists() and process.poll() is None and asyncio.get_running_loop().time() < deadline:
+        while not ready.exists() and process.returncode is None and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.05)
-        assert ready.exists(), ("Inspect buffer did not record events: "
-                                + (process.stderr.read() if process.poll() is not None else ""))
+        if not ready.exists():
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
+            stderr = await process.stderr.read() if process.stderr is not None else b""
+            pytest.fail(f"Inspect buffer did not record events: {stderr.decode(errors='replace')}")
     finally:
-        if process.poll() is None:
+        if process.returncode is None:
             process.kill()
-        process.wait(timeout=5)
-    assert process.returncode < 0
+        await asyncio.wait_for(process.wait(), timeout=5)
+    assert process.returncode is not None and process.returncode < 0
 
     from inspect_ai.log._recorders.buffer.database import location_dir_and_file
 
@@ -2330,12 +2355,12 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
             ("active-sample", 1),
         )]
         pools = [row[0] for row in database.execute("SELECT data FROM message_pool")]
-    assert json.loads(sample_data)["completed_at"] is None
+        call_pools = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+    assert json.loads(sample_data).get("completed_at") is None
     assert [event["event"] for event in events] == ["model", "tool"]
-    assert "active model payload" in json.dumps(events)
+    assert "active model payload" in json.dumps({"events": events, "calls": call_pools})
     assert "active model prompt" in json.dumps(pools)
     assert "active tool result" in json.dumps(events)
-    return partial_path.read_bytes()
 
 
 async def test_native_partial_traces_survive_short_run_cancellation_and_collection_failure(tmp_path):

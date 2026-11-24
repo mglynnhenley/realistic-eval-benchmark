@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.10 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: ba9debcc2a811008231e84f5d4dd2e59c031d40f6462cbe6cb3e04aace0b70f9
+- Trial round: none. Offline validation only; no launch.
+- Changes: capture active Inspect sample buffers and retain private traces through crash-consistent generations, preflight storage validation and durable directory creation.
+
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 5fa4844e13c9a6ddbbf169e89e2e17daf4fa9bffe0bad7a665c7c0e68474e4c3

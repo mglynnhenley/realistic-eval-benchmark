@@ -123,55 +123,50 @@ Jobs are saved under the prepared directory's `jobs/`. Each trial includes
 - `usage.json` with model totals and separate simulator/grader usage.
 - `request.json`, `result.json` and browser network/interception evidence.
 
-Harbor also keeps live private trace checkpoints under
-`~/refund-eval-data/partial-traces/`, outside trial output and task artifact
-trees and the Luna status feed. The task keeps its named `world-logs` volume by
-default, isolating non-Modal Docker trials by Compose project. Only the guarded Modal launcher
-temporarily replaces that source during Dind startup with a private
-`/refund-eval-private/world-logs` bind on the trial's outer sandbox. The world
-service alone mounts it at the existing `/var/log/world` artifact path; it is
-not mounted into `main`, agent logs, or artifact roots. Harbor's Dind path maps
-the fixed world files to Modal's `filesystem.copy_to_local` API rather than
-guarded `_sdk_exec`/`docker compose cp`; non-Modal runs use the existing
-world-service file-transfer API. Modal agent `.eval` files are listed from
-self-bound log directories with Modal's filesystem API; non-Modal environments
-use a scoped directory download and select the newest `.eval`. Legacy runs
-capture `/logs/artifacts/refund` `.eval` files and
+Harbor keeps live private trace checkpoints under
+`~/refund-eval-data/partial-traces/`, outside trial output, task artifacts and
+the Luna status feed. The task keeps its named `world-logs` volume by default,
+isolating non-Modal Docker trials by Compose project. Only the guarded Modal
+launcher temporarily replaces it with a private outer-sandbox bind. The world
+service alone mounts that bind at the existing `/var/log/world` path; simulator
+files are not mounted into `main` or agent/artifact roots. Guarded Modal
+transfers fixed world files with the existing Modal filesystem API rather than
+`_sdk_exec`/`docker compose cp`; unguarded Modal and non-Modal runs use the
+world-service transfer fallback. Native agent `.eval` files use the Modal
+filesystem listing API or a scoped directory download. Legacy runs capture
+`/logs/artifacts/refund` `.eval` files and
 `/logs/agent/progress/snapshot.json` without a remote mirror. Invalid live
-`.eval` archives do not replace an earlier durable checkpoint. Incomplete event
-JSONL snapshots are trimmed to the last newline-terminated record before the
-host marks the copy durable.
+`.eval` archives do not replace an earlier durable checkpoint. Incomplete
+event JSONL snapshots are trimmed to the last newline-terminated record.
 
-generations remain in place if a later snapshot or manifest update fails.
-data, not simulator state. Legacy buffers use a private `/tmp` path and the
-Each per-run directory is mode 0700, and its parent is fsync'd on creation.
-Each source checkpoint is an immutable mode-0600 file under
-`generations/<source>/`. Its data is flushed and fsync'd before the generation
-directory is fsync'd; only then is `manifest.json` atomically updated and its
-parent fsync'd to point at it. Earlier generations remain if a later snapshot
-or manifest update fails. The manifest records the last durable generation
-and a sanitized error type independently for each source; a failed source
-does not replace its previous good copy.
+Inspect's active SQLite sample buffer is captured separately, including WAL
+sidecars, so committed model/tool events from unfinished samples do not depend
+on final `.eval` collection. The native buffer is on a dedicated `main` volume
+under `/refund-eval-private/inspect-data`, outside agent log and artifact roots;
+it contains agent-side Inspect data, not simulator state. Guarded Modal uses a
+direct outer-sandbox file transfer for this source; unguarded Modal and
+non-Modal use scoped service/directory transfer. Legacy Inspect uses a private
+`/tmp` buffer path. A snapshot includes SQLite transactions committed when it
+is read, but events after that snapshot can be lost. Host polling is nominally
+1 second plus transfer time; if capture stalls or fails, the unretained tail
+has no fixed bound.
 
-The manifest stays incomplete: a checkpoint is a file snapshot, not a
-guarantee that every event was captured or that Harbor's final artifact
-collection completed. Inspect `.eval` contents are recoverable only after
-Inspect has flushed them. Inspect's active SQLite sample buffer is checkpointed
-separately, including its WAL sidecars; the native buffer volume is outside
-agent log and artifact roots and contains agent-side data, not simulator state.
-Legacy buffers use a private `/tmp` path and the existing service-transfer
-path. A checkpoint captures SQLite transactions already committed when the
-copy is read; events written after that snapshot can still be lost. Host
-polling is nominally 1 second plus transfer time. Anything written after the
-last successful durable checkpoint can be lost; if capture or transfer stalls
-or fails, the unretained tail has no fixed bound.
+Every newly created directory ancestor is mode 0700, and its containing
+directory is fsync'd before descendants are created. Each source checkpoint is
+an immutable mode-0600 generation under `generations/<source>/`; the file and
+generation directory are fsync'd before `manifest.json` is atomically updated
+to point at it. Earlier generations remain if a later snapshot or manifest
+update fails. The manifest records only the last durable generation and a
+sanitized per-source error; a failed source does not replace its previous good
+copy. It remains marked incomplete: checkpoints do not guarantee every event
+was captured or that final artifact collection completed.
 
 Creating the private per-run directory and its initial manifest is a preflight
-requirement before the worker or Inspect task starts; failure there aborts
-before model work. After startup, trace and manifest storage failures are
-reported as availability errors when possible and never turn a successful
-trial into a failure. Only files referenced by the durable manifest pointer
-are claimed as retained.
+requirement before worker/model execution; failure there aborts before model
+work. After startup, trace and manifest storage failures are reported as
+availability errors when possible and never turn a successful trial into a
+failure. Only files referenced by the durable manifest pointer are claimed as
+retained.
 
 These artifacts can contain inbox contents. Keep run directories out of published
 results. Browser containment and tool boundaries are described in the
