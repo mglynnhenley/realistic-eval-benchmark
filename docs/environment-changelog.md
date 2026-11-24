@@ -24,18 +24,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 8.10 — 2026-11-24
+## 9.1 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: b1489ef44a833385520168ff110e9a923f6713668b1b599a6306369184265ebf
+- Fingerprint: 923c19806f8ef44729030d45d999980d9b3cf9b9c7e33d44cd4bb436591d6337
 - Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
 - Changes: add the local Transect structural/ledger review and optional paid judging for saved `train_refund_late` trials; include bounded prior-source context with target-only citations, preserve unknown coverage, restrict severe verification to matching candidates, and protect local reports. Trial execution and baseline `scout/run.py` remain unchanged.
 
+## 9.0 — 2026-11-24
+- Kind: behaviour round
+- Fingerprint: 0d466f44d5bc036a8b39643f98cf4da3aeebb5a924aa5f25ba2c86494529b361
+- Trial round: the same single approved Luna invocation; no additional trial is planned.
+- Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
+  cutoffs while keeping response usage observational, provider failures real, and strict defaults.
 ## 8.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 2fd7f78255c5805ae1599ebb0b7aae6b03d7381f8db8e2ac3b1de2da990b10dc
 - Trial round: none. Offline validation only.
-- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown.
-
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown. Spend guards retain conservative usage high-water marks across lower OpenRouter counter samples; existing limits remain enforced.
 ## 8.8 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: bc54656dae6464defda410f2e7421e84b0a726b3c6251a1b05720c7fb3586aa3
