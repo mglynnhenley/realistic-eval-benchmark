@@ -57,6 +57,7 @@ def _write_test_only_wheel(
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
+    files.update({name: b'"""Inert offline wheel fixture."""\n' for name in adapter.REQUIRED_AGENT_WHEEL_MEMBERS})
     if scenario_files is not None:
         for name, content in scenario_files.items():
             files[f"refund_eval/scenario/{name}.yaml"] = content
@@ -1335,7 +1336,9 @@ def test_public_validation_rejects_invalid_digest_valid_staged_wheel(
 ):
     setup = {}
     if case == "invalid_zip":
-        setup["raw_wheel"] = b"synthetic digest-valid bytes, not a zip archive"
+        with pytest.raises(ValueError, match="not a readable wheel"):
+            _native_setup(tmp_path, monkeypatch, raw_wheel=b"synthetic digest-valid bytes, not a zip archive")
+        return
     elif case == "missing_descriptor":
         setup["include_scenario"] = False
     elif case == "duplicate_descriptor":

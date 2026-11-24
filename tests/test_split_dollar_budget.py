@@ -686,10 +686,21 @@ def test_split_guard_monitors_agent_and_world_exhaustion_independently(
 def test_split_wheel_attestation_requires_exact_budget_sources(tmp_path):
     wheel = _write_public_agent_wheel(tmp_path)
     with zipfile.ZipFile(wheel) as archive:
-        assert "refund_eval/harbor/installed_agent.py" not in archive.namelist()
+        assert set(adapter.REQUIRED_AGENT_WHEEL_MEMBERS) <= set(archive.namelist())
         assert set(SPLIT_BUDGET_WHEEL_SOURCES).issubset(archive.namelist())
     hashes = verify_split_budget_wheel(wheel)
     assert set(hashes) == set(SPLIT_BUDGET_WHEEL_SOURCES)
+
+    stale_trace = tmp_path / "stale-trace-runtime.whl"
+    with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(stale_trace, "w") as stale:
+        for member in source.infolist():
+            if member.filename not in {
+                "refund_eval/harbor/inspect_snapshotter.py",
+                "refund_eval/harbor/private_traces.py",
+            }:
+                stale.writestr(member, source.read(member.filename))
+    with pytest.raises(ValueError, match="rebuild the wheel from current sources"):
+        verify_split_budget_wheel(stale_trace)
 
     stale = _write_public_agent_wheel(tmp_path / "stale", stale="refund_eval/agent/world_mode.py")
     with pytest.raises(ValueError, match="current approved wheel source"):

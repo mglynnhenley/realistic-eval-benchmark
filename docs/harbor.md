@@ -123,6 +123,54 @@ Jobs are saved under the prepared directory's `jobs/`. Each trial includes
 - `usage.json` with model totals and separate simulator/grader usage.
 - `request.json`, `result.json` and browser network/interception evidence.
 
+Harbor keeps live private trace checkpoints under
+`~/refund-eval-data/partial-traces/`, outside trial output, task artifacts and
+the Luna status feed. The task keeps its named `world-logs` volume by default,
+isolating non-Modal Docker trials by Compose project. Only the guarded Modal
+launcher temporarily replaces it with a private outer-sandbox bind. The world
+service alone mounts that bind at the existing `/var/log/world` path; simulator
+files are not mounted into `main` or agent/artifact roots. Guarded Modal
+transfers fixed world files with the existing Modal filesystem API rather than
+`_sdk_exec`/`docker compose cp`; unguarded Modal and non-Modal runs use the
+world-service transfer fallback. Native agent `.eval` files use the Modal
+filesystem listing API or a scoped directory download. Legacy runs capture
+`/logs/artifacts/refund` `.eval` files and
+`/logs/agent/progress/snapshot.json` without a remote mirror. Invalid live
+`.eval` archives do not replace an earlier durable checkpoint. Incomplete
+event JSONL snapshots are trimmed to the last newline-terminated record.
+
+An agent-side companion snapshots Inspect's active SQLite sample buffer with
+SQLite's online backup API every 0.5 seconds. Each atomic, mode-0600 snapshot is
+a coherent single database; the host downloads only that file, never separate
+database/WAL/SHM copies. The native buffer is on a dedicated `main` volume
+under `/refund-eval-private/inspect-data`, outside agent log and artifact roots;
+legacy Inspect uses a per-run private `/tmp` buffer. Guarded Modal uses a direct
+outer-sandbox file transfer; unguarded Modal and non-Modal use the existing
+scoped transfer fallback. A durable host manifest entry guarantees only the
+events committed in that specific published snapshot. Later events can be lost:
+the nominal helper interval is 0.5 seconds, but failed or stalled snapshot,
+transfer, or host storage has no fixed tail bound. Capture failures after trial
+start are reported in the private manifest and do not change trial outcome.
+
+Every newly created directory ancestor is mode 0700, and its containing
+directory is fsync'd before descendants are created. Each source checkpoint is
+an immutable mode-0600 generation under `generations/<source>/`; the file and
+generation directory are fsync'd before `manifest.json` is atomically updated
+to point at it. Identical size/hash captures reuse the current generation.
+Superseded generations are pruned only after the new manifest is fsync'd; the
+previous target remains available if publication fails. The manifest records
+only the last durable generation and a
+sanitized per-source error; a failed source does not replace its previous good
+copy. It remains marked incomplete: checkpoints do not guarantee every event
+was captured or that final artifact collection completed.
+
+Creating the private per-run directory and its initial manifest is a preflight
+requirement before worker/model execution; failure there aborts before model
+work. After startup, trace and manifest storage failures are reported as
+availability errors when possible and never turn a successful trial into a
+failure. Only files referenced by the durable manifest pointer are claimed as
+retained.
+
 These artifacts can contain inbox contents. Keep run directories out of published
 results. Browser containment and tool boundaries are described in the
 [runbook](running.md#boundaries-and-evidence). Harbor's `trial_completed` reward indicates completion,

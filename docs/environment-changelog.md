@@ -24,11 +24,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 9.1 — 2026-12-12
+## 9.3 — 2026-11-24
 - Kind: trivial batch
-- Fingerprint: 82fdfa9fba1f93e4078a02f373bc12524e6fa459f320e1c7b187962de683aa15
+- Fingerprint: 1faf32d26ece5f51cf3c57d6001152d599447b37d9308e532ea0a75c06bed8b3
 - Trial round: none. Offline launcher verification only.
 - Changes: disable benchmark-side monetary spend validation for explicit no-application-price-cutoff runs while retaining provider-key controls and cleanup after early failures.
+
+## 9.2 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: c66a8d13f667eb3f32ba2aa2cc0843cfa0ccb768dd0d8b0996a72d901fa09d5c
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Correct the saved Admiral car-insurance rule citations and document Three recurring-payment discount scope without regenerating company rules.
+
+## 9.1 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 7c42676db3373a514de62279baa6c24be69d7fcd7542a36531d20755255b2a5f
+- Trial round: none. Offline integration checks only; no paid execution.
+- Changes: Retain private agent and simulator trace checkpoints through cancellation and failed final collection, with isolated Inspect snapshots and durable private storage.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round

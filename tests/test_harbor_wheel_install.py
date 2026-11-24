@@ -43,7 +43,9 @@ class WheelFixture:
     sha256: str
 
 
-def _build_wheel(directory: Path, *, task_source: str | None = None) -> WheelFixture:
+def _build_wheel(
+    directory: Path, *, task_source: str | None = None, include_runtime_modules: bool = True,
+) -> WheelFixture:
     directory.mkdir(parents=True)
     wheel = directory / "refund_eval_wheel_fixture-0.0.1-py3-none-any.whl"
     task = '''from importlib.resources import files
@@ -95,6 +97,9 @@ if __name__ == "__main__":
             b"Tag: py3-none-any\n"
         ),
     }
+    if include_runtime_modules:
+        for member in adapter.REQUIRED_AGENT_WHEEL_MEMBERS:
+            members.setdefault(member, (adapter.ROOT / member).read_bytes())
     record_rows = []
     for name, content in sorted(members.items()):
         digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
@@ -248,6 +253,7 @@ def _exercise_generated_command(
     app = root / "app"
     app.mkdir()
     logs = root / "agent-logs"
+    monkeypatch.setattr(installed_agent, "PRIVATE_AGENT_BUFFER_ROOT", str(root / "private-inspect-data"))
     monkeypatch.setattr(installed_agent, "APP", str(app))
     monkeypatch.setattr(installed_agent, "PYTHON", str(python))
     monkeypatch.setattr(installed_agent, "INSPECT", str(inspect))
@@ -382,6 +388,16 @@ def test_prepare_rejects_wrong_wheel_digest_before_staging_or_output_creation(tm
     with pytest.raises(ValueError, match="(?i)(wheel|sha256|digest)"):
         batch.prepare(out, _config(wheel, digest=wrong_digest))
     assert stage_calls == []
+    assert not out.exists()
+
+
+def test_prepare_rejects_wheel_missing_native_runtime_before_output_creation(tmp_path):
+    wheel = _build_wheel(tmp_path / "input", include_runtime_modules=False)
+    out = tmp_path / "must-not-exist"
+
+    with pytest.raises(ValueError, match="rebuild the wheel from current sources"):
+        batch.prepare(out, _config(wheel))
+
     assert not out.exists()
 
 
