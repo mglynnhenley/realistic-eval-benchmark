@@ -1445,3 +1445,6 @@ async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypa
     with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
         await budget.complete("simulator", [Message("user", "hello")])
     assert recorded.calls == 1
+    with pytest.raises(ModelLimitExceeded, match="allowance is failed"):
+        await budget.complete("simulator", [Message("user", "later tool call")])
+    assert recorded.calls == 1

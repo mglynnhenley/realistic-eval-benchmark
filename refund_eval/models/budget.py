@@ -308,7 +308,9 @@ class BudgetedWorldModels:
         raise AssertionError("unreachable retry loop")
 
     async def _complete_legacy(self, role: Role, messages: Sequence[Message], settings: dict[str, Any]) -> Completion:
-        if self.status != "available" and not self.disable_application_price_cutoffs:
+        if self.status != "available" and not (
+            self.disable_application_price_cutoffs and self.status == "unknown"
+        ):
             raise ModelLimitExceeded(f"World model allowance is {self.status}; no further requests")
         if settings.get("max_tokens") is None:
             settings = {**settings, "max_tokens": WORLD_MAX_OUTPUT_TOKENS, "default_output_cap": True}
@@ -323,7 +325,8 @@ class BudgetedWorldModels:
                 self.persist()
                 raise
             except ModelLimitExceeded:
-                self._mark("unknown")
+                self._mark("failed" if self.disable_application_price_cutoffs else "unknown")
+                self.persist()
                 raise
             except Exception as error:  # noqa: BLE001 - retain MAT-144 failure accounting
                 worst_case = self._worst_case(role, messages, settings)

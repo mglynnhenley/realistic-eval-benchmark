@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 9.0 — 2026-11-24
 - Kind: behaviour round
-- Fingerprint: f657978bcd4a9095e831fabfcfba6532233fa135bace4d26a24eddfea09bb863
+- Fingerprint: 7f34399b37821ce3e50b2b60473b4af8536b67bcf9b671a26e35bb4b314550a2
 - Trial round: the same single approved Luna invocation; no additional trial is planned.
 - Changes: add a run-scoped usage_only opt-in that disables application-level target/world price
   cutoffs while keeping response usage observational, provider failures real, and strict defaults.
