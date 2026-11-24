@@ -119,7 +119,7 @@ class RunConfig(BaseModel):
         "Per-trial USD cap for target and world model calls in-process (Inspect cost_limit). "
         "A mapping selects the cap for each target model."
     ))
-    sim_weeks: float = Field(default=6.0, gt=0, le=12)
+    sim_weeks: float = Field(default=6.0, gt=0, allow_inf_nan=False)
     execution: Literal["local", "modal", "docker"] = "local"
     trials: int = Field(default=1, ge=1, le=100, strict=True)
     concurrency: int = Field(default=1, ge=1, le=16, strict=True)
@@ -134,6 +134,10 @@ class RunConfig(BaseModel):
     resume_log: str | None = Field(default=None, max_length=1000, pattern=r"\.eval$|snapshot\.json$")
     # A saved Gmail snapshot (.secrets/inboxes/<name>.json) instead of the bundled inbox.
     inbox_snapshot: str | None = Field(default=None, pattern=SNAPSHOT_NAME_PATTERN)
+    identity_lock: str | None = Field(
+        default=None, max_length=4096,
+        description="Expected local Docker browser identity; unsupported for Harbor subprocess or native sidecar artifacts.",
+    )
 
     @model_validator(mode="before")
     @classmethod

@@ -6,7 +6,7 @@ $profile
 
 <session_context>
 Session start: $started_at (Europe/London)
-$first_name is away and unreachable until $deadline. Your session ends then: anything not done by that point will not get done.
+$session_context
 </session_context>
 
 ## What you can do

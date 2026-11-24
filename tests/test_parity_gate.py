@@ -10,6 +10,7 @@ models, no API keys. The full gate with its report: `uv run python -m refund_eva
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -20,6 +21,55 @@ import pytest
 from refund_eval.parity import run
 from refund_eval.parity.scripts import SCRIPTS
 from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
+
+
+@pytest.mark.parametrize("change", [None, "different", "missing_identity", "wrong_digest", "tampered", "manifest"])
+def test_harbor_reuse_checks_approved_wheel_before_launch(tmp_path, monkeypatch, change):
+    wheel = tmp_path / "inert-0.0.1-py3-none-any.whl"
+    wheel.write_bytes(b"inert wheel bytes, never installed or launched")
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    script = SCRIPTS["turn_cap"]
+    task = tmp_path / "tasks" / script.scenario
+    agent_dir = task / "environment/agent"
+    (agent_dir / "wheels").mkdir(parents=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.14\n", encoding="utf-8")
+    (agent_dir / "wheels" / wheel.name).write_bytes(wheel.read_bytes())
+    (task / "task.toml").write_text(
+        f'[metadata]\nagent_wheel_filename = "{wheel.name}"\nagent_wheel_sha256 = "{digest}"\n'
+    )
+    manifest = {"filename": wheel.name, "sha256": digest}
+    if change == "different":
+        wheel.write_bytes(b"different approved wheel")
+        digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    elif change == "missing_identity":
+        (task / "task.toml").write_text("[metadata]\n")
+    elif change == "wrong_digest":
+        digest = "0" * 64
+    elif change == "tampered":
+        (agent_dir / "wheels" / wheel.name).write_bytes(b"tampered")
+    elif change == "manifest":
+        manifest["sha256"] = "0" * 64
+    (agent_dir / "agent-wheel.json").write_text(json.dumps(manifest))
+    monkeypatch.setenv("REFUND_EVAL_AGENT_WHEEL", str(wheel))
+    monkeypatch.setenv("REFUND_EVAL_AGENT_WHEEL_SHA256", digest)
+    calls = []
+
+    class LaunchIntercepted(Exception):
+        pass
+
+    def intercept(command, **kwargs):
+        calls.append(command)
+        raise LaunchIntercepted
+
+    monkeypatch.setattr(run.subprocess, "run", intercept)
+    if change is None:
+        with pytest.raises(LaunchIntercepted):
+            run.run_harbor(script, tmp_path, 7)
+        assert len(calls) == 1 and calls[0][1:3] == ["harbor", "run"]
+    else:
+        with pytest.raises(ValueError):
+            run.run_harbor(script, tmp_path, 7)
+        assert not calls
 
 
 def _docker_ready() -> bool:
@@ -51,6 +101,27 @@ def check(name: str, out, paths) -> None:
     assert unexplained(name, comparison) == []
     for c in comparison.values():
         assert c["event_order_same"]
+
+
+def test_inprocess_task_args_write_public_agent_scenario(tmp_path):
+    from refund_eval.scenario.schema import load_agent_scenario, load_scenario
+
+    script = SCRIPTS["turn_cap"]
+    args = run.inprocess_task_args(script, "http://127.0.0.1:8000", tmp_path)
+    public = load_agent_scenario(args["scenario"])
+    full = load_scenario(script.scenario)
+    if args["world_url"] != "http://127.0.0.1:8000":
+        pytest.fail("In-process parity lost its world-service URL", pytrace=False)
+    if set(public.model_dump(mode="json")) != {
+        "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+    }:
+        pytest.fail("Parity caller wrote a non-public top-level field", pytrace=False)
+    if set(public.model_dump(mode="json")["user"]) != {"name", "email_addresses", "phone"}:
+        pytest.fail("Parity caller wrote a non-public user field", pytrace=False)
+    if (public.id, public.task_text, public.start_time, public.requested_deadline, public.sim_weeks) != (
+        full.id, full.task_text, full.start_time, full.requested_deadline, full.sim_weeks,
+    ):
+        pytest.fail("Parity caller changed the public scenario inputs", pytrace=False)
 
 
 @DOCKER

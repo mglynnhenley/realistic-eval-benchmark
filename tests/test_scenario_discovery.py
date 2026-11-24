@@ -1,8 +1,13 @@
 """A scenario added as YAML is immediately available to every launch entry point."""
 
+import base64
+import csv
+import hashlib
+import io
 import shutil
 import sys
 import tomllib
+import zipfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -16,6 +21,30 @@ from refund_eval.harbor.config import TrialSettings
 from refund_eval.scenario import schema
 from refund_eval.world.state import World
 from refund_eval.world_service.settings import WorldSettings
+
+
+def _write_synthetic_wheel(directory):
+    filename = "synthetic_agent-0.0.0-py3-none-any.whl"
+    dist_info = "synthetic_agent-0.0.0.dist-info"
+    files = {
+        "synthetic_agent/__init__.py": b'VALUE = "synthetic"\n',
+        f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
+        f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
+    }
+    record_name = f"{dist_info}/RECORD"
+    rows = []
+    for name, content in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+        rows.append((name, f"sha256={digest}", str(len(content))))
+    rows.append((record_name, "", ""))
+    record = io.StringIO(newline="")
+    csv.writer(record, lineterminator="\n").writerows(rows)
+    files[record_name] = record.getvalue().encode()
+    wheel = directory / filename
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("settings_class", [RunConfig, TrialSettings, WorldSettings, "task", "native_writer",
@@ -41,6 +70,9 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
     elif settings_class in {"native_writer", "native_cli"}:
         from refund_eval.harbor import adapter
 
+        wheel, wheel_sha256 = _write_synthetic_wheel(tmp_path)
+        wheel_args = ["--agent-wheel", str(wheel), "--agent-wheel-sha256", wheel_sha256]
+
         def copy_source(destination):
             destination.mkdir()
             return "test-source"
@@ -49,11 +81,12 @@ def test_scenario_default_deadline(settings_class, name, overrides, weeks, monke
         monkeypatch.setattr(adapter, "stage_agent", lambda *args, **kwargs: None)
         monkeypatch.setattr(adapter, "validate_and_index", lambda *args: None)
         if settings_class == "native_cli":
-            assert adapter.main(["--scenario", name, "--out", str(tmp_path), *flags]) == 0
+            assert adapter.main(["--scenario", name, "--out", str(tmp_path), *wheel_args, *flags]) == 0
         else:
             adapter.write_task(tmp_path, scenario=name, data_mode="fixture", max_turns=1000,
                                research_mode="auto", simulator_model="mockllm/model", grader_model="mockllm/model",
-                               agent_timeout=3600, verifier_timeout=600, cpus=2, memory_mb=4096, **overrides)
+                               agent_timeout=3600, verifier_timeout=600, cpus=2, memory_mb=4096,
+                               agent_wheel=wheel, agent_wheel_sha256=wheel_sha256, **overrides)
         config = tomllib.loads((tmp_path / name / "task.toml").read_text())
         sim_weeks = config["metadata"]["sim_weeks"]
         assert float(config["environment"]["env"]["WORLD_SIM_WEEKS"]) == sim_weeks

@@ -167,17 +167,17 @@ def test_hybrid_readiness_is_local_and_independent_of_gmail(monkeypatch):
     profile._fixture_readiness.cache_clear()
     calls = []
 
-    def run(args, **kwargs):
-        calls.append(args)
-        return SimpleNamespace(returncode=0)
+    def resolve(image):
+        calls.append(image)
+        return "sha256:" + "a" * 64
 
     monkeypatch.setattr(profile.shutil, "which", lambda name: "/usr/local/bin/docker")
-    monkeypatch.setattr(profile.subprocess, "run", run)
+    monkeypatch.setattr(profile, "resolve_local_image_id", resolve)
     try:
         status = profile.hybrid_readiness()
         assert status["configured"]
         assert "keyless" in status["reason"] and "rate limits" in status["reason"]
-        assert calls == [["docker", "image", "inspect", profile.DEFAULT_BROWSER_IMAGE]]
+        assert calls == [profile.DEFAULT_BROWSER_IMAGE]
         assert "Simulated inbox and websites" in profile.fixture_readiness()["reason"]
     finally:
         profile._fixture_readiness.cache_clear()

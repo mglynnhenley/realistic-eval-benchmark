@@ -1,9 +1,11 @@
 """Generate a native Harbor task for one scenario: a world sidecar, the Inspect agent in `main`, a separate verifier.
 
-    scripts/harbor python -m refund_eval.harbor.adapter --scenario train_refund_late --out .context/harbor_tasks
+    scripts/harbor python -m refund_eval.harbor.adapter --scenario train_refund_late --out .context/harbor_tasks \
+        --agent-wheel /path/to/approved-agent.whl --agent-wheel-sha256 SHA256_HEX
 
-Writes, and launches nothing:
-- `OUT/<scenario>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
+The approved wheel path and its SHA256 are required; the adapter hashes the bytes before output creation
+and stages those exact bytes. Writes, and launches nothing:
+- `OUT/<task_id>/`: task.toml (schema 1.4), instruction.md, environment/ (`main` Dockerfile,
   docker-compose.yaml, world/Dockerfile and separate agent and world build inputs) and
   tests/ (the verifier image and test.sh);
 - `OUT/dataset.toml`: the tasks in OUT, each pinned by Harbor's content digest, and `OUT/metric.py`
@@ -19,12 +21,17 @@ directory holds the source and per-task tokens: keep it private (an ignored path
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
+import io
 import json
 import re
 import secrets
 import shutil
 import subprocess
+import zipfile
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -37,6 +44,7 @@ from refund_eval.config import (
     RunConfig,
 )
 from refund_eval.environment_version import ENVIRONMENT_VERSION, environment_fingerprint
+from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import (
     SCENARIO_DIR,
@@ -55,11 +63,10 @@ AGENT_IMPORT_PATH = "refund_eval.harbor.installed_agent:RefundInstalledAgent"
 SOURCE_FILES = ["refund_eval", "pyproject.toml", "uv.lock", "README.md", "LICENSE"]
 AGENT_MODULES = {
     "": "__init__ config environment_version killswitch model_pricing output_paths task",
-    "agent": "__init__ adapters budget harness prompt schedule world_mode",
+    "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
     "harbor": "__init__ atif",
-    "models": "__init__ client replay",
-    "parity": "__init__ inspect_cli scripts",
+    "models": "__init__ client evidence replay shared_role_spend_ledger world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
     "runtime": "__init__ checkpoint events records snapshots trial_artifacts turns",
@@ -71,8 +78,116 @@ AGENT_MODULES = {
     "tasks/train_refund": "__init__ facts",
     "world": "__init__ clock event_log guards ids interception mail mailquery orgs snapshot_store state store timeutil trial_snapshot",
 }
+SPLIT_BUDGET_WHEEL_SOURCES = (
+    "refund_eval/agent/dollar_budget.py",
+    "refund_eval/agent/harness.py",
+    "refund_eval/agent/prompt.py",
+    "refund_eval/agent/world_mode.py",
+    "refund_eval/model_pricing.py",
+    "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/models/shared_role_spend_ledger.py",
+    "refund_eval/published/provider.py",
+    "refund_eval/task.py",
+)
+SPLIT_BUDGET_TASK_SOURCES = (
+    "refund_eval/model_pricing.py",
+    "refund_eval/models/budget.py",
+    "refund_eval/models/client.py",
+    "refund_eval/models/openrouter.py",
+    "refund_eval/models/world_spend_ledger.py",
+    "refund_eval/models/shared_role_spend_ledger.py",
+    "refund_eval/world_service/settings.py",
+    "refund_eval/world_service/__main__.py",
+    "refund_eval/world_service/trial.py",
+    "refund_eval/harbor/world_entrypoint.py",
+)
 HOST_SEED = "${WORLD_SEED:-}"
 DERIVED_SEED = "per trial: first 4 bytes (big-endian) of sha256('<task_version>\\n<trial name>')"
+WHEEL_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+!-]*\.whl\Z")
+SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}\Z")
+
+
+@dataclass(frozen=True)
+class VerifiedAgentWheel:
+    path: Path
+    filename: str
+    sha256: str
+    content: bytes
+
+
+def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgentWheel:
+    filename = path.name
+    if not WHEEL_BASENAME.fullmatch(filename):
+        raise ValueError("Agent wheel path must have a safe .whl basename")
+    if not SHA256_HEX.fullmatch(expected_sha256):
+        raise ValueError("Agent wheel SHA256 must contain 64 hexadecimal characters")
+    content = path.read_bytes()
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if actual_sha256 != expected_sha256.lower():
+        raise ValueError("Agent wheel SHA256 does not match the supplied digest")
+    return VerifiedAgentWheel(path, filename, actual_sha256, content)
+
+
+def verify_suite_task_wheel(wheel: VerifiedAgentWheel, scenarios: set[str]) -> None:
+    error = (
+        "Native task suites require a verified wheel whose "
+        "refund_eval.task.impossible_refund has optional task_text and task_id parameters "
+        "and embedded agent scenario descriptors"
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(wheel.content)) as archive:
+            source = archive.read("refund_eval/task.py")
+            members = set(archive.namelist())
+        module = ast.parse(source)
+    except (OSError, KeyError, zipfile.BadZipFile, SyntaxError, UnicodeDecodeError):
+        raise ValueError(error) from None
+    task = next((node for node in module.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "impossible_refund"),
+                None)
+    if task is None:
+        raise ValueError(error)
+    positional = task.args.posonlyargs + task.args.args
+    optional = {argument.arg for argument in positional[len(positional) - len(task.args.defaults):]}
+    optional.update(argument.arg for argument, default in zip(task.args.kwonlyargs, task.args.kw_defaults)
+                    if default is not None)
+    if not {"task_text", "task_id"} <= optional:
+        raise ValueError(error)
+    missing = sorted(
+        scenario for scenario in scenarios
+        if f"refund_eval/scenario/{scenario}.yaml" not in members
+    )
+    if missing:
+        raise ValueError(
+            "Native task suite wheel is missing agent scenario descriptors: " + ", ".join(missing)
+        )
+
+
+def verify_split_budget_wheel(path: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for relative in SPLIT_BUDGET_WHEEL_SOURCES:
+                actual = archive.read(relative)
+                if actual != (ROOT / relative).read_bytes():
+                    raise ValueError("split budget source does not match the current approved wheel source")
+                hashes[relative] = hashlib.sha256(actual).hexdigest()
+    except (OSError, KeyError, zipfile.BadZipFile):
+        raise ValueError("split mode requires an approved wheel with current budget sources") from None
+    return hashes
+
+
+def verify_split_budget_task_sources(task_path: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    source = task_path / "environment" / "source"
+    try:
+        for relative in SPLIT_BUDGET_TASK_SOURCES:
+            actual = (source / relative).read_bytes()
+            if actual != (ROOT / relative).read_bytes():
+                raise ValueError("split world source does not match current budget enforcement")
+            hashes[relative] = hashlib.sha256(actual).hexdigest()
+    except OSError:
+        raise ValueError("split task is missing current world budget sources") from None
+    return hashes
 
 
 def rules_sha256(scenario_id: str) -> str:
@@ -116,8 +231,23 @@ def _fill(text: str, values: dict[str, object]) -> str:
     return text
 
 
-def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario_name: str) -> None:
+def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario_name: str,
+                verified_wheel: VerifiedAgentWheel | None = None) -> None:
     from refund_eval.realism.track import SOURCE_MANIFEST
+
+    if verified_wheel is not None:
+        destination.mkdir(parents=True, exist_ok=True)
+        for name in ("pyproject.toml", "uv.lock"):
+            shutil.copyfile(source / name, destination / name)
+        wheel_dir = destination / "wheels"
+        wheel_dir.mkdir()
+        (wheel_dir / verified_wheel.filename).write_bytes(verified_wheel.content)
+        (destination / "agent-wheel.json").write_text(json.dumps({
+            "filename": verified_wheel.filename,
+            "sha256": verified_wheel.sha256,
+        }, indent=2) + "\n", encoding="utf-8")
+        shutil.copyfile(Path(__file__).with_name("install_agent.py"), destination / "install-agent.py")
+        return
 
     files = [Path(name) for name in SOURCE_FILES if name != "refund_eval"]
     files.append(Path("refund_eval/agent/system_prompt.md"))
@@ -129,14 +259,14 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
         shutil.copyfile(source / relative, target)
 
     view = scenario.model_dump(mode="json", include={
-        "id": True, "task_kind": True, "task_text": True, "start_time": True, "sim_weeks": True,
-        "user": {"name", "email_addresses", "phone"}, "facts": True,
-        "orgs": {"__all__": {"key", "name", "kind", "email_domains", "contact_url"}},
-    }, exclude={"facts": {"true_circumstances"}})
+        "id": True, "task_text": True, "start_time": True, "requested_deadline": True, "sim_weeks": True,
+        "user": {"name", "email_addresses", "phone"},
+    })
     (destination / "refund_eval" / "scenario" / f"{scenario_name}.yaml").write_text(
         yaml.safe_dump(view), encoding="utf-8",
     )
     manifest = json.loads((source / SOURCE_MANIFEST).read_text(encoding="utf-8"))
+    manifest.pop("files", None)
     memory = source / "refund_eval" / "scenario" / "realism" / f"{scenario.id}.json"
     if memory.is_file():
         manifest["realism_memory"] = {scenario.id: hashlib.sha256(memory.read_bytes()).hexdigest()[:8]}
@@ -146,44 +276,107 @@ def stage_agent(source: Path, destination: Path, scenario: Scenario, *, scenario
 def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | None = None, max_turns: int, research_mode: str,
                simulator_model: str, grader_model: str, agent_timeout: float, verifier_timeout: float,
                cpus: int, memory_mb: int, task_version: str = TASK_VERSION, world_seed: str = HOST_SEED,
-               world_cost_limit: float | None = None) -> Path:
-    """Write OUT/<scenario>/ and return it."""
-    from refund_eval.agent.prompt import task_message
+               world_cost_limit: float | None = None, agent_wheel: Path, agent_wheel_sha256: str,
+               verified_wheel: VerifiedAgentWheel | None = None, openrouter_key_mode: str = "shared",
+               shared_allowance_usd: float | None = None, shared_role_budget_config: str | None = None,
+               task_id: str | None = None, task_text: str | None = None, suite_task: bool = False,
+               requested_deadline: date | None = None) -> Path:
+    """Write OUT/<task_id>/ and return it."""
+    from refund_eval.agent.prompt import task_message, with_requested_deadline
+
+    if verified_wheel is None:
+        verified_wheel = read_verified_agent_wheel(agent_wheel, agent_wheel_sha256)
+    elif (verified_wheel.path != agent_wheel or verified_wheel.sha256 != agent_wheel_sha256.lower()):
+        raise ValueError("Verified agent wheel does not match the supplied wheel and SHA256")
 
     sc = load_scenario(scenario)
+    agent_scenario = with_requested_deadline(sc, requested_deadline)
     if sim_weeks is None:
         sim_weeks = sc.sim_weeks
-    task_dir = out / scenario
+    task_id = scenario if task_id is None else task_id
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", task_id):
+        raise ValueError("task_id must start with a lowercase letter and contain only lowercase letters, digits, '_' or '-'")
+    if task_text is not None and not task_text.strip():
+        raise ValueError("task_text must not be empty")
+    task_dir = out / task_id
     if task_dir.exists():
         raise FileExistsError(f"Refusing to overwrite a generated task: {task_dir}")
     shutil.copytree(TEMPLATE, task_dir)
     source = task_dir / "environment" / "source"
     source_sha256 = copy_source(source)
-    stage_agent(source, task_dir / "environment" / "agent", sc, scenario_name=scenario)
+    stage_agent(source, task_dir / "environment" / "agent", agent_scenario, scenario_name=scenario,
+                verified_wheel=verified_wheel)
     shutil.copytree(source, task_dir / "tests" / "source")  # the verifier image builds from tests/ alone
+    from refund_eval.sim import company_store
+
+    store_root = company_store.store_root()
+    seed_store = task_dir / "environment" / "company-store"
+    seed_store.mkdir()
+    if store_root is not None:
+        company_store.harvest_registered_jobs(sc, destination_root=store_root)
+        company_store.sync_scenario_entries(sc, source_root=store_root, destination_root=seed_store)
     seed_policy = DERIVED_SEED
     if world_seed == HOST_SEED:
         seed_policy += "; WORLD_SEED overrides"
     elif world_seed:
         seed_policy = f"fixed for all trials: {world_seed}"
     values = {
-        "TASK_NAME": f"{ORG}/{scenario}", "SCENARIO": scenario, "TASK_VERSION": task_version,
+        "TASK_NAME": f"{ORG}/{task_id}", "TASK_ID": task_id, "SCENARIO": scenario, "TASK_VERSION": task_version,
         "ENVIRONMENT_VERSION": ENVIRONMENT_VERSION, "ENVIRONMENT_FINGERPRINT": environment_fingerprint(),
-        "DESCRIPTION": f"Impossible-refund benchmark, scenario {sc.id}: a long-horizon customer-service task "
+        "DESCRIPTION": f"Long-horizon customer-service task {task_id} using scenario {sc.id}, "
                        "against simulated organisations, graded from the world's event log.",
         "DATA_MODE": data_mode, "SIM_WEEKS": sim_weeks, "MAX_TURNS": max_turns, "RESEARCH_MODE": research_mode,
         "SIMULATOR_MODEL": simulator_model, "GRADER_MODEL": grader_model, "RULES_SHA256": rules_sha256(sc.id),
         "SOURCE_SHA256": source_sha256, "AGENT_TIMEOUT": float(agent_timeout),
+        "AGENT_WHEEL_FILENAME": verified_wheel.filename, "AGENT_WHEEL_SHA256": verified_wheel.sha256,
         "VERIFIER_TIMEOUT": float(verifier_timeout), "CPUS": cpus, "MEMORY_MB": memory_mb,
         "WORLD_SEED": world_seed, "SEED_POLICY": json.dumps(seed_policy + "; recorded in /var/log/world/seed.json and state.json"),
+        "COMPANY_STORE_ROOT": "/var/log/world/company-store" if store_root is not None else "off",
         "WORLD_COST_LIMIT": world_cost_limit if world_cost_limit is not None else "",
+        "WORLD_STRICT_BUDGET": "true" if openrouter_key_mode in {"split", "shared_roles", "shared_caps"} else "false",
+        "OPENROUTER_WORLD_KEY": "${OPENROUTER_WORLD_API_KEY}" if openrouter_key_mode == "split" else "${OPENROUTER_API_KEY:-}",
+        "OPENROUTER_KEY_MODE": openrouter_key_mode,
+        "SHARED_ALLOWANCE_USD": "" if shared_allowance_usd is None else str(shared_allowance_usd),
+        "REQUESTED_DEADLINE": "" if requested_deadline is None else requested_deadline.isoformat(),
+        "SHARED_ROLE_MODE": openrouter_key_mode if openrouter_key_mode in {"shared_roles", "shared_caps"} else "disabled",
+        "SHARED_ROLE_BUDGET_CONFIG_TOML": json.dumps(shared_role_budget_config or ""),
+        "SHARED_ROLE_BUDGET_CONFIG_YAML": yaml.safe_dump(shared_role_budget_config or "", default_style='"').strip(),
+        "SUITE_TASK_ID": task_id if suite_task else "",
         "TURN_TOKEN": secrets.token_urlsafe(32), "ADMIN_TOKEN": secrets.token_urlsafe(32),
     }
     for name in ("task.toml", "environment/docker-compose.yaml"):
         path = task_dir / name
-        path.write_text(_fill(path.read_text(), values), encoding="utf-8")
+        rendered = _fill(path.read_text(), values)
+        if name == "environment/docker-compose.yaml":
+            if openrouter_key_mode in {"shared_roles", "shared_caps"}:
+                rendered = rendered.replace(
+                    "    # ROLE_BUDGET_MAIN_VOLUME\n",
+                    "    volumes:\n      - role-budget:/var/lib/refund-eval/role-budget\n",
+                ).replace(
+                    "      # ROLE_BUDGET_WORLD_VOLUME\n",
+                    "      - role-budget:/var/lib/refund-eval/role-budget\n"
+                    "      - role-budget:/var/log/world/role-budget\n",
+                ).replace("  # ROLE_BUDGET_VOLUME\n", "  role-budget:\n")
+            if openrouter_key_mode == "shared_caps":
+                marker_anchor = '      REFUND_EVAL_SHARED_ROLE_MODE: "shared_caps"\n'
+                if rendered.count(marker_anchor) != 1:
+                    raise ValueError("shared_caps Compose mode marker is missing")
+                rendered = rendered.replace(
+                    marker_anchor,
+                    marker_anchor + f'      {SHARED_CAPS_HEADROOM_BOUND_ENV}: "false"\n',
+                )
+            else:
+                rendered = rendered.replace("    # ROLE_BUDGET_MAIN_VOLUME\n", "")
+                rendered = rendered.replace("      # ROLE_BUDGET_WORLD_VOLUME\n", "")
+                rendered = rendered.replace("  # ROLE_BUDGET_VOLUME\n", "")
+        path.write_text(rendered, encoding="utf-8")
     (task_dir / "tests" / "test.sh").chmod(0o755)
-    (task_dir / "instruction.md").write_text(task_message(sc, sim_weeks) + "\n", encoding="utf-8")
+    instruction = task_text if task_text is not None else task_message(agent_scenario, sim_weeks)
+    (task_dir / "instruction.md").write_text(
+        instruction if instruction.endswith("\n") else instruction + "\n", encoding="utf-8",
+    )
+    if store_root is not None:
+        company_store.register_native_jobs_root(out / "jobs", root=store_root)
     return task_dir
 
 
@@ -258,11 +451,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--simulator-model", default=DEFAULT_ROLE_MODEL)
     p.add_argument("--grader-model", default=DEFAULT_GRADER_MODEL)
     p.add_argument("--world-cost-limit", type=float, help="Per-trial world model USD allowance; required for paid runs")
+    p.add_argument("--agent-wheel", type=Path, required=True, help="Approved agent wheel to install")
+    p.add_argument("--agent-wheel-sha256", required=True, help="Expected SHA256 of the approved agent wheel")
     p.add_argument("--agent-timeout", type=float, default=39_600, help="Harbor agent timeout in seconds")
     p.add_argument("--verifier-timeout", type=float, default=600)
     p.add_argument("--cpus", type=int, default=2)
     p.add_argument("--memory-mb", type=int, default=4096)
     args = p.parse_args(argv)
+    verified_wheel = read_verified_agent_wheel(args.agent_wheel, args.agent_wheel_sha256)
     if args.world_cost_limit is not None:
         try:
             TypeAdapter(CostCap).validate_python(args.world_cost_limit)
@@ -274,7 +470,9 @@ def main(argv: list[str] | None = None) -> int:
                           max_turns=args.max_turns, research_mode=args.research_mode,
                           simulator_model=args.simulator_model, grader_model=args.grader_model,
                           agent_timeout=args.agent_timeout, verifier_timeout=args.verifier_timeout,
-                          cpus=args.cpus, memory_mb=args.memory_mb, world_cost_limit=args.world_cost_limit)
+                          cpus=args.cpus, memory_mb=args.memory_mb, world_cost_limit=args.world_cost_limit,
+                          agent_wheel=args.agent_wheel, agent_wheel_sha256=args.agent_wheel_sha256,
+                          verified_wheel=verified_wheel)
     job = sample_job(out, task_dir, scenario=args.scenario)
     validate_and_index(out, task_dir, job)
     header = ("# Sample Harbor job for the native refund task; the adapter does not launch it.\n"

@@ -57,6 +57,7 @@ from refund_eval.agent.budget import (
     TokenBudgetReached,
     prepare_ledger,
 )
+from refund_eval.agent.dollar_budget import target_dollar_budget
 from refund_eval.agent.harness import (
     MEMORY_NOTES_PATH,
     MEMORY_TEMPLATE,
@@ -74,7 +75,7 @@ from refund_eval.agent.prompt import render_system_prompt
 from refund_eval.agent.schedule import sim_deadline
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.adapter import inspect_parameters, model_content
-from refund_eval.scenario.schema import Scenario
+from refund_eval.scenario.schema import AgentScenario
 from refund_eval.world.interception import current_tool_call_id
 from refund_eval.world.state import Wakeup, World
 
@@ -94,7 +95,7 @@ class WorldView:
     it does the sample's World on the native path; each `/turn` reply brings the clock and
     stop reason up to date."""
 
-    def __init__(self, scenario: Scenario) -> None:
+    def __init__(self, scenario: AgentScenario) -> None:
         self.world = World(start_time=scenario.start_time, now=scenario.start_time)
 
     def record_clock(self) -> None:
@@ -262,7 +263,7 @@ class WorldClient:
         return on_continue
 
 
-async def run_in_world(state: AgentState, *, scenario: Scenario, world_url: str, history_tokens: int,
+async def run_in_world(state: AgentState, *, scenario: AgentScenario, world_url: str, history_tokens: int,
                        sim_weeks: float, checkin_hours: tuple[int, ...], token_budget: int | None,
                        budget_notice: str) -> AgentState:
     """`refund_agent`'s execute in world-service mode."""
@@ -282,45 +283,50 @@ async def run_in_world(state: AgentState, *, scenario: Scenario, world_url: str,
         # Notes cost no simulated time and do not deliver mail.
         local = [world.local_tool(memory(initial_data={MEMORY_NOTES_PATH: MEMORY_TEMPLATE}))] if history_tokens else []
         ledger = view.world.token_ledger if budgeted else None
-        inner = react(
-            prompt=AgentPrompt(
-                instructions=render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
-                                                  token_budget=ledger.budget if ledger else None,
-                                                  budget_notice=budget_notice),
-                handoff_prompt=None, assistant_prompt=None, submit_prompt=None,
-            ),
-            tools=[*tools, *local],
-            submit=False,
-            compaction=HistoryWindow(history_tokens, clock=lambda: view.world.now) if history_tokens else None,
-            model=BudgetedModel(get_model(), state, session_end, budget_notice=budget_notice,
-                                host=view) if budgeted else None,
-            on_continue=world.on_continue(history_tokens),
-        )
-        try:
-            state = await inner(state)
-        except TokenBudgetReached:
-            # BudgetedModel counted the turn in the view if the final generation ran.
-            output = state.output
-            ended = bool(output.choices) and not output.message.tool_calls
-            await world.finish(STOP_TOKEN_BUDGET, counted=view.world.turn > world.turns, ended=ended,
-                               text=output.message.text if ended else "")
-        except TokenAccountingError:
-            await world.finish(STOP_TOKEN_ACCOUNTING_ERROR)
-            raise
-        except CancelledError:
-            await world.finish(STOP_KILL_SWITCH if kill_reason() is not None else STOP_CANCELLED)
-            raise
-        except LimitExceededError as ex:
-            await world.finish(f"{ex.type}_limit")
-            raise
-        except RuntimeError as ex:
-            # Inspect's compaction: the latest turn alone exceeds the window (see the native path).
-            if not str(ex).startswith("Compaction insufficient"):
+        split_target_budget = "REFUND_EVAL_AGENT_DOLLAR_CAP" in os.environ or "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS" in os.environ
+        model = get_model() if budgeted or split_target_budget else None
+        async with AsyncExitStack() as budget_stack:
+            if split_target_budget:
+                if model is None:
+                    raise RuntimeError("split target model was not initialized")
+                await budget_stack.enter_async_context(target_dollar_budget(model))
+            inner = react(
+                prompt=AgentPrompt(
+                    instructions=render_system_prompt(scenario, checkin_hours, history_tokens, sim_weeks,
+                                                      token_budget=ledger.budget if ledger else None,
+                                                      budget_notice=budget_notice),
+                    handoff_prompt=None, assistant_prompt=None, submit_prompt=None,
+                ),
+                tools=[*tools, *local],
+                submit=False,
+                compaction=HistoryWindow(history_tokens, clock=lambda: view.world.now) if history_tokens else None,
+                    model=BudgetedModel(model, state, session_end, budget_notice=budget_notice,
+                                        host=view) if budgeted else model,
+                on_continue=world.on_continue(history_tokens),
+            )
+            try:
+                state = await inner(state)
+            except TokenBudgetReached:
+                output = state.output
+                ended = bool(output.choices) and not output.message.tool_calls
+                await world.finish(STOP_TOKEN_BUDGET, counted=view.world.turn > world.turns, ended=ended,
+                                   text=output.message.text if ended else "")
+            except TokenAccountingError:
+                await world.finish(STOP_TOKEN_ACCOUNTING_ERROR)
                 raise
-            logger.warning("Stopping trial: %s", ex)
-            await world.finish(STOP_CONTEXT_WINDOW)
-        finally:
-            if budgeted:
-                state.messages.append(final_notice(view.load(), sim_weeks))
+            except CancelledError:
+                await world.finish(STOP_KILL_SWITCH if kill_reason() is not None else STOP_CANCELLED)
+                raise
+            except LimitExceededError as ex:
+                await world.finish(f"{ex.type}_limit")
+                raise
+            except RuntimeError as ex:
+                if not str(ex).startswith("Compaction insufficient"):
+                    raise
+                logger.warning("Stopping trial: %s", ex)
+                await world.finish(STOP_CONTEXT_WINDOW)
+            finally:
+                if budgeted:
+                    state.messages.append(final_notice(view.load(), sim_weeks))
         await world.finish(loop_stop_reason(state))
     return state

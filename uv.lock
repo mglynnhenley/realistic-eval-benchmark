@@ -3816,6 +3816,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "beautifulsoup4" },
+    { name = "filelock" },
     { name = "google-api-python-client" },
     { name = "google-auth-oauthlib" },
     { name = "httpx" },
@@ -3860,6 +3861,7 @@ requires-dist = [
     { name = "aiohttp" },
     { name = "anthropic", marker = "extra == 'providers'" },
     { name = "beautifulsoup4" },
+    { name = "filelock" },
     { name = "gdm-concordia", marker = "extra == 'concordia'", specifier = "==2.4.0" },
     { name = "google-api-python-client" },
     { name = "google-auth-oauthlib" },

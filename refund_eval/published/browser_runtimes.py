@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
+import subprocess
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -22,13 +25,47 @@ class BrowserBoundaryError(RuntimeError):
     """The browser boundary failed; continuing the trial is not supported."""
 
 
+def require_verified_browser_isolation(manifest: Any) -> None:
+    """Reject startup unless the browser manifest proves an isolated network."""
+    if not isinstance(manifest, Mapping) or manifest.get("verified") is not True:
+        raise BrowserBoundaryError("Browser network isolation is not verified")
+    if manifest.get("network_mode") != "none":
+        raise BrowserBoundaryError("Browser network isolation evidence is inconsistent")
+    mode = manifest.get("mode")
+    if mode == "docker-network-none":
+        return
+    if mode == "subprocess-netns" and manifest.get("namespace_verified") is True:
+        return
+    raise BrowserBoundaryError("Browser network isolation evidence is missing or unknown")
+
+
+def resolve_local_image_id(image: str, *, docker_binary: str | None = None) -> str:
+    """Resolve only an image already present in the active local daemon; never pull."""
+    binary = docker_binary or shutil.which("docker")
+    if binary is None:
+        raise BrowserBoundaryError("Docker is unavailable; refusing to substitute a browser image")
+    try:
+        result = subprocess.run(
+            [binary, "image", "inspect", "--format", "{{.Id}}", image],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BrowserBoundaryError("Cannot inspect the local browser image; refusing to pull or substitute") from error
+    image_id = result.stdout.strip()
+    if result.returncode or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        raise BrowserBoundaryError(
+            f"Browser image {image!r} is unavailable locally; refusing to pull or substitute another image"
+        )
+    return image_id
+
+
 def docker_command(
     spool_dir: Path, container_name: str, *, image: str = DEFAULT_IMAGE,
     docker_binary: str = "docker", docker_host: str | None = None,
 ) -> list[str]:
     """No host networking, credentials, Docker socket, shared profile or host cwd."""
     return [docker_binary, *(["--host", docker_host] if docker_host else []),
-        "run", "--rm", "-i", "--name", container_name,
+        "run", "--pull=never", "--rm", "-i", "--name", container_name,
         "--network", "none", "--dns", "127.0.0.1", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--pids-limit", "256", "--memory", "1g", "--cpus", "2",
@@ -57,10 +94,12 @@ class DockerBrowserRuntime:
         self.client: MCPStdioClient | None = None
         self._docker_binary = shutil.which("docker") or "docker"
         self._docker_host: str | None = None
+        self.image_id: str | None = None
 
     async def start(self) -> MCPStdioClient:
         if shutil.which(self._docker_binary) is None:
             raise BrowserBoundaryError("Docker is required for the published browser")
+        self.image_id = resolve_local_image_id(self.image, docker_binary=self._docker_binary)
         # Resolve the active endpoint before the child receives its empty HOME.
         process = await asyncio.create_subprocess_exec(
             self._docker_binary, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}",
@@ -76,7 +115,7 @@ class DockerBrowserRuntime:
             raise BrowserBoundaryError("Cannot resolve the active Docker daemon")
         self._docker_host = os.environ.get("DOCKER_HOST") or stdout.decode().strip()
         self.client = MCPStdioClient(
-            docker_command(self.spool_dir, self.container_name, image=self.image,
+            docker_command(self.spool_dir, self.container_name, image=self.image_id,
                            docker_binary=self._docker_binary, docker_host=self._docker_host),
             timeout=self.timeout, max_response_bytes=MAX_RESPONSE_BYTES * 2,
         )
@@ -100,6 +139,8 @@ class DockerBrowserRuntime:
 
     async def verify_isolation(self) -> dict[str, Any]:
         inspected = json.loads(await self._docker_output("inspect", self.container_name))[0]
+        if inspected.get("Image") != self.image_id:
+            raise BrowserBoundaryError("Browser container is not using the resolved immutable image ID")
         host = inspected["HostConfig"]
         mounts = inspected.get("Mounts", [])
         valid_mount = (len(mounts) == 1 and mounts[0].get("Type") == "bind"

@@ -31,6 +31,7 @@ from pathlib import Path
 from refund_eval.world_service.settings import DEFAULT_OUTPUT_DIR
 
 FAKE_MODELS_ENV = "REFUND_EVAL_FAKE_WORLD_MODELS"
+COMPANY_STORE_SEED_ROOT = Path("/opt/company-store-seed")
 _CREDENTIAL_NAME = re.compile(r"API_KEY|_KEY$|OPENROUTER|OPEN_ROUTER|ANTHROPIC|OPENAI|EXA_|SUPABASE", re.IGNORECASE)
 # Environment variable -> world service flag.
 FLAGS = {
@@ -77,12 +78,29 @@ def world_argv(env: dict[str, str], seed: int | None) -> list[str]:
             argv += [flag, env[name].strip()]
     if seed is not None:
         argv += ["--seed", str(seed)]
+    argv.append("--require-verified-browser-isolation")
     return argv
 
 
 def credentials_set(env: dict[str, str]) -> list[str]:
     """Names (never values) of credential-like variables that are set."""
     return sorted(name for name, value in env.items() if value.strip() and _CREDENTIAL_NAME.search(name))
+
+
+def initialize_company_store(env: dict[str, str]) -> int:
+    """Seed the per-trial artifact store, or keep shared storage explicitly disabled."""
+    configured_root = env.get("REFUND_EVAL_COMPANY_STORE", "off").strip()
+    if not configured_root or configured_root.casefold() == "off":
+        os.environ["REFUND_EVAL_COMPANY_STORE"] = "off"
+        return 0
+    os.environ["REFUND_EVAL_COMPANY_STORE"] = configured_root
+    from refund_eval.scenario.schema import load_scenario
+    from refund_eval.sim import company_store
+
+    scenario = load_scenario(env["WORLD_SCENARIO"])
+    return company_store.sync_scenario_entries(
+        scenario, source_root=COMPANY_STORE_SEED_ROOT, destination_root=Path(configured_root),
+    )
 
 
 class FakeWorldModels:
@@ -123,6 +141,7 @@ def main() -> int:
     seed = choose_seed(env)
     output = Path(env.get("WORLD_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR)
     output.mkdir(parents=True, exist_ok=True)
+    initialize_company_store(env)
     (output / "seed.json").write_text(json.dumps({**seed, "fake_world_models": model_client is not None}) + "\n")
     from refund_eval.world_service.__main__ import main as serve
 

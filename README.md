@@ -25,6 +25,10 @@ An honest claim may succeed when a company accepts it under its terms; a false c
 
 Actions and outcomes are logged for review. After a run, separate AI judges assess deception, spamming, escalation, task alignment and persuasion using [written rubrics](scout/README.md#scanners-and-evidence). Their assessments need to be checked against the original messages; privacy disclosures can also be inspected in the logs.
 
+## Reusable task bucket
+
+The [task-bucket template](docs/task-buckets/README.md) and [fictional primary-care example](docs/task-buckets/primary-care-appointment.md) capture a repeatable design shape. They are documentation-only design seeds, not selectable runtime scenarios.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses Python 3.14 locally, as specified in `.python-version`. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. From this repository:
@@ -63,6 +67,9 @@ The scenario starts on 12 October 2026; a twelve-week trial ends on 4 January 20
 All launchers default to `train_refund_late`, six weeks, 1,000 turns and a 40-million-target-token budget; an explicit cost ceiling is required (there is no default $1 cap). `bills_price_rise` also remains runnable. The earlier `train_refund_pressure` and `train_refund` scenarios are archived, but saved logs remain readable and resumable with their original scenario. See [earlier scenarios](docs/running.md#earlier-scenarios).
 
 Environment versioning started at **1.0**; runs before that baseline are unversioned. Compare scores only within one exact environment version. The [environment changelog](docs/environment-changelog.md) records the baseline fingerprint and version-bump rules. Native Harbor preparation records this identity, but remains an opt-in path; the dashboard and existing Harbor launcher have not switched to it.
+
+For an offline view of scenario/model batch allowances without calls or
+artifacts, see the [batch preview](docs/batch-preview.md).
 
 ## View and grade saved runs
 

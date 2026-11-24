@@ -34,6 +34,7 @@ import os
 import tempfile
 import uuid
 from contextlib import AsyncExitStack
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import Any, Self
@@ -46,8 +47,24 @@ from refund_eval.config import HYBRID_EXA_KEY_ENV
 from refund_eval.killswitch import kill_reason
 from refund_eval.models import client as models
 from refund_eval.models.budget import BudgetedWorldModels
-from refund_eval.models.client import ModelClient, ModelLimitExceeded
+from refund_eval.models.client import (
+    ModelClient,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+)
 from refund_eval.models.replay import RecordingModelClient
+from refund_eval.models.shared_role_spend_ledger import (
+    LEDGER_DIRECTORY as SHARED_ROLE_LEDGER_DIRECTORY,
+)
+from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedger,
+)
+from refund_eval.models.world_spend_ledger import (
+    WorldSpendLedger,
+    WorldSpendLedgerError,
+)
 from refund_eval.output_paths import validate_private_output
 from refund_eval.published.adapter import AUDIT_KEY, MCPService, audit, fingerprint
 from refund_eval.published.profile import (
@@ -70,7 +87,6 @@ from refund_eval.world import store as trial_store
 from refund_eval.world.event_log import EVENTS_KEY
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
-    SESSION_END_KEY,
     ToolContext,
     active_tool_call,
     current_tool_call_id,
@@ -85,7 +101,7 @@ from refund_eval.world.state import (
     load_world,
     world_tx,
 )
-from refund_eval.world.store import world_store
+from refund_eval.world.store import SESSION_END_KEY, world_store
 from refund_eval.world_service.settings import WorldSettings
 from refund_eval.world_service.store import ACTIVITY_KEY, MemoryTrial, OutputWriter
 from refund_eval.world_service.tools import (
@@ -149,6 +165,8 @@ class WorldTrial:
         self._lock = anyio.Lock()
         self._tools: dict[str, NativeTool] = {}
         self._writer: OutputWriter | None = None
+        self._spend_ledger: WorldSpendLedger | None = None
+        self._spend_scope: dict[str, Any] | None = None
         self.trial: MemoryTrial | None = None
         self.scenario: Scenario | None = None
 
@@ -156,7 +174,36 @@ class WorldTrial:
 
     async def __aenter__(self) -> Self:
         settings = self.settings
+        shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+        if (shared_role_mode == "shared_caps"
+                and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
+                     or settings.world_cost_limit is None)):
+            raise WorldSpendLedgerError("World shared_caps task has no verified headroom binding")
         self.scenario = scenario = load_scenario(settings.scenario)
+        if settings.world_cost_limit is not None:
+            model_mapping = ({"simulator": settings.simulator_model, "grader": settings.grader_model}
+                             if self._model_client is None else
+                             {role: self._model_client.model_name(role) for role in ("simulator", "grader")})
+            self._spend_scope = {"scenario": settings.scenario, "models": model_mapping}
+            if shared_role_mode in {"shared_roles", "shared_caps"}:
+                shared_config = SharedRoleBudgetConfig.from_environment()
+                if (shared_config.scenario != settings.scenario
+                        or shared_config.models["simulator"] != model_mapping["simulator"]
+                        or shared_config.models["grader"] != model_mapping["grader"]
+                        or settings.world_cost_limit is None
+                        or shared_config.role_limits_usd["world"] != Decimal(str(settings.world_cost_limit))):
+                    raise WorldSpendLedgerError("World shared-role budget scope does not match the prepared run")
+                self._spend_ledger = SharedRoleSpendLedger(SHARED_ROLE_LEDGER_DIRECTORY, shared_config).view("world")
+                self._spend_scope = shared_config.scope
+            elif shared_role_mode in (None, "", "disabled"):
+                self._spend_ledger = WorldSpendLedger(settings.output_dir, settings.world_cost_limit, self._spend_scope)
+            else:
+                raise WorldSpendLedgerError("World shared-role budget mode is invalid")
+            if self._spend_ledger.has_unresolved():
+                raise WorldSpendLedgerError(
+                    f"World-spend ledger in {self._spend_ledger.path} has an unresolved reservation; "
+                    "refusing to erase prior trial artifacts or resume paid work. Reconcile it or use a new output directory."
+                )
         if self._model_client is None:
             from refund_eval.models.openrouter import OpenRouterClient
 
@@ -166,8 +213,13 @@ class WorldTrial:
         trial_store.install(self.trial)
         # Every world-side completion is kept in the store, so the trial can be replayed.
         recorded = RecordingModelClient(self._model_client)
+        if settings.strict_budget and settings.world_cost_limit is None:
+            raise ValueError("Strict world budget requires world_cost_limit")
         models.install(recorded if settings.world_cost_limit is None else
-                       BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist))
+                       BudgetedWorldModels(recorded, settings.world_cost_limit, self.persist,
+                                           prices=getattr(self._model_client, "tariffs", None) or {},
+                                           ledger=self._spend_ledger,
+                                           scope=self._spend_scope, strict_budget=settings.strict_budget))
         try:
             init_world(scenario, settings.seed)
             store = world_store()
@@ -205,7 +257,10 @@ class WorldTrial:
         the same profile record, startup checks and audit. The browser runs here, in the world."""
         from refund_eval.published import profile as published
         from refund_eval.published.browser import PublishedBrowserService
-        from refund_eval.published.browser_runtimes import DEFAULT_IMAGE
+        from refund_eval.published.browser_runtimes import (
+            DEFAULT_IMAGE,
+            require_verified_browser_isolation,
+        )
         from refund_eval.published.fixtures import (
             FIXTURE_MAIL_PROVENANCE,
             make_fixture_mail,
@@ -286,6 +341,9 @@ class WorldTrial:
             with active_tool_call(request.get("tool_call_id")):
                 try:
                     return await boundary(request)
+                except ModelRequestRejected:
+                    _record_stop("model_request_rejected")
+                    raise
                 except ModelLimitExceeded:
                     _record_stop(STOP_MODEL_LIMIT)
                     raise
@@ -299,6 +357,9 @@ class WorldTrial:
                                           output_dir=artifacts / "files")
         self._stack.push_async_callback(browser.aclose)
         # Starts the browser, runs the interception canary and records the isolation evidence.
+        if self.settings.require_verified_browser_isolation:
+            await browser.list_tools()
+            require_verified_browser_isolation(browser.security_manifest)
         await self._add_tools(browser, "playwright")
         manifest = getattr(browser, "security_manifest", {}) or {}
         profile = world_store().get(PROFILE_KEY)
@@ -357,6 +418,10 @@ class WorldTrial:
                 return _error(str(ex))
             except ModelLimitExceeded as ex:
                 _record_stop(STOP_MODEL_LIMIT)
+                entry.update(status="error", error=str(ex))
+                return _error(str(ex))
+            except ModelRequestRejected as ex:
+                _record_stop("model_request_rejected")
                 entry.update(status="error", error=str(ex))
                 return _error(str(ex))
             except Exception as ex:
@@ -456,6 +521,9 @@ class WorldTrial:
             return None
         except ModelLimitExceeded:
             _record_stop(STOP_MODEL_LIMIT)
+            return None
+        except ModelRequestRejected:
+            _record_stop("model_request_rejected")
             return None
         wakeup, _ = wake_after_turn(sim_weeks=settings.sim_weeks, checkin_hours=settings.checkin_hours)
         return wakeup

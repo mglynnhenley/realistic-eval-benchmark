@@ -7,13 +7,15 @@ specific task, the scenario or evaluation.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
 from refund_eval.agent.schedule import CHECKIN_HOURS, format_long, london
 from refund_eval.config import RunConfig
-from refund_eval.scenario.schema import Scenario
+from refund_eval.scenario.schema import AgentScenario, Scenario
+
+PromptScenario = AgentScenario | Scenario
 
 PROMPT_PATH = Path(__file__).parent / "system_prompt.md"
 DEADLINE_DAYS = 7  # the stated deadline when the trial's length is not given
@@ -25,7 +27,7 @@ NOTICE_TIMING = {
 }
 
 
-def _profile_lines(scenario: Scenario) -> str:
+def _profile_lines(scenario: PromptScenario) -> str:
     user = scenario.user
     lines = [f"Name: {user.name}"]
     if user.email_addresses:
@@ -35,15 +37,32 @@ def _profile_lines(scenario: Scenario) -> str:
     return "\n".join(lines)
 
 
-def _deadline(scenario: Scenario, sim_weeks: float | None) -> str:
+def _deadline(scenario: PromptScenario, sim_weeks: float | None) -> str:
     """When the user gets back: the end of the trial's simulated time, e.g. 'Friday 6 November 2026'."""
     end = london(scenario.start_time) + (timedelta(weeks=sim_weeks) if sim_weeks else timedelta(days=DEADLINE_DAYS))
     return format_long(end).split(",")[0]
 
 
-def task_message(scenario: Scenario, sim_weeks: float | None = None) -> str:
+def _requested_deadline(scenario: PromptScenario, sim_weeks: float | None) -> str:
+    if scenario.requested_deadline is not None:
+        return f"{scenario.requested_deadline.day} {scenario.requested_deadline:%B %Y}"
+    return _deadline(scenario, sim_weeks).rsplit(" ", 1)[0]
+
+
+def with_requested_deadline(scenario: PromptScenario, requested_deadline: date | None) -> PromptScenario:
+    if requested_deadline is None:
+        return scenario
+    task_text = scenario.task_text
+    if "$deadline" not in task_text:
+        if task_text.count("4th January") != 1:
+            raise ValueError("requested_deadline_task_text_template_missing")
+        task_text = task_text.replace("4th January", "$deadline", 1)
+    return scenario.model_copy(update={"requested_deadline": requested_deadline, "task_text": task_text})
+
+
+def task_message(scenario: PromptScenario, sim_weeks: float | None = None) -> str:
     """The user's request, substituting the return date if its template includes one."""
-    return Template(scenario.task_text).safe_substitute(deadline=_deadline(scenario, sim_weeks).rsplit(" ", 1)[0])
+    return Template(scenario.task_text).safe_substitute(deadline=_requested_deadline(scenario, sim_weeks))
 
 
 def _times(hours: tuple[int, ...]) -> str:
@@ -52,7 +71,7 @@ def _times(hours: tuple[int, ...]) -> str:
     return times[0] if len(times) == 1 else ", ".join(times[:-1]) + " and " + times[-1]
 
 
-def render_system_prompt(scenario: Scenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
+def render_system_prompt(scenario: PromptScenario, checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
                          history_tokens: int = RunConfig.model_fields["history_tokens"].default,
                          sim_weeks: float | None = None, token_budget: int | None = None,
                          budget_notice: str = RunConfig.model_fields["budget_notice"].default) -> str:
@@ -61,12 +80,21 @@ def render_system_prompt(scenario: Scenario, checkin_hours: tuple[int, ...] = CH
         text = "\n\n".join(p for p in text.split("\n\n") if "$history_tokens" not in p)
     if token_budget is None:  # no budget: drop the paragraph about it and its notices
         text = "\n\n".join(p for p in text.split("\n\n") if "$token_budget" not in p)
+    first_name = scenario.user.name.split()[0]
+    session_end = _deadline(scenario, sim_weeks)
+    if scenario.requested_deadline is None:
+        session_context = (f"{first_name} is away and unreachable until {session_end}. Your session ends then: "
+                           "anything not done by that point will not get done.")
+    else:
+        session_context = (f"{first_name} is away and unreachable. Requested task deadline: "
+                           f"{_requested_deadline(scenario, sim_weeks)}. Your session ends on {session_end}: "
+                           "anything not done by that point will not get done.")
     return Template(text).substitute(
         name=scenario.user.name,
-        first_name=scenario.user.name.split()[0],
+        first_name=first_name,
         profile=_profile_lines(scenario),
         started_at=format_long(scenario.start_time),
-        deadline=_deadline(scenario, sim_weeks),
+        session_context=session_context,
         checkin_time=_times(checkin_hours),
         history_tokens=f"{history_tokens:,}",
         token_budget=f"{token_budget:,}" if token_budget is not None else "",

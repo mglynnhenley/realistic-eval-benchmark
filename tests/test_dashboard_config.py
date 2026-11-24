@@ -314,6 +314,89 @@ def test_unavailable_simulated_gmail_runtime_cannot_start_worker(tmp_path, monke
         manager.close()
 
 
+def test_dashboard_locked_image_is_used_for_readiness(tmp_path, monkeypatch):
+    from refund_eval import run_identity
+    from refund_eval.published import profile
+
+    image_id = "sha256:" + "a" * 64
+    readiness = []
+    monkeypatch.setattr(
+        run_identity, "validate_identity_lock",
+        lambda value, scenario, *, browser_runtime: ({"runtime_identity": image_id}, image_id),
+    )
+    monkeypatch.setattr(
+        profile, "fixture_readiness",
+        lambda **kwargs: readiness.append(kwargs) or {"configured": True, "reason": "Browser ready"},
+    )
+    monkeypatch.setattr(
+        profile, "hybrid_readiness",
+        lambda **kwargs: readiness.append(kwargs) or {"configured": True, "reason": "Browser ready"},
+    )
+    monkeypatch.setattr(server.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(
+        poll=lambda: 0, wait=lambda **kwargs: 0,
+    ))
+    monkeypatch.setattr(server.RunManager, "_monitor", lambda *args: None)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        manager.start(server.RunConfig(
+            cost_limit=1, mode="model", data_mode="fixture", model="mockllm/target",
+            simulator_model="mockllm/simulator", grader_model="mockllm/grader",
+            identity_lock="locks/custom-image.json",
+        ))
+        assert readiness == [{"browser_image": image_id}]
+    finally:
+        manager.close()
+
+
+def test_dashboard_identity_lock_mismatch_fails_before_readiness_or_worker(tmp_path, monkeypatch):
+    from refund_eval import run_identity
+    from refund_eval.published import profile
+
+    def mismatch(*args, **kwargs):
+        raise run_identity.IdentityLockError("Identity lock mismatch: environment_fingerprint")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A mismatched lock must fail before readiness or worker startup")
+
+    monkeypatch.setattr(run_identity, "validate_identity_lock", mismatch)
+    monkeypatch.setattr(profile, "fixture_readiness", forbidden)
+    monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
+    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        with pytest.raises(server.APIError, match="Identity lock mismatch"):
+            manager.start(server.RunConfig(
+                cost_limit=1, mode="model", model="mockllm/target",
+                simulator_model="mockllm/simulator", grader_model="mockllm/grader",
+                identity_lock="locks/mismatch.json",
+            ))
+        assert not manager.list() and not manager.processes
+    finally:
+        manager.close()
+
+
+def test_dashboard_unresolvable_lock_path_returns_api_error_before_readiness_or_worker(tmp_path, monkeypatch):
+    from refund_eval.published import profile
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("An invalid lock path must fail before readiness or worker startup")
+
+    monkeypatch.setattr(profile, "fixture_readiness", forbidden)
+    monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
+    monkeypatch.setattr(server.subprocess, "Popen", forbidden)
+    manager = server.RunManager(tmp_path / "runs")
+    try:
+        with pytest.raises(server.APIError, match="Cannot resolve identity lock path"):
+            manager.start(server.RunConfig(
+                cost_limit=1, mode="model", model="mockllm/target",
+                simulator_model="mockllm/simulator", grader_model="mockllm/grader",
+                identity_lock="~definitely-no-such-local-user/lock.json",
+            ))
+        assert not manager.list() and not manager.processes
+    finally:
+        manager.close()
+
+
 @pytest.mark.parametrize("data_mode", ["fixture", "hybrid"])
 def test_unknown_profile_is_rejected(tmp_path, data_mode):
     manager = server.RunManager(tmp_path)

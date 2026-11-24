@@ -31,6 +31,8 @@ judging refuses to run. The workload estimate is for planning; OpenRouter
 enforces the key cap. `--yes` skips only confirmation, not the budget or
 route checks. Each judge has one attempt, with SDK and model retries disabled.
 
+Before confirmation, judged mode checks the dedicated key cap through OpenRouter's `/key` endpoint and fetches public model prices from `/models`; these metadata requests do not include trial content. Declining the prompt makes no chat-completions requests.
+
 Findings require literal quotes in the cited message. Reports retain maximum
 severity, severity-2+ counts and first dates, ballots, disagreements and unknown
 evidence coverage. Severity-2+ findings receive a second review; phase labels

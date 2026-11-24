@@ -17,13 +17,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from inspect_ai.tool import ToolError
 from inspect_ai.util import LimitExceededError
 
-from refund_eval.models.client import ModelLimitExceeded
+from refund_eval.models.client import ModelLimitExceeded, ModelRequestRejected
 from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.world import clock, event_log
@@ -31,7 +30,7 @@ from refund_eval.world.guards import extract_urls
 from refund_eval.world.ids import new_hex
 from refund_eval.world.mail import Mailbox
 from refund_eval.world.state import Channel, Interception, load_world, world_tx
-from refund_eval.world.store import world_store
+from refund_eval.world.store import session_end, world_store
 from refund_eval.world.timeutil import as_aware
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,6 @@ logger = logging.getLogger(__name__)
 # Private per-sample state of the mail client (not part of the World contract).
 CLIENT_KEY = "mail_client"
 DISPATCH_LIMIT_KEY = "interception_execution_limit"
-SESSION_END_KEY = "harness_session_end"
 
 
 @dataclass
@@ -128,15 +126,27 @@ def current_tool_call_id() -> str | None:
     span_id = current_span_id()
     if span_id is None:
         return None
+
+    def tool_call_id(events: list[Any]) -> tuple[bool, str | None]:
+        for n in range(len(events) - 1, -1, -1):
+            ev = events[n]
+            if isinstance(ev, SpanBeginEvent) and ev.id == span_id:
+                return True, next((e.id for e in events[n + 1 :] if isinstance(e, ToolEvent)), None)
+        return False, None
+
     try:
-        events = list(transcript().history.recent_events(200))
+        history = transcript().history
+        events = list(history.recent_events(100))
     except Exception:  # noqa: BLE001 - history unavailable: fall back to a fresh id
         return None
-    for n in range(len(events) - 1, -1, -1):
-        ev = events[n]
-        if isinstance(ev, SpanBeginEvent) and ev.id == span_id:
-            return next((e.id for e in events[n + 1 :] if isinstance(e, ToolEvent)), None)
-    return None
+    found, call_id = tool_call_id(events)
+    if found:
+        return call_id
+    try:
+        events = list(history.recent_events(200))
+    except Exception:  # noqa: BLE001 - history unavailable: fall back to a fresh id
+        return None
+    return tool_call_id(events)[1]
 
 
 def log_interception(
@@ -182,10 +192,9 @@ def set_response(interception_id: str, text: str) -> None:
 
 def enforce_session_end() -> None:
     """Stop tool execution at the harness's per-sample simulated-time boundary."""
-    end = world_store().get(SESSION_END_KEY)
-    if end is None:
+    deadline = session_end()
+    if deadline is None:
         return  # Standalone tool consumers have no harness horizon.
-    deadline = datetime.fromisoformat(end)
     world = load_world()
     if as_aware(world.now) < as_aware(deadline):
         return
@@ -202,10 +211,8 @@ def enforce_session_end() -> None:
 def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> None:
     """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
     enforce_session_end()
-    end = world_store().get(SESSION_END_KEY)
     with event_log.clock_cause("charge"), world_tx() as w:
-        clock.charge(w, tool_name, written=written, read=read, base=base,
-                     until=datetime.fromisoformat(end) if end is not None else None)
+        clock.charge(w, tool_name, written=written, read=read, base=base, until=session_end())
     # Typing/reading can exhaust the remaining session time. In particular, do
     # not dispatch a native write after composing it has reached the boundary.
     enforce_session_end()
@@ -282,6 +289,12 @@ async def intercept(
             "type": ex.type, "value": ex.value, "limit": ex.limit, "message": ex.message,
         })
         _note({"dispatch_limit": ex.type, "interception_id": icpt.id, "tool": tool})
+        raise
+    except ModelRequestRejected:
+        with world_tx() as world:
+            if world.stop_reason is None:
+                world.stop_reason = "model_request_rejected"
+        _note({"dispatch_error": "model_request_rejected", "interception_id": icpt.id, "tool": tool})
         raise
     except ModelLimitExceeded:
         # A world-side model client limit outside Inspect (the world service) stops the trial the same way.
