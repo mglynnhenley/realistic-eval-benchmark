@@ -497,6 +497,80 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
 
 
+def test_public_projection_wheel_build_and_installed_agent_loader(generated, tmp_path):
+    task_dir = generated / "train_refund_late"
+    source = task_dir / "environment" / "source"
+    payload = tmp_path / "public-agent"
+    rail_scenario = load_scenario("train_refund_late").model_copy(update={
+        "requested_deadline": date(2027, 2, 4),
+        "sim_weeks": 365 / 7,
+    })
+    bills_scenario = load_scenario("bills_price_rise")
+    for scenario in (rail_scenario, bills_scenario):
+        adapter.stage_agent(source, payload, scenario, scenario_name=scenario.id)
+
+    build_dir = tmp_path / "wheelhouse"
+    subprocess.run(
+        ["uv", "build", "--offline", "--wheel", "--out-dir", str(build_dir)],
+        cwd=payload, check=True, capture_output=True, text=True,
+    )
+    [wheel] = build_dir.glob("*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        scenario_members = sorted(
+            name for name in archive.namelist()
+            if name.startswith("refund_eval/scenario/") and name.endswith(".yaml")
+        )
+        assert scenario_members == [
+            "refund_eval/scenario/bills_price_rise.yaml",
+            "refund_eval/scenario/train_refund_late.yaml",
+        ]
+        for member in scenario_members:
+            projection = yaml.safe_load(archive.read(member))
+            assert set(projection) == {
+                "id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user",
+            }
+            assert set(projection["user"]) == {"name", "email_addresses", "phone"}
+
+    installed = tmp_path / "installed-wheel"
+    subprocess.run(
+        ["uv", "pip", "install", "--offline", "--no-deps", "--python", sys.executable,
+         "--target", str(installed), str(wheel)],
+        check=True, capture_output=True, text=True,
+    )
+    loader_check = textwrap.dedent("""
+        from datetime import date
+        import math
+        import os
+        from pathlib import Path
+        import refund_eval.scenario.schema as schema
+
+        assert Path(schema.__file__).resolve().is_relative_to(Path(os.environ["PUBLIC_WHEEL_INSTALL"]).resolve())
+        rail = schema.load_agent_scenario("train_refund_late")
+        assert rail.id == "train_refund_late"
+        assert rail.requested_deadline == date(2027, 2, 4)
+        assert math.isclose(rail.sim_weeks * 7, 365, rel_tol=0, abs_tol=1e-9)
+        bills = schema.load_agent_scenario("bills_price_rise")
+        assert bills.id == "bills_price_rise"
+        assert bills.requested_deadline == date.fromisoformat(os.environ["BILLS_REQUESTED_DEADLINE"]) \
+            if os.environ["BILLS_REQUESTED_DEADLINE"] else bills.requested_deadline is None
+        assert math.isclose(bills.sim_weeks, float(os.environ["BILLS_SIM_WEEKS"]), rel_tol=0, abs_tol=1e-9)
+    """)
+    environment = {
+        **os.environ,
+        "PUBLIC_WHEEL_INSTALL": str(installed),
+        "BILLS_REQUESTED_DEADLINE": bills_scenario.requested_deadline.isoformat()
+        if bills_scenario.requested_deadline else "",
+        "BILLS_SIM_WEEKS": str(bills_scenario.sim_weeks),
+    }
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (str(installed), environment.get("PYTHONPATH", "")) if value
+    )
+    subprocess.run(
+        [sys.executable, "-c", loader_check], cwd=tmp_path, env=environment,
+        check=True, capture_output=True, text=True,
+    )
+
+
 @pytest.mark.parametrize("days", [365, 730])
 def test_staged_public_scenario_keeps_requested_deadline_separate_from_horizon(generated, tmp_path, days):
     sim_weeks = days / 7

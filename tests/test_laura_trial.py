@@ -239,26 +239,6 @@ def _install_staged_scenario_wheel(
     )
 
 
-@pytest.fixture
-def inherited_scenario_bundle(tmp_path, monkeypatch):
-    from refund_eval.scenario import schema
-
-    source_scenario_dir = Path(__file__).resolve().parents[1] / "refund_eval" / "scenario"
-    scenario_files = {
-        "archive/train_refund": (source_scenario_dir / "archive" / "train_refund.yaml").read_bytes(),
-        "train_refund_late": (source_scenario_dir / "train_refund_late.yaml").read_bytes(),
-    }
-    bundle = _native_setup(tmp_path, monkeypatch)
-    staged_scenario_dir = bundle.source_root / "refund_eval" / "scenario"
-    for name, content in scenario_files.items():
-        scenario_path = staged_scenario_dir / f"{name}.yaml"
-        scenario_path.parent.mkdir(parents=True, exist_ok=True)
-        scenario_path.write_bytes(content)
-    monkeypatch.setattr(schema, "SCENARIO_DIR", staged_scenario_dir)
-    _install_staged_scenario_wheel(bundle, scenario_files, tmp_path / "inherited-wheel")
-    return SimpleNamespace(bundle=bundle, files=scenario_files, schema=schema, scenario_dir=staged_scenario_dir)
-
-
 def _save(bundle: SimpleNamespace) -> None:
     laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
 
@@ -1323,48 +1303,24 @@ def test_public_validation_rejects_invalid_digest_valid_staged_wheel(
     assert not bundle.manifest_path.exists()
 
 
-def test_public_validation_accepts_inherited_settings_in_packaged_preflight(
-    inherited_scenario_bundle, tmp_path, monkeypatch
-):
-    bundle = inherited_scenario_bundle.bundle
-    assert laura_trial._public_validation_result(bundle.task_path)["scenario"] == "train_refund_late"
+def test_public_validation_rejects_unprojected_inherited_wheel(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch)
+    source_scenario_dir = Path(__file__).resolve().parents[1] / "refund_eval" / "scenario"
+    inherited_files = {
+        "archive/train_refund": (source_scenario_dir / "archive" / "train_refund.yaml").read_bytes(),
+        "train_refund_late": (source_scenario_dir / "train_refund_late.yaml").read_bytes(),
+    }
+    _install_staged_scenario_wheel(bundle, inherited_files, tmp_path / "unprojected-wheel")
 
-    other_scenario_dir = tmp_path / "other-scenarios"
-    other_scenario_dir.mkdir()
-    monkeypatch.setattr(inherited_scenario_bundle.schema, "SCENARIO_DIR", other_scenario_dir)
     with pytest.raises(laura_trial.SetupFailure):
-        laura_trial._public_validation_result(bundle.task_path)
-    monkeypatch.setattr(inherited_scenario_bundle.schema, "SCENARIO_DIR", inherited_scenario_bundle.scenario_dir)
+        laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
+    assert not bundle.manifest_path.exists()
 
-    _save(bundle)
-    laura_trial.verify_setup(bundle.manifest_path)
-    task_manifest_path = bundle.task_path / "task.toml"
-    task_manifest = task_manifest_path.read_text(encoding="utf-8")
-    current_horizon = tomllib.loads(task_manifest)["metadata"]["sim_weeks"]
-    horizon_line = f"sim_weeks = {current_horizon}"
-    assert task_manifest.count(horizon_line) == 1
-    task_manifest_path.write_text(
-        task_manifest.replace(horizon_line, f"sim_weeks = {current_horizon + 1}", 1),
-        encoding="utf-8",
+
+def test_public_validation_rejects_mismatched_public_scenario_id(tmp_path, monkeypatch):
+    bundle = _native_setup(
+        tmp_path, monkeypatch, scenario={**_PUBLIC_SCENARIO, "id": "different_scenario"},
     )
-    with pytest.raises(laura_trial.SetupFailure):
-        laura_trial.verify_setup(bundle.manifest_path)
-
-
-def test_public_validation_rejects_inherited_effective_mismatch_in_packaged_preflight(
-    inherited_scenario_bundle, tmp_path
-):
-    bundle = inherited_scenario_bundle.bundle
-    mismatched_files = dict(inherited_scenario_bundle.files)
-    child = yaml.safe_load(mismatched_files["train_refund_late"])
-    child["id"] = "effective_mismatch"
-    mismatched_files["train_refund_late"] = yaml.safe_dump(child, sort_keys=False).encode()
-    for name, content in mismatched_files.items():
-        scenario_path = inherited_scenario_bundle.scenario_dir / f"{name}.yaml"
-        scenario_path.parent.mkdir(parents=True, exist_ok=True)
-        scenario_path.write_bytes(content)
-    _install_staged_scenario_wheel(bundle, mismatched_files, tmp_path / "mismatched-wheel")
-
     with pytest.raises(laura_trial.SetupFailure):
         laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
     assert not bundle.manifest_path.exists()
