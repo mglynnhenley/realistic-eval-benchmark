@@ -86,11 +86,6 @@ def _parse(m: re.Match[str], real_today: date) -> date | None:
         return None
 
 
-def dates_in(text: str, real_today: date) -> set[date]:
-    """Every date written in `text` (used to remember what the agent typed)."""
-    return {d for m in _PATTERN.finditer(text) if (d := _parse(m, real_today)) is not None}
-
-
 def _format(m: re.Match[str], new: date) -> str:
     if m.group("iso"):
         return new.isoformat()

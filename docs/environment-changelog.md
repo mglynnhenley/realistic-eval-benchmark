@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.8 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 9e66738262dbbb72d8279fcbcdf87b9f5edf56423b446a579123c78db7098a7c
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Remove unused date extraction and mailbox sender-check helpers without changing active mail handling.
+
 ## 9.7 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 6a4da4821ab63913694d741f6f97b096864a9ac0369a8fbb55b499459a67fcdd
