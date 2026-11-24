@@ -16,6 +16,7 @@ from inspect_ai import eval, eval_async
 from refund_eval.config import DEFAULT_GRADER_MODEL, DEFAULT_ROLE_MODEL
 from refund_eval.harbor.artifacts import finite_json
 from refund_eval.harbor.config import SNAPSHOT_IN_IMAGE, TrialRequest
+from refund_eval.harbor.inspect_snapshotter import start_snapshotter, stop_snapshotter
 from refund_eval.published.provider import published_model_args
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.task import impossible_refund
@@ -140,8 +141,13 @@ def _export(request: TrialRequest, output: Path, log) -> dict:
 
 def run_trial(request: TrialRequest, output: Path) -> dict:
     """Legacy synchronous contract, retained for old requests."""
-    [log] = eval(impossible_refund, **_initialize(request, output))
-    return _export(request, output, log)
+    kwargs = _initialize(request, output)
+    snapshotter = start_snapshotter(output, Path(os.environ.get("XDG_DATA_HOME", "/tmp/refund-eval-inspect-data")))
+    try:
+        [log] = eval(impossible_refund, **kwargs)
+        return _export(request, output, log)
+    finally:
+        stop_snapshotter(snapshotter)
 
 
 def _identity(request: TrialRequest) -> dict:
@@ -224,6 +230,9 @@ async def run_trial_async(request: TrialRequest, output: Path, *, worker_seconds
     kwargs = _initialize(request, output)
     kwargs.pop("display")  # eval_async has no synchronous display argument.
     write_json(output / "worker-identity.json", _identity(request))
+    snapshotter = await asyncio.to_thread(
+        start_snapshotter, output, Path(os.environ.get("XDG_DATA_HOME", "/tmp/refund-eval-inspect-data")),
+    )
     evaluation = asyncio.create_task(eval_async(impossible_refund, **kwargs))
     loop = asyncio.get_running_loop()
     stopped = False
@@ -279,6 +288,7 @@ async def run_trial_async(request: TrialRequest, output: Path, *, worker_seconds
         stop_waiter.cancel()
         for signum in (signal.SIGTERM, signal.SIGINT):
             loop.remove_signal_handler(signum)
+        await asyncio.to_thread(stop_snapshotter, snapshotter)
 
 
 def main() -> int:

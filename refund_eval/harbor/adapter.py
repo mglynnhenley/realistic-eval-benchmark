@@ -65,7 +65,8 @@ AGENT_MODULES = {
     "": "__init__ config environment_version killswitch model_pricing output_paths task",
     "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
-    "harbor": "__init__ atif target_charges",
+    "dashboard": "__init__ luna luna_events",
+    "harbor": "__init__ atif installed_agent inspect_snapshotter luna_status private_traces target_charges",
     "models": "__init__ client evidence replay shared_role_spend_ledger world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
@@ -77,7 +78,23 @@ AGENT_MODULES = {
     "tasks/household_bills": "__init__ facts",
     "tasks/train_refund": "__init__ facts",
     "world": "__init__ clock event_log guards ids interception mail mailquery orgs snapshot_store state store timeutil trial_snapshot",
+    "world_service": "__init__ status",
 }
+REQUIRED_AGENT_WHEEL_MEMBERS = (
+    "refund_eval/__init__.py",
+    "refund_eval/harbor/__init__.py",
+    "refund_eval/harbor/atif.py",
+    "refund_eval/harbor/installed_agent.py",
+    "refund_eval/harbor/inspect_snapshotter.py",
+    "refund_eval/harbor/luna_status.py",
+    "refund_eval/harbor/private_traces.py",
+    "refund_eval/harbor/target_charges.py",
+    "refund_eval/dashboard/__init__.py",
+    "refund_eval/dashboard/luna.py",
+    "refund_eval/dashboard/luna_events.py",
+    "refund_eval/world_service/__init__.py",
+    "refund_eval/world_service/status.py",
+)
 SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/dollar_budget.py",
     "refund_eval/agent/harness.py",
@@ -116,6 +133,15 @@ class VerifiedAgentWheel:
     content: bytes
 
 
+def _require_agent_wheel_members(members: set[str]) -> None:
+    missing = sorted(set(REQUIRED_AGENT_WHEEL_MEMBERS) - members)
+    if missing:
+        raise ValueError(
+            "Agent wheel is missing native runtime modules: "
+            f"{', '.join(missing)}; rebuild the wheel from current sources before staging"
+        )
+
+
 def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgentWheel:
     filename = path.name
     if not WHEEL_BASENAME.fullmatch(filename):
@@ -126,6 +152,11 @@ def read_verified_agent_wheel(path: Path, expected_sha256: str) -> VerifiedAgent
     actual_sha256 = hashlib.sha256(content).hexdigest()
     if actual_sha256 != expected_sha256.lower():
         raise ValueError("Agent wheel SHA256 does not match the supplied digest")
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            _require_agent_wheel_members(set(archive.namelist()))
+    except zipfile.BadZipFile:
+        raise ValueError("Agent wheel is not a readable wheel") from None
     return VerifiedAgentWheel(path, filename, actual_sha256, content)
 
 
@@ -167,6 +198,7 @@ def verify_split_budget_wheel(path: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
     try:
         with zipfile.ZipFile(path) as archive:
+            _require_agent_wheel_members(set(archive.namelist()))
             for relative in SPLIT_BUDGET_WHEEL_SOURCES:
                 actual = archive.read(relative)
                 if actual != (ROOT / relative).read_bytes():
@@ -364,7 +396,7 @@ def write_task(out: Path, *, scenario: str, data_mode: str, sim_weeks: float | N
             if openrouter_key_mode in {"shared_roles", "shared_caps"}:
                 rendered = rendered.replace(
                     "    # ROLE_BUDGET_MAIN_VOLUME\n",
-                    "    volumes:\n      - role-budget:/var/lib/refund-eval/role-budget\n",
+                    "      - role-budget:/var/lib/refund-eval/role-budget\n",
                 ).replace(
                     "      # ROLE_BUDGET_WORLD_VOLUME\n",
                     "      - role-budget:/var/lib/refund-eval/role-budget\n"
