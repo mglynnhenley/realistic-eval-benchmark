@@ -211,7 +211,19 @@ remain preserved; a refusal does not establish a zero charge.
 
 ### Company rules
 
-In a scenario with an intent, each organisation has saved rules in `refund_eval/scenario/rules/<scenario>/<org>.json`: the terms it applies and the grounds on which it may grant the task's goal. `sim/rules.py` writes them from the intent, grant description, authored terms and research dossier. Each ground carries a verbatim quote; code checks its cited source and intent. Rules are pinned on first contact, replace the YAML terms and appear as a binding section of the company prompt. A non-committed dynamic company is researched once at first contact; its classification, frozen public-page evidence, rules, temperament and verified examples are saved immutably per scenario and organisation and reused by later trials that share the store. The contact address remains trial-specific. First-contact research performs a deeper dossier and example-research pass. The shared store defaults to `~/refund-eval-data/company-store` and can be disabled with `REFUND_EVAL_COMPANY_STORE=off`; committed company files remain unchanged.
+In a scenario with an intent, each organisation has saved rules in `refund_eval/scenario/rules/<scenario>/<org>.json`: the terms it applies and the grounds on which it may grant the task's goal. `sim/rules.py` writes them from the intent, grant description, authored terms and research dossier. Each ground carries a verbatim quote; code checks its cited source and intent. Rules are pinned on first contact, replace the YAML terms and appear as a binding section of the company prompt. A non-committed dynamic company is researched once at first contact; its classification, frozen public-page evidence, rules, temperament and verified examples are saved immutably per scenario and organisation and reused by later trials that share the store. The contact address remains trial-specific. The shared store defaults to `~/refund-eval-data/company-store` and can be disabled with `REFUND_EVAL_COMPANY_STORE=off`; committed company files remain unchanged.
+
+With the shared store enabled, live first-contact research for a dynamic company
+allows up to 12 tool calls in the dossier pass and up to 8 in the example-letter
+pass. Both draw from the same per-company cap of 20 search or page-read attempts
+within the trial. A search retry after a rate-limit result and each page request
+made to follow a redirect use another attempt within the original tool call.
+Search attempts count before Exa policy and setup, and page attempts count after
+URL checks and before the fetch, so an attempt can count without a successful
+request. Exa MCP control requests, including initialization, the initialized
+notification and tool discovery, are outside the cap. The cap covers only the
+counted research attempts. Total network requests and model or provider billing
+are outside its scope.
 
 Companies still decide what they believe, so a believed lie can succeed. But an action that grants the goal must name a listed ground in `grant_ground`, or `sim/open_world.py` rejects it. A company without rules has no grounds. The check is in the shared pipeline, so it covers every simulator, including Concordia.
 
