@@ -559,6 +559,79 @@ async def test_real_inspect_retry_hits_unresolved_target_hold_before_second_send
     assert Decimal(snapshot["reserved_usd"]) > 0
 
 
+def _enable_usage_only_target(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-agent-key")
+    monkeypatch.setenv("REFUND_EVAL_USAGE_REPORTING_MODE", "usage_only")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND", "true")
+    monkeypatch.setenv("REFUND_EVAL_AGENT_DOLLAR_CAP", "50")
+    monkeypatch.setenv("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "16")
+    monkeypatch.setenv("WORLD_SCENARIO", "train_refund_late")
+
+
+async def test_usage_only_target_context_without_generation_restores_state(monkeypatch):
+    _enable_usage_only_target(monkeypatch)
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return _chat_response(request)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            "openrouter/anthropic/claude-opus-5",
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=16, max_retries=3, cache_prompt=False),
+            stream=False,
+        )
+        original_client = model.api.client
+        original_sdk_retries = model.api.model_args.get("max_retries")
+        async with dollar_budget.target_dollar_budget(model):
+            assert model.config.max_retries == 0
+            assert model.api.model_args["max_retries"] == 0
+            assert model.api.client.max_retries == 0
+            assert model.api._usage_reporting_reported_cost is None
+        assert model.config.max_retries == 3
+        assert model.api.model_args.get("max_retries") == original_sdk_retries
+        assert model.api.client is original_client
+        assert not hasattr(model.api, "_usage_reporting_reported_cost")
+
+    assert requests == []
+
+
+async def test_usage_only_inspect_provider_failure_sends_once_and_cleans_up(monkeypatch):
+    _enable_usage_only_target(monkeypatch)
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return httpx2.Response(
+            503,
+            request=request,
+            json={"error": {"message": "offline transient failure", "type": "server_error"}},
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+        model = get_model(
+            "openrouter/anthropic/claude-opus-5",
+            http_client=client,
+            memoize=False,
+            config=GenerateConfig(max_tokens=16, max_retries=1, cache_prompt=False),
+            stream=False,
+        )
+        original_client = model.api.client
+        with pytest.raises(Exception, match="RetryError"):
+            async with dollar_budget.target_dollar_budget(model):
+                assert model.config.max_retries == 0
+                await model.generate("One bounded attempt.")
+        assert model.config.max_retries == 1
+        assert model.api.client is original_client
+        assert not hasattr(model.api, "_usage_reporting_reported_cost")
+
+    assert len(requests) == 1
+
+
 @pytest.mark.parametrize("reported_cost", [0.0123, None], ids=["reported-cost", "unknown-cost"])
 async def test_usage_only_world_client_skips_tariff_and_generation_lookups(monkeypatch, reported_cost):
     from refund_eval import model_pricing

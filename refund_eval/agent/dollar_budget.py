@@ -317,12 +317,17 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
         original_generate = getattr(api, "generate", None)
         original_client = api.client
         old_max_retries = api.model_args.get("max_retries")
+        model_config = model.config if isinstance(model, Model) else None
+        old_model_max_retries = model_config.max_retries if model_config is not None else None
+        if model_config is not None:
+            model_config.max_retries = 0
         model_info = _get_model_info_direct(model) if isinstance(model, Model) else None
         old_model_cost = model_info.cost if model_info is not None else None
         if model_info is not None:
             model_info.cost = None
         missing_cost = object()
         old_reported_cost = getattr(api, "_usage_reporting_reported_cost", missing_cost)
+        api._usage_reporting_reported_cost = None
         api.model_args["max_retries"] = 0
         api.client = api.client.with_options(max_retries=0)
 
@@ -339,6 +344,7 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
             return completion
 
         async def response_only_generate(*args: Any, **kwargs: Any) -> Any:
+            api._usage_reporting_reported_cost = None
             result = await original_generate(*args, **kwargs)
             output = result[0] if isinstance(result, tuple) else result
             if isinstance(output, ModelOutput):
@@ -361,10 +367,13 @@ async def target_dollar_budget(model: Any) -> AsyncIterator[None]:
             if original_generate is not None:
                 api.generate = original_generate
             api.client = original_client
+            if model_config is not None:
+                model_config.max_retries = old_model_max_retries
             if model_info is not None:
                 model_info.cost = old_model_cost
             if old_reported_cost is missing_cost:
-                delattr(api, "_usage_reporting_reported_cost")
+                if hasattr(api, "_usage_reporting_reported_cost"):
+                    delattr(api, "_usage_reporting_reported_cost")
             else:
                 api._usage_reporting_reported_cost = old_reported_cost
             if old_max_retries is None:
