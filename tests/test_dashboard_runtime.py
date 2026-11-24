@@ -206,6 +206,69 @@ def test_simulated_gmail_worker_rechecks_runtime_before_model(tmp_path, monkeypa
     assert "Docker is unavailable" in read_snapshot(tmp_path)["error"]
 
 
+def test_worker_uses_locked_image_for_readiness_before_eval(tmp_path, monkeypatch):
+    from refund_eval import run_identity
+    from refund_eval.published import profile
+
+    image_id = "sha256:" + "b" * 64
+    (tmp_path / "config.json").write_text(json.dumps({
+        "mode": "model", "tool_profile": "published", "data_mode": "fixture", "model": "mockllm/target",
+        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "cost_limit": 1, "identity_lock": "locks/custom-image.json",
+    }))
+    readiness = []
+    evaluations = []
+    monkeypatch.setattr(
+        run_identity, "validate_identity_lock",
+        lambda value, scenario, *, browser_runtime: ({"runtime_identity": image_id}, image_id),
+    )
+
+    def ready(**kwargs):
+        readiness.append(kwargs)
+        return {"configured": True, "reason": "Browser ready"}
+
+    def evaluate(task, **kwargs):
+        evaluations.append(kwargs)
+        return [SimpleNamespace(
+            samples=[SimpleNamespace(store={}, messages=[], scores={}, error=None)],
+            status="success", error=None, location=str(tmp_path / "mock.eval"),
+        )]
+
+    monkeypatch.setattr(profile, "fixture_readiness", ready)
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: pytest.fail("unexpected readiness mode"))
+    monkeypatch.setattr(worker, "eval", evaluate)
+
+    assert worker.run_worker(tmp_path) == 0
+    assert readiness == [{"browser_image": image_id}]
+    assert evaluations[0]["task_args"]["identity_lock"] == "locks/custom-image.json"
+
+
+def test_worker_rejects_identity_lock_mismatch_before_readiness_or_eval(tmp_path, monkeypatch):
+    from refund_eval import run_identity
+    from refund_eval.published import profile
+
+    (tmp_path / "config.json").write_text(json.dumps({
+        "mode": "model", "tool_profile": "published", "data_mode": "fixture", "model": "mockllm/target",
+        "simulator_model": "mockllm/simulator", "grader_model": "mockllm/grader",
+        "cost_limit": 1, "identity_lock": "locks/mismatch.json",
+    }))
+
+    def mismatch(*args, **kwargs):
+        raise run_identity.IdentityLockError("Identity lock mismatch: scenario")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A mismatched lock must fail before readiness or model evaluation")
+
+    monkeypatch.setattr(run_identity, "validate_identity_lock", mismatch)
+    monkeypatch.setattr(profile, "fixture_readiness", forbidden)
+    monkeypatch.setattr(profile, "hybrid_readiness", forbidden)
+    monkeypatch.setattr(worker, "eval", forbidden)
+
+    assert worker.run_worker(tmp_path) == 1
+    assert read_snapshot(tmp_path)["phase"] == "failed"
+    assert "Identity lock mismatch: scenario" in read_snapshot(tmp_path)["error"]
+
+
 def test_runtime_failure_keeps_last_visible_messages(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps({
         "mode": "model", "tool_profile": "published", "data_mode": "hybrid",

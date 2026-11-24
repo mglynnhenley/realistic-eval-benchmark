@@ -136,6 +136,11 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         verify_suite_task_wheel(verified_wheel, {entry.scenario for entry in config.suite})
     if config.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
         verify_split_budget_wheel(config.agent_wheel)
+    if config.identity_lock is not None:
+        raise ValueError(
+            "Native Harbor does not support exact browser artifact locks; "
+            "the generated sidecar task records its own source and rules identities."
+        )
     targets = config.models or [config.model]
     if config.execution not in {"docker", "modal"}:
         raise ValueError("Native batches require execution='docker' or execution='modal'")

@@ -40,11 +40,14 @@ def freeze_source_manifest(source: Path) -> None:
     no paths, timestamps, environment values, or private runtime inputs.
     """
     digest = hashlib.sha256()
+    files = []
     for path in sorted(source.rglob("*")):
         relative = path.relative_to(source)
         if not path.is_file() or relative == SOURCE_MANIFEST:
             continue
-        name = relative.as_posix().encode("utf-8")
+        filename = relative.as_posix()
+        files.append(filename)
+        name = filename.encode("utf-8")
         contents = path.read_bytes()
         for value in (name, contents):
             digest.update(len(value).to_bytes(8, "big"))
@@ -54,6 +57,7 @@ def freeze_source_manifest(source: Path) -> None:
         "schema_version": 1,
         "commit": head.strip() if head else None,
         "dirty": bool(_git("status", "--porcelain")),
+        "files": files,
         "source_sha256": digest.hexdigest(),
     }
     (source / SOURCE_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

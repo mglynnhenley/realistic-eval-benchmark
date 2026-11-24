@@ -491,7 +491,9 @@ def test_main_image_builds_from_only_the_agent_payload(generated, tmp_path, appr
     assert agent_manifest.pop("realism_memory") == {
         "train_refund_late": hashlib.sha256(memory.read_bytes()).hexdigest()[:8],
     }
-    assert agent_manifest == world_manifest
+    assert "files" in world_manifest
+    assert "files" not in agent_manifest
+    assert agent_manifest == {key: value for key, value in world_manifest.items() if key != "files"}
     assert agent_manifest["source_sha256"] == Task(task_dir).config.metadata["source_sha256"]
 
 
@@ -1075,6 +1077,10 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_whee
     with pytest.raises(ValueError, match="Git-ignored"):
         batch.prepare(adapter.ROOT / "trackable-native-batch",
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
+    locked = batch.NativeBatchConfig(**config, world_cost_limit=1, identity_lock="unsupported")
+    with pytest.raises(ValueError, match="Native Harbor does not support exact browser artifact locks"):
+        batch.prepare(tmp_path / "locked-native", locked)
+    assert not (tmp_path / "locked-native").exists()
 
 
 def test_split_batch_rejects_bills_scenario_before_preparation(approved_split_budget_wheel):

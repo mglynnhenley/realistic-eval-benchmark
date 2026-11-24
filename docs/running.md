@@ -2,6 +2,9 @@
 
 The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a real Chromium browser. An open-world simulator answers intercepted emails and website submissions. See [architecture.md](architecture.md) for the design and [harbor.md](harbor.md) for isolated Modal or Docker batches.
 
+See the identity-lock guide at docs/identity-locks.md to pin and enforce
+source, scenario, and local browser-runtime identities for repeatable runs.
+
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/) and Docker. uv uses the Python 3.14 pin in `.python-version` for local runs and validation. Native Harbor task images also use 3.14; legacy Harbor trial images use 3.12. Then:
@@ -189,6 +192,8 @@ uv run python -m refund_eval.sim.rules --scenario train_refund_late \
 Without `--save` it only prints. `--org KEY` limits it to named organisations. Dropped grounds are listed under `errors`. Trials never generate rules with `research_mode=saved` or fixture web.
 
 Dynamic, non-committed companies can be researched and saved on first contact for reuse by later trials that share the store. The immutable store defaults to `~/refund-eval-data/company-store`; set `REFUND_EVAL_COMPANY_STORE` to choose another root, or set it to `off` to keep per-trial behavior. An in-repository store path must be `company-store/`, which is gitignored. Review recent metadata with `uv run python -m refund_eval.sim.company_store list --days 7`.
+
+See [company rules](architecture.md#company-rules) for the tool-call and request-attempt limits on first-contact research.
 
 Native Harbor task preparation first harvests available artifacts from previously registered local job roots for the selected scenario, then snapshots its sanitized entries into world-only build inputs. Each trial writes its company store under the collected `world/company-store` artifact. A host-only `.native-jobs/` registry tracks prepared jobs roots; it is not copied into task, agent or world inputs. Sequentially prepared native tasks therefore reuse prior companies without a manual harvest or model calls.
 
