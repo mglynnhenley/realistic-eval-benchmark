@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shutil
 import stat
 import struct
 import subprocess
@@ -22,6 +23,7 @@ import tomllib
 import zipfile
 import zlib
 from contextlib import suppress
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -33,10 +35,21 @@ from pydantic import ValidationError
 
 from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor import batch
+from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
+    SharedRoleBudgetConfig,
+    SharedRoleSpendLedgerError,
+)
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import AgentScenario
 from scripts import guarded_harbor
-from scripts.offline_spend_guard import KEY_CEILING, Thresholds
+from scripts.offline_spend_guard import (
+    KEY_CEILING,
+    SharedCapsThresholds,
+    SharedRoleThresholds,
+    SplitThresholds,
+    Thresholds,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
@@ -693,21 +706,119 @@ def _amount_text(value: Any) -> str | None:
     return format(amount, "f") if amount is not None else None
 
 
-def _guard_parameters(parameters: dict[str, Any], thresholds: Thresholds, total: int | None) -> dict[str, Any]:
-    return {
+def _guard_parameters(
+    parameters: dict[str, Any], thresholds: Thresholds | SplitThresholds | SharedRoleThresholds | SharedCapsThresholds,
+    total: int | None
+) -> dict[str, Any]:
+    common = {
         **parameters,
         "requested_total_time_limit_seconds": total,
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested" if total is None else "unavailable",
+        "cleanup_timeout_seconds": thresholds.cleanup_timeout,
+    }
+    if isinstance(thresholds, SplitThresholds):
+        return common | {
+            "openrouter_key_mode": "split",
+            "agent_trial_delta_usd": str(thresholds.agent_trial_delta),
+            "world_trial_delta_usd": str(thresholds.world_trial_delta),
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        }
+    if isinstance(thresholds, SharedRoleThresholds):
+        return common | {
+            "openrouter_key_mode": "shared_roles",
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "runtime_metadata_confirmed": False,
+        }
+    if isinstance(thresholds, SharedCapsThresholds):
+        return common | {
+            "openrouter_key_mode": "shared_caps",
+            "shared_aggregate_ceiling_usd": "150",
+            "shared_allowance_source": "verified_key_headroom",
+            "runtime_metadata_confirmed": False,
+        }
+    return common | {
         "openrouter_trial_delta_usd": str(thresholds.openrouter_trial_delta),
         "openrouter_key_ceiling_usd": str(thresholds.openrouter_key_ceiling),
-        "cleanup_timeout_seconds": thresholds.cleanup_timeout,
     }
 
 
 def _reject_total_limit(total: int | None) -> None:
     if total is not None:
         raise SetupFailure("strict_total_deadline_unsupported_by_modal")
+
+
+def _shared_thresholds(args: argparse.Namespace) -> Thresholds:
+    if args.openrouter_key_ceiling is None or args.openrouter_trial_delta is None:
+        raise SetupFailure("shared_guard_thresholds_required")
+    return Thresholds(
+        openrouter_key_ceiling=args.openrouter_key_ceiling,
+        openrouter_trial_delta=args.openrouter_trial_delta,
+        probe_timeout=args.probe_timeout,
+        poll_interval=args.poll_interval,
+        max_sample_age=args.max_sample_age,
+        cleanup_timeout=args.cleanup_timeout,
+    )
+
+
+def _split_thresholds(args: argparse.Namespace, agent_cap: Any, world_cap: Any) -> SplitThresholds:
+    if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
+        raise SetupFailure("split_mode_rejects_shared_threshold_flags")
+    agent_amount = _amount(agent_cap)
+    world_amount = _amount(world_cap)
+    if agent_amount is None or world_amount is None:
+        raise SetupFailure("split_role_caps_must_be_finite")
+    return SplitThresholds(
+        agent_trial_delta=agent_amount,
+        world_trial_delta=world_amount,
+        probe_timeout=args.probe_timeout,
+        poll_interval=args.poll_interval,
+        max_sample_age=args.max_sample_age,
+        cleanup_timeout=args.cleanup_timeout,
+    )
+
+
+def _shared_role_thresholds(args: argparse.Namespace, allowance: Any) -> SharedRoleThresholds:
+    if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
+        raise SetupFailure("shared_roles_rejects_shared_threshold_flags")
+    amount = _amount(allowance)
+    if amount is None:
+        raise SetupFailure("shared_roles_allowance_must_be_finite")
+    try:
+        return SharedRoleThresholds(
+            shared_allowance_usd=amount,
+            probe_timeout=args.probe_timeout,
+            poll_interval=args.poll_interval,
+            max_sample_age=args.max_sample_age,
+            cleanup_timeout=args.cleanup_timeout,
+        )
+    except ValueError:
+        raise SetupFailure("shared_roles_allowance_invalid") from None
+
+
+def _shared_caps_thresholds(args: argparse.Namespace) -> SharedCapsThresholds:
+    if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
+        raise SetupFailure("shared_caps_rejects_operator_allowance_flags")
+    return SharedCapsThresholds(
+        probe_timeout=args.probe_timeout, poll_interval=args.poll_interval,
+        max_sample_age=args.max_sample_age, cleanup_timeout=args.cleanup_timeout,
+    )
+
+
+def _saved_split_caps(config: JobConfig) -> tuple[Any, Any]:
+    agent_env = config.agents[0].env or {}
+    task_path = Path(config.tasks[0].path)
+    try:
+        task_environment = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+        environment = task_environment.get("environment", {}).get("env", {})
+        if not isinstance(environment, dict):
+            raise TypeError
+        world_env = _world_environment(task_path, config, environment)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        raise SetupFailure("saved_world_environment_unresolvable") from None
+    return agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"), world_env.get("WORLD_COST_LIMIT")
 
 
 def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
@@ -718,7 +829,8 @@ def _native_targets(config: batch.NativeBatchConfig) -> list[str]:
 
 
 def _native_effective_parameters(
-    config: batch.NativeBatchConfig, thresholds: Thresholds
+    config: batch.NativeBatchConfig,
+    thresholds: Thresholds | SplitThresholds | SharedRoleThresholds | SharedCapsThresholds,
 ) -> dict[str, Any]:
     targets = _native_targets(config)
     if config.execution != "modal":
@@ -736,21 +848,47 @@ def _native_effective_parameters(
     world_cost = _amount(config.world_cost_limit)
     if agent_cost is None or world_cost is None:
         raise SetupFailure("native_cost_limits_must_be_finite")
-    runtime_delta = thresholds.openrouter_trial_delta
-    if agent_cost + world_cost > runtime_delta:
-        raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
+    split = config.openrouter_key_mode == "split"
+    shared_roles = config.openrouter_key_mode == "shared_roles"
+    shared_caps = config.openrouter_key_mode == "shared_caps"
+    if (split != isinstance(thresholds, SplitThresholds) or shared_roles != isinstance(thresholds, SharedRoleThresholds)
+            or shared_caps != isinstance(thresholds, SharedCapsThresholds)):
+        raise SetupFailure("native_key_mode_does_not_match_runtime_guard")
+    if split or shared_roles or shared_caps:
+        if config.agent_max_output_tokens is None:
+            raise SetupFailure("strict_role_mode_requires_agent_max_output_tokens")
+        if split and (agent_cost > thresholds.agent_trial_delta or world_cost > thresholds.world_trial_delta):
+            raise SetupFailure("split_role_caps_exceed_runtime_trial_deltas")
+        if shared_roles:
+            assert isinstance(thresholds, SharedRoleThresholds)
+            allowance = _amount(config.shared_allowance_usd)
+            if (allowance is None or allowance != thresholds.shared_allowance_usd
+                    or allowance > min(Decimal(150), agent_cost + world_cost)):
+                raise SetupFailure("shared_roles_allowance_does_not_match_role_caps")
+        if shared_caps and (agent_cost != 50 or world_cost != 100):
+            raise SetupFailure("shared_caps_requires_50_target_and_100_world_caps")
+    else:
+        assert isinstance(thresholds, Thresholds)
+        runtime_delta = thresholds.openrouter_trial_delta
+        if agent_cost + world_cost > runtime_delta:
+            raise SetupFailure("agent_and_world_caps_exceed_runtime_trial_delta")
+    if shared_roles:
+        assert isinstance(thresholds, SharedRoleThresholds)
+        runtime_delta = thresholds.shared_allowance_usd
     if config.trial_spend_cap_usd is not None:
         trial_cap = _amount(config.trial_spend_cap_usd)
         key_cap = _amount(config.key_spend_cap_usd)
         if trial_cap is None or key_cap is None:
             raise SetupFailure("native_planning_caps_must_be_finite")
+        if split or shared_roles or shared_caps:
+            raise SetupFailure("strict_role_mode_does_not_support_combined_planning_caps")
         if trial_cap > runtime_delta or trial_cap < agent_cost + world_cost:
             raise SetupFailure("native_trial_planning_cap_conflicts_with_runtime_guard")
         if key_cap > KEY_CEILING or config.trials * trial_cap > key_cap:
             raise SetupFailure("native_key_planning_cap_exceeds_supported_guard")
 
     worker_time_limit = config.time_limit
-    return {
+    effective = {
         "target_model": targets[0],
         "models": targets,
         "simulator_model": config.simulator_model,
@@ -763,14 +901,47 @@ def _native_effective_parameters(
         "effective_parameters_complete": True,
         "unavailable_fields": [],
     }
+    if split:
+        effective.update({
+            "openrouter_key_mode": "split",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        })
+    elif shared_roles:
+        effective.update({
+            "openrouter_key_mode": "shared_roles",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
+        })
+        if config.requested_deadline is not None:
+            effective["requested_deadline"] = config.requested_deadline.isoformat()
+    elif shared_caps:
+        effective.update({
+            "openrouter_key_mode": "shared_caps",
+            "agent_max_output_tokens": config.agent_max_output_tokens,
+            "shared_aggregate_ceiling_usd": "150",
+            "shared_allowance_source": "verified_key_headroom",
+            "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
+            "runtime_metadata_confirmed": False,
+        })
+        if config.requested_deadline is not None:
+            effective["requested_deadline"] = config.requested_deadline.isoformat()
+    return effective
 
 
 _WORLD_ENVIRONMENT_FIELDS = {
     "WORLD_COST_LIMIT",
+    "WORLD_STRICT_BUDGET",
+    "WORLD_SCENARIO",
     "WORLD_SIMULATOR_MODEL",
     "WORLD_GRADER_MODEL",
     "WORLD_SIM_WEEKS",
     "WORLD_MAX_TURNS",
+    "REFUND_EVAL_SHARED_ROLE_MODE",
+    "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG",
 }
 
 
@@ -870,7 +1041,7 @@ def _world_environment(
 
 
 def _saved_effective_parameters(
-    config: JobConfig, thresholds: Thresholds
+    config: JobConfig, thresholds: Thresholds | SplitThresholds | SharedRoleThresholds | SharedCapsThresholds
 ) -> dict[str, Any]:
     if len(config.agents) != 1 or len(config.tasks) != 1 or not config.tasks[0].path:
         raise SetupFailure("saved_native_values_unavailable")
@@ -891,6 +1062,33 @@ def _saved_effective_parameters(
     if not isinstance(task_environment, dict) or not isinstance(config.environment.env, dict):
         raise SetupFailure("saved_world_environment_unresolvable")
     world_env = _world_environment(task_path, config, task_environment)
+    agent_env = config.agents[0].env or {}
+    split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+    shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
+    shared_caps = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_caps"
+    if (split != isinstance(thresholds, SplitThresholds)
+            or shared_roles != isinstance(thresholds, SharedRoleThresholds)
+            or shared_caps != isinstance(thresholds, SharedCapsThresholds)):
+        raise SetupFailure("saved_key_mode_does_not_match_runtime_guard")
+    shared_config: SharedRoleBudgetConfig | None = None
+    if shared_roles or shared_caps:
+        expected_mode = "shared_caps" if shared_caps else "shared_roles"
+        raw_shared_config = agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+        if (not isinstance(raw_shared_config, str)
+                or raw_shared_config != world_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+                or world_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != expected_mode
+                or task_metadata.get("openrouter_key_mode") != expected_mode):
+            raise SetupFailure("saved_shared_role_routing_or_config_mismatch")
+        try:
+            shared_config = SharedRoleBudgetConfig.from_json(raw_shared_config)
+        except SharedRoleSpendLedgerError:
+            raise SetupFailure("saved_shared_role_config_invalid") from None
+    if (shared_roles or shared_caps) and world_env.get("WORLD_STRICT_BUDGET") != "true":
+        raise SetupFailure("saved_shared_role_strict_world_budget_missing")
+    if split and (
+        world_env.get("WORLD_STRICT_BUDGET") != "true"
+    ):
+        raise SetupFailure("saved_split_key_routing_or_strict_budget_missing")
     native_task = (
         task_metadata.get("scenario") == _LAURA_SCENARIO
         and isinstance(task_metadata.get("agent_wheel_sha256"), str)
@@ -944,18 +1142,73 @@ def _saved_effective_parameters(
         raise SetupFailure("saved_max_turns_invalid")
 
     agent_kwargs = config.agents[0].kwargs
+
+    def requested_deadline_text(value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        if type(value) is date:
+            return value.isoformat()
+        if isinstance(value, str):
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError:
+                raise SetupFailure("saved_requested_deadline_invalid") from None
+            if parsed.isoformat() != value:
+                raise SetupFailure("saved_requested_deadline_invalid")
+            return parsed.isoformat()
+        raise SetupFailure("saved_requested_deadline_invalid")
+
+    requested_deadline = requested_deadline_text(task_metadata.get("requested_deadline"))
+    agent_requested_deadline = requested_deadline_text(agent_kwargs.get("requested_deadline"))
+    if requested_deadline != agent_requested_deadline:
+        raise SetupFailure("saved_requested_deadline_metadata_mismatch")
+    if requested_deadline is not None and not (shared_roles or shared_caps):
+        raise SetupFailure("saved_requested_deadline_requires_guarded_shared_key_mode")
     agent_cap_raw = agent_kwargs.get("cost_limit")
     if isinstance(agent_cap_raw, dict):
         agent_cap_raw = agent_cap_raw.get(target)
     world_cap_raw = world_env.get("WORLD_COST_LIMIT")
     agent_amount = _amount(agent_cap_raw)
     world_amount = _amount(world_cap_raw)
-    if (
-        agent_amount is not None
-        and world_amount is not None
-        and agent_amount + world_amount > thresholds.openrouter_trial_delta
-    ):
-        raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
+    agent_output_tokens: int | None = None
+    if shared_roles or shared_caps:
+        assert shared_config is not None
+        if shared_roles:
+            assert isinstance(thresholds, SharedRoleThresholds)
+            allowance_matches = shared_config.allowance_usd == thresholds.shared_allowance_usd
+        else:
+            allowance_matches = shared_config.allowance_usd == Decimal(150)
+        declared_agent = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
+        raw_output = agent_env.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
+        if isinstance(raw_output, str) and raw_output.isdecimal():
+            agent_output_tokens = int(raw_output)
+        if (shared_config.scenario != task_metadata.get("scenario")
+                or shared_config.scenario != world_env.get("WORLD_SCENARIO", shared_config.scenario)
+                or shared_config.models != {"target": target, "simulator": simulator, "grader": grader}
+                or agent_amount is None or world_amount is None or declared_agent != agent_amount
+                or shared_config.role_limits_usd["target"] != agent_amount
+                or shared_config.role_limits_usd["world"] != world_amount
+                or not allowance_matches
+                or _amount(task_metadata.get("shared_allowance_usd")) != shared_config.allowance_usd
+                or (shared_caps and (agent_amount != 50 or world_amount != 100))
+                or agent_output_tokens is None or agent_output_tokens <= 0):
+            raise SetupFailure("saved_shared_role_scope_or_caps_mismatch")
+    if split:
+        agent_env = config.agents[0].env or {}
+        declared_agent_amount = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
+        raw_output_tokens = agent_env.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
+        if isinstance(raw_output_tokens, str) and raw_output_tokens.isdecimal():
+            agent_output_tokens = int(raw_output_tokens)
+        if (
+            agent_amount is None or declared_agent_amount != agent_amount or agent_output_tokens is None
+            or agent_output_tokens <= 0 or world_amount is None
+            or agent_amount > thresholds.agent_trial_delta or world_amount > thresholds.world_trial_delta
+        ):
+            raise SetupFailure("saved_split_role_caps_or_output_bound_invalid")
+    elif not shared_roles and not shared_caps and agent_amount is not None and world_amount is not None:
+        assert isinstance(thresholds, Thresholds)
+        if agent_amount + world_amount > thresholds.openrouter_trial_delta:
+            raise SetupFailure("saved_agent_and_world_caps_exceed_runtime_trial_delta")
     worker_time_raw = agent_kwargs.get("time_limit")
     worker_time = positive_integer(worker_time_raw)
     if worker_time_raw is not None and worker_time is None:
@@ -978,7 +1231,7 @@ def _saved_effective_parameters(
         raise SetupFailure("saved_agent_cost_limit_invalid")
     if world_cap_raw is not None and world_amount is None:
         raise SetupFailure("saved_world_cost_limit_invalid")
-    return {
+    effective = {
         "target_model": target,
         "models": [target],
         "simulator_model": simulator,
@@ -991,6 +1244,89 @@ def _saved_effective_parameters(
         "effective_parameters_complete": not unknown,
         "unavailable_fields": unknown,
     }
+    if split:
+        effective.update({
+            "openrouter_key_mode": "split",
+            "agent_max_output_tokens": agent_output_tokens,
+            "agent_key_ceiling_usd": 50,
+            "world_key_ceiling_usd": 100,
+        })
+    elif shared_roles:
+        effective.update({
+            "openrouter_key_mode": "shared_roles",
+            "agent_max_output_tokens": agent_output_tokens,
+            "shared_allowance_usd": str(thresholds.shared_allowance_usd),
+            "shared_allowance_source": "operator_attested_allocation",
+            "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
+        })
+        if requested_deadline is not None:
+            effective["requested_deadline"] = requested_deadline
+    elif shared_caps:
+        effective.update({
+            "openrouter_key_mode": "shared_caps",
+            "agent_max_output_tokens": agent_output_tokens,
+            "shared_aggregate_ceiling_usd": "150",
+            "shared_allowance_source": "verified_key_headroom",
+            "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
+            "runtime_metadata_confirmed": False,
+        })
+        if requested_deadline is not None:
+            effective["requested_deadline"] = requested_deadline
+    return effective
+
+
+def _bind_shared_caps_allowance(config: JobConfig, allowance: Decimal) -> None:
+    if not allowance.is_finite() or not Decimal(0) < allowance <= Decimal(150):
+        raise SetupFailure("shared_caps_verified_allowance_invalid")
+    if len(config.tasks) != 1 or not config.tasks[0].path:
+        raise SetupFailure("shared_caps_task_unavailable")
+    original = Path(config.tasks[0].path)
+    runtime_task = Path(config.jobs_dir).parent / "runtime-inputs" / config.job_name
+    runtime_task.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if runtime_task.exists():
+        raise SetupFailure("shared_caps_runtime_task_already_exists")
+    agent_env = config.agents[0].env or {}
+    if agent_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "false":
+        raise SetupFailure("shared_caps_runtime_task_binding_failed")
+    old_config = agent_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
+    try:
+        task_toml_path = original / "task.toml"
+        task_toml = tomllib.loads(task_toml_path.read_text(encoding="utf-8"))
+        task_env = task_toml["environment"]["env"]
+        if (task_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps"
+                or task_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG") != old_config
+                or not isinstance(old_config, str)):
+            raise ValueError
+        config_data = json.loads(old_config)
+        config_data["shared_allowance_usd"] = str(allowance)
+        runtime_config = json.dumps(config_data, sort_keys=True, separators=(",", ":"))
+        SharedRoleBudgetConfig.from_json(runtime_config)
+        compose_path = original / "environment" / "docker-compose.yaml"
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        world_env = compose["services"]["world"]["environment"]
+        if (world_env.get("REFUND_EVAL_SHARED_ROLE_MODE") != "shared_caps"
+                or world_env.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "false"
+                or world_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG") != old_config):
+            raise ValueError
+        compose["services"]["world"]["environment"]["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"] = runtime_config
+        compose["services"]["world"]["environment"][SHARED_CAPS_HEADROOM_BOUND_ENV] = "true"
+        shutil.copytree(original, runtime_task)
+        task_copy = runtime_task / "task.toml"
+        text = task_copy.read_text(encoding="utf-8")
+        old_assignment = f"REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG = {json.dumps(old_config)}"
+        if text.count(old_assignment) != 1:
+            raise ValueError
+        task_copy.write_text(text.replace(old_assignment,
+                            f"REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG = {json.dumps(runtime_config)}"), encoding="utf-8")
+        (runtime_task / "environment" / "docker-compose.yaml").write_text(
+            yaml.safe_dump(compose, sort_keys=False), encoding="utf-8",
+        )
+    except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError, SharedRoleSpendLedgerError):
+        raise SetupFailure("shared_caps_runtime_task_binding_failed") from None
+    agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"] = runtime_config
+    agent_env[SHARED_CAPS_HEADROOM_BOUND_ENV] = "true"
+    config.agents[0].env = agent_env
+    config.tasks[0].path = runtime_task
 
 
 def _record_effective_parameters(job: Any, config: JobConfig, parameters: dict[str, Any]) -> None:
@@ -1033,8 +1369,8 @@ def _parser() -> argparse.ArgumentParser:
     setup.add_argument("--run-config", type=Path)
     run.add_argument("--prepared-dir", type=Path)
     run.add_argument("--job-name", required=True)
-    run.add_argument("--openrouter-key-ceiling", type=_decimal_argument, required=True)
-    run.add_argument("--openrouter-trial-delta", type=_decimal_argument, required=True)
+    run.add_argument("--openrouter-key-ceiling", type=_decimal_argument)
+    run.add_argument("--openrouter-trial-delta", type=_decimal_argument)
     run.add_argument("--total-time-limit-seconds", type=int)
     run.add_argument("--probe-timeout", type=float, default=10.0)
     run.add_argument("--poll-interval", type=float, default=15.0)
@@ -1059,25 +1395,28 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        thresholds = Thresholds(
-            openrouter_key_ceiling=args.openrouter_key_ceiling,
-            openrouter_trial_delta=args.openrouter_trial_delta,
-            probe_timeout=args.probe_timeout,
-            poll_interval=args.poll_interval,
-            max_sample_age=args.max_sample_age,
-            cleanup_timeout=args.cleanup_timeout,
-        )
-    except (ValueError, TypeError) as failure:
-        print(f"launcher_failed={type(failure).__name__} cleanup_uncertain=false", file=sys.stderr)
-        return 1
-
-    try:
         _reject_total_limit(args.total_time_limit_seconds)
         if args.manifest is not None:
             if args.prepared_dir is not None:
                 raise SetupFailure("prepared_dir_is_only_valid_with_run_config")
             total_time_limit = None
             config = prepare_fresh_job(args.manifest, args.job_name)
+            agent_env = config.agents[0].env or {}
+            split = agent_env.get("OPENROUTER_API_KEY") == guarded_harbor.OPENROUTER_AGENT_KEY_REFERENCE
+            shared_roles = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_roles"
+            shared_caps = agent_env.get("REFUND_EVAL_SHARED_ROLE_MODE") == "shared_caps"
+            if split:
+                thresholds = _split_thresholds(args, *_saved_split_caps(config))
+            elif shared_roles:
+                try:
+                    role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
+                except (KeyError, SharedRoleSpendLedgerError):
+                    raise SetupFailure("saved_shared_role_config_invalid") from None
+                thresholds = _shared_role_thresholds(args, role_config.allowance_usd)
+            elif shared_caps:
+                thresholds = _shared_caps_thresholds(args)
+            else:
+                thresholds = _shared_thresholds(args)
             parameters = _saved_effective_parameters(config, thresholds)
         else:
             native_config = batch.NativeBatchConfig.model_validate_json(
@@ -1087,6 +1426,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.prepared_dir is None:
                 raise SetupFailure("prepared_dir_required_for_run_config")
             total_time_limit = None
+            if native_config.openrouter_key_mode == "split":
+                targets = _native_targets(native_config)
+                costs = resolve_cost_limits(native_config.cost_limit, targets, scenario=native_config.scenario)
+                thresholds = _split_thresholds(args, costs[targets[0]], native_config.world_cost_limit)
+            elif native_config.openrouter_key_mode == "shared_roles":
+                thresholds = _shared_role_thresholds(args, native_config.shared_allowance_usd)
+            elif native_config.openrouter_key_mode == "shared_caps":
+                thresholds = _shared_caps_thresholds(args)
+            else:
+                thresholds = _shared_thresholds(args)
             parameters = _native_effective_parameters(native_config, thresholds)
             run_record_path = batch.prepare(args.prepared_dir, native_config)
             effective = _guard_parameters(parameters, thresholds, total_time_limit)
@@ -1107,12 +1456,24 @@ def main(argv: list[str] | None = None) -> int:
 
     effective_parameters = _guard_parameters(parameters, thresholds, total_time_limit)
     print("laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false", flush=True)
+    def record_guard_metadata(metadata: dict[str, Any]) -> None:
+        if isinstance(thresholds, SharedCapsThresholds):
+            try:
+                _bind_shared_caps_allowance(config, Decimal(metadata["shared_allowance_usd"]))
+            except (KeyError, InvalidOperation, TypeError, ValueError, SetupFailure):
+                raise SetupFailure("shared_caps_runtime_task_binding_failed") from None
+        effective_parameters.update(metadata)
+
+    on_guard_ready = record_guard_metadata if isinstance(
+        thresholds, (SharedRoleThresholds, SharedCapsThresholds)
+    ) else None
     return guarded_harbor.run_guarded_config(
         config,
         thresholds,
         on_job_created=_print_local_job_log,
         on_sandbox_created=_print_modal_dashboard,
         before_job_run=lambda job: _record_effective_parameters(job, config, effective_parameters),
+        on_guard_ready=on_guard_ready,
         total_time_limit_seconds=total_time_limit,
     )
 

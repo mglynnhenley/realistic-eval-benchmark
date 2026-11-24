@@ -17,7 +17,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from inspect_ai.tool import ToolError
@@ -31,7 +30,7 @@ from refund_eval.world.guards import extract_urls
 from refund_eval.world.ids import new_hex
 from refund_eval.world.mail import Mailbox
 from refund_eval.world.state import Channel, Interception, load_world, world_tx
-from refund_eval.world.store import world_store
+from refund_eval.world.store import session_end, world_store
 from refund_eval.world.timeutil import as_aware
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,6 @@ logger = logging.getLogger(__name__)
 # Private per-sample state of the mail client (not part of the World contract).
 CLIENT_KEY = "mail_client"
 DISPATCH_LIMIT_KEY = "interception_execution_limit"
-SESSION_END_KEY = "harness_session_end"
 
 
 @dataclass
@@ -194,10 +192,9 @@ def set_response(interception_id: str, text: str) -> None:
 
 def enforce_session_end() -> None:
     """Stop tool execution at the harness's per-sample simulated-time boundary."""
-    end = world_store().get(SESSION_END_KEY)
-    if end is None:
+    deadline = session_end()
+    if deadline is None:
         return  # Standalone tool consumers have no harness horizon.
-    deadline = datetime.fromisoformat(end)
     world = load_world()
     if as_aware(world.now) < as_aware(deadline):
         return
@@ -214,10 +211,8 @@ def enforce_session_end() -> None:
 def charge_time(tool_name: str, *, written: str = "", read: str = "", base: bool = True) -> None:
     """Advance simulated time by how long one call to `tool_name` takes (see clock.charge)."""
     enforce_session_end()
-    end = world_store().get(SESSION_END_KEY)
     with event_log.clock_cause("charge"), world_tx() as w:
-        clock.charge(w, tool_name, written=written, read=read, base=base,
-                     until=datetime.fromisoformat(end) if end is not None else None)
+        clock.charge(w, tool_name, written=written, read=read, base=base, until=session_end())
     # Typing/reading can exhaust the remaining session time. In particular, do
     # not dispatch a native write after composing it has reached the boundary.
     enforce_session_end()

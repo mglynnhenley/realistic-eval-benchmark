@@ -14,8 +14,9 @@ Job config: `import_path: refund_eval.harbor.installed_agent:RefundInstalledAgen
 - context: target tokens and cost from the trajectory's final metrics (the agent's own model
   calls only; world-side model usage is in the world's state.json).
 
-Harbor's instruction is not used: the Inspect task gives the agent the scenario's task message,
-which is what the adapter writes to instruction.md.
+Suite-generated jobs opt in to forwarding the Harbor instruction as the Inspect task's initial user
+message and the task ID as sample metadata; default single-task jobs forward neither. Scenario facts
+and world-side outcome grading continue to come from the selected scenario.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import asyncio
 import json
 import shlex
 from contextlib import suppress
+from datetime import date
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -52,11 +54,13 @@ class RefundAgentOptions(InstalledAgentOptions):
                                 description="Model-visible history in tokens (with a memory tool); 0 shows it all.")
     token_budget: int | None = Field(default=None, gt=0, description="Target tokens including cached input.")
     budget_notice: BudgetNotice = Field(default=RunConfig.model_fields["budget_notice"].default)
+    requested_deadline: date | None = None
     cost_limit: float | None = Field(default=None, gt=0, le=1000,
                                      description="Per-trial target-only USD cap (Inspect cost_limit); excludes world-service "
                                                  "model calls. Required for train_refund_late.")
     time_limit: int | None = Field(default=None, ge=1, le=72000, description="Inspect wall-clock limit in seconds.")
     reasoning: bool = Field(default=False, description="Ask OpenRouter to return the target's reasoning.")
+    forward_task_instruction: bool = False
 
 
 class RefundInstalledAgent(BaseInstalledAgent):
@@ -82,7 +86,7 @@ class RefundInstalledAgent(BaseInstalledAgent):
                 return server.url.removesuffix("/").removesuffix("/mcp")
         return DEFAULT_WORLD_URL
 
-    def inspect_command(self) -> str:
+    def inspect_command(self, instruction: str | None = None) -> str:
         """The shell command that runs the trial and converts its log (the world's settings from the task env)."""
         options = self.options
         model = self.model_name or ""
@@ -90,17 +94,29 @@ class RefundInstalledAgent(BaseInstalledAgent):
             raise ValueError("Choose the target model (model_name)")
         logs = self.environment_logs_dir.as_posix()
         model_args = {**published_model_args(model), **({"reasoning_enabled": True} if options.reasoning else {})}
+        if model.startswith("openrouter/"):
+            model_args["max_retries"] = 0
         task_args = {"world_url": self.world_url(), "history_tokens": options.history_tokens,
                      "budget_notice": options.budget_notice}
+        suite_instruction = None
+        if options.forward_task_instruction:
+            if not instruction or not instruction.strip():
+                raise ValueError("Suite task forwarding requires a non-empty instruction")
+            suite_instruction = instruction.rstrip("\n")
+            task_args["task_text"] = suite_instruction
         for name in ("token_budget", "cost_limit", "time_limit"):
             if getattr(options, name) is not None:
                 task_args[name] = getattr(options, name)
+        if options.requested_deadline is not None:
+            task_args["requested_deadline"] = options.requested_deadline.isoformat()
         # Inspect's task loader expects a cwd-relative path with Python 3.14.
         task_file = (f'"$({PYTHON} -c \'import os, refund_eval.task; '
                      'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')
         parts = [f"REFUND_EVAL_KILL_FILE={shlex.quote(f'{APP}/.context/KILL')}",
                  INSPECT, "eval", task_file, "--model", shlex.quote(model),
+                 "--max-retries", "0",
                  *(f"-M {key}={json.dumps(value)}" for key, value in model_args.items()),
+                 *(['-T task_id="$WORLD_TASK_ID"'] if suite_instruction is not None else []),
                  '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"',
                  *(f"-T {key}={shlex.quote(str(value))}" for key, value in task_args.items()),
@@ -114,7 +130,11 @@ class RefundInstalledAgent(BaseInstalledAgent):
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         if reason := kill_reason():
             raise RuntimeError(f"Trial blocked by kill switch: {reason}")
-        execution = asyncio.create_task(self.exec_as_agent(environment, self.inspect_command(), cwd=APP))
+        execution = asyncio.create_task(self.exec_as_agent(
+            environment,
+            self.inspect_command(instruction if self.options.forward_task_instruction else None),
+            cwd=APP,
+        ))
         status = NativeStatus(self.logs_dir, self.model_name)
         observer = asyncio.create_task(status.watch(environment))
         try:

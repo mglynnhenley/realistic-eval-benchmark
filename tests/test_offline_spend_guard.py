@@ -198,19 +198,28 @@ def stable_guard(*, events=None, clock=None, or_values=None):
 
 
 @pytest.mark.parametrize(
-    ("record", "reason"),
+    ("record", "reason", "verifier_disabled"),
     [
-        ("setup_exception", "trial_exception"),
-        ("step_exception", "trial_exception"),
-        ("no_trial", "unexpected_trial_count"),
-        ("unfinished_trial", "incomplete_result"),
-        ("missing_reward", "invalid_reward"),
-        ("zero_reward", None),
-        ("success", None),
+        ("setup_exception", "trial_exception", False),
+        ("step_exception", "trial_exception", False),
+        ("no_trial", "unexpected_trial_count", False),
+        ("unfinished_trial", "incomplete_result", False),
+        ("missing_reward", "invalid_reward", False),
+        ("disabled_setup_exception", "trial_exception", True),
+        ("disabled_step_exception", "trial_exception", True),
+        ("disabled_no_trial", "unexpected_trial_count", True),
+        ("disabled_unfinished_trial", "incomplete_result", True),
+        ("disabled_missing_reward", None, True),
+        ("zero_reward", None, False),
+        ("success", None, False),
     ],
 )
-def test_guarded_cli_reports_returned_trial_result(tmp_path, monkeypatch, capsys, record, reason):
+def test_guarded_cli_reports_returned_trial_result(
+    tmp_path, monkeypatch, capsys, record, reason, verifier_disabled
+):
     config = valid_config(tmp_path)
+    if verifier_disabled:
+        config.verifier = config.verifier.model_copy(update={"disable": True})
     config_path = tmp_path / "job.json"
     config_path.write_text(config.model_dump_json(), encoding="utf-8")
     exception = ExceptionInfo(
@@ -228,15 +237,18 @@ def test_guarded_cli_reports_returned_trial_result(tmp_path, monkeypatch, capsys
         config=TrialConfig(task=config.tasks[0]),
         agent_info=AgentInfo(name="offline", version="1"),
         started_at=START,
-        finished_at=None if record == "unfinished_trial" else END,
-        exception_info=exception if record == "setup_exception" else None,
+        finished_at=None if record in {"unfinished_trial", "disabled_unfinished_trial"} else END,
+        exception_info=exception if record in {"setup_exception", "disabled_setup_exception"} else None,
         step_results=[StepResult(step_name="offline", exception_info=exception)]
-        if record == "step_exception" else None,
-        verifier_result=None if record in {"setup_exception", "missing_reward"} else VerifierResult(
+        if record in {"step_exception", "disabled_step_exception"} else None,
+        verifier_result=None if record in {
+            "setup_exception", "missing_reward", "disabled_setup_exception",
+            "disabled_step_exception", "disabled_missing_reward",
+        } else VerifierResult(
             rewards={"score": 0 if record == "zero_reward" else 1},
         ),
     )
-    trials = [] if record == "no_trial" else [trial]
+    trials = [] if record in {"no_trial", "disabled_no_trial"} else [trial]
     result = JobResult(
         id=uuid4(),
         started_at=START,
@@ -257,7 +269,11 @@ def test_guarded_cli_reports_returned_trial_result(tmp_path, monkeypatch, capsys
 
     stdout, stderr = capsys.readouterr()
     if reason is None:
-        assert (exit_code, stdout, stderr) == (0, "guarded_harbor_job=complete\n", "")
+        expected_stdout = (
+            "guarded_harbor_job=complete grading=disabled\n"
+            if verifier_disabled else "guarded_harbor_job=complete\n"
+        )
+        assert (exit_code, stdout, stderr) == (0, expected_stdout, "")
     else:
         assert (exit_code, stdout, stderr) == (1, "", f"guarded_harbor_job=failed reason={reason}\n")
 

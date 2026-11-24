@@ -38,7 +38,7 @@ import logging
 import random
 from asyncio import CancelledError
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, get_type_hints
 from uuid import uuid4
 
@@ -71,7 +71,7 @@ from refund_eval.agent.budget import (
     prepare_ledger,
     runtime_notice,
 )
-from refund_eval.agent.prompt import render_system_prompt
+from refund_eval.agent.prompt import render_system_prompt, with_requested_deadline
 from refund_eval.agent.schedule import (  # noqa: F401 - next_checkin re-exported
     CHECKIN_HOURS,
     aware,
@@ -98,7 +98,6 @@ from refund_eval.scenario.schema import Scenario, load_agent_scenario, load_scen
 from refund_eval.world import event_log
 from refund_eval.world.interception import (
     DISPATCH_LIMIT_KEY,
-    SESSION_END_KEY,
     current_tool_call_id,
     enforce_session_end,
 )
@@ -109,6 +108,7 @@ from refund_eval.world.state import (
     load_world,
     world_tx,
 )
+from refund_eval.world.store import SESSION_END_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -546,6 +546,7 @@ def refund_agent(
     max_turns: int = RunConfig.model_fields["max_turns"].default,
     history_tokens: int = RunConfig.model_fields["history_tokens"].default,
     sim_weeks: float = RunConfig.model_fields["sim_weeks"].default,
+    requested_deadline: date | None = None,
     checkin_hours: tuple[int, ...] = CHECKIN_HOURS,
     tool_profile: str = RunConfig.model_fields["tool_profile"].default,
     published_data: str = RunConfig.model_fields["data_mode"].default,
@@ -570,6 +571,7 @@ def refund_agent(
         memory tool for notes; 0 shows the full history and adds no memory tool.
       sim_weeks: Stop when the next wake-up would be more than this many
         simulated weeks after the scenario start.
+      requested_deadline: The user's requested task deadline, independent of the session horizon.
       checkin_hours: London hours of the daily scheduled check-ins.
       company_simulator: Simulator kind for every organisation except personal contacts.
       fixture_path: Explicit inbox JSON for the published fixture or hybrid profile.
@@ -604,14 +606,14 @@ def refund_agent(
         raise ValueError(f"budget_notice must be one of: {', '.join(BUDGET_NOTICES)}")
     async def execute(state: AgentState) -> AgentState:
         if world_url is not None:
-            scenario = load_agent_scenario(scenario_id)
+            scenario = with_requested_deadline(load_agent_scenario(scenario_id), requested_deadline)
             from refund_eval.agent.world_mode import run_in_world
 
             return await run_in_world(state, scenario=scenario, world_url=world_url,
                                       history_tokens=history_tokens, sim_weeks=sim_weeks,
                                       checkin_hours=checkin_hours, token_budget=token_budget,
                                       budget_notice=budget_notice)
-        scenario = load_scenario(scenario_id)
+        scenario = with_requested_deadline(load_scenario(scenario_id), requested_deadline)
         from refund_eval.sim.open_world import COMPANY_SIMULATOR_KEY
         from refund_eval.sim.research import MODE_KEY as RESEARCH_MODE_KEY
 

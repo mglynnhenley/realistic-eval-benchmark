@@ -22,6 +22,7 @@ import re
 import threading
 import uuid
 from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -56,8 +57,9 @@ from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG
 from refund_eval.scenario.schema import AgentScenario, load_scenario
 from refund_eval.world import interception
 from refund_eval.world import store as trial_store
-from refund_eval.world.event_log import EVENTS_KEY
+from refund_eval.world.event_log import EVENTS_KEY, rebuild
 from refund_eval.world.state import WORLD_KEY
+from refund_eval.world.timeutil import to_london
 from refund_eval.world.trial_snapshot import TrialSnapshot
 from refund_eval.world_service import server
 from refund_eval.world_service import trial as world_service_trial
@@ -535,6 +537,25 @@ async def test_caller_meta_names_the_tool_call(tmp_path, monkeypatch):
         events = trial.data()["events"]
     [requested] = [e for e in events if e["kind"] == "wakeup_requested"]
     assert requested["tool"] == "schedule_wakeup" and requested["tool_call_id"] == "toolu_123"
+
+
+async def test_native_wakeup_rejects_session_cutoff_without_recording_request(tmp_path, monkeypatch):
+    stub_browser(monkeypatch)
+    models = FakeModels()
+    async with (WorldTrial(settings(tmp_path, sim_weeks=1), model_client=models) as trial,
+                session(trial) as (client, _, _)):
+        end = to_london(datetime.fromisoformat(trial.data()["world"]["start_time"])) + timedelta(weeks=1)
+        before_end = (end - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        accepted = await client.call_tool("schedule_wakeup", {"at": before_end}, meta={"tool_call_id": "before"})
+        assert not accepted.isError, accepted.content
+        declined = await client.call_tool("schedule_wakeup", {"at": end.strftime("%Y-%m-%d %H:%M")})
+        assert declined.isError and "before the simulated session ends" in declined.content[0].text
+        data = trial.data()
+
+    [requested] = [e for e in data["events"] if e["kind"] == "wakeup_requested"]
+    assert requested["tool_call_id"] == "before"
+    assert rebuild(data["events"]).model_dump(mode="json") == data["world"]
+    assert not models.calls
 
 
 def test_active_call_id_replaces_the_transcript_lookup():
@@ -1280,3 +1301,13 @@ def test_real_browser_form_in_the_world_service(tmp_path, monkeypatch):
     assert any(r["event"] == "browser_probe_end" and r["boundary_verified"] for r in records)
     assert any(r["event"] == "request" and r["request"]["method"] == "POST" and r["request"]["tool_call_id"] == click
                for r in records)
+
+
+@pytest.mark.asyncio
+async def test_shared_caps_world_refuses_unbound_before_provider_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    monkeypatch.setenv("REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND", "false")
+
+    with pytest.raises(WorldSpendLedgerError, match="verified headroom binding"):
+        await WorldTrial(settings(tmp_path, scenario="train_refund_late", world_cost_limit=100),
+                         model_client=object()).__aenter__()

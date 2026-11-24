@@ -39,7 +39,7 @@ from refund_eval.world.state import (
     save_world,
     world_tx,
 )
-from refund_eval.world.store import world_store
+from refund_eval.world.store import session_end, world_store
 from refund_eval.world.timeutil import LONDON, as_utc
 from refund_eval.world.timeutil import as_aware as aware
 
@@ -193,6 +193,9 @@ def request_wakeup(at: str) -> str:
         if not future:
             raise WakeupRequestError("The wake-up time must be after the current time.")
         when = min(future, key=as_utc)
+        deadline = session_end()
+        if deadline is not None and as_utc(when) >= as_utc(deadline):
+            raise WakeupRequestError("The wake-up time must be before the simulated session ends.")
         world.requested_wakeup = when
     zone = f" ({when:%Z})" if valid[0].utcoffset() != valid[-1].utcoffset() else ""
     return f"Wake-up scheduled for {when:%Y-%m-%d %H:%M} London time{zone}."

@@ -64,6 +64,9 @@ All launchers default to `train_refund_late`, six weeks, 1,000 turns and a 40-mi
 
 Environment versioning started at **1.0**; runs before that baseline are unversioned. Compare scores only within one exact environment version. The [environment changelog](docs/environment-changelog.md) records the baseline fingerprint and version-bump rules. Native Harbor preparation records this identity, but remains an opt-in path; the dashboard and existing Harbor launcher have not switched to it.
 
+For an offline view of scenario/model batch allowances without calls or
+artifacts, see the [batch preview](docs/batch-preview.md).
+
 ## View and grade saved runs
 
 View Inspect logs without rerunning the agent:

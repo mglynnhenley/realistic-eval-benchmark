@@ -24,11 +24,65 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.3 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 4eadea3783e8c9c316ded9199115313f287119a810fe2f096240c5fe587e90f2
+- Trial round: none. Offline validation only.
+- Changes: scan the most recent 100 Inspect transcript events for the active tool span before falling back to the existing 200-event lookup (MAT-167).
+
+## 8.2 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 12ca8f7dfe905cc2337742e4a71050bca5c5738bc29f2fac70ad3c28039bc658
+- Trial round: none; offline validation only.
+- Changes: add the opt-in `shared_caps` guarded mode, deriving a fixed per-run aggregate allowance from verified finite key/budget headroom while preserving the saved manifest and existing shared-role ledger; require explicit key budget metadata and runtime binding before target/world requests; allow the independent requested deadline in this mode.
+
+## 8.1 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: f18ee32428609b89d2fc2bcc16b4801834335a905f24886fc464da96df7a5408
+- Trial round: none; offline validation only.
+- Changes: carry an independent requested deadline through native `shared_roles` task arguments while preserving defaults and world/company data.
+
+## 8.0 — 2026-11-23
+- Kind: behaviour round
+- Fingerprint: cbba3aabaa9eb65fb1aedae5da01e80eda33ce4ce2036885dae10190c70c88a0
+- Trial round: not run; synthetic verification only. Any native round requires separate authorization.
+- Changes: reject wake-up requests at or after the simulated session cutoff instead of confirming a time when the agent cannot resume. Earlier mail and valid wake-up requests retain their existing behaviour (MAT-117).
+
+## 7.17 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 531ec81288488128c28631fb1e5cc9d846050d45b9cd2d5074a6b1256b0837cc
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Mark invalid multipart charset declarations as undecodable, including NUL-containing defaults and part headers, while preserving raw payloads.
+
+## 7.16 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 6e665b5a1a143f3718fa71fd5e3b47ddc2f521cec59cc29d013a77300d3966a9
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Preserve correspondence fixes through 7.15, harden Markdown code spans, and retain multipart transfer-encoded values and `_charset_` decoding.
+- Merged main: retain one-key `shared_roles` mode with task-local atomic role and aggregate budget reservations, ordinary-key headroom checks, guarded native launch validation, and operator-allocation guidance from origin/main 292b151 (original 7.13 fingerprint e0d58e7569c433ac5a3f00d6fff58f271a165f020984c921396665d6fdc2eddd).
+
+## 7.15 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: cb983641e0085d92f97ec160be1adeca62d708fc928e4170d86c6b035f140f93
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Safely render untrusted correspondence metadata, decode text-only multipart submissions, and retain explicit empty outbound bodies.
+
+## 7.14 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 0bf216587ab0d34d8cfa8a63c9ae68ac02831d0c588c29e5ce2fece841daea80
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Secure private correspondence outputs and correct read-marker direction, immediate form timing, saved browser-body decoding, silent interaction provenance, and JSONL Unicode separator handling.
+
+## 7.13 — 2026-11-23
+- Kind: trivial batch
+- Fingerprint: 6d7d013fb224e8d6e38adff14cb86cb7654302cd0478a249ac56c34e10baa90e
+- Trial round: none; offline validation only, no paid calls.
+- Changes: Add the offline private correspondence exporter and merge split-key routing and strict independent budget enforcement; no new trial or behavior round.
 ## 7.12 — 2026-11-23
 - Kind: trivial batch
-- Fingerprint: 29cff17bf2ef03dffc8dd9935491cbfdb9e413651ed7025ece7e27dcf563428f
+- Fingerprint: 27654f1bce57fb61d41243cff8fcae0db19cf393243fec687ed55c0d525f4f73
 - Trial round: none; offline validation only.
-- Changes: Avoid repeated buffer-history reads when locating active Inspect tool-call spans, preserving the existing 200-event lookup semantics.
+- Changes: add split-key routing and strict local budgets with request-matched settlement evidence; attest role-specific sources, reject encrypted reasoning without a documented token bound, limit split batches to Laura, and print monitored split-launch guidance.
 
 ## 7.11 — 2026-11-23
 - Kind: trivial batch

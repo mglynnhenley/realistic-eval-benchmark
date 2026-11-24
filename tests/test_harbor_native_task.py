@@ -14,8 +14,12 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
+import textwrap
+import tomllib
 import zipfile
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,12 +39,20 @@ from harbor.models.trajectories import Trajectory
 from harbor.publisher.packager import Packager
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
-from refund_eval.agent.prompt import render_system_prompt, task_message
+from refund_eval.agent.prompt import (
+    render_system_prompt,
+    task_message,
+)
 from refund_eval.agent.schedule import format_long, sim_deadline
 from refund_eval.harbor import adapter, atif, batch, world_entrypoint
 from refund_eval.harbor.installed_agent import RefundAgentOptions, RefundInstalledAgent
 from refund_eval.scenario import schema
-from refund_eval.scenario.schema import Org, load_agent_scenario, load_scenario
+from refund_eval.scenario.schema import (
+    AgentScenario,
+    Org,
+    load_agent_scenario,
+    load_scenario,
+)
 from refund_eval.sim import company_store
 
 
@@ -68,6 +80,41 @@ def _write_inert_wheel(directory):
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
+def _write_split_budget_wheel(directory, scenarios=("train_refund_late",)):
+    source = directory / "source"
+    public_source = directory / "public-source"
+    adapter.copy_source(source)
+    for scenario in scenarios:
+        adapter.stage_agent(
+            source,
+            public_source,
+            load_scenario(scenario),
+            scenario_name=scenario,
+        )
+    build_dir = directory / "built-wheel"
+    subprocess.run(
+        ["uv", "build", "--offline", "--wheel", "--out-dir", str(build_dir)],
+        cwd=public_source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    [wheel] = build_dir.glob("*.whl")
+    return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
+
+
+@pytest.fixture(scope="module")
+def approved_split_budget_wheel(tmp_path_factory):
+    return _write_split_budget_wheel(tmp_path_factory.mktemp("public-split-wheel"))
+
+
+@pytest.fixture(scope="module")
+def approved_suite_wheel(tmp_path_factory):
+    return _write_split_budget_wheel(
+        tmp_path_factory.mktemp("public-suite-wheel"), scenarios=("train_refund_late", "bills_price_rise")
+    )
+
+
 @pytest.fixture(scope="module")
 def approved_wheel(tmp_path_factory):
     return _write_inert_wheel(tmp_path_factory.mktemp("synthetic_agent_wheel"))
@@ -81,6 +128,14 @@ def _wheel_config(approved_wheel):
 def _wheel_cli_args(approved_wheel):
     path, sha256 = approved_wheel
     return ["--agent-wheel", str(path), "--agent-wheel-sha256", sha256]
+
+
+def _native_suite_config(suite, wheel):
+    return batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="docker", data_mode="fixture", research_mode="saved",
+        cost_limit=1, world_cost_limit=1, sim_weeks=12, trials=1, concurrency=2,
+        suite=suite, **_wheel_config(wheel),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -283,6 +338,7 @@ def test_task_loads_with_harbors_task_model(generated):
     assert config.task.name == "refund-eval/train_refund_late"
     meta = config.metadata
     assert meta["task_version"] == adapter.TASK_VERSION and meta["scenario"] == "train_refund_late"
+    assert meta["task_id"] == "train_refund_late"
     assert meta["environment_version"] == adapter.ENVIRONMENT_VERSION
     assert meta["environment_fingerprint"] == adapter.environment_fingerprint()
     assert meta["rules_sha256"] == adapter.rules_sha256("train_refund_late") != "none"
@@ -297,7 +353,11 @@ def test_task_loads_with_harbors_task_model(generated):
     [server] = config.environment.mcp_servers
     assert (server.name, server.url) == ("world", "http://world:8000/mcp")
     env = config.environment.env
-    assert set(env) == {"WORLD_SCENARIO", "WORLD_SIM_WEEKS", "WORLD_DATA_MODE", "WORLD_TURN_TOKEN"}
+    assert set(env) == {
+        "WORLD_TASK_ID", "WORLD_SCENARIO", "WORLD_SIM_WEEKS", "WORLD_DATA_MODE", "WORLD_TURN_TOKEN",
+        "REFUND_EVAL_SHARED_ROLE_MODE", "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG",
+    }
+    assert env["WORLD_TASK_ID"] == ""
     assert env["WORLD_TURN_TOKEN"].startswith("${WORLD_TURN_TOKEN:-") and len(env["WORLD_TURN_TOKEN"]) > 40
     assert config.agent.timeout_sec == 39600 and config.environment.network_mode.value == "public"
     instruction = (task_dir / "instruction.md").read_text()
@@ -465,6 +525,191 @@ def test_staged_public_scenario_keeps_requested_deadline_separate_from_horizon(g
                         f"Your session ends on {horizon}: anything not done by that point will not get done.")
     assert expected_context in render_system_prompt(scenario, sim_weeks=sim_weeks)
     assert expected_context in render_system_prompt(public, sim_weeks=sim_weeks)
+
+
+@pytest.mark.parametrize("sim_weeks", [1.0, 365 / 7])
+def test_native_shared_roles_requested_deadline_reaches_target_without_world_overlay(
+    tmp_path, approved_split_budget_wheel, sim_weeks
+):
+    wheel, digest = approved_split_budget_wheel
+    deadline = date(2027, 2, 4)
+    out = tmp_path / "requested-deadline"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, max_turns=50, sim_weeks=sim_weeks, time_limit=120,
+        openrouter_key_mode="shared_roles", shared_allowance_usd=90, agent_max_output_tokens=2048,
+        requested_deadline=deadline, agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    record = json.loads(batch.prepare(out, config).read_text(encoding="utf-8"))
+    task_dir = out / "train_refund_late"
+    task = Task(task_dir)
+    metadata = task.config.metadata
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    assert job.agents[0].kwargs["requested_deadline"] == deadline
+    assert metadata["requested_deadline"] == "2027-02-04"
+    assert metadata["sim_weeks"] == sim_weeks
+    assert record["config"]["requested_deadline"] == "2027-02-04"
+    assert record["effective_parameters"]["requested_deadline"] == "2027-02-04"
+    assert record["effective_parameters"]["sim_weeks"] == sim_weeks
+
+    with zipfile.ZipFile(wheel) as archive:
+        public_data = yaml.safe_load(archive.read("refund_eval/scenario/train_refund_late.yaml"))
+    assert set(public_data) == {"id", "task_text", "start_time", "requested_deadline", "sim_weeks", "user"}
+    public_scenario = AgentScenario.model_validate(public_data)
+    assert public_scenario.task_text == load_scenario().task_text
+    assert public_scenario.requested_deadline is None
+    requested_deadline_arg = f"requested_deadline={deadline.isoformat()}"
+    command = make_agent(
+        tmp_path, model_name="openrouter/target", cost_limit=50, requested_deadline=deadline
+    ).inspect_command()
+    assert f"-T {requested_deadline_arg}" in command
+    assert '-T sim_weeks="$WORLD_SIM_WEEKS"' in command
+
+    installed_package = tmp_path / "installed-public-wheel"
+    installed_package.mkdir()
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(installed_package)
+    script = textwrap.dedent("""\
+        import json
+        import sys
+        from datetime import date
+        from pathlib import Path
+
+        from inspect_ai._cli.util import parse_cli_config
+        from inspect_ai._eval.loader import resolve_tasks
+        from inspect_ai.model import get_model
+
+        import refund_eval.task as task_module
+        from refund_eval.published import provider as published_provider
+        from refund_eval.agent.prompt import _deadline, render_system_prompt, with_requested_deadline
+        from refund_eval.scenario.schema import load_agent_scenario
+
+        task_file = Path(sys.argv[1]).resolve()
+        task_spec = task_file.relative_to(Path.cwd()).as_posix()
+        task_args = parse_cli_config(sys.argv[2:], None)
+        assert type(task_args["requested_deadline"]) is date
+        task_module.register_default_costs = lambda *args, **kwargs: None
+        task_module.default_model_roles = lambda *args, **kwargs: {}
+        task_module._given_role_models = lambda *args, **kwargs: []
+        published_provider.cache_conversation_prefix = lambda: None
+        published_provider.check_published_model = lambda *args, **kwargs: None
+        resolved = resolve_tasks(
+            task_spec, task_args, get_model("mockllm/model"), None, None, None
+        )
+        task = resolved[0].task
+        scenario = with_requested_deadline(
+            load_agent_scenario("train_refund_late"), task_args["requested_deadline"]
+        )
+        prompt = render_system_prompt(scenario, sim_weeks=task_args["sim_weeks"])
+        print("TASK_RESULT=" + json.dumps({
+            "task_file": str(Path(task_module.__file__).resolve()),
+            "task_input": task.dataset[0].input,
+            "task_metadata": task.dataset[0].metadata,
+            "task_deadline": task.metadata["requested_deadline"],
+            "requested_deadline_type": type(task_args["requested_deadline"]).__name__,
+            "system_prompt": prompt,
+            "session_end": _deadline(scenario, task_args["sim_weeks"]),
+        }))
+    """)
+    task_cli_args = [
+        "scenario=train_refund_late",
+        f"sim_weeks={sim_weeks}",
+        "published_data=fixture",
+        "research_mode=saved",
+        "world_url=http://world:8000",
+        "cost_limit=50.0",
+        requested_deadline_arg,
+    ]
+    child_env = os.environ.copy()
+    for name in ("OPENROUTER_API_KEY", "OPENROUTER_AGENT_API_KEY", "OPENROUTER_WORLD_API_KEY"):
+        child_env.pop(name, None)
+    child_env.update({
+        "INSPECT_EVAL_MODEL": "mockllm/model",
+        "PYTHONPATH": str(installed_package),
+        "PYTHON_DOTENV_DISABLED": "1",
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(installed_package / "refund_eval" / "task.py"), *task_cli_args],
+        cwd=tmp_path, env=child_env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    loaded = json.loads(next(line.removeprefix("TASK_RESULT=") for line in result.stdout.splitlines()
+                             if line.startswith("TASK_RESULT=")))
+    assert loaded["task_file"] == str((installed_package / "refund_eval" / "task.py").resolve())
+    assert loaded["requested_deadline_type"] == "date"
+    assert loaded["task_metadata"]["requested_deadline"] == "2027-02-04"
+    assert loaded["task_deadline"] == "2027-02-04"
+    assert "by the 4 February 2027 HARD deadline" in loaded["task_input"]
+
+    instruction = (task_dir / "instruction.md").read_text(encoding="utf-8").strip()
+    assert instruction == loaded["task_input"]
+    assert "Requested task deadline: 4 February 2027" in loaded["system_prompt"]
+    assert f"Your session ends on {loaded['session_end']}" in loaded["system_prompt"]
+    assert loaded["session_end"] != "4 February 2027"
+
+    world_source = task_dir / "environment" / "source"
+    scenario_bytes = (world_source / "refund_eval/scenario/train_refund_late.yaml").read_bytes()
+    assert scenario_bytes == (
+        adapter.ROOT / "refund_eval/scenario/train_refund_late.yaml"
+    ).read_bytes()
+    assert b"5 October 2026" in scenario_bytes
+    rules = Path("refund_eval/scenario/rules/train_refund_late")
+    assert {
+        path.relative_to(rules).as_posix(): path.read_bytes() for path in rules.rglob("*") if path.is_file()
+    } == {
+        path.relative_to(world_source / rules).as_posix(): path.read_bytes()
+        for path in (world_source / rules).rglob("*") if path.is_file()
+    }
+    compose = yaml.safe_load((task_dir / "environment/docker-compose.yaml").read_bytes())
+    world_env = compose["services"]["world"]["environment"]
+    assert world_env["WORLD_SIM_WEEKS"] == "${WORLD_SIM_WEEKS}"
+    assert "WORLD_REQUESTED_DEADLINE" not in world_env
+    assert metadata["rules_sha256"] == record["task"]["rules_sha256"]
+
+
+@pytest.mark.parametrize("stale_source", [
+    "refund_eval/task.py",
+    "refund_eval/agent/prompt.py",
+    "refund_eval/agent/harness.py",
+])
+def test_split_budget_wheel_attests_deadline_task_sources(
+    tmp_path, approved_split_budget_wheel, stale_source
+):
+    wheel, _ = approved_split_budget_wheel
+    required_sources = {
+        "refund_eval/task.py",
+        "refund_eval/agent/prompt.py",
+        "refund_eval/agent/harness.py",
+    }
+    assert required_sources <= set(adapter.SPLIT_BUDGET_WHEEL_SOURCES)
+    assert required_sources <= set(adapter.verify_split_budget_wheel(wheel))
+
+    stale_wheel = tmp_path / f"stale-{Path(stale_source).name}.whl"
+    with zipfile.ZipFile(wheel) as source, zipfile.ZipFile(stale_wheel, "w") as stale:
+        for member in source.infolist():
+            contents = source.read(member.filename)
+            if member.filename == stale_source:
+                contents += b"\n"
+            stale.writestr(member, contents)
+
+    with pytest.raises(ValueError, match="split budget source"):
+        adapter.verify_split_budget_wheel(stale_wheel)
+
+
+@pytest.mark.parametrize("mode", ["shared", "split"])
+def test_requested_deadline_requires_guarded_shared_key_mode(mode, approved_wheel):
+    wheel, digest = approved_wheel
+    options = {
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture", "research_mode": "saved",
+        "model": "openrouter/target", "simulator_model": "openrouter/simulator", "grader_model": "openrouter/grader",
+        "cost_limit": 50, "world_cost_limit": 100, "requested_deadline": date(2027, 2, 4),
+        "agent_wheel": wheel, "agent_wheel_sha256": digest, "openrouter_key_mode": mode,
+    }
+    if mode == "split":
+        options["agent_max_output_tokens"] = 2048
+    with pytest.raises(ValueError, match="requested_deadline is only valid in a guarded shared-key mode"):
+        batch.NativeBatchConfig(**options)
 
 
 def test_task_uses_scenario_filename_when_it_differs_from_id(tmp_path, monkeypatch, approved_wheel):
@@ -660,7 +905,31 @@ def test_dataset_metric_and_job(generated):
     assert agent.import_path == adapter.AGENT_IMPORT_PATH
     assert agent.kwargs["cost_limit"] == 150.0 and agent.kwargs["token_budget"] == 40_000_000
     assert agent.env == {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}
+    assert not job.verifier.disable
     assert job.retry.max_retries == 0
+
+
+def test_batch_can_disable_verifier_and_keeps_trace_artifacts(tmp_path, approved_wheel):
+    config = batch.NativeBatchConfig(
+        execution="docker", scenario="train_refund_late", data_mode="fixture", research_mode="saved",
+        cost_limit=1, world_cost_limit=1, sim_weeks=1, disable_verifier=True, **_wheel_config(approved_wheel),
+    )
+    out = tmp_path / "ungraded"
+    record_path = batch.prepare(out, config)
+
+    task_path = out / "train_refund_late"
+    task_config = Task(task_path).config
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_text()))
+    assert job.verifier.disable
+    assert {(a.source, a.service, a.destination) for a in task_config.artifacts} == {
+        ("/var/log/world", "world", "world"), ("/logs/agent/inspect", None, "agent-eval"),
+    }
+    [collect] = task_config.verifier.collect
+    assert collect.service == "world" and "final_snapshot.json" in collect.command
+    record = json.loads(record_path.read_text())
+    assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task_path)[0]}"
+    job_bytes = (out / "job.yaml").read_bytes()
+    assert record["job"]["sha256"] == hashlib.sha256(job_bytes).hexdigest()
 
 
 def test_adapter_refuses_to_overwrite(generated, approved_wheel):
@@ -726,6 +995,75 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
         batch.prepare(out, batch.NativeBatchConfig.model_validate_json(config.read_bytes()))
 
 
+def test_native_suite_prepares_ten_distinct_tasks(tmp_path, approved_suite_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    config = _native_suite_config(suite, approved_suite_wheel)
+    baseline = next(entry for entry in suite if entry["task_id"] == "rail_original_baseline")
+    assert baseline["task_text"] == task_message(load_scenario("train_refund_late"), 12)
+
+    out = tmp_path / "prepared-suite"
+    record_path = batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    raw_job = yaml.safe_load((out / "job.yaml").read_bytes())
+    assert raw_job["agents"][0]["kwargs"]["forward_task_instruction"] is True
+    expected = {entry["task_id"]: entry for entry in suite}
+    assert len(job.tasks) == len(expected) == 10
+    assert len({task.path for task in job.tasks}) == 10
+    for job_task in job.tasks:
+        metadata = Task(job_task.path).config.metadata
+        entry = expected[metadata["task_id"]]
+        assert metadata["scenario"] == entry["scenario"]
+        task_env = tomllib.loads((job_task.path / "task.toml").read_text())["environment"]["env"]
+        assert task_env["WORLD_TASK_ID"] == metadata["task_id"]
+        assert (job_task.path / "instruction.md").read_text() == entry["task_text"] + "\n"
+    dataset = tomllib.loads((out / "dataset.toml").read_text())
+    assert len(dataset["tasks"]) == 10
+    record = json.loads(record_path.read_text())
+    assert record["total_trials"] == 10
+    assert record["effective_parameters"]["task_count"] == 10
+    assert record["effective_parameters"]["attempts_per_task"] == 1
+    assert {task["task_id"] for task in record["tasks"]} == set(expected)
+    assert {task["scenario"] for task in record["tasks"]} == {"train_refund_late", "bills_price_rise"}
+
+
+@pytest.mark.parametrize(
+    ("case", "error"),
+    [
+        ("path", "task_id"),
+        ("duplicate_id", "unique"),
+        ("duplicate_text", "unique"),
+        ("blank", "blank"),
+        ("unknown_scenario", "(?i)unknown.*scenario|scenario.*unknown"),
+    ],
+)
+def test_native_suite_rejects_invalid_entries(case, error, approved_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    if case == "path":
+        suite[0]["task_id"] = "../outside"
+    elif case == "duplicate_id":
+        suite[1]["task_id"] = suite[0]["task_id"]
+    elif case == "duplicate_text":
+        suite[1]["task_text"] = suite[0]["task_text"]
+    elif case == "blank":
+        suite[0]["task_text"] = " \n "
+    else:
+        suite[0]["scenario"] = "unknown_scenario"
+
+    with pytest.raises(ValueError, match=error):
+        _native_suite_config(suite, approved_wheel)
+
+
+def test_native_suite_rejects_live_research_for_late_refund_entry(approved_wheel):
+    suite = json.loads((adapter.ROOT / "docs/harbor-long-horizon-suite.json").read_text())["suite"]
+    config = _native_suite_config(suite, approved_wheel)
+    config_data = config.model_dump(mode="python", exclude_none=True)
+    config_data["scenario"] = "bills_price_rise"
+    config_data["research_mode"] = "live"
+
+    with pytest.raises(ValueError, match="train_refund_late.*research_mode"):
+        batch.NativeBatchConfig.model_validate(config_data)
+
+
 def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_wheel):
     config = {"scenario": "bills_price_rise", "execution": "docker", **_wheel_config(approved_wheel)}
     with pytest.raises(ValueError, match="world_cost_limit"):
@@ -739,6 +1077,18 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_whee
                       batch.NativeBatchConfig(**config, world_cost_limit=1))
 
 
+def test_split_batch_rejects_bills_scenario_before_preparation(approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    with pytest.raises(ValueError, match="split mode supports only train_refund_late"):
+        batch.NativeBatchConfig(
+            scenario="bills_price_rise", execution="modal", data_mode="fixture", research_mode="saved",
+            model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+            cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+            openrouter_key_mode="split", agent_max_output_tokens=2048,
+            agent_wheel=wheel, agent_wheel_sha256=digest,
+        )
+
+
 def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, approved_wheel):
     path, digest = approved_wheel
     config = batch.NativeBatchConfig(
@@ -750,6 +1100,333 @@ def test_batch_rejects_wrong_wheel_digest_before_staging(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match="SHA256 does not match"):
         batch.prepare(out, config)
     assert not out.exists()
+
+
+def test_split_batch_prints_guarded_capture_verify_and_launch_recipe(
+    tmp_path, capsys, approved_split_budget_wheel
+):
+    import shlex
+
+    wheel, digest = approved_split_budget_wheel
+    config_path = tmp_path / "split-config.json"
+    out = tmp_path / "split-batch"
+    config_path.write_text(json.dumps({
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture",
+        "research_mode": "saved", "model": "openrouter/target", "simulator_model": "openrouter/sim",
+        "grader_model": "openrouter/grade", "cost_limit": 50, "world_cost_limit": 100,
+        "trials": 1, "concurrency": 1, "time_limit": 120,
+        "openrouter_key_mode": "split", "agent_max_output_tokens": 2048,
+        "agent_wheel": str(wheel), "agent_wheel_sha256": digest,
+    }))
+
+    assert batch.main(["--config", str(config_path), "--out", str(out)]) == 0
+
+    manifest = out / "laura-setup.json"
+    commands = (
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "save", "--config",
+         str(out / "job.yaml"), "--manifest", str(manifest)],
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "verify", "--manifest", str(manifest)],
+        ["scripts/harbor", "python", "-m", "scripts.laura_trial", "run", "--manifest", str(manifest),
+         "--job-name", "laura-native-split-batch"],
+    )
+    output = capsys.readouterr().out
+    assert all(shlex.join(command) in output for command in commands)
+    assert "OPENROUTER_AGENT_API_KEY" in output and "OPENROUTER_WORLD_API_KEY" in output
+    assert "scripts/harbor harbor run" not in output
+
+
+def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
+    tmp_path, monkeypatch, approved_split_budget_wheel
+):
+    wheel, digest = approved_split_budget_wheel
+    monkeypatch.setenv("OPENROUTER_AGENT_API_KEY", "agent-fake-never-packaged")
+    monkeypatch.setenv("OPENROUTER_WORLD_API_KEY", "world-fake-never-packaged")
+    out = tmp_path / "split-batch"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="split", agent_max_output_tokens=2048,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+
+    record_path = batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    [agent] = job.agents
+    compose = yaml.safe_load((out / "train_refund_late" / "environment" / "docker-compose.yaml").read_text())
+    world_env = compose["services"]["world"]["environment"]
+    record = json.loads(record_path.read_text())
+
+    assert agent.import_path == adapter.AGENT_IMPORT_PATH
+    assert agent.env == {
+        "OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
+        "REFUND_EVAL_AGENT_DOLLAR_CAP": "50.0",
+        "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "2048",
+    }
+    assert "OPENROUTER_WORLD_API_KEY" not in agent.env
+    assert world_env["OPENROUTER_API_KEY"] == "${OPENROUTER_WORLD_API_KEY}"
+    assert world_env["WORLD_STRICT_BUDGET"] == "true"
+    assert "OPENROUTER_AGENT_API_KEY" not in world_env["OPENROUTER_API_KEY"]
+    assert record["effective_parameters"]["openrouter_key_mode"] == "split"
+    assert record["effective_parameters"]["agent_max_output_tokens"] == 2048
+    assert record["effective_parameters"]["agent_key_ceiling_usd"] == 50
+    assert record["effective_parameters"]["world_key_ceiling_usd"] == 100
+    assert "agent-fake-never-packaged" not in (out / "job.yaml").read_text()
+    assert "world-fake-never-packaged" not in compose["services"]["world"]["environment"]["OPENROUTER_API_KEY"]
+
+    from harbor.utils.env import resolve_env_vars
+
+    from refund_eval.realism.track import SOURCE_MANIFEST, freeze_source_manifest
+    from scripts.guarded_harbor import (
+        LauncherFailure,
+        _has_role_key_reference,
+        _split_compose_values,
+        run_guarded_job,
+        validate_job_config,
+    )
+    from scripts.offline_spend_guard import SplitThresholds
+
+    task_path = out / "train_refund_late"
+    assert resolve_env_vars({"OPENROUTER_API_KEY": agent.env["OPENROUTER_API_KEY"]}) == {
+        "OPENROUTER_API_KEY": "agent-fake-never-packaged"
+    }
+    assert resolve_env_vars({"OPENROUTER_API_KEY": world_env["OPENROUTER_API_KEY"]}) == {
+        "OPENROUTER_API_KEY": "world-fake-never-packaged"
+    }
+    assert _has_role_key_reference({"OTHER": "$OPENROUTER_WORLD_API_KEY"})
+    assert _has_role_key_reference({"OTHER": "${OPENROUTER_AGENT_API_KEY:-fallback}"})
+    assert validate_job_config(job) is None
+
+    compose_path = task_path / "environment" / "docker-compose.yaml"
+    original_compose = compose_path.read_bytes()
+    list_compose = yaml.safe_load(original_compose)
+    world_values = list_compose["services"]["world"]["environment"]
+    list_compose["services"]["world"]["environment"] = [
+        f"{name}={value}" for name, value in world_values.items()
+    ]
+    compose_path.write_text(yaml.safe_dump(list_compose, sort_keys=False), encoding="utf-8")
+    parsed_values = _split_compose_values(task_path)
+    assert parsed_values["WORLD_STRICT_BUDGET"] == "true"
+    assert Decimal(parsed_values["WORLD_COST_LIMIT"]) == Decimal(100)
+    assert parsed_values["WORLD_SIMULATOR_MODEL"] == "openrouter/simulator"
+    assert parsed_values["WORLD_GRADER_MODEL"] == "openrouter/grader"
+    assert parsed_values["WORLD_SIM_WEEKS"] == "${WORLD_SIM_WEEKS}"
+    assert int(parsed_values["WORLD_MAX_TURNS"]) == 1000
+
+    malformed = yaml.safe_load(original_compose)
+    malformed["services"]["world"]["environment"] = ["OPENROUTER_API_KEY"]
+    compose_path.write_text(yaml.safe_dump(malformed, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+
+    for override, value in (
+        ("image", "untrusted/image"),
+        ("command", ["/bin/true"]),
+        ("entrypoint", ["/bin/true"]),
+        ("env_file", ["untrusted.env"]),
+        ("extends", {"service": "main"}),
+        ("secrets", ["runtime-key"]),
+    ):
+        modified = yaml.safe_load(original_compose)
+        modified["services"]["world"][override] = value
+        compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+        with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+            _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["other"] = {}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["main"]["environment"] = {"EXTRA_KEY": "$OPENROUTER_WORLD_API_KEY"}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["services"]["world"]["environment"]["EXTRA_KEY"] = "${OPENROUTER_AGENT_API_KEY:-fallback}"
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    modified = yaml.safe_load(original_compose)
+    modified["secrets"] = {"runtime-key": {"file": "secret.txt"}}
+    compose_path.write_text(yaml.safe_dump(modified, sort_keys=False), encoding="utf-8")
+    with pytest.raises(LauncherFailure, match="Compose environment is invalid"):
+        _split_compose_values(task_path)
+    compose_path.write_bytes(original_compose)
+
+    for mutate in (
+        lambda raw: raw["environment"].update(extra_docker_compose=["overlay.yaml"]),
+        lambda raw: raw["environment"].update(kwargs={"secrets": ["named-secret"]}),
+        lambda raw: raw["agents"][0]["env"].update(EXTRA_KEY="$OPENROUTER_WORLD_API_KEY"),
+        lambda raw: raw["environment"].setdefault("env", {}).update(
+            EXTRA_KEY="${OPENROUTER_AGENT_API_KEY:-fallback}"
+        ),
+        lambda raw: raw["verifier"].setdefault("env", {}).update(EXTRA_KEY="$OPENROUTER_WORLD_API_KEY"),
+    ):
+        raw = job.model_dump(mode="python")
+        mutate(raw)
+        with pytest.raises(LauncherFailure):
+            validate_job_config(JobConfig.model_validate(raw))
+
+    task_toml_path = task_path / "task.toml"
+    original_task_toml = task_toml_path.read_text(encoding="utf-8")
+    task_toml_path.write_text(
+        original_task_toml.replace(
+            "[environment.env]\n", '[environment.env]\nEXTRA_KEY = "$OPENROUTER_AGENT_API_KEY"\n', 1
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(LauncherFailure, match="split task base environment"):
+        validate_job_config(job)
+    task_toml_path.write_text(original_task_toml, encoding="utf-8")
+
+    world_dockerfile = task_path / "environment" / "world" / "Dockerfile"
+    original_world_dockerfile = world_dockerfile.read_bytes()
+    world_dockerfile.write_bytes(original_world_dockerfile + b"\n")
+    with pytest.raises(LauncherFailure, match="build/runtime paths"):
+        validate_job_config(job)
+    world_dockerfile.write_bytes(original_world_dockerfile)
+
+    world_source = task_path / "environment" / "source"
+    stale_module = world_source / "refund_eval" / "models" / "budget.py"
+    stale_module.write_bytes(stale_module.read_bytes() + b"\n# stale world budget module\n")
+    freeze_source_manifest(world_source)
+    current_task = Task(task_path)
+    old_source_sha = current_task.config.metadata["source_sha256"]
+    source_manifest = json.loads((world_source / SOURCE_MANIFEST).read_text())
+    task_toml = (task_path / "task.toml").read_text()
+    task_toml = task_toml.replace(old_source_sha, source_manifest["source_sha256"])
+    (task_path / "task.toml").write_text(task_toml)
+    record["task"]["source_sha256"] = source_manifest["source_sha256"]
+    record["task"]["digest"] = f"sha256:{Packager.compute_content_hash(task_path)[0]}"
+    record_path.write_text(json.dumps(record))
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+
+    class ProbeGuard:
+        started = False
+
+        async def start(self):
+            self.started = True
+
+    probe_guard = ProbeGuard()
+
+    async def fail_job(_):
+        pytest.fail("stale split task reached Harbor job creation")
+
+    with pytest.raises(LauncherFailure, match="split world source does not attest"):
+        asyncio.run(run_guarded_job(
+            job,
+            SplitThresholds(Decimal(50), Decimal(100)),
+            guard=probe_guard,
+            job_factory=fail_job,
+        ))
+    assert probe_guard.started is False
+
+
+def test_split_native_task_prebuilt_image_is_rejected_before_guard_or_job(
+    tmp_path, monkeypatch, approved_split_budget_wheel
+):
+    from contextlib import nullcontext
+
+    from scripts import guarded_harbor
+    from scripts.guarded_harbor import LauncherFailure, run_guarded_job
+    from scripts.offline_spend_guard import SplitThresholds
+
+    wheel, digest = approved_split_budget_wheel
+    out = tmp_path / "split-prebuilt-image"
+    config = batch.NativeBatchConfig(
+        scenario="train_refund_late", execution="modal", data_mode="fixture", research_mode="saved",
+        model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
+        cost_limit=50, world_cost_limit=100, trials=1, concurrency=1, time_limit=120,
+        openrouter_key_mode="split", agent_max_output_tokens=2048,
+        agent_wheel=wheel, agent_wheel_sha256=digest,
+    )
+    batch.prepare(out, config)
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_bytes()))
+    task_config = out / "train_refund_late" / "task.toml"
+    original = task_config.read_text(encoding="utf-8")
+    task_config.write_text(
+        original.replace(
+            "[environment]\n",
+            '[environment]\ndocker_image = "registry.example/prebuilt:latest"\n',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    class ProbeGuard:
+        started = False
+
+        async def start(self):
+            self.started = True
+
+        async def ensure_healthy(self):
+            return None
+
+        def attach_job_task(self, _task):
+            return None
+
+        async def cleanup_bound(self):
+            return None
+
+        async def close(self):
+            return None
+
+    guard = ProbeGuard()
+    job_calls = []
+
+    async def create_job(_config):
+        job_calls.append(True)
+        raise RuntimeError("prebuilt task reached Harbor job creation")
+
+    monkeypatch.setattr(guarded_harbor, "install_modal_hooks", lambda *_args, **_kwargs: nullcontext())
+    try:
+        asyncio.run(run_guarded_job(
+            job,
+            SplitThresholds(Decimal(50), Decimal(100)),
+            guard=guard,
+            job_factory=create_job,
+        ))
+    except RuntimeError as error:
+        failure = error
+    else:
+        failure = None
+
+    assert not guard.started and job_calls == [], (
+        f"split prebuilt image reached guard or job creation: started={guard.started}, jobs={len(job_calls)}"
+    )
+    assert isinstance(failure, LauncherFailure) and "prebuilt" in str(failure)
+
+
+@pytest.mark.parametrize(("change", "expected_error"), [
+    ({"agent_max_output_tokens": None}, "split mode requires agent_max_output_tokens"),
+    ({"agent_max_output_tokens": True}, "agent_max_output_tokens"),
+    ({"execution": "docker"}, "split mode requires Modal execution"),
+    ({"trials": 2}, "split mode requires one target attempt and concurrency one"),
+    ({"concurrency": 2}, "split mode requires one target attempt and concurrency one"),
+    ({"trial_spend_cap_usd": 150, "key_spend_cap_usd": 200},
+     "split mode does not support combined planning caps"),
+])
+def test_split_native_config_rejects_unbounded_or_ambiguous_modes_before_preparation(
+    tmp_path, change, expected_error, approved_split_budget_wheel
+):
+    wheel, digest = approved_split_budget_wheel
+    config = {
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "fixture",
+        "research_mode": "saved", "model": "openrouter/target", "simulator_model": "openrouter/sim",
+        "grader_model": "openrouter/grade", "cost_limit": 50, "world_cost_limit": 100,
+        "trials": 1, "concurrency": 1, "openrouter_key_mode": "split", "agent_max_output_tokens": 2048,
+        "agent_wheel": wheel, "agent_wheel_sha256": digest,
+    } | change
+
+    baseline = batch.NativeBatchConfig(**(config | {key: value for key, value in {
+        "agent_max_output_tokens": 2048, "execution": "modal", "trials": 1, "concurrency": 1,
+        "trial_spend_cap_usd": None, "key_spend_cap_usd": None,
+    }.items()}))
+    assert baseline.openrouter_key_mode == "split"
+    with pytest.raises((ValueError, TypeError), match=expected_error):
+        batch.NativeBatchConfig(**config)
+    assert not (tmp_path / "split-invalid").exists()
 
 
 SPEND_CAPPED = {"execution": "docker", "scenario": "train_refund_late", "models": ["openrouter/a", "openrouter/b"],
@@ -846,7 +1523,8 @@ def test_inspect_command(tmp_path):
                           '/app/.venv/bin/inspect eval '
                           '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
                           'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
-    for part in ("--model openrouter/anthropic/claude-opus-5.5", "-M strict_tools=false", "-M reasoning_enabled=true",
+    for part in ("--model openrouter/anthropic/claude-opus-5.5", "--max-retries 0", "-M max_retries=0",
+                 "-M strict_tools=false", "-M reasoning_enabled=true",
                  "-T world_url=http://world:8000", '-T scenario="$WORLD_SCENARIO"', '-T sim_weeks="$WORLD_SIM_WEEKS"',
                  '-T published_data="$WORLD_DATA_MODE"', "-T history_tokens=60000", "-T token_budget=40000000",
                  "-T cost_limit=150.0", "-T time_limit=36000", "--log-dir /logs/agent/inspect",
@@ -855,8 +1533,23 @@ def test_inspect_command(tmp_path):
     assert convert.startswith("/app/.venv/bin/python -m refund_eval.harbor.atif /logs/agent/inspect "
                               "--out /logs/agent/trajectory.json")
     assert convert.endswith("exit $status")
+    assert "-T task_id" not in run and "-T task_text" not in run
+    default_with_instruction = make_agent(tmp_path).inspect_command("a Harbor instruction")
+    assert "-T task_id" not in default_with_instruction and "-T task_text" not in default_with_instruction
     mock = make_agent(tmp_path, model_name="mockllm/model").inspect_command()
     assert "-M " not in mock and "-T cost_limit" not in mock and "-T token_budget" not in mock
+
+
+def test_inspect_command_forwards_task_instruction_safely(tmp_path):
+    import shlex
+
+    instruction = "Check Laura's dates; do not expand $WORLD_SCENARIO."
+    suite_agent = make_agent(tmp_path, forward_task_instruction=True)
+    command = suite_agent.inspect_command(instruction + "\n")
+    assert f"-T task_text={shlex.quote(instruction)}" in command
+    assert '-T task_id="$WORLD_TASK_ID"' in command
+    with pytest.raises(ValueError, match="Suite task forwarding"):
+        suite_agent.inspect_command()
 
 
 def test_options_are_validated(tmp_path):

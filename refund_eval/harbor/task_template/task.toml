@@ -13,19 +13,23 @@ artifacts = [
 [task]
 name = "__TASK_NAME__"
 description = "__DESCRIPTION__"
-keywords = ["refund-eval", "long-horizon", "customer-service", "__SCENARIO__"]
+keywords = ["refund-eval", "long-horizon", "customer-service", "__SCENARIO__", "__TASK_ID__"]
 
 [metadata]
 task_version = "__TASK_VERSION__"
 environment_version = "__ENVIRONMENT_VERSION__"
 environment_fingerprint = "__ENVIRONMENT_FINGERPRINT__"
+task_id = "__TASK_ID__"
 scenario = "__SCENARIO__"
 data_mode = "__DATA_MODE__"
 sim_weeks = __SIM_WEEKS__
+requested_deadline = "__REQUESTED_DEADLINE__"
 max_turns = __MAX_TURNS__
 research_mode = "__RESEARCH_MODE__"
 simulator_model = "__SIMULATOR_MODEL__"
 grader_model = "__GRADER_MODEL__"
+openrouter_key_mode = "__OPENROUTER_KEY_MODE__"
+shared_allowance_usd = "__SHARED_ALLOWANCE_USD__"
 rules_sha256 = "__RULES_SHA256__"
 source_sha256 = "__SOURCE_SHA256__"
 agent_wheel_filename = "__AGENT_WHEEL_FILENAME__"
@@ -54,10 +58,13 @@ network_mode = "public"
 workdir = "/app"
 
 [environment.env]
+WORLD_TASK_ID = "__SUITE_TASK_ID__"
 WORLD_SCENARIO = "__SCENARIO__"
 WORLD_SIM_WEEKS = "__SIM_WEEKS__"
 WORLD_DATA_MODE = "__DATA_MODE__"
 WORLD_TURN_TOKEN = "${WORLD_TURN_TOKEN:-__TURN_TOKEN__}"
+REFUND_EVAL_SHARED_ROLE_MODE = "__SHARED_ROLE_MODE__"
+REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG = __SHARED_ROLE_BUDGET_CONFIG_TOML__
 
 # For discoverability; the installed agent connects to it through Inspect, not Harbor.
 [[environment.mcp_servers]]
