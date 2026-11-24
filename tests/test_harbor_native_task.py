@@ -2274,9 +2274,11 @@ async def _partial_inspect_eval_bytes(tmp_path):
 async def test_active_inspect_sample_events_survive_process_kill(tmp_path, native, guarded_modal):
     import sqlite3
 
+    from refund_eval.harbor import inspect_snapshotter
     from refund_eval.harbor.private_traces import (
         PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
         PrivateTraceCapture,
+        active_sample_snapshot_path,
     )
 
     data_home = tmp_path / "inspect-data"
@@ -2342,24 +2344,17 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
         await asyncio.wait_for(process.wait(), timeout=5)
     assert process.returncode is not None and process.returncode < 0
 
-    from inspect_ai.log._recorders.buffer.database import location_dir_and_file
-
     source_capture = PrivateTraceCapture(
         "active-sample", native=native, root=tmp_path / "spool",
     )
     source = next(source for source in source_capture.sources if source.name == "agent_active_samples")
     database_path = Path(ready.read_text())
-    remote_directory = (
-        f"{source.database_root}/"
-        f"{location_dir_and_file(log_directory + '/run.eval')[0]}"
-    )
+    local_snapshot = inspect_snapshotter.snapshot_path(data_home)
+    inspect_snapshotter._publish(database_path, local_snapshot)
+    remote_snapshot = active_sample_snapshot_path("active-sample", source.buffer_root)
 
     class Filesystem:
-        async def aio(self, directory):
-            if directory == log_directory:
-                return [SimpleNamespace(name="run.eval")]
-            assert directory == remote_directory
-            return [SimpleNamespace(name=path.name) for path in database_path.parent.iterdir()]
+        pass
 
     class CapturingEnvironment:
         def __init__(self):
@@ -2368,16 +2363,12 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
                 setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
 
         async def download_file(self, remote, destination):
-            assert remote.startswith(source.database_root + "/")
-            shutil.copyfile(database_path.parent / Path(remote).name, destination)
+            assert remote == remote_snapshot.as_posix()
+            shutil.copyfile(local_snapshot, destination)
 
         async def download_dir(self, remote, destination):
-            if remote == log_directory:
-                (Path(destination) / "run.eval").write_bytes(b"in-progress eval")
-                return
-            assert remote == remote_directory
-            for path in database_path.parent.iterdir():
-                shutil.copyfile(path, Path(destination) / path.name)
+            assert remote == remote_snapshot.parent.as_posix()
+            shutil.copyfile(local_snapshot, Path(destination) / remote_snapshot.name)
 
         async def exec(self, *_args, **_kwargs):
             raise AssertionError("active trace capture must not use sandbox exec")
@@ -2400,6 +2391,267 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
     assert "active model payload" in json.dumps({"events": events, "calls": call_pools})
     assert "active model prompt" in json.dumps(pools)
     assert "active tool result" in json.dumps(events)
+
+
+async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_failed_collection(
+    tmp_path, approved_split_budget_wheel,
+):
+    import sqlite3
+
+    from refund_eval.harbor.inspect_snapshotter import snapshot_path
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+        active_sample_snapshot_path,
+        private_inspect_data_home,
+    )
+    from scripts import guarded_harbor
+    from scripts.guarded_harbor import validate_job_config
+
+    wheel, digest = approved_split_budget_wheel
+    staged_job = _stage_shared_caps_job(tmp_path / "staged-shared-caps", wheel, digest)
+    assert validate_job_config(staged_job) is None
+    task_path = Path(staged_job.tasks[0].path)
+    compose_path = task_path / "environment/docker-compose.yaml"
+    staged_compose = yaml.safe_load(compose_path.read_text())
+    main_volumes = staged_compose["services"]["main"]["volumes"]
+    world_volumes = staged_compose["services"]["world"]["volumes"]
+    buffer_target = next(volume for volume in main_volumes if volume.startswith("inspect-buffer:")).split(":", 1)[1]
+    world_target = next(volume for volume in world_volumes if volume.startswith("world-logs:")).split(":", 1)[1]
+    staged_environment = SimpleNamespace(environment_dir=task_path / "environment")
+    with guarded_harbor.private_world_compose_bind(staged_environment):
+        guarded_compose = yaml.safe_load((staged_environment.environment_dir / "docker-compose.yaml").read_text())
+        guarded_main_volumes = guarded_compose["services"]["main"]["volumes"]
+        guarded_world_volumes = guarded_compose["services"]["world"]["volumes"]
+        buffer_mount = next(volume for volume in guarded_main_volumes if volume.endswith(f":{buffer_target}"))
+        world_mount = next(volume for volume in guarded_world_volumes if volume.endswith(f":{world_target}"))
+        buffer_root = Path(buffer_mount.split(":", 1)[0])
+        world_root = Path(world_mount.split(":", 1)[0])
+
+    run_id = "real-inspect-active"
+    staged_data_home = private_inspect_data_home(run_id, buffer_root)
+    local_agent_root = tmp_path / "agent-data"
+    data_home = local_agent_root / staged_data_home.relative_to(buffer_root)
+    expected_buffer_snapshot = active_sample_snapshot_path(run_id, buffer_root)
+    assert snapshot_path(data_home).relative_to(local_agent_root) == expected_buffer_snapshot.relative_to(buffer_root)
+    expected_world_events = (world_root / "events.jsonl").as_posix()
+    log_dir = tmp_path / "inspect-logs"
+    marker = tmp_path / "sample-active"
+    child = textwrap.dedent(f"""
+        import asyncio, os
+        from pathlib import Path
+        from inspect_ai import Task, eval_async
+        from inspect_ai.dataset import Sample
+        from inspect_ai.model import ChatCompletionChoice, ChatMessageAssistant, ModelOutput, get_model
+        from inspect_ai.solver import solver, use_tools
+        from inspect_ai.tool import ToolCall, tool
+
+        @tool
+        def offline_tool():
+            '''Return a deterministic response for the active-sample test.'''
+            async def execute(request: str):
+                '''Return the requested fixture response.
+
+                Args:
+                    request: The offline request to return.
+                '''
+                return "active tool result"
+            return execute
+
+        @solver
+        def pause_sample():
+            async def solve(state, generate):
+                state = await generate(state)
+                Path({str(marker)!r}).write_text("active")
+                while True:
+                    await asyncio.sleep(0.02)
+            return solve
+
+        async def main():
+            tool_call = ModelOutput(
+                model="mockllm/model",
+                choices=[ChatCompletionChoice(
+                    message=ChatMessageAssistant(content="", tool_calls=[ToolCall(
+                        id="tool-1", function="offline_tool", arguments={{"request": "active request"}},
+                    )]), stop_reason="tool_calls",
+                )],
+            )
+            model = get_model("mockllm/model", custom_outputs=[
+                tool_call, ModelOutput.from_content("mockllm/model", "model response after tool"),
+            ], memoize=False)
+            task = Task(
+                dataset=[Sample(input="Run the offline tool")],
+                solver=[use_tools(offline_tool()), pause_sample()],
+            )
+            await eval_async(task, model=model, log_dir=os.environ["INSPECT_LOG_DIR"], log_format="eval")
+        asyncio.run(main())
+    """)
+    environment_vars = {
+        **os.environ, "XDG_DATA_HOME": str(data_home), "INSPECT_LOG_DIR": str(log_dir),
+    }
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "refund_eval.harbor.inspect_snapshotter", "run",
+        "--log-dir", str(log_dir), "--", sys.executable, "-c", child,
+        cwd=Path(__file__).resolve().parents[1], env=environment_vars,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
+    )
+    remote_snapshot = snapshot_path(data_home)
+
+    def checkpoint_has_agent_and_tool_events():
+        if not remote_snapshot.is_file():
+            return False
+        try:
+            with sqlite3.connect(f"{remote_snapshot.as_uri()}?mode=ro", uri=True) as database:
+                events = [json.loads(row[0]) for row in database.execute("SELECT data FROM events")]
+                messages = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+                calls = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+                samples = [json.loads(row[0]) for row in database.execute("SELECT data FROM samples")]
+            event_types = {event.get("event") for event in events}
+            evidence = json.dumps({"events": events, "messages": messages, "calls": calls})
+            return (
+                {"model", "tool"} <= event_types
+                and any(sample.get("completed_at") is None for sample in samples)
+                and "active request" in evidence
+                and "active tool result" in evidence
+            )
+        except sqlite3.Error:
+            return False
+
+    try:
+        deadline = asyncio.get_running_loop().time() + 15
+        while (not marker.exists() or not checkpoint_has_agent_and_tool_events()) and process.returncode is None:
+            if asyncio.get_running_loop().time() >= deadline:
+                stderr = await process.stderr.read() if process.stderr else b""
+                pytest.fail(f"Inspect did not publish an active checkpoint: {stderr.decode(errors='replace')}")
+            await asyncio.sleep(0.05)
+        if not marker.exists():
+            stderr = await process.stderr.read() if process.stderr else b""
+            pytest.fail(f"Inspect exited before the active sample checkpoint: {stderr.decode(errors='replace')}")
+        assert marker.is_file() and process.returncode is None
+        os.killpg(process.pid, 9)
+        await asyncio.wait_for(process.wait(), timeout=5)
+    finally:
+        if process.returncode is None:
+            os.killpg(process.pid, 9)
+            await process.wait()
+
+    capture = PrivateTraceCapture(run_id, native=True, root=tmp_path / "spool")
+    agent_source = next(source for source in capture.sources if source.name == "agent_active_samples")
+    world_source = next(source for source in capture.sources if source.name == "simulator_events")
+    assert Path(agent_source.buffer_root) == buffer_root
+    assert world_source.remote_path == expected_world_events
+    world_snapshot = b'{"event":"simulator-private-event"}\n'
+
+    class OfflineEnvironment:
+        _sandbox = SimpleNamespace(filesystem=object())
+
+        def __init__(self):
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            if remote == expected_buffer_snapshot.as_posix():
+                shutil.copyfile(remote_snapshot, destination)
+            elif remote == world_source.remote_path:
+                Path(destination).write_bytes(world_snapshot)
+            else:
+                raise FileNotFoundError(remote)
+
+        async def download_dir(self, remote, destination):
+            raise RuntimeError("final artifact collection failed")
+
+    offline = OfflineEnvironment()
+    with pytest.raises(RuntimeError, match="final artifact collection failed"):
+        await offline.download_dir("final-artifacts", tmp_path)
+    await capture._capture_source(offline, agent_source)
+    await capture._capture_source(offline, world_source)
+    saved = _captured_trace_file(capture.directory, agent_source.name)
+    with sqlite3.connect(f"{saved.as_uri()}?mode=ro", uri=True) as database:
+        events = [json.loads(row[0]) for row in database.execute("SELECT data FROM events ORDER BY id")]
+        messages = [row[0] for row in database.execute("SELECT data FROM message_pool")]
+        calls = [row[0] for row in database.execute("SELECT data FROM call_pool")]
+    assert {event["event"] for event in events} >= {"model", "tool"}
+    evidence = json.dumps({"events": events, "messages": messages, "calls": calls})
+    assert "active request" in evidence and "active tool result" in evidence
+    assert _captured_trace_file(capture.directory, world_source.name).read_bytes() == world_snapshot
+
+
+async def test_active_sample_snapshot_validation_does_not_block_run_monitoring(tmp_path, monkeypatch):
+    import sqlite3
+    import time
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+        TraceSource,
+        active_sample_snapshot_path,
+    )
+
+    capture = PrivateTraceCapture("async-snapshot-validation", native=True, root=tmp_path / "spool")
+    buffer_root = tmp_path / "agent-buffer"
+    source = TraceSource("agent_active_samples", None, "active-samples.sqlite", buffer_root=str(buffer_root))
+    remote_snapshot = active_sample_snapshot_path(capture.run_id, buffer_root)
+    remote_snapshot.parent.mkdir(parents=True)
+    with sqlite3.connect(remote_snapshot) as database:
+        database.execute("CREATE TABLE events (data TEXT)")
+        database.execute("INSERT INTO events VALUES (?)", ('{"event":"model"}',))
+
+    class OfflineEnvironment:
+        _sandbox = SimpleNamespace(filesystem=object())
+
+        def __init__(self):
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, remote, destination):
+            assert remote == remote_snapshot.as_posix()
+            shutil.copyfile(remote_snapshot, destination)
+
+    original_validate = private_traces._validate_active_sample_snapshot
+
+    def delayed_validate(path, timeout):
+        time.sleep(0.15)
+        original_validate(path, timeout)
+
+    monkeypatch.setattr(private_traces, "_validate_active_sample_snapshot", delayed_validate)
+    task = asyncio.create_task(
+        capture._download_active_sample_buffer(OfflineEnvironment(), source, tmp_path / "host-snapshot.sqlite"),
+    )
+    monitor_ticks = 0
+    while not task.done():
+        monitor_ticks += 1
+        await asyncio.sleep(0.01)
+    await task
+    assert monitor_ticks >= 5
+
+
+async def test_inspect_snapshotter_backup_respects_sqlite_busy_timeout(tmp_path):
+    import sqlite3
+    import time
+
+    from refund_eval.harbor.inspect_snapshotter import (
+        BACKUP_TIMEOUT_SECONDS,
+        _publish,
+    )
+
+    database_path = tmp_path / "active-samples.db"
+    destination = tmp_path / "snapshot" / "active-samples.sqlite"
+    with sqlite3.connect(database_path) as database:
+        database.execute("CREATE TABLE events (data TEXT)")
+        database.execute("INSERT INTO events VALUES (?)", ('{"event":"model"}',))
+    lock = sqlite3.connect(database_path, isolation_level=None)
+    lock.execute("BEGIN EXCLUSIVE")
+    task = asyncio.create_task(asyncio.to_thread(_publish, database_path, destination))
+    started = time.monotonic()
+    done, _ = await asyncio.wait({task}, timeout=BACKUP_TIMEOUT_SECONDS + 0.5)
+    elapsed = time.monotonic() - started
+    lock.rollback()
+    lock.close()
+    assert done, "SQLite backup exceeded its configured busy and backup timeout"
+    with pytest.raises((sqlite3.Error, TimeoutError)):
+        await task
+    assert elapsed < BACKUP_TIMEOUT_SECONDS + 0.5
+    assert not destination.exists()
+    assert not list(destination.parent.glob(".active-samples-*"))
 
 
 async def test_native_partial_traces_survive_short_run_cancellation_and_collection_failure(tmp_path):

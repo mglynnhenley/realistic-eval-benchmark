@@ -16,7 +16,11 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from refund_eval.harbor.config import TrialRequest, TrialSettings
-from refund_eval.harbor.private_traces import PrivateTraceCapture
+from refund_eval.harbor.private_traces import (
+    LEGACY_INSPECT_DATA_ROOT,
+    PrivateTraceCapture,
+    private_inspect_data_home,
+)
 from refund_eval.killswitch import kill_reason
 
 
@@ -79,7 +83,9 @@ class RefundInspectAgent(BaseAgent):
             "python -m refund_eval.harbor.worker --request /app/request.json "
             "> /logs/agent/worker.log 2>&1",
             cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
-                              "XDG_DATA_HOME": "/tmp/refund-eval-inspect-data"},
+                              "XDG_DATA_HOME": str(private_inspect_data_home(
+                                  request.trial_id, LEGACY_INSPECT_DATA_ROOT,
+                              ))},
             timeout_sec=request.settings.time_limit + 600,
         ))
         try:
@@ -163,7 +169,9 @@ class RefundInspectAgent(BaseAgent):
                 "exec python -m refund_eval.harbor.worker --request /app/request.json "
                 f"--worker-seconds {allowance:.6f} > /logs/agent/worker.log 2>&1",
                 cwd="/app", env={**self.extra_env, "REFUND_EVAL_DASHBOARD_RUN_DIR": "/logs/agent/progress",
-                                  "XDG_DATA_HOME": "/tmp/refund-eval-inspect-data"},
+                                  "XDG_DATA_HOME": str(private_inspect_data_home(
+                                      request.trial_id, LEGACY_INSPECT_DATA_ROOT,
+                                  ))},
                 timeout_sec=exec_timeout_seconds(worker_end),
             ))
             killed = False

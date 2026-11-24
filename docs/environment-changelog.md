@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.11 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 803987895e58b17452c725dcd153b179f8e331173cd7c969081071b96c8b9310
+- Trial round: none. Offline validation only; no launch.
+- Changes: snapshot live Inspect buffers with the agent-side SQLite online backup helper, bound unchanged trace generations, and preserve inspect-buffer mounts through guarded shared-budget staging.
+
 ## 8.10 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: ba9debcc2a811008231e84f5d4dd2e59c031d40f6462cbe6cb3e04aace0b70f9

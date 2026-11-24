@@ -36,7 +36,11 @@ from pydantic import Field
 
 from refund_eval.config import BudgetNotice, RunConfig
 from refund_eval.harbor.luna_status import NativeStatus
-from refund_eval.harbor.private_traces import PrivateTraceCapture
+from refund_eval.harbor.private_traces import (
+    PRIVATE_AGENT_BUFFER_ROOT,
+    PrivateTraceCapture,
+    private_inspect_data_home,
+)
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.provider import published_model_args
 
@@ -125,8 +129,14 @@ class RefundInstalledAgent(BaseInstalledAgent):
                  "--max-samples", "1", "--metadata", shlex.quote(f"harbor_trial={self.logs_dir.parent.name}")]
         convert = [PYTHON, "-m", "refund_eval.harbor.atif", f"{logs}/inspect", "--out", f"{logs}/trajectory.json",
                    "--agent-name", self.name(), "--agent-version", AGENT_VERSION]
-        return (f"mkdir -p {logs}/inspect; "
-                f"{' '.join(parts)} > {logs}/inspect.log 2>&1; status=$?; "
+        run_id = self.logs_dir.parent.name
+        runner = shlex.join([
+            PYTHON, "-m", "refund_eval.harbor.inspect_snapshotter", "run",
+            "--log-dir", f"{logs}/inspect", "--", *parts[1:],
+        ])
+        data_home = shlex.quote(str(private_inspect_data_home(run_id, PRIVATE_AGENT_BUFFER_ROOT)))
+        return (f"mkdir -p {logs}/inspect; XDG_DATA_HOME={data_home} {parts[0]} "
+                f"{runner} > {logs}/inspect.log 2>&1; status=$?; "
                 f"{' '.join(convert)} >> {logs}/inspect.log 2>&1; exit $status")
 
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
