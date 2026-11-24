@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.12 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: ddeff0f24e3b6c337cdebeed1d73f32abfd5742b041fd8d94f4cf1d5c6695140
+- Trial round: none. Offline validation only; no launch.
+- Changes: package the native Inspect snapshotter and private-trace dependencies in the installed agent wheel, preserve old task Compose files through guarded temporary adaptation, and make generation pruning safe across cancelled captures.
+
 ## 8.11 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 803987895e58b17452c725dcd153b179f8e331173cd7c969081071b96c8b9310
