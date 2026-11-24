@@ -139,6 +139,8 @@ def private_world_compose_bind(environment):
         world = services.get("world") if isinstance(services, dict) else None
         main_volumes = main.get("volumes") if isinstance(main, dict) else None
         world_volumes = world.get("volumes") if isinstance(world, dict) else None
+        if isinstance(main, dict) and "volumes" not in main:
+            main_volumes = main.setdefault("volumes", [])
         if not isinstance(main_volumes, list) or not isinstance(world_volumes, list):
             raise LauncherFailure("guarded Modal task must have main and world volume lists")
         world_mounts = [index for index, volume in enumerate(world_volumes)
@@ -277,9 +279,10 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
             raise ValueError
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
-        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+        if not isinstance(compose, dict) or set(compose) not in ({"services"}, {"services", "volumes"}):
             raise ValueError
-        if compose["volumes"] not in (
+        if compose.get("volumes", {}) not in (
+            {},
             {"world-logs": None},
             {"world-logs": None, "inspect-buffer": None},
         ):
@@ -290,10 +293,11 @@ def _split_compose_values(task_path: Path) -> dict[str, Any]:
         main = services["main"]
         world_service = services["world"]
         if (not isinstance(main, dict)
-                or set(main) != {"depends_on", "environment", "volumes"}
+                or set(main) - {"depends_on", "environment", "volumes"}
+                or "depends_on" not in main
                 or main["depends_on"] != {"world": {"condition": "service_healthy"}}
-                or main["environment"] not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
-                or main["volumes"] not in ([], ["inspect-buffer:/refund-eval-private/inspect-data"])):
+                or main.get("environment", {}) not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main.get("volumes", []) not in ([], ["inspect-buffer:/refund-eval-private/inspect-data"])):
             raise ValueError
         if not isinstance(world_service, dict) or set(world_service) != {
             "build", "expose", "environment", "security_opt", "volumes"
@@ -331,9 +335,10 @@ def _shared_roles_compose_values(
         if any(environment_dir.glob("docker-compose.override*")) or any(environment_dir.glob("compose.override*")):
             raise ValueError
         compose = yaml.safe_load((environment_dir / "docker-compose.yaml").read_text(encoding="utf-8"))
-        if not isinstance(compose, dict) or set(compose) != {"services", "volumes"}:
+        if not isinstance(compose, dict) or set(compose) not in ({"services"}, {"services", "volumes"}):
             raise ValueError
-        if compose["volumes"] not in (
+        if compose.get("volumes", {}) not in (
+            {},
             {"world-logs": None, "role-budget": None},
             {"world-logs": None, "inspect-buffer": None, "role-budget": None},
         ):
@@ -343,10 +348,11 @@ def _shared_roles_compose_values(
             raise ValueError
         main, world_service = services["main"], services["world"]
         if (not isinstance(main, dict)
-                or set(main) != {"depends_on", "environment", "volumes"}
+                or set(main) - {"depends_on", "environment", "volumes"}
+                or "depends_on" not in main
                 or main["depends_on"] != {"world": {"condition": "service_healthy"}}
-                or main["environment"] not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
-                or main["volumes"] not in (
+                or main.get("environment", {}) not in ({}, {"XDG_DATA_HOME": PRIVATE_AGENT_BUFFER_ROOT})
+                or main.get("volumes", []) not in (
                     ["inspect-buffer:/refund-eval-private/inspect-data", "role-budget:/var/lib/refund-eval/role-budget"],
                     ["role-budget:/var/lib/refund-eval/role-budget", "inspect-buffer:/refund-eval-private/inspect-data"],
                     ["role-budget:/var/lib/refund-eval/role-budget"],

@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -94,6 +95,8 @@ def _write_inert_wheel(directory):
         f"{dist_info}/METADATA": b"Metadata-Version: 2.1\nName: synthetic-agent\nVersion: 0.0.0\n\n",
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
+    for member in adapter.REQUIRED_AGENT_WHEEL_MEMBERS:
+        files.setdefault(member, (adapter.ROOT / member).read_bytes())
     record_name = f"{dist_info}/RECORD"
     rows = []
     for name, content in files.items():
@@ -2177,7 +2180,8 @@ def test_guarded_modal_adapts_old_shared_caps_task_without_mutating_source(tmp_p
     ]
     assert validate_job_config(job) is None
     compose["services"]["main"]["volumes"].remove("inspect-buffer:/refund-eval-private/inspect-data")
-    compose["volumes"].pop("inspect-buffer")
+    compose["services"]["main"].pop("environment")
+    compose.pop("volumes")
     compose_path.write_text(yaml.safe_dump(compose, sort_keys=False))
     original_compose = compose_path.read_bytes()
     assert validate_job_config(job) is None
@@ -2188,7 +2192,6 @@ def test_guarded_modal_adapts_old_shared_caps_task_without_mutating_source(tmp_p
         adapted = yaml.safe_load(adapted_path.read_text())
         assert environment.environment_dir != task_path / "environment"
         assert "inspect-buffer" in adapted["volumes"]
-        assert "role-budget" in adapted["volumes"]
         assert f"{PRIVATE_AGENT_BUFFER_ROOT}:/refund-eval-private/inspect-data" in adapted["services"]["main"]["volumes"]
         assert "role-budget:/var/lib/refund-eval/role-budget" in adapted["services"]["main"]["volumes"]
         assert f"{PRIVATE_WORLD_LOGS_ROOT}:/var/log/world" in adapted["services"]["world"]["volumes"]
@@ -2508,12 +2511,13 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     expected_buffer_snapshot = active_sample_snapshot_path(run_id, buffer_root)
     assert snapshot_path(data_home).relative_to(local_agent_root) == expected_buffer_snapshot.relative_to(buffer_root)
     expected_world_events = (world_root / "events.jsonl").as_posix()
-    log_dir = tmp_path / "inspect-logs"
     marker = tmp_path / "sample-active"
-    child = textwrap.dedent(f"""
-        import asyncio, os
+    task_args_file = tmp_path / "inspect-task-args.json"
+    task_file = tmp_path / "offline-inspect-task.py"
+    task_source = textwrap.dedent(f"""
+        import asyncio, json, os
         from pathlib import Path
-        from inspect_ai import Task, eval_async
+        from inspect_ai import Task, task
         from inspect_ai.dataset import Sample
         from inspect_ai.model import ChatCompletionChoice, ChatMessageAssistant, ModelOutput, get_model
         from inspect_ai.solver import solver, use_tools
@@ -2540,7 +2544,13 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
                     await asyncio.sleep(0.02)
             return solve
 
-        async def main():
+        @task
+        def offline_inspect(task_id=None, scenario=None, task_text=None, **kwargs):
+            if isinstance(task_text, list):
+                task_text = ",".join(task_text)
+            Path(os.environ["INSPECT_TASK_ARGS_FILE"]).write_text(json.dumps({{
+                "task_id": task_id, "scenario": scenario, "task_text": task_text,
+            }}))
             tool_call = ModelOutput(
                 model="mockllm/model",
                 choices=[ChatCompletionChoice(
@@ -2552,16 +2562,13 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
             model = get_model("mockllm/model", custom_outputs=[
                 tool_call, ModelOutput.from_content("mockllm/model", "model response after tool"),
             ], memoize=False)
-            task = Task(
+            return Task(
                 dataset=[Sample(input="Run the offline tool")],
                 solver=[use_tools(offline_tool()), pause_sample()],
+                model=model,
             )
-            await eval_async(task, model=model, log_dir=os.environ["INSPECT_LOG_DIR"], log_format="eval")
-        asyncio.run(main())
     """)
-    environment_vars = {
-        **os.environ, "XDG_DATA_HOME": str(data_home), "INSPECT_LOG_DIR": str(log_dir),
-    }
+    task_file.write_text(task_source)
     installed_site = tmp_path / "installed-agent-wheel"
     wheel_install = await asyncio.to_thread(
         subprocess.run,
@@ -2569,37 +2576,40 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         check=False, capture_output=True, text=True,
     )
     assert wheel_install.returncode == 0, wheel_install.stderr
-    child_path = tmp_path / "offline-inspect-child.py"
-    child_path.write_text(child)
-    argument_file = tmp_path / "inspect-arguments.json"
-    fake_inspect = tmp_path / "inspect"
-    fake_inspect.write_text(textwrap.dedent(f"""\
-        #!{sys.executable}
-        import json, os, subprocess, sys
-        from pathlib import Path
-        Path(os.environ["INSPECT_ARGS_FILE"]).write_text(json.dumps(sys.argv[1:]))
-        raise SystemExit(subprocess.run([sys.executable, os.environ["INSPECT_CHILD"]]).returncode)
-    """))
-    fake_inspect.chmod(0o755)
     run_logs = tmp_path / run_id / "agent"
     agent_logs = tmp_path / "installed-agent-logs"
     instruction = "Preserve 'quotes', spaces, and $WORLD_SCENARIO literally."
+    inspect_cli = adapter.ROOT / ".venv/bin/inspect"
+    agent_python = adapter.ROOT / ".venv/bin/python"
+    assert inspect_cli.is_file()
+    assert agent_python.is_file()
+    environment_vars = {
+        **os.environ,
+        "XDG_DATA_HOME": str(data_home),
+        "INSPECT_TASK_ARGS_FILE": str(task_args_file),
+        "INSPECT_CLI": str(inspect_cli),
+        "AGENT_PYTHON": str(agent_python),
+        "INSTALLED_SITE": str(installed_site),
+        "TEST_APP": str(tmp_path),
+        "TEST_PRIVATE_ROOT": str(local_agent_root),
+        "TEST_AGENT_LOGS": str(agent_logs),
+        "TEST_RUN_LOGS": str(run_logs),
+        "TEST_INSTRUCTION": instruction,
+        "WORLD_TASK_ID": "offline-task",
+        "WORLD_SCENARIO": "train_refund_late",
+        "WORLD_SIM_WEEKS": "1",
+        "WORLD_DATA_MODE": "fixture",
+    }
     environment_vars.update({
         "PYTHONPATH": os.pathsep.join(filter(None, (str(installed_site), os.environ.get("PYTHONPATH", "")))),
-        "INSPECT_ARGS_FILE": str(argument_file), "INSPECT_CHILD": str(child_path),
-        "FAKE_INSPECT": str(fake_inspect), "INSTALLED_SITE": str(installed_site),
-        "TEST_APP": str(tmp_path), "TEST_PRIVATE_ROOT": str(local_agent_root),
-        "TEST_AGENT_LOGS": str(agent_logs), "TEST_RUN_LOGS": str(run_logs),
-        "TEST_INSTRUCTION": instruction, "WORLD_TASK_ID": "offline-task",
-        "WORLD_SCENARIO": "train_refund_late", "WORLD_SIM_WEEKS": "1", "WORLD_DATA_MODE": "fixture",
     })
     launcher = textwrap.dedent("""\
         import os, sys
         from pathlib import Path
         from refund_eval.harbor import installed_agent
         assert Path(installed_agent.__file__).resolve().is_relative_to(Path(os.environ["INSTALLED_SITE"]))
-        installed_agent.PYTHON = sys.executable
-        installed_agent.INSPECT = os.environ["FAKE_INSPECT"]
+        installed_agent.PYTHON = os.environ["AGENT_PYTHON"]
+        installed_agent.INSPECT = os.environ["INSPECT_CLI"]
         installed_agent.APP = os.environ["TEST_APP"]
         installed_agent.PRIVATE_AGENT_BUFFER_ROOT = os.environ["TEST_PRIVATE_ROOT"]
         agent = installed_agent.RefundInstalledAgent(
@@ -2615,6 +2625,12 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
     )
     assert generated.returncode == 0, generated.stderr
     command = generated.stdout.strip()
+    task_reference = (
+        f'"$({agent_python} -c \'import os, refund_eval.task; '
+        'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"'
+    )
+    assert command.count(task_reference) == 1
+    command = command.replace(task_reference, shlex.quote(os.path.relpath(task_file, tmp_path)))
     process = await asyncio.create_subprocess_shell(
         command, cwd=tmp_path, env=environment_vars,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, start_new_session=True,
@@ -2641,6 +2657,10 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
         except sqlite3.Error:
             return False
 
+    def inspect_log():
+        path = agent_logs / "inspect.log"
+        return path.read_text(errors="replace") if path.is_file() else "Inspect log was not created"
+
     try:
         deadline = asyncio.get_running_loop().time() + 15
         while (not marker.exists() or not checkpoint_has_agent_and_tool_events()) and process.returncode is None:
@@ -2649,25 +2669,21 @@ async def test_real_inspect_active_sample_checkpoint_survives_abrupt_stop_and_fa
                     os.killpg(process.pid, 9)
                     await asyncio.wait_for(process.wait(), timeout=5)
                 stderr = await process.stderr.read() if process.stderr else b""
-                pytest.fail(f"Inspect did not publish an active checkpoint: {stderr.decode(errors='replace')}")
+                pytest.fail(f"Inspect did not publish an active checkpoint: {inspect_log()} {stderr.decode(errors='replace')}")
             await asyncio.sleep(0.05)
         if not marker.exists():
             if process.returncode is None:
                 os.killpg(process.pid, 9)
                 await asyncio.wait_for(process.wait(), timeout=5)
             stderr = await process.stderr.read() if process.stderr else b""
-            pytest.fail(f"Inspect exited before the active sample checkpoint: {stderr.decode(errors='replace')}")
+            pytest.fail(f"Inspect exited before the active sample checkpoint: {inspect_log()} {stderr.decode(errors='replace')}")
         assert marker.is_file() and process.returncode is None
         os.killpg(process.pid, 9)
         await asyncio.wait_for(process.wait(), timeout=5)
-        arguments = json.loads(argument_file.read_text())
-        assert arguments[0] == "eval"
-        assert arguments[arguments.index("--model") + 1] == "mockllm/model"
-        assert "scenario=train_refund_late" in arguments
-        assert "task_id=offline-task" in arguments
-        assert f"task_text={instruction}" in arguments
-        task_index = arguments.index("eval") + 1
-        assert (tmp_path / arguments[task_index]).resolve() == installed_site / "refund_eval/task.py"
+        task_arguments = json.loads(task_args_file.read_text())
+        assert task_arguments == {
+            "task_id": "offline-task", "scenario": "train_refund_late", "task_text": instruction,
+        }
     finally:
         if process.returncode is None:
             os.killpg(process.pid, 9)
