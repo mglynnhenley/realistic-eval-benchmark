@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.13 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 0b6babacf722a7db89810f353910e79f2c9b52d3797f441341a449238b4aa3c6
+- Trial round: none. Offline validation only; no launch.
+- Changes: preflight supplied native wheels for the launcher and trace snapshot modules, preserve legacy Compose fields in guarded copies, and serialize task arguments for Inspect's real CLI parser.
+
 ## 8.12 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: ddeff0f24e3b6c337cdebeed1d73f32abfd5742b041fd8d94f4cf1d5c6695140
