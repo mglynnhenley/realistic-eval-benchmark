@@ -64,6 +64,13 @@ def _use_test_private_trace_root(tmp_path, monkeypatch):
     monkeypatch.setattr(private_traces, "TRACE_ROOT", tmp_path / "partial-traces")
 
 
+def _captured_trace_file(directory, source_name):
+    manifest = json.loads((directory / "manifest.json").read_text())
+    relative_path = manifest["files"][source_name]["path"]
+    assert relative_path is not None
+    return directory / relative_path
+
+
 def _write_inert_wheel(directory):
     filename = "synthetic_agent-0.0.0-py3-none-any.whl"
     dist_info = "synthetic_agent-0.0.0.dist-info"
@@ -2000,20 +2007,21 @@ async def test_private_trace_capture_uses_file_api_and_isolates_source_failures(
     environment = DirectFilesOnly()
     capture = PrivateTraceCapture("offline-native", native=True, root=tmp_path / "spool")
     await capture.capture(environment)
-    first_agent = (capture.directory / "agent.eval").read_bytes()
-    partial_log = await read_eval_log_async(capture.directory / "agent.eval")
+    first_agent_path = _captured_trace_file(capture.directory, "agent_eval")
+    first_agent = first_agent_path.read_bytes()
+    partial_log = await read_eval_log_async(first_agent_path)
     assert len(partial_log.samples) == 1
     assert any("recoverable partial agent event" in str(message.content)
                for message in partial_log.samples[0].messages)
     assert partial_log.status not in {"success", "error"}
-    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":1}'
-    assert not (capture.directory / "simulator-events.jsonl").exists()
+    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":1}'
+    assert json.loads(capture.manifest_path.read_text())["files"]["simulator_events"]["path"] is None
     environment.values["/refund-eval-private/world-logs/state.json"] = b'{"turn":2}'
     environment.failures = {"agent_eval"}
     await capture.capture(environment)
-    assert (capture.directory / "agent.eval").read_bytes() == first_agent
-    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":2}'
-    assert (capture.directory / "simulator-events.jsonl").read_bytes() == b'{"event":1}\n'
+    assert _captured_trace_file(capture.directory, "agent_eval").read_bytes() == first_agent
+    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":2}'
+    assert _captured_trace_file(capture.directory, "simulator_events").read_bytes() == b'{"event":1}\n'
     assert environment.exec_calls == 0
     assert capture.directory.stat().st_mode & 0o777 == 0o700
     assert capture.manifest_path.stat().st_mode & 0o777 == 0o600
@@ -2024,14 +2032,59 @@ async def test_private_trace_capture_uses_file_api_and_isolates_source_failures(
     assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
     assert manifest["files"]["simulator_state"]["last_durable_checkpoint"] is not None
     assert manifest["files"]["simulator_events"]["status"] == "durable"
-    assert all((capture.directory / name).stat().st_mode & 0o777 == 0o600
-               for name in ("agent.eval", "simulator-state.json", "simulator-events.jsonl"))
+    assert all(_captured_trace_file(capture.directory, name).stat().st_mode & 0o777 == 0o600
+               for name in ("agent_eval", "simulator_state", "simulator_events"))
     environment.failures = set()
     environment.values["/logs/agent/inspect/run.eval"] = b"truncated .eval archive"
     await capture.capture(environment)
-    assert (capture.directory / "agent.eval").read_bytes() == first_agent
+    assert _captured_trace_file(capture.directory, "agent_eval").read_bytes() == first_agent
     manifest = json.loads(capture.manifest_path.read_text())
     assert manifest["files"]["agent_eval"]["last_attempt_error_type"] == "RuntimeError"
+
+
+async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tmp_path, monkeypatch):
+    from refund_eval.harbor.private_traces import (
+        PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
+        PrivateTraceCapture,
+    )
+
+    source_capture = PrivateTraceCapture("generation-check", native=True, root=tmp_path / "spool")
+    source = next(source for source in source_capture.sources if source.name == "simulator_state")
+
+    class MutableEnvironment:
+        def __init__(self):
+            self.value = b'{"turn":1}'
+            setattr(self, PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, True)
+
+        async def download_file(self, _remote, destination):
+            Path(destination).write_bytes(self.value)
+
+    environment = MutableEnvironment()
+    await source_capture._capture_source(environment, source)
+    previous_path = _captured_trace_file(source_capture.directory, source.name)
+    previous_manifest = source_capture.manifest_path.read_bytes()
+    environment.value = b'{"turn":2}'
+
+    original_write_manifest = source_capture._write_manifest
+
+    def fail_manifest_pointer():
+        raise OSError("simulated manifest pointer failure")
+
+    monkeypatch.setattr(source_capture, "_write_manifest", fail_manifest_pointer)
+    with pytest.raises(OSError, match="manifest pointer failure"):
+        await source_capture._capture_source(environment, source)
+
+    assert source_capture.manifest_path.read_bytes() == previous_manifest
+    assert previous_path.read_bytes() == b'{"turn":1}'
+    generation_directory = source_capture.directory / "generations" / source.name
+    assert len(list(generation_directory.iterdir())) == 2
+
+    monkeypatch.setattr(source_capture, "_write_manifest", original_write_manifest)
+    await source_capture._capture_source(environment, source)
+    current_path = _captured_trace_file(source_capture.directory, source.name)
+    assert current_path != previous_path
+    assert current_path.read_bytes() == b'{"turn":2}'
+    assert previous_path.read_bytes() == b'{"turn":1}'
 
 
 async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloads(tmp_path):
@@ -2064,10 +2117,10 @@ async def test_nonmodal_private_trace_capture_uses_service_and_directory_downloa
 
     capture = PrivateTraceCapture("offline-nonmodal", native=True, root=tmp_path / "spool")
     await capture.capture(NonModalFiles())
-    log = await read_eval_log_async(capture.directory / "agent.eval")
+    log = await read_eval_log_async(_captured_trace_file(capture.directory, "agent_eval"))
     assert any("recoverable partial agent event" in str(message.content) for message in log.samples[0].messages)
-    assert (capture.directory / "simulator-state.json").read_bytes() == b'{"turn":4}'
-    assert (capture.directory / "simulator-events.jsonl").read_bytes() == b'{"event":"retained"}\n'
+    assert _captured_trace_file(capture.directory, "simulator_state").read_bytes() == b'{"turn":4}'
+    assert _captured_trace_file(capture.directory, "simulator_events").read_bytes() == b'{"event":"retained"}\n'
 
     class ListFiles:
         async def aio(self, _directory):
@@ -2237,7 +2290,7 @@ async def test_active_inspect_sample_events_survive_process_kill(tmp_path, nativ
             raise AssertionError("active trace capture must not use sandbox exec")
 
     await source_capture._capture_source(CapturingEnvironment(), source)
-    captured = source_capture.directory / source.filename
+    captured = _captured_trace_file(source_capture.directory, source.name)
     with sqlite3.connect(f"{captured.as_uri()}?mode=ro", uri=True) as database:
         sample_data = database.execute(
             "SELECT data FROM samples WHERE id = ? AND epoch = ?",
@@ -2305,10 +2358,10 @@ async def test_native_partial_traces_survive_short_run_cancellation_and_collecti
         await environment.download_dir("/var/log/world", tmp_path)
     [spool] = list((tmp_path / "partial-traces").iterdir())
     from inspect_ai.log import read_eval_log_async
-    partial_log = await read_eval_log_async(spool / "agent.eval")
+    partial_log = await read_eval_log_async(_captured_trace_file(spool, "agent_eval"))
     assert any("recoverable partial agent event" in str(message.content)
                for message in partial_log.samples[0].messages)
-    assert (spool / "simulator-events.jsonl").read_bytes() == b'{"event":"private"}\n'
+    assert _captured_trace_file(spool, "simulator_events").read_bytes() == b'{"event":"private"}\n'
     manifest = json.loads((spool / "manifest.json").read_text())
     assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
     assert manifest["collection_status"] == "incomplete"

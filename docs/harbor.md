@@ -143,9 +143,12 @@ JSONL snapshots are trimmed to the last newline-terminated record before the
 host marks the copy durable.
 
 Each per-run directory is mode 0700, and its parent is fsync'd on creation.
-Each host checkpoint is marked durable only after a mode-0600 temporary file
-has been flushed and fsync'd, atomically replaced, and its mode-0700 parent
 directory fsync'd. manifest.json records the last durable checkpoint and a
+Each host checkpoint is an immutable mode-0600 generation file. Its data is
+flushed and fsync'd before the generation directory is fsync'd; only then is
+manifest.json atomically updated and its parent fsync'd to point at it. Earlier
+generations remain in place if a later snapshot or manifest update fails.
+manifest.json records the last durable checkpoint and a
 sanitized error type independently for each source; a failed source does not
 replace its previous good copy. The manifest stays incomplete: a checkpoint
 is a file snapshot, not a guarantee that every event was captured or that

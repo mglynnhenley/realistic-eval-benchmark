@@ -188,14 +188,17 @@ async def test_legacy_partial_traces_survive_cancellation_when_final_collection_
     [spool] = list((tmp_path / "partial-traces").iterdir())
     from inspect_ai.log import read_eval_log_async
 
-    log = await read_eval_log_async(spool / "agent.eval")
+    manifest = json.loads((spool / "manifest.json").read_text())
+    log = await read_eval_log_async(spool / manifest["files"]["agent_eval"]["path"])
     assert any("recoverable legacy agent event" in str(message.content)
                for message in log.samples[0].messages)
-    saved_snapshot = json.loads((spool / "runtime-snapshot.json").read_bytes())
+    saved_snapshot = json.loads(
+        (spool / manifest["files"]["runtime_snapshot"]["path"]).read_bytes()
+    )
     assert saved_snapshot["resume_state"][EVENTS_KEY] == [simulator_event]
-    manifest = json.loads((spool / "manifest.json").read_text())
     assert manifest["status"] == "incomplete" and manifest["run_status"] == "cancelled"
-    assert all(entry["status"] == "durable" for entry in manifest["files"].values())
+    assert manifest["files"]["agent_eval"]["status"] == "durable"
+    assert manifest["files"]["runtime_snapshot"]["status"] == "durable"
     assert "native" in environment.events
     assert "recoverable legacy agent event" not in (tmp_path / "agent/collection.json").read_text()
 

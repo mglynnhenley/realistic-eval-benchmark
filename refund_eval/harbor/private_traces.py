@@ -146,7 +146,7 @@ class PrivateTraceCapture:
         self._source_locks = {source.name: asyncio.Lock() for source in self.sources}
         self._checkpoint = 0
         self.manifest = {
-            "version": 1,
+            "version": 2,
             "run_id": run_id,
             "status": "incomplete",
             "run_status": "running",
@@ -158,6 +158,7 @@ class PrivateTraceCapture:
                     "attempts": 0,
                     "last_durable_checkpoint": None,
                     "last_durable_at": None,
+                    "path": None,
                     "bytes": None,
                     "sha256": None,
                     "last_attempt_error_type": None,
@@ -216,9 +217,17 @@ class PrivateTraceCapture:
                 size, digest = await asyncio.to_thread(
                     _durable_metadata, temp_path, complete_jsonl=source.name == "simulator_events",
                 )
-                destination = self.directory / source.filename
-                os.replace(temp_path, destination)
+                generation_root = self.directory / "generations"
+                generation_root.mkdir(mode=0o700, exist_ok=True)
+                os.chmod(generation_root, 0o700)
                 _fsync_directory(self.directory)
+                generation_directory = generation_root / source.name
+                generation_directory.mkdir(mode=0o700, exist_ok=True)
+                os.chmod(generation_directory, 0o700)
+                _fsync_directory(generation_root)
+                destination = generation_directory / f"{uuid4().hex}-{source.filename}"
+                os.replace(temp_path, destination)
+                _fsync_directory(generation_directory)
                 async with self._manifest_lock:
                     self._checkpoint += 1
                     record = self.manifest["files"][source.name]
@@ -227,6 +236,7 @@ class PrivateTraceCapture:
                         attempts=record["attempts"] + 1,
                         last_durable_checkpoint=self._checkpoint,
                         last_durable_at=_now(),
+                        path=destination.relative_to(self.directory).as_posix(),
                         bytes=size,
                         sha256=digest,
                         last_attempt_error_type=None,
