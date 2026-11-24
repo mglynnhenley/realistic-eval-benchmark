@@ -130,9 +130,9 @@ class RefundInstalledAgent(BaseInstalledAgent):
         convert = [PYTHON, "-m", "refund_eval.harbor.atif", f"{logs}/inspect", "--out", f"{logs}/trajectory.json",
                    "--agent-name", self.name(), "--agent-version", AGENT_VERSION]
         run_id = self.logs_dir.parent.name
-        runner = shlex.join([
-            PYTHON, "-m", "refund_eval.harbor.inspect_snapshotter", "run",
-            "--log-dir", f"{logs}/inspect", "--", *parts[1:],
+        runner = " ".join([
+            shlex.quote(PYTHON), "-m", "refund_eval.harbor.inspect_snapshotter", "run",
+            "--log-dir", shlex.quote(f"{logs}/inspect"), "--", *parts[1:],
         ])
         data_home = shlex.quote(str(private_inspect_data_home(run_id, PRIVATE_AGENT_BUFFER_ROOT)))
         return (f"mkdir -p {logs}/inspect; XDG_DATA_HOME={data_home} {parts[0]} "

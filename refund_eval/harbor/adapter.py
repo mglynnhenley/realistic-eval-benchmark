@@ -65,7 +65,8 @@ AGENT_MODULES = {
     "": "__init__ config environment_version killswitch model_pricing output_paths task",
     "agent": "__init__ adapters budget dollar_budget harness prompt schedule world_mode",
     "companies": "__init__ models",
-    "harbor": "__init__ atif",
+    "dashboard": "__init__ luna luna_events",
+    "harbor": "__init__ atif installed_agent inspect_snapshotter luna_status private_traces",
     "models": "__init__ client evidence replay shared_role_spend_ledger world_spend_ledger",
     "published": "__init__ adapter mail mcp provider search",
     "realism": "__init__ notes track",
@@ -77,6 +78,7 @@ AGENT_MODULES = {
     "tasks/household_bills": "__init__ facts",
     "tasks/train_refund": "__init__ facts",
     "world": "__init__ clock event_log guards ids interception mail mailquery orgs snapshot_store state store timeutil trial_snapshot",
+    "world_service": "__init__ status",
 }
 SPLIT_BUDGET_WHEEL_SOURCES = (
     "refund_eval/agent/dollar_budget.py",
