@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.7 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: b6c8ae311a051d966c3604e3d3af1efd96cd2867e112e2e3dd6a6bffedc2663e
+- Trial round: none. Offline validation only.
+- Changes: retain native Harbor target generation IDs and OpenRouter response charge evidence separately from Inspect estimates; unknown charges remain unknown.
+
 ## 8.6 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 9704d16033a7eecd0560c00d149b9617fb17917f592b11df1fc9e1011f2faac7

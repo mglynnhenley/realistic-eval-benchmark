@@ -12,7 +12,8 @@ Job config: `import_path: refund_eval.harbor.installed_agent:RefundInstalledAgen
   kill switch (`.context/KILL` or REFUND_EVAL_KILL) is forwarded by touching /app/.context/KILL in
   `main`; the agent then stops at its next tool call or turn and tells the world.
 - context: target tokens and cost from the trajectory's final metrics (the agent's own model
-  calls only; world-side model usage is in the world's state.json).
+  calls only; world-side model usage is in the world's state.json). OpenRouter cost comes
+  from the collected target charge receipts, even when the trajectory is missing.
 
 Suite-generated jobs opt in to forwarding the Harbor instruction as the Inspect task's initial user
 message and the task ID as sample metadata; default single-task jobs forward neither. Scenario facts
@@ -31,11 +32,16 @@ from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
-from harbor.models.agent.context import AgentContext
+from harbor.models.agent.context import AgentContext, ModelUsage
 from pydantic import Field
 
 from refund_eval.config import BudgetNotice, RunConfig
 from refund_eval.harbor.luna_status import NativeStatus
+from refund_eval.harbor.target_charges import (
+    TARGET_CHARGES_DIRECTORY,
+    TARGET_CHARGES_ENV,
+    target_charge_summary,
+)
 from refund_eval.killswitch import kill_reason
 from refund_eval.published.provider import published_model_args
 
@@ -112,7 +118,9 @@ class RefundInstalledAgent(BaseInstalledAgent):
         # Inspect's task loader expects a cwd-relative path with Python 3.14.
         task_file = (f'"$({PYTHON} -c \'import os, refund_eval.task; '
                      'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')"')
-        parts = [f"REFUND_EVAL_KILL_FILE={shlex.quote(f'{APP}/.context/KILL')}",
+        receipt_env = ([f"{TARGET_CHARGES_ENV}={shlex.quote(f'{logs}/{TARGET_CHARGES_DIRECTORY}')}"]
+                       if model.startswith("openrouter/") else [])
+        parts = [f"REFUND_EVAL_KILL_FILE={shlex.quote(f'{APP}/.context/KILL')}", *receipt_env,
                  INSPECT, "eval", task_file, "--model", shlex.quote(model),
                  "--max-retries", "0",
                  *(f"-M {key}={json.dumps(value)}" for key, value in model_args.items()),
@@ -155,14 +163,22 @@ class RefundInstalledAgent(BaseInstalledAgent):
             await status.safe_observe(environment)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
+        receipts = (target_charge_summary(self.logs_dir / TARGET_CHARGES_DIRECTORY)
+                    if (self.model_name or "").startswith("openrouter/") else None)
         path = self.logs_dir / "trajectory.json"
-        if not path.is_file():
+        if not path.is_file() and receipts is None:
             return
-        trajectory = json.loads(path.read_text(encoding="utf-8"))
+        trajectory = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         totals = trajectory.get("final_metrics") or {}
         context.n_input_tokens = totals.get("total_prompt_tokens")
         context.n_cache_tokens = totals.get("total_cached_tokens")
         context.n_output_tokens = totals.get("total_completion_tokens")
-        context.cost_usd = totals.get("total_cost_usd")
+        context.cost_usd = receipts["actual_cost_usd"] if receipts is not None else totals.get("total_cost_usd")
         context.metadata = {**(trajectory.get("extra") or {}),
                             "cost_scope": "target model only; world-side model use is in the world's state.json"}
+        if receipts is not None:
+            context.metadata["target_charges"] = receipts
+            if totals:
+                context.model_usage = {self.model_name: ModelUsage(
+                    n_input_tokens=context.n_input_tokens or 0, n_cache_tokens=context.n_cache_tokens or 0,
+                    n_output_tokens=context.n_output_tokens or 0, cost_usd=context.cost_usd)}

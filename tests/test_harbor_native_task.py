@@ -1600,6 +1600,7 @@ def test_inspect_command(tmp_path):
                          reasoning=True).inspect_command()
     run, convert = command.split("; status=$?; ")
     assert run.startswith('mkdir -p /logs/agent/inspect; REFUND_EVAL_KILL_FILE=/app/.context/KILL '
+                          'REFUND_EVAL_TARGET_CHARGES_DIR=/logs/agent/target-charge-receipts '
                           '/app/.venv/bin/inspect eval '
                           '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
                           'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ')
@@ -1618,6 +1619,7 @@ def test_inspect_command(tmp_path):
     assert "-T task_id" not in default_with_instruction and "-T task_text" not in default_with_instruction
     mock = make_agent(tmp_path, model_name="mockllm/model").inspect_command()
     assert "-M " not in mock and "-T cost_limit" not in mock and "-T token_budget" not in mock
+    assert "REFUND_EVAL_TARGET_CHARGES_DIR" not in mock
 
 
 def test_inspect_command_forwards_task_instruction_safely(tmp_path):
@@ -1820,7 +1822,9 @@ def test_atif_output_is_valid_for_harbor(tmp_path):
     assert agent_step.reasoning_content == "Check the inbox." and agent_step.message == "Checking."
     assert agent_step.observation.results[0].source_call_id == "call_1"
     assert agent_step.extra == {"sim_time": "2026-09-25T09:00:00+01:00", "sim_turn": 0}
-    assert model.final_metrics.total_cost_usd == 0.25 and model.final_metrics.total_prompt_tokens == 800
+    assert model.final_metrics.total_cost_usd is None and model.final_metrics.total_prompt_tokens == 800
+    assert model.final_metrics.extra["inspect_estimated_cost_usd"] == 0.25
+    assert agent_step.metrics.extra["inspect_estimated_cost_usd"] == 0.25
 
     agent = make_agent(tmp_path)
     agent.logs_dir.mkdir(parents=True)
@@ -1828,5 +1832,30 @@ def test_atif_output_is_valid_for_harbor(tmp_path):
     context = AgentContext()
     agent.populate_context_post_run(context)
     assert (context.n_input_tokens, context.n_cache_tokens, context.n_output_tokens, context.cost_usd) == (
-        800, 700, 50, 0.25)
+        800, 700, 50, None)
+    assert context.model_usage[agent.model_name].cost_usd is None
     assert context.metadata["inspect_log"] == "trial.eval" and "target model only" in context.metadata["cost_scope"]
+
+
+def test_openrouter_context_reads_charge_receipts_without_trajectory(tmp_path):
+    from refund_eval.harbor.target_charges import SOURCE, TARGET_CHARGES_DIRECTORY
+
+    agent = make_agent(tmp_path)
+    directory = agent.logs_dir / TARGET_CHARGES_DIRECTORY
+    directory.mkdir(parents=True)
+    (directory / "attempt.json").write_text(json.dumps({
+        "schema_version": 1, "attempt_id": "attempt", "status": "response",
+        "generation_id": "gen-offline-1", "source": SOURCE, "actual_cost_usd": "0.012",
+    }))
+    context = AgentContext()
+    agent.populate_context_post_run(context)
+    assert context.cost_usd == 0.012
+    assert context.metadata["target_charges"]["attempt_count"] == 1
+
+    (directory / "interrupted.json").write_text(json.dumps({
+        "schema_version": 1, "attempt_id": "interrupted", "status": "pending",
+        "generation_id": None, "source": None, "actual_cost_usd": None,
+    }))
+    agent.populate_context_post_run(context)
+    assert context.cost_usd is None
+    assert context.metadata["target_charges"]["unknown_attempt_count"] == 1
