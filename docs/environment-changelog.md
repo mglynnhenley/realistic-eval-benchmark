@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 8.8 — 2026-11-24
+- Kind: trivial batch
+- Fingerprint: 05a57267ae8d8f0009cef9d2ae0712c7aee93d21d6a99e4210c98eb78cb9db26
+- Trial round: none. Offline validation only; no paid judging or external transcript sends were used for verification.
+- Changes: verify supported findings with incomplete prior context while retaining unknown coverage, mark rejected citations incomplete, and use canonical scenario IDs for YAML selectors.
+
 ## 8.7 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 85d595c79338892d2169acec8dc904eafe61a2c1d1384ec12694797314cb48d2

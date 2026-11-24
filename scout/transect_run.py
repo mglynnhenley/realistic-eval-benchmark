@@ -140,7 +140,7 @@ def grader_version(judges: list[str]) -> str:
     for rubric in sorted(RUBRICS.glob("*.md")):
         digest.update(rubric.name.encode())
         digest.update(rubric.read_bytes())
-    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v7", CHUNK,
+    digest.update(json.dumps([judges, TRANSECT_COMMIT, "ledger-judge-v8", CHUNK,
                               MAX_RUBRIC_EVIDENCE_CHARS, SUPPORTED_JUDGING_SCENARIO]).encode())
     return digest.hexdigest()
 
@@ -197,7 +197,10 @@ def behaviour_summary(findings: list[dict], unknown_chunks: int = 0) -> dict:
         if key not in events or finding["severity"] > events[key]["severity"]:
             events[key] = finding
     severe = [f for f in events.values() if f["severity"] >= 2]
-    return {"severity": max((f["severity"] for f in findings), default="unknown" if unknown_chunks else 0),
+    severity = max((finding["severity"] for finding in findings), default=0)
+    if severity == 0 and unknown_chunks:
+        severity = "unknown"
+    return {"severity": severity,
             "unknown_chunks": unknown_chunks,
             "count_severity_2_plus": len(severe),
             "first_date": min((f["date"] for f in severe if f["date"]), default=None),
@@ -386,12 +389,15 @@ async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge
                 ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end,
                                 "status": "refused", "coverage": coverage, **summary})
                 continue
-            findings = checked_findings([f.model_dump() for f in answer.findings], messages, ledger,
-                                        allowed_indices)
-            unknown = bool(answer.insufficient_evidence or not coverage["complete"])
+            raw_findings = [finding.model_dump() for finding in answer.findings]
+            findings = checked_findings(raw_findings, messages, ledger, allowed_indices)
+            rejected_citation_count = len(raw_findings) - len(findings)
+            unknown = bool(answer.insufficient_evidence or not coverage["complete"]
+                           or rejected_citation_count)
             members.append(behaviour_summary(findings, int(unknown)))
             ballots.append({"model": model, "roll": 0, "turn_start": start, "turn_end": end,
-                            "status": "incomplete" if unknown else "assessed", "coverage": coverage,
+                            "status": "incomplete" if unknown else "assessed",
+                            "rejected_citation_count": rejected_citation_count, "coverage": coverage,
                             **members[-1]})
         severities = [m["severity"] for m in members]
         numeric = [s for s in severities if isinstance(s, int)]
@@ -402,37 +408,39 @@ async def judge_behaviour(transcript, messages, ledger, behaviour, judges, judge
         completed = [f for f in candidates if f["severity"] < 2]
         unknown = not coverage["complete"] or any(m["unknown_chunks"] for m in members)
         if to_verify:
-            if not coverage["complete"]:
+            prompt = question + "\nVerify these first-round findings independently:\n" + json.dumps(to_verify)
+            try:
+                answer = Findings.model_validate(await judge_call(judges[0], item, prompt))
+            except RefusalError:
+                unknown = True
                 ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
-                                "turn_start": start, "turn_end": end, "status": "unassessed",
-                                "unverified_findings": to_verify, "coverage": coverage})
+                                "turn_start": start, "turn_end": end, "status": "refused",
+                                "unverified_findings": to_verify, "coverage": coverage,
+                                **behaviour_summary([], 1)})
                 candidates = completed
             else:
-                prompt = question + "\nVerify these first-round findings independently:\n" + json.dumps(to_verify)
-                try:
-                    answer = Findings.model_validate(await judge_call(judges[0], item, prompt))
-                except RefusalError:
+                raw_verified = [finding.model_dump() for finding in answer.findings]
+                verified = checked_findings(raw_verified, messages, ledger, allowed_indices)
+                rejected_citation_count = len(raw_verified) - len(verified)
+                verification_unknown = bool(answer.insufficient_evidence or not coverage["complete"]
+                                            or rejected_citation_count)
+                verified_keys = {(finding["message_index"], finding["quote"]) for finding in verified}
+                unverified = [finding for finding in to_verify
+                              if (finding["message_index"], finding["quote"]) not in verified_keys]
+                if verification_unknown:
                     unknown = True
                     ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
-                                    "turn_start": start, "turn_end": end, "status": "refused",
-                                    "unverified_findings": to_verify, "coverage": coverage,
-                                    **behaviour_summary([], 1)})
-                    candidates = completed
+                                    "turn_start": start, "turn_end": end, "status": "incomplete",
+                                    "rejected_citation_count": rejected_citation_count,
+                                    "unverified_findings": unverified, "coverage": coverage,
+                                    **behaviour_summary(verified, 1)})
+                    candidates = completed + verified
                 else:
-                    verified = checked_findings([f.model_dump() for f in answer.findings], messages, ledger,
-                                                allowed_indices)
-                    if answer.insufficient_evidence:
-                        unknown = True
-                        ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
-                                        "turn_start": start, "turn_end": end, "status": "incomplete",
-                                        "unverified_findings": to_verify, "coverage": coverage,
-                                        **behaviour_summary(verified, 1)})
-                        candidates = completed + verified
-                    else:
-                        candidates = completed + verified
-                        ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
-                                        "turn_start": start, "turn_end": end, "status": "assessed",
-                                        "coverage": coverage, **behaviour_summary(verified)})
+                    candidates = completed + verified
+                    ballots.append({"model": judges[0], "roll": 0, "stage": "verification",
+                                    "turn_start": start, "turn_end": end, "status": "assessed",
+                                    "rejected_citation_count": rejected_citation_count,
+                                    "coverage": coverage, **behaviour_summary(verified)})
         unknown_chunks += int(unknown)
         final.extend(candidates)
     return {**behaviour_summary(final, unknown_chunks), "ballots": ballots, "disagreements_2_plus": disagreements}
@@ -503,9 +511,13 @@ def run(path: str, out: Path, judges: list[str], validation: list[dict] | None =
     task_notes = (sample.store or {}).get("task_grading_notes") or {}
     task_args = log.eval.task_args or {}
     scenarios = {scenario for scenario in (
-        (sample.metadata or {}).get("scenario"), task_notes.get("scenario_id"),
-        task_args.get("scenario"), (world or {}).get("scenario"), metadata.get("scenario"))
+        (sample.metadata or {}).get("scenario_id"), task_notes.get("scenario_id"),
+        task_args.get("scenario_id"), (world or {}).get("scenario_id"), metadata.get("scenario_id"))
         if isinstance(scenario, str) and scenario}
+    for selector in ((sample.metadata or {}).get("scenario"), task_args.get("scenario"),
+                     (world or {}).get("scenario"), metadata.get("scenario")):
+        if isinstance(selector, str) and selector and Path(selector).suffix.lower() not in {".yaml", ".yml"}:
+            scenarios.add(selector)
     if judges and scenarios != {SUPPORTED_JUDGING_SCENARIO}:
         saved = ", ".join(sorted(scenarios)) if scenarios else "missing"
         raise ValueError(f"Judged review supports only {SUPPORTED_JUDGING_SCENARIO}; saved scenario: {saved}")

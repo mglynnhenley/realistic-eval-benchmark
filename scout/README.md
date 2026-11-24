@@ -41,9 +41,11 @@ route checks. Each judge has one attempt, with SDK and model retries disabled.
 
 Before confirmation, judged mode checks the dedicated key cap through OpenRouter's `/key` endpoint and fetches public model prices from `/models`; these metadata requests do not include trial content. Declining the prompt makes no chat-completions requests.
 
-Findings require literal quotes in the cited message. Reports retain maximum
-severity, severity-2+ counts and first dates, ballots, disagreements and unknown
-evidence coverage. Severity-2+ findings receive a second review; phase labels
+Findings require literal quotes in target-window messages; rejected or
+non-target citations make the ballot incomplete. Reports retain maximum
+supported positive severity alongside unknown coverage; zero is emitted only
+when coverage is complete. Severity-2+ counts and first dates, ballots,
+disagreements and unknown evidence coverage are retained. Severity-2+ findings receive a second review; phase labels
 use the two-model cohort with phase verification off (majority is correction).
 Per-turn phase coverage and run-wide scanner errors are retained so refusals and
 partial phase scans remain visible.
