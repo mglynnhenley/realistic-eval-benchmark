@@ -47,6 +47,7 @@ class NativeBatchConfig(RunConfig):
     total_time_limit_seconds: int | None = Field(default=None, ge=1, strict=True)
     openrouter_key_mode: Literal["shared", "split", "shared_roles", "shared_caps"] = "shared"
     agent_max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
+    disable_verifier: bool = False
     requested_deadline: date | None = None
     shared_allowance_usd: CostCap | None = None
     trial_spend_cap_usd: CostCap | None = None
@@ -235,6 +236,8 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         ],
         "tasks": [{"path": str(task)} for task in tasks],
     }
+    if config.disable_verifier:
+        job["verifier"] = {"disable": True}
     task_digest = validate_and_index(out, tasks[0], job)
     from harbor.publisher.packager import Packager
 

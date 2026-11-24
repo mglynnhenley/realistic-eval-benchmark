@@ -905,7 +905,31 @@ def test_dataset_metric_and_job(generated):
     assert agent.import_path == adapter.AGENT_IMPORT_PATH
     assert agent.kwargs["cost_limit"] == 150.0 and agent.kwargs["token_budget"] == 40_000_000
     assert agent.env == {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}
+    assert not job.verifier.disable
     assert job.retry.max_retries == 0
+
+
+def test_batch_can_disable_verifier_and_keeps_trace_artifacts(tmp_path, approved_wheel):
+    config = batch.NativeBatchConfig(
+        execution="docker", scenario="train_refund_late", data_mode="fixture", research_mode="saved",
+        cost_limit=1, world_cost_limit=1, sim_weeks=1, disable_verifier=True, **_wheel_config(approved_wheel),
+    )
+    out = tmp_path / "ungraded"
+    record_path = batch.prepare(out, config)
+
+    task_path = out / "train_refund_late"
+    task_config = Task(task_path).config
+    job = JobConfig.model_validate(yaml.safe_load((out / "job.yaml").read_text()))
+    assert job.verifier.disable
+    assert {(a.source, a.service, a.destination) for a in task_config.artifacts} == {
+        ("/var/log/world", "world", "world"), ("/logs/agent/inspect", None, "agent-eval"),
+    }
+    [collect] = task_config.verifier.collect
+    assert collect.service == "world" and "final_snapshot.json" in collect.command
+    record = json.loads(record_path.read_text())
+    assert record["task"]["digest"] == f"sha256:{Packager.compute_content_hash(task_path)[0]}"
+    job_bytes = (out / "job.yaml").read_bytes()
+    assert record["job"]["sha256"] == hashlib.sha256(job_bytes).hexdigest()
 
 
 def test_adapter_refuses_to_overwrite(generated, approved_wheel):
