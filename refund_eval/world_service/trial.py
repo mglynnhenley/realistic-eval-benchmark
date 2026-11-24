@@ -175,6 +175,12 @@ class WorldTrial:
     async def __aenter__(self) -> Self:
         settings = self.settings
         shared_role_mode = os.environ.get("REFUND_EVAL_SHARED_ROLE_MODE")
+        if settings.disable_application_price_cutoffs and (
+            settings.usage_reporting_mode != "usage_only" or shared_role_mode != "shared_caps"
+        ):
+            raise WorldSpendLedgerError(
+                "Disabling application price cutoffs requires the shared_caps usage-only run mode"
+            )
         if (shared_role_mode == "shared_caps"
                 and (os.environ.get(SHARED_CAPS_HEADROOM_BOUND_ENV) != "true"
                      or settings.world_cost_limit is None)):
@@ -220,7 +226,8 @@ class WorldTrial:
                                            prices=getattr(self._model_client, "tariffs", None) or {},
                                            ledger=self._spend_ledger,
                                            scope=self._spend_scope, strict_budget=settings.strict_budget,
-                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only"))
+                                           usage_reporting_only=settings.usage_reporting_mode == "usage_only",
+                                           disable_application_price_cutoffs=settings.disable_application_price_cutoffs))
         try:
             init_world(scenario, settings.seed)
             store = world_store()
@@ -294,11 +301,13 @@ class WorldTrial:
             boundary_config = fixture_web_config(ctx)
             provenance = {"data_mode": "fixture", "mail": FIXTURE_MAIL_PROVENANCE,
                           "web_dataset": FIXTURE_WEB_DATASET, "browser_image": DEFAULT_IMAGE,
+                          "browser_image_ref": DEFAULT_IMAGE,
                           "web_sha256": fingerprint(boundary_config), "inbox": inbox}
         else:
             boundary_config = {"public_read_policy": "public_web", "public_read_urls": []}
             provenance = {"data_mode": "hybrid", **mode_details, "mail": FIXTURE_MAIL_PROVENANCE,
-                          "browser_image": DEFAULT_IMAGE, "public_read_policy": "public_web",
+                          "browser_image": DEFAULT_IMAGE, "browser_image_ref": DEFAULT_IMAGE,
+                          "public_read_policy": "public_web",
                           "search_provider": "exa", "inbox": inbox}
         if data_mode == "hybrid" and scenario.id == "train_refund_late":
             # The booking pages and lookup the late-refund scenario serves itself (as published_tools does).
