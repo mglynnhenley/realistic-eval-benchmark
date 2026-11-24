@@ -836,8 +836,16 @@ def test_native_shared_roles_requested_deadline_reaches_target_without_world_ove
         "PYTHONPATH": str(installed_package),
         "PYTHON_DOTENV_DISABLED": "1",
     })
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_python = subprocess.run(
+        [
+            "uv", "run", "--project", str(repo_root), "--frozen",
+            "python", "-c", "import sys; print(sys.executable)",
+        ],
+        cwd=repo_root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
     result = subprocess.run(
-        [sys.executable, "-c", script, str(installed_package / "refund_eval" / "task.py"), *task_cli_args],
+        [repo_python, "-c", script, str(installed_package / "refund_eval" / "task.py"), *task_cli_args],
         cwd=tmp_path, env=child_env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr + result.stdout
@@ -1516,6 +1524,7 @@ def test_split_native_batch_routes_agent_and_world_to_distinct_key_aliases(
         "OPENROUTER_API_KEY": "${OPENROUTER_AGENT_API_KEY}",
         "REFUND_EVAL_AGENT_DOLLAR_CAP": "50.0",
         "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS": "2048",
+        "REFUND_EVAL_USAGE_REPORTING_MODE": "strict",
     }
     assert "OPENROUTER_WORLD_API_KEY" not in agent.env
     assert world_env["OPENROUTER_API_KEY"] == "${OPENROUTER_WORLD_API_KEY}"
