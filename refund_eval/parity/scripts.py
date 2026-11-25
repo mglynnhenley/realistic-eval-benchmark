@@ -13,11 +13,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 MODEL = "mockllm/model"
 AVANTI = "customer.resolutions@avantiwestcoast.co.uk"
 OCTOPUS = "hello@octopus.energy"
+LATE_FORM_INPUTS = "late-form-inputs.json"
 _WAKE = re.compile(r"^\[(New email|Scheduled check-in|Scheduled wake-up|Continue) - "
                    r"\w{3} (\d{1,2} \w{3} \d{4}) \d{2}:\d{2}\]")
 _MAIL_ID = re.compile(r"\b[0-9a-f]{16}\b")
@@ -143,14 +145,23 @@ class EmailReply(Script):
 
 
 class LateForm(Script):
-    def step(self, n, messages):
+    def fixture_inputs(self) -> dict[str, str]:
+        staged = Path(__file__).with_name(LATE_FORM_INPUTS)
+        if staged.is_file():
+            return json.loads(staged.read_text(encoding="utf-8"))
+
         from refund_eval.scenario.schema import load_scenario
 
         scenario = load_scenario(self.scenario)
-        fields = [("#email", scenario.user.email_addresses[0]), ("#booking_ref", scenario.journey.booking_ref),
+        return {"email": scenario.user.email_addresses[0], "booking_ref": scenario.journey.booking_ref,
+                "contact_url": scenario.org("trainline").contact_url}
+
+    def step(self, n, messages):
+        inputs = self.fixture_inputs()
+        fields = [("#email", inputs["email"]), ("#booking_ref", inputs["booking_ref"]),
                   ("#subject", "Late train refund"), ("#message", "My train was late. Please refund my ticket.")]
         if n == 0:
-            return call(n, "browser_navigate", {"url": scenario.org("trainline").contact_url})
+            return call(n, "browser_navigate", {"url": inputs["contact_url"]})
         if n <= len(fields):
             target, text = fields[n - 1]
             return call(n, "browser_type", {"target": target, "text": text})
