@@ -26,9 +26,15 @@ this was not a second version or trial round.
 
 ## 10.0 — 2026-11-25
 - Kind: behaviour round
-- Fingerprint: de503351b0a77ef982af46cbed523040aeadd7ddce7fc13c932d411721b2140c
+- Fingerprint: 36d35a86c488f2fbb9f71170dc0c3d538528ccc0822a733ed222650e386b5bd4
 - Trial round: pending; offline verification and replay only in this PR. Paid rerun coordinated separately via Repro Auditor after review.
 - Changes: Raise default `LATE_REFUND_TOKEN_BUDGET` from 40,000,000 to 200,000,000 target tokens (retaining cached-input accounting and existing simulated-clock rules) so long-horizon `train_refund_late` runs are not stopped early by cached-input re-reads before reaching their simulated horizon (MAT-206).
+
+## 9.11 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 7e6a73b432250e96b72d31b0d1e62a0cb937c41a4a15c0c27932876ec547a53e
+- Trial round: none. Offline checks and free replay only; no paid execution.
+- Changes: Pin Modal sandboxes to `region="uk"` by default in Harbor batch/job preparation (configurable via `modal_region`), and narrowly allow long UK help/contact prose slugs, local Citizens Advice directory contact paths, and public Microsoft Forms/Customer Voice redirect/fallback URLs in `BrowserBoundary` without weakening isolation or write/action guards (MAT-203).
 
 ## 9.10 — 2026-11-25
 - Kind: trivial batch

@@ -59,6 +59,7 @@ def prepare(
     models: list[str] | None = None,
     environment: str = "modal", trials: int = DEFAULT_TRIALS, concurrency: int = DEFAULT_CONCURRENCY,
     secrets: list[str] | None = None, inbox: Path | None = None, resume: Path | None = None,
+    modal_region: str | None = "uk",
 ) -> Path:
     from harbor.models.job.config import JobConfig
     from harbor.models.task.task import Task
@@ -157,6 +158,8 @@ def prepare(
     env_kwargs = {}
     if environment == "modal":
         env_kwargs = {"app_name": "refund-eval-harbor", "sandbox_timeout_secs": (settings.trial_deadlines["sandbox_seconds"] if settings.trial_deadlines else settings.time_limit + 1800)}
+        if modal_region is not None:
+            env_kwargs["region"] = modal_region
         if secrets:
             env_kwargs["secrets"] = secrets
     # Credential values are resolved by Harbor at execution, never serialized here.

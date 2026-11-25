@@ -1046,3 +1046,40 @@ async def test_script_sent_form_records_what_the_page_showed(ctx, monkeypatch):
     assert saved[0].response_summary == SCRIPT_FORM_SHOWN.format(text="Thank you. Your case reference is R564222.")
     assert saved[0].response_summary.startswith("[script-sent form: the page displayed its own built-in confirmation")
     assert saved[1].response_summary == "Thank you. Your case reference is R564222."
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback",
+    "https://www.citizensadvice.org.uk/local/waltham-forest/contact-us/0014K000009EMN7QAO/",
+    "https://forms.office.com/Pages/ResponsePage.aspx?id=G27Hzu4JwkCqkG8fhb4UBQOthw2bwshJtQ8MUo-3ePdUQUdFQ0dYWkExN0g4U0gzMUk0T1A1SktBUi4u&embed=true",
+    "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=G27Hzu4JwkCqkG8fhb4UBQOthw2bwshJtQ8MUo-3ePdUQUdFQ0dYWkExN0g4U0gzMUk0T1A1SktBUi4u&embed=true",
+    "https://customervoice.microsoft.com/Pages/ResponsePage.aspx?id=bSfu1g_RwEaSECgx_MY4cdB1MPeHBylMtse7BtTTEFBUMjVJSk0wQ1VBNVI1RzQ5STM2SUxCVDdHOC4u&embed=true&compact=true&ctx=%7B%7D&nocdn=1&fswBypass=1",
+])
+async def test_public_web_allows_narrow_uk_help_and_form_pages(ctx, url):
+    fetched = []
+
+    async def fetch(request):
+        fetched.append(request["url"])
+        return response(200, "<html>ok</html>")
+
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    result = await boundary(public_req(url))
+    assert result["status"] == 200
+    assert fetched == [url]
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "public_read" and decision["read_policy_checks"] == PUBLIC_WEB_CHECKS
+
+
+@pytest.mark.parametrize(("url", "resource", "navigation", "reason"), [
+    ("https://www.nationwide.co.uk/contact-us/send-us-a-quick-feedback-now", "document", True, "action_url"),
+    ("https://www.nationwide.co.uk/contact-us/make-a-complaint-or-delete-your-account", "document", True, "action_url"),
+    ("https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback?id=1", "document", True, "action_url"),
+    ("https://www.nationwide.co.uk/contact-us/make-a-complaint-or-send-us-feedback", "xhr", False, "action_url"),
+    ("https://www.citizensadvice.org.uk/local/waltham-forest/contact-us/0014K000009EMN7QAO/?token=abc", "document", True, "url_guard"),
+    ("https://example.org/local/waltham-forest/contact-us/0014K000009EMN7QAO/", "document", True, "url_guard"),
+    ("https://forms.office.com/Pages/ResponsePage.aspx?id=abc123456789012345&token=xyz", "document", True, "url_guard"),
+])
+async def test_public_web_uk_narrow_rules_keep_action_and_token_guards(ctx, url, resource, navigation, reason):
+    assert (await public_web(ctx)(public_req(url, resource=resource, navigation=navigation)))["status"] == 403
+    assert store().get(AUDIT_KEY)[-1]["policy_reason"] == reason
+    assert load_world().interceptions == []
