@@ -1179,6 +1179,12 @@ def test_shared_caps_and_shared_roles_allow_per_run_target_cap_while_keeping_100
     assert laura_trial_main(["save", "--config", str(roles_out / "job.yaml"), "--manifest", str(roles_manifest)]) == 0
     assert laura_trial_main(["verify", "--manifest", str(roles_manifest)]) == 0
 
+    high_roles_config = batch.NativeBatchConfig(
+        **base, cost_limit=950, world_cost_limit=100, openrouter_key_mode="shared_roles",
+        shared_allowance_usd=1050,
+    )
+    assert high_roles_config.shared_allowance_usd == 1050
+
     with pytest.raises(ValueError, match=r"world cap exceeds supported \$100 ceiling"):
         batch.NativeBatchConfig(
             **base, cost_limit=250, world_cost_limit=101, openrouter_key_mode="shared_caps",

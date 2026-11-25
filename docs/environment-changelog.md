@@ -38,7 +38,7 @@ this was not a second version or trial round.
 
 ## 10.3 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 960dea698923edcb4c81a046e97266a485ccdafb0bd8d87c6da0ec6700684919
+- Fingerprint: 85846f43f71ffab6c1017ce8bdeb7d2c053420577a50567cac8f8dda1cb90c0d
 - Trial round: none. Offline checks only; no paid execution.
 - Changes: Allow shared-cost (`shared_roles` and `shared_caps`) runs to define the target model cap per run via `cost_limit` (with aggregate ceiling `target + world`) instead of a hard-coded $50 target ceiling, while keeping the simulator/world cap ceiling at $100 (MAT-221).
 

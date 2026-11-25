@@ -10,7 +10,7 @@ import tomllib
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -55,7 +55,7 @@ class NativeBatchConfig(RunConfig):
     disable_verifier: bool = False
     requested_deadline: date | None = None
     modal_region: str | None = Field(default="uk", min_length=1, pattern=r"^[a-z0-9-]+$")
-    shared_allowance_usd: CostCap | None = None
+    shared_allowance_usd: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] | None = None
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
     suite: list[NativeSuiteEntry] | None = Field(default=None, min_length=10, max_length=10)
