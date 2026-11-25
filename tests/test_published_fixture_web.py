@@ -137,6 +137,22 @@ def req(url, method="GET", fields=None):
     }
 
 
+async def test_late_orr_policy_links_to_public_enquiries(ctx):
+    scenario = load_scenario("train_refund_late")
+    late_ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
+    boundary = BrowserBoundary(late_ctx, **fixture_web_config(late_ctx))
+    policy = await boundary(req(scenario.org("orr").policy_url))
+    document = BeautifulSoup(base64.b64decode(policy["body_base64"]), "html.parser")
+    url = "https://www.orr.gov.uk/contact-us/general-enquiries"
+    assert document.find("a", href=url)
+    contact = await boundary(req(url))
+    assert contact["status"] == 200
+    content = base64.b64decode(contact["body_base64"]).decode()
+    assert "contact.pct@orr.gov.uk" in content
+    assert "does not handle individual refund claims" in content
+    assert "existing booking or account" not in content
+
+
 def test_late_form_has_empty_date_and_unchecked_accuracy_terms(ctx):
     from refund_eval.published.fixture_web import _page_html
 

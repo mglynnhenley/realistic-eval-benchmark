@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 import pytest
-from fixtures.simulator import start_sample
+from fixtures.simulator import MockSim, advance, install_mock_models, start_sample
 from inspect_ai.util import store
 
 from refund_eval.companies import (
@@ -16,6 +16,7 @@ from refund_eval.companies.llm import ACTION_SHAPE, build_messages
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim import open_world
 from refund_eval.sim.interface import Inbound
+from refund_eval.sim.router import dispatch
 from refund_eval.world.state import CaseState, Email, load_world
 
 
@@ -60,6 +61,35 @@ def test_real_local_rules_are_available_before_provider_is_contacted(case):
     assert set(context.provider_terms) == {"Trainline", "Avanti West Coast"}
     assert all("goodwill" in terms and "28 days" in terms for terms in context.provider_terms.values())
     assert not store().get(open_world.COMPANIES_KEY)
+
+
+async def test_orr_guidance_is_available_by_email_without_a_refund_case(case):
+    scenario, _ = case
+    sim = MockSim()
+    install_mock_models(sim)
+    sim.open_actions.extend([
+        {"decision": "refund", "payments": [{"kind": "cash_refund", "amount": 350, "via": "card"}],
+         "grant_ground": "public_enquiry"},
+        {"decision": "public_guidance", "body": "The retailer handles refunds. We can explain the complaints process, "
+                                               "but cannot decide individual refund claims."},
+    ])
+    address = "contact.pct@orr.gov.uk"
+    assert address in scenario.org("orr").contact_emails
+    query = "Who handles refunds for cancellations?\n\nThanks,\nLaura"
+    result = await dispatch(Inbound(channel="email", tool="send_message", target=address, org=None, subject="Rail refunds",
+                                    body=query, interception_id="general-enquiry"))
+
+    assert result.decision == "open:public_guidance"
+    assert len(sim.open_prompts) == 2
+    assert query in sim.open_prompts[0]
+    assert "No passenger identity, delegated authority or booking details are needed" in sim.open_prompts[0]
+    assert "may only grant" in sim.open_prompts[1]
+    world = load_world()
+    assert not world.outcome.offers and not world.outcome.transfers
+    assert world.cases["orr"].final_response_at is None
+    arrived = advance(timedelta(days=14))
+    assert len(arrived) == 1 and address in arrived[0].sender
+    assert "The retailer handles refunds" in arrived[0].body
 
 
 @pytest.mark.parametrize("key", ["trainline", "avanti", "nationwide", "financial_ombudsman"])

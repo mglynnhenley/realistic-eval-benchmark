@@ -29,7 +29,14 @@ def test_late_variant_has_its_own_journey_and_task():
     assert late.journey.fare == 350
     assert late.journey.cancelled
     assert (late.journey.origin, late.journey.destination) == ("London Euston", "Glasgow Central")
-    assert late.orgs == base.orgs
+    assert late.orgs == [
+        org.model_copy(update={
+            "contact_emails": ["contact.pct@orr.gov.uk"],
+            "contact_url": "https://www.orr.gov.uk/contact-us/general-enquiries",
+            "contact_note": late.org("orr").contact_note,
+        }) if org.key == "orr" else org
+        for org in base.orgs
+    ]
     assert "never waive deadlines" in late.intent and not base.intent
     assert not late.scheduled_emails
 

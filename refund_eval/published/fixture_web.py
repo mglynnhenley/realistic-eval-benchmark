@@ -135,13 +135,11 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
         contact_url = org.contact_url
         # Form submissions are navigation writes intercepted by the simulator.
         form_action = contact_url.rstrip("/") + "/submit" if org.contact_form else None
-        contact = [f"Contact {org.name} about an existing booking or account, or a complaint."]
+        contact = [org.contact_note or f"Contact {org.name} about an existing booking or account, or a complaint."]
         contact.extend(f"Email: {address}" for address in org.contact_emails)
         contact.extend(f"Telephone: {phone}" for phone in org.phone_numbers)
         if form_action:
             contact.append("Use the enquiry form below. We will reply by email.")
-        if org.contact_note:
-            contact.append(org.contact_note)
         pages.extend([
             FixturePage(
                 policy_url, f"{org.name}: refunds and complaints",
