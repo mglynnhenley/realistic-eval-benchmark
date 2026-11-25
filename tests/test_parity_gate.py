@@ -67,9 +67,14 @@ def test_harbor_reuse_checks_approved_wheel_before_launch(tmp_path, monkeypatch,
 
     monkeypatch.setattr(run.subprocess, "run", intercept)
     if change is None:
+        staged = agent_dir / "parity-fixtures/refund_eval/parity"
+        staged.mkdir(parents=True)
+        scripts = staged / "scripts.py"
+        scripts.write_text("# Stale parity fixture\n", encoding="utf-8")
         with pytest.raises(LaunchIntercepted):
             run.run_harbor(script, tmp_path, 7)
         assert len(calls) == 1 and calls[0][1:3] == ["harbor", "run"]
+        assert scripts.read_bytes() == (run.REPO / "refund_eval/parity/scripts.py").read_bytes()
     else:
         with pytest.raises(ValueError):
             run.run_harbor(script, tmp_path, 7)
