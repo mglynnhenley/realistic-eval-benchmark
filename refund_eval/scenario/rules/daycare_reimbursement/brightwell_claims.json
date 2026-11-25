@@ -1,0 +1,18 @@
+{
+  "org": "brightwell_claims",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a daycare invoice under a dependent-care plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {
+    "terms": "Service dates govern; payment date is irrelevant. Each complete line needs service dates, amount, provider name and tax ID, and dependant name. Incomplete claims are pended for 10 business days and then denied. Lines keep their IDs and are paid at most once. Claims and corrections are decided within 10 business days. Funding-limited approvals wait for the next eligible Friday remittance. Run-out is the end of week 10.",
+    "grounds": [{
+      "key": "eligible_line",
+      "conditions": "Approve one itemized dependent-care line when its documented service dates are within coverage, the service has been provided, and required substantiation is present, regardless of current funding. Disburse at most once from funded balance during remittance.",
+      "evidence_required": "The provider's itemized line ID, service dates, amount, provider name and tax ID, and dependant name.",
+      "quote": "Approved lines pay in line-ID order, up to funded balance, on the Friday remittance after approval.",
+      "source": "scenario terms"
+    }]
+  },
+  "errors": []
+}

@@ -1,0 +1,10 @@
+{
+  "org": "brightwell_hr",
+  "subject": "daycare reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Brightwell HR confirms dependent-care election and effective dates from its enrollment system.",
+    "facts": [{"statement": "HR confirms recorded election and coverage dates and has no other childcare fund.", "quote": "Enrollment elections take effect on their recorded effective date and are not retroactive. HR cannot pay claims.", "url": "https://brightwell.example/hr/dependent-care"}],
+    "persona": {"Reply-from": "Brightwell Benefits HR <hr@brightwell.example>", "Sign-off": "Benefits Partner"}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "org": "brightwell_hr",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a daycare invoice under a dependent-care plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {"terms": "Enrollment dates are confirmed from the recorded election. Coverage is not retroactive. HR has no other childcare fund and cannot pay claims.", "grounds": []},
+  "errors": []
+}

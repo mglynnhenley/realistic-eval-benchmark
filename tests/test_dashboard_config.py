@@ -62,9 +62,12 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
 
 
 def test_each_scenario_choice_carries_its_own_fare():
-    fares = {item["name"]: item["fare"] for item in server.public_config()["scenarios"]}
+    choices = server.public_config()["scenarios"]
+    fares = {item["name"]: item["fare"] for item in choices if "fare" in item}
     assert fares["train_refund_late"] == 350.0
     assert set(fares) == {"train_refund_late", "bills_price_rise"}
+    daycare = next(item for item in choices if item["name"] == "daycare_reimbursement")
+    assert daycare["invoice_total"] == 800
 
 
 def test_scenario_picker_loads_api_choices_before_presets_and_preserves_selection():

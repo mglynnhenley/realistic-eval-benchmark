@@ -1,0 +1,9 @@
+{
+  "org": "little_oaks",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a daycare invoice under a dependent-care plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {"terms": "Little Oaks issues an itemized statement with line IDs, dates, amounts, attended days and tax ID within three business days. Statements change only to match the register. The provider gives no refund, credit, discount or hardship payment for attended care.", "grounds": []},
+  "errors": []
+}

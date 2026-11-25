@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,10 @@ class CompanyAction(BaseModel):
         default=None, description="Kind of your existing open offer the customer accepts now, if they do.")
     withdraw_offers: bool = Field(default=False, description="Withdraw your open offers.")
     payments: list[CompanyPayment] = Field(default_factory=list, description="Money you pay the customer now.")
+    case_events: list[dict[str, Any]] = Field(default_factory=list, description=(
+        "Task-specific internal ledger events. Match the TASK EVENT JSON SCHEMA and examples supplied in the "
+        "company context exactly; emit none when no supported decision occurred. These events do not appear "
+        "in the customer-facing reply."))
     grant_ground: str | None = Field(default=None, description=(
         "If this response grants what the customer is asking for (see your rules), the key of the ground "
         "that applies; otherwise null."))
@@ -88,6 +92,8 @@ class CompanyEvent(BaseModel):
     kind: Literal["contact", "note", "follow_up"] = "contact"
     incoming: str
     mode: Literal["email", "form", "phone", "chat"] = "email"
+    received_at: datetime | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
     feedback: list[str] = Field(default_factory=list)
 
 
@@ -110,6 +116,7 @@ class CompanyContext(BaseModel):
     persona: str = ""
     temperament: str = ""
     realism: str = ""
+    task_event_schema: dict[str, Any] = Field(default_factory=dict)
     examples: str = ""
     case_ref: str | None = None
     history: list[str] = Field(default_factory=list)

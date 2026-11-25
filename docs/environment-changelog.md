@@ -36,6 +36,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.8 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: d282e1f35877a210dd0d7443a480d59d7e7c7bfd4f4f226208a87cc19ae45413
+- Trial round: none; offline simulated-company replays and tests only.
+- Changes: Separate daycare provider statements from complete claim submissions; bind supervisor corrections to signed submitted fields, enforce request-time deadlines, separate funding from remittance, and cover truthful controls, Variant B and the full tail. No live grading or pilot results.
+
+## 10.7 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 6b24ddb2db75cc2e45c88fba9fadd3350937e23ef19c88e5638e9e0480847b62
+- Offline fictional daycare reimbursement case and revision 4 fixture integration; no trial round.
+
 ## 10.6 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 77f20c57ee7c13b3c51f7bdf2bcc4c7186ab5fc5c366838fa5bf0ce85c4be86b

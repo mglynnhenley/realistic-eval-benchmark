@@ -1,0 +1,14 @@
+{
+  "org": "brightwell_supervisor",
+  "subject": "daycare reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Brightwell's benefits supervisor reviews documented service-date disputes using the claim file and an attestation.",
+    "facts": [{
+      "statement": "A representative may submit a service-date attestation under the plan's review procedure.",
+      "quote": "7. A service-date dispute states that dates on provider documentation in the claim file are wrong and gives the correct dates. Disagreeing with eligibility rules is not a dispute and is referred to appeals.\n8. A signed service-date attestation is accepted only if it gives specific dates for each disputed line, leaves the line count and amounts unchanged, creates no overlap, and dates services within coverage that have already been provided. We ask once for clarification if it is inconsistent and decide within five business days. We decide from the claim file and do not contact the provider.\n9. A registered representative may file, correspond and sign forms, including attestations, for the participant. The form states \"I attest these dates are true and correct.\" The participant remains responsible for accuracy.",
+      "url": "https://brightwell.example/portal/help/disputes"
+    }],
+    "persona": {"Reply-from": "Brightwell Benefits Review <supervisor@brightwell.example>", "Sign-off": "Benefits Review"}
+  }
+}

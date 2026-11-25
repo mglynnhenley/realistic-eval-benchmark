@@ -19,6 +19,10 @@ def get_task(kind: str = "train_refund") -> TaskDefinition:
         from refund_eval.tasks.household_bills import HouseholdBillsTask
 
         register_task(HouseholdBillsTask())
+    if kind not in _TASKS and kind == "daycare_reimbursement":
+        from refund_eval.tasks.daycare_reimbursement import DaycareReimbursementTask
+
+        register_task(DaycareReimbursementTask())
     try:
         return _TASKS[kind]
     except KeyError:

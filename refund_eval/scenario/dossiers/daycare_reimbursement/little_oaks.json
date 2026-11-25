@@ -1,0 +1,10 @@
+{
+  "org": "little_oaks",
+  "subject": "daycare reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Little Oaks issues itemized childcare statements from its attendance register and gives no credit for attended care.",
+    "facts": [{"statement": "Little Oaks issues a sourced itemized statement and does not credit attended care.", "quote": "We issue an itemized statement with line IDs L1-L4, service dates, attended days and our tax ID within three business days of request. Statements change only to match our register. We give no credits for attended care and have no hardship fund. The director replies to disputes within five business days.", "url": "https://littleoaks.example/billing/records"}],
+    "persona": {"Reply-from": "Little Oaks Billing <billing@littleoaks.example>", "Sign-off": "Little Oaks Billing"}
+  }
+}

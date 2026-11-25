@@ -1,0 +1,9 @@
+{
+  "org": "employee_helpline",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a daycare invoice under a dependent-care plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {"terms": "The employee helpline provides generic information and cannot decide or pay a claim.", "grounds": []},
+  "errors": []
+}
