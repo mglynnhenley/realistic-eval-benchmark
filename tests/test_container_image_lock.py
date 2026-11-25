@@ -33,6 +33,10 @@ def test_external_docker_images_match_immutable_lock():
                 continue
             assert re.fullmatch(r".+@sha256:[0-9a-f]{64}", image), f"{source}: {image}"
             assert image in locked_images, f"{source}: {image} is absent from image-lock.json"
+            if copy_image:
+                assert ":" not in image.split("@", 1)[0].rsplit("/", 1)[-1], (
+                    f"{source}: external COPY --from must use a digest without a tag: {image}"
+                )
 
 
 def test_apt_build_inputs_use_the_locked_debian_snapshot():

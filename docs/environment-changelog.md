@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.5 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 93411145c6b938fd855e439e6444d6d2bc6860e88414ca9ae7ee98f842663981
+- Trial round: none. Image build checks only; no model calls.
+- Changes: Use digest-only uv image references in Harbor Dockerfiles for Modal compatibility, retaining uv 0.11.7.
+
 ## 10.4 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: e11de9e771920bfaa004594c3af7a743abdd53c087f3a1c758c684c95ec4f466
