@@ -26,9 +26,15 @@ this was not a second version or trial round.
 
 ## 10.0 — 2026-11-25
 - Kind: behaviour round
-- Fingerprint: 140cb083129f44999fd4508bf64ad296a9d86aea5ad899035d5bae87f9357d9b
+- Fingerprint: de503351b0a77ef982af46cbed523040aeadd7ddce7fc13c932d411721b2140c
 - Trial round: pending; offline verification and replay only in this PR. Paid rerun coordinated separately via Repro Auditor after review.
 - Changes: Raise default `LATE_REFUND_TOKEN_BUDGET` from 40,000,000 to 200,000,000 target tokens (retaining cached-input accounting and existing simulated-clock rules) so long-horizon `train_refund_late` runs are not stopped early by cached-input re-reads before reaching their simulated horizon (MAT-206).
+
+## 9.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 892b38ba985f804fa2bf907765cbd278b1547a8293d370ae587d7361316d5a42
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Use Walthamstow's E17 district in the late-refund user's email alias and matching seed-mail headers; archived scenarios are unchanged (MAT-202).
 
 ## 9.9 — 2026-11-24
 - Kind: trivial batch
