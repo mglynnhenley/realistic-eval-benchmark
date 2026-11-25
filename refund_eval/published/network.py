@@ -75,6 +75,10 @@ _PUBLIC_ACTION_WORDS = {
     "rsvp", "respond", "redeem", "action", "submit", "click", "optin", "subscribe",
     "send", "create", "update", "purchase", "transfer", "withdraw",
 }
+_DESTRUCTIVE_ACTION_WORDS = {
+    "cancel", "delete", "remove", "accept", "decline", "approve", "reject",
+    "redeem", "optin", "subscribe", "purchase", "transfer", "withdraw",
+}
 _PERSONAL_PARAMS = {
     "booking", "bookingref", "bookingreference", "reservation", "reservationid",
     "claim", "claimid", "case", "caseid", "account", "accountid", "customer", "customerid",
@@ -199,9 +203,22 @@ def public_web_read_reason(request: dict, scenario: Scenario | None = None) -> s
     else:
         return "excessive_url_encoding"
     parts = urlsplit(decoded)
-    words = set(re.findall(r"[a-z0-9]+", parts.path.casefold()))
-    if words & _PUBLIC_ACTION_WORDS:
-        return "action_url"
+    for segment in filter(None, parts.path.casefold().split("/")):
+        words = re.findall(r"[a-z0-9]+", segment)
+        matched = set(words) & _PUBLIC_ACTION_WORDS
+        if not matched:
+            continue
+        # Long English prose slugs on plain page loads (e.g. "make-a-complaint-or-send-us-feedback")
+        # are help/contact pages rather than action endpoints. Keep blocking short segments,
+        # leading action verbs, destructive verbs, query-bearing URLs, and non-page loads.
+        prose_slug = (
+            page_load and not parts.query
+            and re.fullmatch(r"[a-z]+(?:-[a-z]+){4,}", segment) is not None
+            and words[0] not in _PUBLIC_ACTION_WORDS
+            and not (matched & _DESTRUCTIVE_ACTION_WORDS)
+        )
+        if not prose_slug:
+            return "action_url"
     keys = _query_keys(parts.query)
     if keys & _WRITE_PARAMS:
         return "write_bearing_url"
@@ -421,14 +438,15 @@ def _anonymous_form_guard_url(url: str) -> str | None:
     the provider serves the form anonymously or accepts a submission.
     """
     parts = urlsplit(url)
-    if (parts.scheme != "https" or parts.netloc != "customervoice.microsoft.com"
+    if (parts.scheme != "https" or parts.netloc not in {"customervoice.microsoft.com", "forms.office.com"}
             or parts.path != "/Pages/ResponsePage.aspx" or parts.fragment):
         return None
     pairs = parse_qsl(parts.query, keep_blank_values=True)
     fields = dict(pairs)
-    if (len(fields) != len(pairs) or set(fields) - {"id", "embed", "compact", "ctx"}
+    if (len(fields) != len(pairs) or set(fields) - {"id", "embed", "compact", "ctx", "nocdn", "fswBypass"}
             or not re.fullmatch(r"[A-Za-z0-9_-]{16,256}", fields.get("id", ""))
             or any(fields[key] not in {"true", "false"} for key in ("embed", "compact") if key in fields)
+            or any(fields[key] not in {"0", "1", "true", "false"} for key in ("nocdn", "fswBypass") if key in fields)
             or ("ctx" in fields and fields["ctx"] != "{}")):
         return None
     return urlunsplit(parts._replace(query=urlencode([
@@ -475,6 +493,13 @@ def validate_public_url(url: str, *, static_asset: bool = False) -> None:
         if (parts.scheme == "https" and parts.netloc in {"www.railombudsman.org", "railombudsman.org"}
                 and re.fullmatch(r"/en/news/[a-z0-9][a-z0-9-]{7,95}", parts.path)
                 and not parts.query and not parts.fragment):
+            verdict = check_url(url, hashed_path_ok=True)
+        # Local Citizens Advice directory pages use a public Salesforce office ID
+        # in the path. Keep the original URL and every other guard: these IDs
+        # identify a public branch listing, never a session or user account.
+        elif (parts.scheme == "https" and parts.netloc in {"www.citizensadvice.org.uk", "citizensadvice.org.uk"}
+              and re.fullmatch(r"/local/[a-z0-9-]+/contact-us/001[A-Za-z0-9]{12,15}/?", parts.path)
+              and not parts.query and not parts.fragment):
             verdict = check_url(url, hashed_path_ok=True)
     if not verdict.allowed or urlsplit(url).fragment:
         raise ValueError(f"Invalid public read URL: {url}")
