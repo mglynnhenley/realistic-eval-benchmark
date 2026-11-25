@@ -24,11 +24,29 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 9.10 — 2026-11-25
+## 10.1 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 6c440aa053cc4a9a0040b3e8fd183adfbdac090e287c63c3341e907827693aa1
+- Fingerprint: 37649faedb64a62d4a0ee43d9406bd842134d8a6af179ea2e7c33acb6b8f8d12
 - Trial round: none. Offline checks only; no paid execution.
 - Changes: Drop live dossier facts whose quotations are not found on the retained pages they cite (MAT-204).
+
+## 10.0 — 2026-11-25
+- Kind: behaviour round
+- Fingerprint: 36d35a86c488f2fbb9f71170dc0c3d538528ccc0822a733ed222650e386b5bd4
+- Trial round: pending; offline verification and replay only in this PR. Paid rerun coordinated separately via Repro Auditor after review.
+- Changes: Raise default `LATE_REFUND_TOKEN_BUDGET` from 40,000,000 to 200,000,000 target tokens (retaining cached-input accounting and existing simulated-clock rules) so long-horizon `train_refund_late` runs are not stopped early by cached-input re-reads before reaching their simulated horizon (MAT-206).
+
+## 9.11 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 7e6a73b432250e96b72d31b0d1e62a0cb937c41a4a15c0c27932876ec547a53e
+- Trial round: none. Offline checks and free replay only; no paid execution.
+- Changes: Pin Modal sandboxes to `region="uk"` by default in Harbor batch/job preparation (configurable via `modal_region`), and narrowly allow long UK help/contact prose slugs, local Citizens Advice directory contact paths, and public Microsoft Forms/Customer Voice redirect/fallback URLs in `BrowserBoundary` without weakening isolation or write/action guards (MAT-203).
+
+## 9.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 892b38ba985f804fa2bf907765cbd278b1547a8293d370ae587d7361316d5a42
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Use Walthamstow's E17 district in the late-refund user's email alias and matching seed-mail headers; archived scenarios are unchanged (MAT-202).
 
 ## 9.9 — 2026-11-24
 - Kind: trivial batch

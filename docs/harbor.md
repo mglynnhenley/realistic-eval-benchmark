@@ -65,7 +65,7 @@ targets. `--trials` counts attempts per model (default 4); `--concurrency` limit
 across the whole batch (default 2). The default per-trial wall-clock limit is 1,800 seconds.
 Automatic retries are disabled.
 
-The default scenario is `train_refund_late`, with six simulated weeks, 1,000 turns and a 40-million-target-token budget. An explicit `--cost-limit` is required. `bills_price_rise` also remains runnable; `train_refund` and `train_refund_pressure` are archived for historical log loading and resume, not new CLI launches. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
+The default scenario is `train_refund_late`, with six simulated weeks, 1,000 turns and a 200-million-target-token budget. An explicit `--cost-limit` is required. `bills_price_rise` also remains runnable; `train_refund` and `train_refund_pressure` are archived for historical log loading and resume, not new CLI launches. The simulator defaults to `openrouter/anthropic/claude-opus-5.5`; its
 grader role, which checks company replies for financial consistency, defaults to
 `openrouter/anthropic/claude-haiku-4.5`. Override these with `--simulator-model`
 and `--grader-model`.

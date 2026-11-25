@@ -117,7 +117,7 @@ def test_model_worker_sets_explicit_roles_and_fixture_limits(tmp_path, monkeypat
         "max_turns": 7, "cost_limit": 2.5, "sim_weeks": 0.5, "history_tokens": 8000,
         "budget_notice": "every_step",
         "tool_profile": "published", "published_data": "hybrid", "artifact_dir": str(tmp_path), "time_limit": None,
-        "scenario": "train_refund_late", "token_budget": 40_000_000, "research_mode": "auto",
+        "scenario": "train_refund_late", "token_budget": 200_000_000, "research_mode": "auto",
     }
     assert RUN_DIR_ENV not in os.environ
 

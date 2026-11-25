@@ -26,7 +26,7 @@ HYBRID_EXA_KEY_ENV = "REFUND_EVAL_EXA_API_KEY"
 SUPABASE_URL_ENV = "SUPABASE_URL"
 SUPABASE_KEY_ENV = "SUPABASE_SERVICE_ROLE_KEY"
 LATE_REFUND_SCENARIO = "train_refund_late"
-LATE_REFUND_TOKEN_BUDGET = 40_000_000
+LATE_REFUND_TOKEN_BUDGET = 200_000_000
 CostCap = Annotated[float, Field(gt=0, le=1000, strict=True, allow_inf_nan=False)]
 CostLimit = CostCap | dict[str, CostCap]
 # When the target sees the runtime notice of time and tokens left (with a token budget).
@@ -62,9 +62,11 @@ def scenario_budget_defaults(values):
         values = dict(values)
         if "cost_limit" not in values:
             raise ValueError("train_refund_late requires an explicit cost_limit for each target model")
-        values.setdefault("token_budget", LATE_REFUND_TOKEN_BUDGET)
-        if values.get("token_budget") is None:
-            raise ValueError("train_refund_late requires a token_budget")
+        resuming = bool(values.get("resume_log") or values.get("resume_sha256"))
+        if not resuming:
+            values.setdefault("token_budget", LATE_REFUND_TOKEN_BUDGET)
+            if values.get("token_budget") is None:
+                raise ValueError("train_refund_late requires a token_budget")
         if "research_mode" in values and values["research_mode"] not in {"saved", "auto"}:
             raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
     return values

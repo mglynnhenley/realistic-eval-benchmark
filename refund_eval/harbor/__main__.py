@@ -14,6 +14,7 @@ from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     HYBRID_EXA_KEY_ENV,
+    LATE_REFUND_TOKEN_BUDGET,
     SUPABASE_KEY_ENV,
     SUPABASE_URL_ENV,
     resolve_cost_limits,
@@ -58,6 +59,7 @@ def prepare(
     models: list[str] | None = None,
     environment: str = "modal", trials: int = DEFAULT_TRIALS, concurrency: int = DEFAULT_CONCURRENCY,
     secrets: list[str] | None = None, inbox: Path | None = None, resume: Path | None = None,
+    modal_region: str | None = "uk",
 ) -> Path:
     from harbor.models.job.config import JobConfig
     from harbor.models.task.task import Task
@@ -156,6 +158,8 @@ def prepare(
     env_kwargs = {}
     if environment == "modal":
         env_kwargs = {"app_name": "refund-eval-harbor", "sandbox_timeout_secs": (settings.trial_deadlines["sandbox_seconds"] if settings.trial_deadlines else settings.time_limit + 1800)}
+        if modal_region is not None:
+            env_kwargs["region"] = modal_region
         if secrets:
             env_kwargs["secrets"] = secrets
     # Credential values are resolved by Harbor at execution, never serialized here.
@@ -303,7 +307,7 @@ def main() -> None:
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
     parser.add_argument("--sim-weeks", type=float, default=argparse.SUPPRESS)
     parser.add_argument("--token-budget", type=int, default=argparse.SUPPRESS,
-                        help="Target tokens including cached input; late-refund defaults to 40000000")
+                        help=f"Target tokens including cached input; late-refund defaults to {LATE_REFUND_TOKEN_BUDGET}")
     parser.add_argument("--budget-notice", choices=list(BUDGET_NOTICES),
                         default=TrialSettings.model_fields["budget_notice"].default,
                         help="With a token budget, show the runtime notice every step, daily, or when low")
