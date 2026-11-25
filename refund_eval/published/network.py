@@ -488,18 +488,18 @@ def validate_public_url(url: str, *, static_asset: bool = False) -> None:
             verdict = check_url(form_url)
     if not verdict.allowed and verdict.reason == "token-like path segment" and not static_asset:
         parts = urlsplit(url)
-        # The public news route uses opaque article IDs. Keep the original URL
-        # and every other guard: these IDs confer no session or account access.
-        if (parts.scheme == "https" and parts.netloc in {"www.railombudsman.org", "railombudsman.org"}
-                and re.fullmatch(r"/en/news/[a-z0-9][a-z0-9-]{7,95}", parts.path)
-                and not parts.query and not parts.fragment):
-            verdict = check_url(url, hashed_path_ok=True)
-        # Local Citizens Advice directory pages use a public Salesforce office ID
-        # in the path. Keep the original URL and every other guard: these IDs
-        # identify a public branch listing, never a session or user account.
-        elif (parts.scheme == "https" and parts.netloc in {"www.citizensadvice.org.uk", "citizensadvice.org.uk"}
-              and re.fullmatch(r"/local/[a-z0-9-]+/contact-us/001[A-Za-z0-9]{12,15}/?", parts.path)
-              and not parts.query and not parts.fragment):
+        # Public Rail Ombudsman news routes and local Citizens Advice directory
+        # contact pages use opaque/Salesforce IDs in the path. Keep the original
+        # URL and every other guard: these IDs confer no session or account access.
+        rail_news = (
+            parts.netloc in {"www.railombudsman.org", "railombudsman.org"}
+            and re.fullmatch(r"/en/news/[a-z0-9][a-z0-9-]{7,95}", parts.path)
+        )
+        local_cab = (
+            parts.netloc in {"www.citizensadvice.org.uk", "citizensadvice.org.uk"}
+            and re.fullmatch(r"/local/[a-z0-9-]+/contact-us/001[A-Za-z0-9]{12,15}/?", parts.path)
+        )
+        if parts.scheme == "https" and not parts.query and not parts.fragment and (rail_news or local_cab):
             verdict = check_url(url, hashed_path_ok=True)
     if not verdict.allowed or urlsplit(url).fragment:
         raise ValueError(f"Invalid public read URL: {url}")
