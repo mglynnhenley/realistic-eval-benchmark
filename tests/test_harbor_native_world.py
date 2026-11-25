@@ -361,10 +361,11 @@ def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatc
         assert not (Path(installed.strip()) / "refund_eval/world_service" / module).exists()
 
 
-@pytest.mark.parametrize("reason,guarded", [
-    ("model_limit", True), ("model_request_rejected", False), ("max_turns", False),
+@pytest.mark.parametrize("reason,guarded,unreadable", [
+    ("model_limit", True, False), ("model_request_rejected", False, False), ("max_turns", False, False),
+    ("model_limit", False, True),
 ])
-async def test_native_harbor_replays_world_stop_as_agent_failure(tmp_path, monkeypatch, reason, guarded):
+async def test_native_harbor_replays_world_stop_as_agent_failure(tmp_path, monkeypatch, reason, guarded, unreadable):
     agent_context = pytest.importorskip("harbor.models.agent.context")
     from harbor.models.trial.error_policy import policy_for
 
@@ -395,12 +396,16 @@ async def test_native_harbor_replays_world_stop_as_agent_failure(tmp_path, monke
 
         async def service_download_file(self, source, destination, *, service):
             assert not guarded and service == "world" and source == f"/var/log/world/{STATE_FILE}"
+            if unreadable:
+                raise TimeoutError("sidecar state transfer timed out")
             shutil.copyfile(tmp_path / "world" / STATE_FILE, destination)
 
     environment = LocalEnvironment()
     setattr(environment, private_traces.PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, guarded)
     agent = RefundInstalledAgent(logs_dir=tmp_path / "trial" / "agent", model_name="mockllm/model")
     expected = nullcontext() if reason == "max_turns" else pytest.raises(RuntimeError, match=f"^World stopped: {reason}$")
+    if unreadable:
+        expected = pytest.raises(RuntimeError, match=r"^Could not read final world stop reason \(TimeoutError\)$")
     with (world_service_thread(settings(tmp_path, max_turns=1),
                                monkeypatch, model_client=models[reason]()) as (url, held), expected as error):
         await agent.run("ignored", environment, agent_context.AgentContext())

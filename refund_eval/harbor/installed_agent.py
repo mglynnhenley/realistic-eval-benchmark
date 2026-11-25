@@ -166,7 +166,7 @@ class RefundInstalledAgent(BaseInstalledAgent):
                         await environment.service_download_file(f"/var/log/world/{state.name}", state, service="world")
                     reason = json.loads(state.read_bytes())["stop_reason"]
             except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(f"Could not read final world stop reason ({type(exc).__name__})") from None
+                raise ApiError(f"Could not read final world stop reason ({type(exc).__name__})") from None
         if reason in ("model_limit", "model_request_rejected"):
             raise ApiError(f"World stopped: {reason}")
 

@@ -38,7 +38,7 @@ this was not a second version or trial round.
 
 ## 10.5 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 2a5307a43dba9cbab95cefea3643ca960504596d9270a4c3adfc48eaa4377546
+- Fingerprint: d8a747cc68c8ccde49026fd6f5a9272a0d1902415587bbcaa5c73b3b5b3c08fa
 - Trial round: none. Offline checks only; no paid execution.
 - Changes: Native Harbor records a trial error when the world stops with `model_limit` or `model_request_rejected` (MAT-224).
 
