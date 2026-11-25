@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.1 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 37649faedb64a62d4a0ee43d9406bd842134d8a6af179ea2e7c33acb6b8f8d12
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Drop live dossier facts whose quotations are not found on the retained pages they cite (MAT-204).
+
 ## 10.0 — 2026-11-25
 - Kind: behaviour round
 - Fingerprint: 36d35a86c488f2fbb9f71170dc0c3d538528ccc0822a733ed222650e386b5bd4

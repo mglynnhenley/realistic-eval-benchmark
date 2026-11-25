@@ -73,6 +73,32 @@ async def test_live_research_runs_the_tool_loop_then_takes_the_dossier(sim):
     assert store().get(research.DOSSIERS_KEY)["trainline"]["dossier"] == record["dossier"]
 
 
+async def test_live_research_keeps_only_quotes_found_on_their_cited_pages(sim, monkeypatch):
+    source = "https://www.example.test/Terms?item=ABC"
+    other = "https://www.example.test/faq"
+
+    async def read(url, *, scenario):
+        text = "Requests need\n A RECEIPT." if url == source else "Submit within seven days."
+        return f"URL: {url}\n\n{text}"
+
+    monkeypatch.setattr(research, "_read_page", read)
+    supported = {"statement": "Proof is required.", "quote": "need a receipt",
+                 "url": "HTTPS://EXAMPLE.TEST/Terms?item=ABC#proof"}
+    proposal = {"summary": "A synthetic service.", "facts": [
+        supported,
+        {"statement": "Wrong page.", "quote": "within seven days", "url": source},
+        {"statement": "Unread page.", "quote": "need a receipt", "url": "https://example.test/unread"},
+        {"statement": "Wrong path case.", "quote": "need a receipt", "url": "https://example.test/terms?item=ABC"},
+        {"statement": "Wrong query case.", "quote": "need a receipt", "url": "https://example.test/Terms?item=abc"},
+        {"statement": "Blank quote.", "quote": " ", "url": other},
+    ], "persona": {"voice": "Brief."}}
+    sim.research_script = [("read_page", {"url": source}), ("read_page", {"url": other}), proposal]
+    record = await research.research(TRAINLINE)
+    assert record["dossier"]["facts"] == [supported]
+    assert record["dossier"]["summary"] == proposal["summary"]
+    assert record["dossier"]["persona"]["voice"] == "Brief."
+
+
 async def test_page_redirects_consume_the_shared_request_budget(monkeypatch):
     requests = []
 
@@ -129,6 +155,7 @@ async def test_a_tool_error_is_shown_to_the_model_and_recorded(sim, monkeypatch)
     assert record["tool_calls"][0]["error"] == "HTTP 403" and record["errors"] == ["read_page: HTTP 403"]
     assert "Error: HTTP 403" in sim.dossier_prompts[-1]
     assert record["dossier"]["summary"].startswith("Trainline")
+    assert record["dossier"]["facts"] == []
 
 
 @pytest.mark.parametrize("mode", ["auto", "live"])

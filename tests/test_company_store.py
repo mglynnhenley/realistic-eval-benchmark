@@ -374,9 +374,10 @@ def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypat
     monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "2")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
     monkeypatch.setattr(rules_module, "RULES_PROMPT_VERSION", "1")
-    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "3")
+    research_version = research_module.RESEARCH_PROMPT_VERSION
+    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "other")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
-    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", "2")
+    monkeypatch.setattr(research_module, "RESEARCH_PROMPT_VERSION", research_version)
     monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "3")
     assert company_store.entry_fingerprint(SCENARIO, ORG) != fingerprint
     monkeypatch.setattr(research_module, "EXEMPLAR_PROMPT_VERSION", "2")
@@ -388,6 +389,21 @@ def test_fingerprint_versions_and_first_save_leave_old_entry_untouched(monkeypat
     assert company_store.save_entry(SCENARIO, ORG, _company_entry(
         SCENARIO, ORG, different, temperament="different"))["temperament"] == "different"
     assert path.read_bytes() == original
+
+
+def test_shared_entry_created_before_fact_verification_is_not_reused(monkeypatch):
+    _set_live(MockSim())
+    cached_research = _dossier()
+    cached_research["dossier"]["facts"][0]["quote"] = "No deadline applies."
+    with monkeypatch.context() as legacy:
+        legacy.setattr(research, "RESEARCH_PROMPT_VERSION", "2")
+        fingerprint = company_store.entry_fingerprint(SCENARIO, ORG)
+        company_store.save_entry(SCENARIO, ORG, _company_entry(
+            SCENARIO, ORG, fingerprint, research=cached_research))
+        assert company_store.load_entry(SCENARIO, ORG)["research"]["dossier"] == cached_research["dossier"]
+
+    assert company_store.load_entry(SCENARIO, ORG) is None
+    assert company_store.find_matching_entry(SCENARIO, company_store.org_identity(ORG)) is None
 
 
 def test_concurrent_first_save_returns_one_immutable_payload():

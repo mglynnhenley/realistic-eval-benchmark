@@ -61,7 +61,7 @@ from refund_eval.sim.rules import (
     saved_rules,
 )
 from refund_eval.world.mail import sent_mail
-from refund_eval.world.orgs import parse_address
+from refund_eval.world.orgs import citation_url_key, parse_address
 from refund_eval.world.state import (
     CaseState,
     Claim,
@@ -194,13 +194,13 @@ def _apply_example_reply_from(org: Org, record: dict | None, examples: list[dict
         persona = {}
     dossier["persona"] = persona
     pages = {
-        research_module._normal_url(page.get("url", "")): page.get("text", "")
+        citation_url_key(page.get("url", "")): page.get("text", "")
         for page in (record or {}).get("pages", [])
         if page.get("url")
     }
     for example in examples:
         if address := own_address(org, example.get("from")):
-            page = pages.get(research_module._normal_url(example.get("source", "")), "")
+            page = pages.get(citation_url_key(example.get("source", "")), "")
             if isinstance(page, str) and address.casefold() in page.casefold():
                 persona["Reply-from"] = f"{org.name} <{address}>"
                 return

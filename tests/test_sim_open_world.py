@@ -275,18 +275,24 @@ def live_web(sim, monkeypatch):
     return searches
 
 
-async def test_a_company_is_researched_once_at_first_contact_and_answers_from_it(sim, live_web):
-    from refund_eval.sim.research import DOSSIERS_KEY
+async def test_a_company_is_researched_once_at_first_contact_and_answers_from_it(sim, live_web, monkeypatch):
+    from refund_eval.sim import research
+
+    async def read(url, *, scenario):
+        return f"URL: {url}\n\nRefunds must be claimed within 28 days."
+
+    monkeypatch.setattr(research, "_read_page", read)
+    sim.research_script.append(("read_page", {"url": "https://www.thetrainline.com/terms"}))
 
     await dispatch(email("sales.support@info.thetrainline.com"))
     await dispatch(email("sales.support@info.thetrainline.com", "Following up.", iid="open-2"))
     assert live_web == ["Trainline refund policy"]
-    assert len(sim.dossier_prompts) == 2 and "28 days" in sim.dossier_prompts[1]  # search turn, then the dossier
+    assert len(sim.dossier_prompts) == 3 and "28 days" in sim.dossier_prompts[2]
     assert all("RESEARCHED PUBLIC INFORMATION" in p and "thetrainline.com/terms" in p for p in sim.open_prompts)
     assert all("Voice: Friendly and informal." in p for p in sim.open_prompts)
-    record = store().get(DOSSIERS_KEY)["trainline"]
+    record = store().get(research.DOSSIERS_KEY)["trainline"]
     assert record["mode"] == "live" and record["retrieved_at"]
-    assert [c["tool"] for c in record["tool_calls"]] == ["web_search_exa"]
+    assert [c["tool"] for c in record["tool_calls"]] == ["web_search_exa", "read_page"]
     world = load_world()  # the researched persona names the sender and the case reference format
     assert world.pending[0].email.sender == "Trainline Help <help@thetrainline.com>"
     assert re.fullmatch(r"TL-\d{6}", world.cases["trainline"].case_ref)

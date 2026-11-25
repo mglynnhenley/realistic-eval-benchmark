@@ -54,6 +54,14 @@ def host_of(target: str) -> str | None:
     return host.removeprefix("www.")
 
 
+def citation_url_key(url: str) -> str:
+    value = re.sub(r"^https?://", "", url.strip(), flags=re.IGNORECASE).split("#", 1)[0]
+    authority, *suffix = re.split(r"(?=[/?])", value, maxsplit=1)
+    user_info, at, host = authority.rpartition("@")
+    tail = suffix[0] if suffix else ""
+    return user_info + at + host.casefold().removeprefix("www.") + (tail if "?" in tail else tail.rstrip("/"))
+
+
 def _domain_match(host: str, domains: list[str]) -> bool:
     for d in domains:
         d = d.lower().strip().lstrip(".")

@@ -64,7 +64,7 @@ from refund_eval.scenario.schema import (
     subject_slug,
 )
 from refund_eval.sim.common import current_scenario
-from refund_eval.world.orgs import host_of, parse_address
+from refund_eval.world.orgs import citation_url_key, host_of, parse_address
 from refund_eval.world.store import world_store
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ MAX_OUTPUT_TOKENS = 12_000  # a dossier is a few thousand; also what OpenRouter 
 MAX_FACTS = 25
 FRESH_DAYS = 30
 DIRECTIVES = ("Reply-from", "Sign-off", "Greeting", "Case-ref-format", "Phone-hours", "Cold-email")
-RESEARCH_PROMPT_VERSION = "2"
+RESEARCH_PROMPT_VERSION = "3"
 EXEMPLAR_PROMPT_VERSION = "2"
 
 
@@ -447,6 +447,7 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
                 f"That was not valid: {str(ex)[:600]}\nReturn one JSON object with exactly these keys:\n{DOSSIER_SHAPE}")))
             lookups = 0
             continue
+        dossier.facts = _verified_facts(dossier.facts, record["pages"])
         record["dossier"] = _clean_persona(dossier, org).model_dump(by_alias=True)
         break
     return record
@@ -456,9 +457,16 @@ def _normal(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _normal_url(url: str) -> str:
-    value = re.sub(r"^https?://", "", url.strip().casefold())
-    return value.removeprefix("www.").split("#", 1)[0].rstrip("/")
+def _verified_facts(facts: list[Fact], pages: list[dict[str, Any]]) -> list[Fact]:
+    sources: dict[str, list[str]] = {}
+    for page in pages:
+        sources.setdefault(citation_url_key(page["url"]), []).append(_normal(page["text"]))
+    verified = []
+    for fact in facts:
+        quote = _normal(fact.quote)
+        if quote and any(quote in text for text in sources.get(citation_url_key(fact.url), [])):
+            verified.append(fact)
+    return verified
 
 
 def _published_address(org: Org, value: str | None) -> str | None:
@@ -504,9 +512,9 @@ async def research_examples(org: Org, scenario: Scenario, *,
         except Exception as ex:  # noqa: BLE001 - malformed examples are discarded
             record["errors"].append(f"examples: {ex}"[:300])
             break
-        pages = {_normal_url(page["url"]): page for page in record["pages"]}
+        pages = {citation_url_key(page["url"]): page for page in record["pages"]}
         for candidate in found.examples:
-            cited = pages.get(_normal_url(candidate.source))
+            cited = pages.get(citation_url_key(candidate.source))
             if cited is None:
                 record["errors"].append(f"dropped example: source page not read: {candidate.source}"[:300])
                 continue
