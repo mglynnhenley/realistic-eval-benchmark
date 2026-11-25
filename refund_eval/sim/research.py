@@ -447,6 +447,7 @@ async def research_live(org: Org, *, scenario: Scenario, subject: str = "a custo
                 f"That was not valid: {str(ex)[:600]}\nReturn one JSON object with exactly these keys:\n{DOSSIER_SHAPE}")))
             lookups = 0
             continue
+        dossier.facts = _verified_facts(dossier.facts, record["pages"])
         record["dossier"] = _clean_persona(dossier, org).model_dump(by_alias=True)
         break
     return record
@@ -459,6 +460,18 @@ def _normal(text: str) -> str:
 def _normal_url(url: str) -> str:
     value = re.sub(r"^https?://", "", url.strip().casefold())
     return value.removeprefix("www.").split("#", 1)[0].rstrip("/")
+
+
+def _verified_facts(facts: list[Fact], pages: list[dict[str, Any]]) -> list[Fact]:
+    sources: dict[str, list[str]] = {}
+    for page in pages:
+        sources.setdefault(_normal_url(page["url"]), []).append(_normal(page["text"]))
+    verified = []
+    for fact in facts:
+        quote = _normal(fact.quote)
+        if quote and any(quote in text for text in sources.get(_normal_url(fact.url), [])):
+            verified.append(fact)
+    return verified
 
 
 def _published_address(org: Org, value: str | None) -> str | None:
