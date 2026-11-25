@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.2 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 377dd6f90f8c3bba7b29db5d857e857e831189dd37765f13617cb1c6af0bc594
+- Trial round: no standalone trial; included in the combined Luna validation.
+- Changes: Make ORR's public written guidance available without passenger authentication. Email identity, refund eligibility, consent and payment rules are unchanged (MAT-205).
+
 ## 10.1 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 37649faedb64a62d4a0ee43d9406bd842134d8a6af179ea2e7c33acb6b8f8d12
