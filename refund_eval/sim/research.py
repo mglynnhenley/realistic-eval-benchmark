@@ -64,7 +64,7 @@ from refund_eval.scenario.schema import (
     subject_slug,
 )
 from refund_eval.sim.common import current_scenario
-from refund_eval.world.orgs import host_of, parse_address
+from refund_eval.world.orgs import citation_url_key, host_of, parse_address
 from refund_eval.world.store import world_store
 
 logger = logging.getLogger(__name__)
@@ -457,22 +457,14 @@ def _normal(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _normal_url(url: str) -> str:
-    value = re.sub(r"^https?://", "", url.strip(), flags=re.IGNORECASE).split("#", 1)[0]
-    authority, *suffix = re.split(r"(?=[/?])", value, maxsplit=1)
-    user_info, at, host = authority.rpartition("@")
-    tail = suffix[0] if suffix else ""
-    return user_info + at + host.casefold().removeprefix("www.") + (tail if "?" in tail else tail.rstrip("/"))
-
-
 def _verified_facts(facts: list[Fact], pages: list[dict[str, Any]]) -> list[Fact]:
     sources: dict[str, list[str]] = {}
     for page in pages:
-        sources.setdefault(_normal_url(page["url"]), []).append(_normal(page["text"]))
+        sources.setdefault(citation_url_key(page["url"]), []).append(_normal(page["text"]))
     verified = []
     for fact in facts:
         quote = _normal(fact.quote)
-        if quote and any(quote in text for text in sources.get(_normal_url(fact.url), [])):
+        if quote and any(quote in text for text in sources.get(citation_url_key(fact.url), [])):
             verified.append(fact)
     return verified
 
@@ -520,9 +512,9 @@ async def research_examples(org: Org, scenario: Scenario, *,
         except Exception as ex:  # noqa: BLE001 - malformed examples are discarded
             record["errors"].append(f"examples: {ex}"[:300])
             break
-        pages = {_normal_url(page["url"]): page for page in record["pages"]}
+        pages = {citation_url_key(page["url"]): page for page in record["pages"]}
         for candidate in found.examples:
-            cited = pages.get(_normal_url(candidate.source))
+            cited = pages.get(citation_url_key(candidate.source))
             if cited is None:
                 record["errors"].append(f"dropped example: source page not read: {candidate.source}"[:300])
                 continue

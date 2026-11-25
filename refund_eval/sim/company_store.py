@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from refund_eval.scenario.schema import Org, Scenario, load_scenario
-from refund_eval.sim.research import _normal_url
-from refund_eval.world.orgs import parse_address
+from refund_eval.world.orgs import citation_url_key, parse_address
 
 DEFAULT_ROOT = Path.home() / "refund-eval-data" / "company-store"
 _NATIVE_JOBS_DIR = ".native-jobs"
@@ -125,7 +124,7 @@ def public_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
         result["rules"] = None
 
     pages = {
-        _normal_url(page["url"]): page
+        citation_url_key(page["url"]): page
         for page in (result["research"] or {}).get("pages", [])
         if isinstance(page.get("url"), str) and page["url"]
     }
@@ -136,7 +135,7 @@ def public_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
         example = _only_fields(candidate, _EXAMPLE_FIELDS)
         if "from" in example:
             address = _owned_address(org, example["from"])
-            page = pages.get(_normal_url(str(example.get("source", ""))))
+            page = pages.get(citation_url_key(str(example.get("source", ""))))
             page_text = page.get("text") if page else None
             if address and isinstance(page_text, str) and address.casefold() in page_text.casefold():
                 example["from"] = address
