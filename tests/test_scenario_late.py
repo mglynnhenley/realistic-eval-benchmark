@@ -10,6 +10,7 @@ from refund_eval.agent.prompt import render_system_prompt, task_message
 from refund_eval.claims import capture_observation
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import Inbound
+from refund_eval.world.orgs import parse_address
 
 
 def test_late_variant_has_its_own_journey_and_task():
@@ -31,6 +32,19 @@ def test_late_variant_has_its_own_journey_and_task():
     assert late.orgs == base.orgs
     assert "never waive deadlines" in late.intent and not base.intent
     assert not late.scheduled_emails
+
+
+def test_late_alias_is_used_in_the_profile_and_seed_mail():
+    base, late = load_scenario("train_refund"), load_scenario("train_refund_late")
+    old_alias = "laura.bennett.w17@gmail.com"
+    alias = "laura.bennett.e17@gmail.com"
+    assert base.user.email_addresses == [old_alias]
+    assert late.user.email_addresses == [alias]
+    assert alias in render_system_prompt(late)
+    senders = {parse_address(email.sender) for email in late.seed_emails}
+    recipients = {parse_address(address) for email in late.seed_emails for address in email.to}
+    assert alias in senders and alias in recipients
+    assert old_alias not in senders | recipients
 
 
 def test_late_inbox_replaces_every_base_email():
