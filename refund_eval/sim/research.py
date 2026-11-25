@@ -106,7 +106,7 @@ MAX_OUTPUT_TOKENS = 12_000  # a dossier is a few thousand; also what OpenRouter 
 MAX_FACTS = 25
 FRESH_DAYS = 30
 DIRECTIVES = ("Reply-from", "Sign-off", "Greeting", "Case-ref-format", "Phone-hours", "Cold-email")
-RESEARCH_PROMPT_VERSION = "2"
+RESEARCH_PROMPT_VERSION = "3"
 EXEMPLAR_PROMPT_VERSION = "2"
 
 

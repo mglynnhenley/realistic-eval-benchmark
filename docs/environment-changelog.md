@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 9.10 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 1b6cb4d056b3689fbe619ca6d3f71a204ce445f4d67b5bdd7af92cf0c81fe838
+- Fingerprint: 6c7abc1990b5db842f466dcaffb2a47564a75977aa0d91dabdf00da11a191fd6
 - Trial round: none. Offline checks only; no paid execution.
 - Changes: Drop live dossier facts whose quotations are not found on the retained pages they cite (MAT-204).
 
