@@ -1986,6 +1986,54 @@ def test_batch_rejects_spend_caps_that_do_not_fit(tmp_path, change, error, appro
     assert not (tmp_path / "run").exists()
 
 
+def test_batch_pins_modal_region_to_uk_by_default(tmp_path, approved_wheel):
+    base = {**SPEND_CAPPED, **_wheel_config(approved_wheel), "execution": "modal"}
+    modal_run = tmp_path / "modal-default"
+    record = json.loads(batch.prepare(modal_run, batch.NativeBatchConfig(**base)).read_text())
+    job = yaml.safe_load((modal_run / "job.yaml").read_text())
+    assert job["environment"] == {"type": "modal", "delete": True, "kwargs": {"region": "uk"}}
+    assert record["effective_parameters"]["modal_region"] == "uk"
+
+    unpinned_run = tmp_path / "modal-unpinned"
+    record_none = json.loads(
+        batch.prepare(unpinned_run, batch.NativeBatchConfig(**base, modal_region=None)).read_text()
+    )
+    job_none = yaml.safe_load((unpinned_run / "job.yaml").read_text())
+    assert job_none["environment"] == {"type": "modal", "delete": True}
+    assert record_none["effective_parameters"]["modal_region"] is None
+
+    docker_run = tmp_path / "docker-run"
+    record_docker = json.loads(
+        batch.prepare(docker_run, batch.NativeBatchConfig(**{**base, "execution": "docker"})).read_text()
+    )
+    job_docker = yaml.safe_load((docker_run / "job.yaml").read_text())
+    assert job_docker["environment"] == {"type": "docker", "delete": True}
+    assert "modal_region" not in record_docker["effective_parameters"]
+
+
+def test_legacy_harbor_pins_modal_region_to_uk_by_default(tmp_path):
+    from refund_eval.harbor.__main__ import prepare as legacy_prepare
+    from refund_eval.harbor.config import TrialSettings
+
+    settings = TrialSettings(scenario="train_refund_late", cost_limit=5.0, data_mode="fixture", research_mode="saved")
+    modal_job = json.loads(
+        legacy_prepare(tmp_path / "legacy-modal", settings=settings, model="openrouter/a", environment="modal").read_text()
+    )
+    assert modal_job["environment"]["kwargs"]["region"] == "uk"
+
+    unpinned_job = json.loads(
+        legacy_prepare(
+            tmp_path / "legacy-unpinned", settings=settings, model="openrouter/a", environment="modal", modal_region=None
+        ).read_text()
+    )
+    assert "region" not in unpinned_job["environment"]["kwargs"]
+
+    docker_job = json.loads(
+        legacy_prepare(tmp_path / "legacy-docker", settings=settings, model="openrouter/a", environment="docker").read_text()
+    )
+    assert docker_job["environment"]["kwargs"] == {}
+
+
 # --------------------------------------------------------------------------- installed agent
 
 
