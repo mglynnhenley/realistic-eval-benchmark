@@ -239,6 +239,37 @@ is not a hard invoice ceiling. Check `store.world_model_budget` in world
 external tools are not covered. Get approval for the full costs before
 launching. Use `"execution": "modal"` to prepare a Modal job.
 
+### Prepare a guarded trial package offline
+
+With Python 3.14 and the locked dependencies cached (`uv sync --frozen --no-dev` and
+`uv sync --frozen --project integrations/harbor`), prepare one fresh native
+`train_refund_late` Modal trial from a saved, approved native run spec:
+
+```bash
+UV_OFFLINE=1 PYTHON_DOTENV_DISABLED=1 scripts/harbor python -m scripts.laura_trial prepare \
+  --run-config .context/approved-run.json --prepared-dir .context/prepared-trial
+```
+
+Use the native JSON format shown below **without** `agent_wheel` and `agent_wheel_sha256`;
+the command computes the new wheel identity from the public stage. Save the approved
+`scenario`, `execution`, `openrouter_key_mode`, `cost_limit`, `world_cost_limit`,
+`time_limit`, `max_turns`, `sim_weeks`, `token_budget`, and `history_tokens` explicitly.
+Keep any mode-specific limits, such as `agent_max_output_tokens` or `shared_allowance_usd`,
+in the same file. Missing limits or conflicting effective identities fail preparation.
+Specs with `trial_spend_cap_usd` and `key_spend_cap_usd` are rejected because the
+manifest launcher does not enforce those planning caps; use the existing native
+`run --run-config` flow for those specs.
+
+The output must be a new or empty private directory. Preparation builds and stages the
+public-only wheel, checks the rendered limits (including strict world budgeting for strict
+role modes), then installs the exact staged wheel in an isolated environment and
+loads its public scenario using the installed task loader. On success, `run.json`
+records separate wheel and public-descriptor digests, and `laura-setup.json` is ready
+for the guarded `run --manifest` command below. If preparation fails, do not launch
+from the partial output. This does not start Harbor or a model call, validate full
+startup, or grant launch approval. Guard credentials and any required guard flags are
+still supplied separately at launch.
+
 ### Save and run a selected setup with the guarded launcher
 
 `scripts.laura_trial` is opt-in and wraps the existing guarded runner. It does
@@ -489,6 +520,8 @@ Example native JSON config; replace the approved wheel path and digest with the 
   "data_mode": "hybrid",
   "sim_weeks": 52,
   "max_turns": 500,
+  "token_budget": 40000000,
+  "history_tokens": 60000,
   "time_limit": 36000,
   "openrouter_key_mode": "split",
   "model": "openrouter/provider/model",
