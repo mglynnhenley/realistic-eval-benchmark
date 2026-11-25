@@ -1448,3 +1448,39 @@ async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypa
     with pytest.raises(ModelLimitExceeded, match="allowance is failed"):
         await budget.complete("simulator", [Message("user", "later tool call")])
     assert recorded.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_only_cancelled_call_settles_unknown_and_allows_next_call(monkeypatch):
+    # Replays Grok job b2a80b83: the browser boundary's request timeout cancelled a
+    # background-form company decision mid-call, leaving the allowance "unsettled".
+    snapshots = []
+    monkeypatch.setattr(
+        world_budget, "world_store",
+        lambda: SimpleNamespace(set=lambda _key, value: snapshots.append(dict(value))),
+    )
+
+    class HangingThenPriced:
+        calls = 0
+
+        def model_name(self, role):
+            return "openrouter/test-world"
+
+        async def complete(self, role, messages, **settings):
+            self.calls += 1
+            if self.calls == 1:
+                await asyncio.Event().wait()
+            return Completion(text="ok", message=Message("assistant", "ok"), usage=Usage(cost=0.02))
+
+    recorded = HangingThenPriced()
+    budget = BudgetedWorldModels(
+        recorded, 100, lambda: None, prices={}, usage_reporting_only=True,
+        disable_application_price_cutoffs=True,
+    )
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(budget.complete("simulator", [Message("user", "background form")]), 0.05)
+    assert budget.status == "unknown" and snapshots[-1]["status"] == "unknown"
+
+    completion = await budget.complete("simulator", [Message("user", "next company reply")])
+    assert completion.usage.cost == 0.02
+    assert recorded.calls == 2 and budget.status == "available"
