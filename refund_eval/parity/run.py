@@ -49,7 +49,7 @@ from refund_eval.harbor.world_entrypoint import (
     FAKE_MODES,
     credentials_set,
 )
-from refund_eval.parity.scripts import SCRIPTS, Script
+from refund_eval.parity.scripts import LATE_FORM_INPUTS, SCRIPTS, LateForm, Script
 from refund_eval.world_service.startup_diagnostics import (
     StartupDiagnostics,
     StartupMarker,
@@ -272,16 +272,18 @@ def run_inprocess(script: Script, out: Path, seed: int, diagnostics: StartupDiag
 # --------------------------------------------------------------------------- harbor: local Docker
 
 
-def stage_scripted_agent(task_dir: Path) -> None:
+def stage_scripted_agent(task_dir: Path, script: Script | None = None, *, refresh: bool = False) -> None:
     """Stage parity-only fixtures outside the approved wheel payload for local tests."""
     source = REPO / "refund_eval" / "parity"
     agent = task_dir / "environment" / "agent"
     destination = agent / "parity-fixtures" / "refund_eval" / "parity"
     for filename in ("__init__.py", "inspect_cli.py", "scripts.py"):
         target = destination / filename
-        if not target.exists():
+        if refresh or not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / filename, target)
+    if isinstance(script, LateForm):
+        _write(destination / LATE_FORM_INPUTS, script.fixture_inputs())
 
     marker = "# TEST-ONLY: overlay scripted parity fixtures after the approved wheel install"
     hook = (
@@ -327,7 +329,7 @@ def run_harbor(script: Script, out: Path, seed: int) -> dict:
     if manifest != identity:
         raise ValueError("Existing Harbor task agent wheel manifest does not match the approved wheel")
     read_verified_agent_wheel(agent_dir / "wheels" / approved.filename, approved.sha256)
-    stage_scripted_agent(task)
+    stage_scripted_agent(task, script, refresh=True)
     kwargs: dict[str, Any] = {"script": script.name}
     if script.cost_limit is not None:
         kwargs["cost_limit"] = script.cost_limit

@@ -67,9 +67,14 @@ def test_harbor_reuse_checks_approved_wheel_before_launch(tmp_path, monkeypatch,
 
     monkeypatch.setattr(run.subprocess, "run", intercept)
     if change is None:
+        staged = agent_dir / "parity-fixtures/refund_eval/parity"
+        staged.mkdir(parents=True)
+        scripts = staged / "scripts.py"
+        scripts.write_text("# Stale parity fixture\n", encoding="utf-8")
         with pytest.raises(LaunchIntercepted):
             run.run_harbor(script, tmp_path, 7)
         assert len(calls) == 1 and calls[0][1:3] == ["harbor", "run"]
+        assert scripts.read_bytes() == (run.REPO / "refund_eval/parity/scripts.py").read_bytes()
     else:
         with pytest.raises(ValueError):
             run.run_harbor(script, tmp_path, 7)
@@ -81,6 +86,37 @@ def _docker_ready() -> bool:
         return False
     probe = subprocess.run(["docker", "image", "inspect", DEFAULT_IMAGE], capture_output=True, check=False)
     return probe.returncode == 0
+
+
+def test_late_form_uses_only_staged_inputs_in_harbor(tmp_path, monkeypatch):
+    from refund_eval.parity import scripts
+    from refund_eval.scenario import schema
+
+    script = SCRIPTS["late_form"]
+    scenario = schema.load_scenario(script.scenario)
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / "Dockerfile").write_text("FROM python:3.14\n", encoding="utf-8")
+    run.stage_scripted_agent(tmp_path, script)
+    staged = environment / "agent/parity-fixtures/refund_eval/parity"
+    assert json.loads((staged / scripts.LATE_FORM_INPUTS).read_text(encoding="utf-8")) == {
+        "email": scenario.user.email_addresses[0],
+        "booking_ref": scenario.journey.booking_ref,
+        "contact_url": scenario.org("trainline").contact_url,
+    }
+
+    def no_full_scenario(*args):
+        pytest.fail("The staged mock should not load a full scenario")
+
+    monkeypatch.setattr(schema, "load_scenario", no_full_scenario)
+    monkeypatch.setattr(scripts, "__file__", str(staged / "scripts.py"))
+    for n, tool, args in [
+        (0, "browser_navigate", {"url": scenario.org("trainline").contact_url}),
+        (1, "browser_type", {"target": "#email", "text": scenario.user.email_addresses[0]}),
+        (2, "browser_type", {"target": "#booking_ref", "text": scenario.journey.booking_ref}),
+    ]:
+        [call] = script.step(n, []).message.tool_calls
+        assert (call.function, call.arguments) == (tool, args)
 
 
 DOCKER = pytest.mark.skipif(not _docker_ready(), reason=f"Needs Docker and the browser image {DEFAULT_IMAGE}")
