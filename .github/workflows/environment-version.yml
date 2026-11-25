@@ -34,3 +34,9 @@ jobs:
           python-version: "3.14"
       - run: uv sync --frozen --project integrations/harbor
       - run: scripts/harbor python -m pytest -q tests/test_harbor_wheel_install.py
+      - run: uv sync --frozen --no-dev
+      - run: scripts/harbor python -m pytest -q tests/test_harbor_prepare_trial.py
+        env:
+          UV_OFFLINE: "1"
+          UV_PYTHON_DOWNLOADS: never
+          PYTHON_DOTENV_DISABLED: "1"

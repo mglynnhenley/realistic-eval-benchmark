@@ -1,4 +1,4 @@
-"""Opt-in saved-setup checks for a guarded fresh Harbor job.
+"""Offline package preparation and saved-setup checks for a guarded fresh Harbor job.
 
 This wraps the existing guarded runner; it does not select Muse or native defaults.
 Save and verify validate the public scenario schema, not package startup health or launch approval.
@@ -26,6 +26,7 @@ from contextlib import suppress
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import Any
 from uuid import uuid4
 
@@ -33,8 +34,9 @@ import yaml
 from harbor.models.job.config import JobConfig
 from pydantic import ValidationError
 
+from refund_eval.agent.prompt import with_requested_deadline
 from refund_eval.config import resolve_cost_limits
-from refund_eval.harbor import batch
+from refund_eval.harbor import adapter, batch
 from refund_eval.models.shared_role_spend_ledger import (
     SHARED_CAPS_HEADROOM_BOUND_ENV,
     SharedRoleBudgetConfig,
@@ -1404,9 +1406,153 @@ def _update_native_run_record(record_path: Path, parameters: dict[str, Any]) -> 
         raise SetupFailure("native_run_record_write_failed") from None
 
 
+_INSTALLED_PUBLIC_CHECK = """\
+import hashlib
+import sys
+from pathlib import Path
+
+from refund_eval import task
+from refund_eval.scenario import schema
+
+scenario, deadline, digest = sys.argv[1:]
+for module in (task, schema):
+    if not Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()):
+        sys.exit("loader is not from the installed wheel")
+if hashlib.sha256((schema.SCENARIO_DIR / f"{scenario}.yaml").read_bytes()).hexdigest() != digest:
+    sys.exit("installed scenario digest differs from the packaged scenario")
+public = task.load_agent_scenario(task.resolve_scenario_arg(scenario))
+if public.id != scenario or (str(public.requested_deadline) if public.requested_deadline else "") != deadline:
+    sys.exit("installed scenario identity differs from the saved spec")
+"""
+
+
+def _prepare_step(command: list[str], *, work: Path, env: dict[str, str], failure: str) -> None:
+    try:
+        subprocess.run(command, cwd=work, env=env, check=True, capture_output=True, timeout=180)
+    except (OSError, subprocess.SubprocessError):
+        raise SetupFailure(failure) from None
+
+
+def _validate_prepared_limits(job: JobConfig, task_path: Path, spec: batch.NativeBatchConfig) -> None:
+    task_config = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))
+    metadata = task_config["metadata"]
+    task_env = task_config["environment"]["env"]
+    world = _world_environment(task_path, job, task_env)
+    agent = job.agents[0]
+    target = _native_targets(spec)[0]
+    deadline = spec.requested_deadline.isoformat() if spec.requested_deadline else ""
+    expected_world = {
+        "WORLD_SCENARIO": spec.scenario,
+        "WORLD_SIM_WEEKS": str(spec.sim_weeks),
+        "WORLD_MAX_TURNS": str(spec.max_turns),
+        "WORLD_SIMULATOR_MODEL": spec.simulator_model,
+        "WORLD_GRADER_MODEL": spec.grader_model,
+        "WORLD_COST_LIMIT": str(spec.world_cost_limit),
+        "WORLD_STRICT_BUDGET": "false" if spec.openrouter_key_mode == "shared" else "true",
+        "REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS": str(spec.disable_application_price_cutoffs).lower(),
+    }
+    expected_agent = {
+        "cost_limit": resolve_cost_limits(spec.cost_limit, [target], scenario=spec.scenario)[target],
+        "time_limit": spec.time_limit,
+        "token_budget": spec.token_budget,
+        "history_tokens": spec.history_tokens,
+    }
+    agent_deadline = agent.kwargs.get("requested_deadline")
+    if (
+        agent.import_path != adapter.AGENT_IMPORT_PATH
+        or agent.model_name != target
+        or metadata["scenario"] != spec.scenario
+        or task_env.get("WORLD_SCENARIO") != spec.scenario
+        or metadata["openrouter_key_mode"] != spec.openrouter_key_mode
+        or metadata["requested_deadline"] != deadline
+        or (str(agent_deadline) if agent_deadline is not None else "") != deadline
+        or any(world.get(key) != value for key, value in expected_world.items())
+        or any(agent.kwargs.get(key) != value for key, value in expected_agent.items())
+        or (agent.env or {}).get("REFUND_EVAL_USAGE_REPORTING_MODE", "strict") != spec.usage_reporting_mode
+        or (spec.agent_max_output_tokens is not None
+            and (agent.env or {}).get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS") != str(spec.agent_max_output_tokens))
+    ):
+        raise SetupFailure("prepared_limits_or_identity_differ_from_saved_spec")
+
+
+def prepare_trial(run_config: Path, out: Path) -> None:
+    values = json.loads(run_config.read_bytes(), object_pairs_hook=_unique_object)
+    if not isinstance(values, dict):
+        raise SetupFailure("saved_run_spec_must_be_an_object")
+    if {"agent_wheel", "agent_wheel_sha256"} & values.keys():
+        raise SetupFailure("saved_run_spec_must_not_pin_a_wheel")
+    required = {"scenario", "execution", "openrouter_key_mode", "cost_limit", "world_cost_limit",
+                "time_limit", "max_turns", "sim_weeks", "token_budget", "history_tokens"}
+    missing = required - values.keys()
+    if missing:
+        raise SetupFailure("saved_run_spec_missing_" + "_and_".join(sorted(missing)))
+    # Validate the saved settings before building; the actual wheel identity is generated below.
+    spec = batch.NativeBatchConfig.model_validate({
+        **values, "agent_wheel": "unbuilt.whl", "agent_wheel_sha256": "0" * 64,
+    })
+    _reject_total_limit(spec.total_time_limit_seconds)
+    if spec.trial_spend_cap_usd is not None:
+        raise SetupFailure("combined_planning_caps_unsupported_by_manifest_runner")
+    if (
+        spec.scenario != _LAURA_SCENARIO or spec.execution != "modal" or spec.suite is not None
+        or spec.trials != 1 or spec.concurrency != 1 or spec.identity_lock is not None
+        or spec.resume_log is not None or spec.inbox_snapshot is not None
+    ):
+        raise SetupFailure("prepare_requires_one_fresh_late_refund_modal_trial")
+    _native_targets(spec)
+    out = validate_private_output(out)
+    if out.exists() and any(out.iterdir()):
+        raise SetupFailure("prepare_requires_empty_output_directory")
+    env = {name: os.environ[name] for name in ("PATH", "HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
+           if name in os.environ}
+    env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never", PYTHON_DOTENV_DISABLED="1")
+    with TemporaryDirectory(prefix="harbor-prepare-") as scratch:
+        work = Path(scratch)
+        source, stage, wheels, venv = (work / name for name in ("source", "public", "wheels", "venv"))
+        adapter.copy_source(source)
+        scenario = with_requested_deadline(adapter.load_scenario(spec.scenario), spec.requested_deadline)
+        adapter.stage_agent(source, stage, scenario, scenario_name=spec.scenario)
+        _prepare_step(["uv", "build", "--offline", "--no-config", "--wheel", str(stage), "--out-dir", str(wheels)],
+                      work=work, env=env, failure="public_wheel_build_failed")
+        wheel, = wheels.glob("*.whl")
+        spec.agent_wheel = wheel
+        spec.agent_wheel_sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        record_path = batch.prepare(out, spec)
+        job_path = record_path.with_name("job.yaml")
+        _, _, job = _load_config(job_path, Path.cwd())
+        _validate_with_fresh_name(job)
+        task_path = job.tasks[0].path
+        _validate_prepared_limits(job, task_path, spec)
+        try:
+            validation = _public_validation_result(task_path)
+        except SetupFailure:
+            raise SetupFailure("packaged_public_descriptor_invalid") from None
+        agent_dir = task_path / "environment" / "agent"
+        interpreter = str(venv / "bin" / "python")
+        _prepare_step(
+            ["uv", "sync", "--offline", "--no-config", "--frozen", "--no-dev", "--no-install-project",
+             "--python", "3.14", "--project", str(agent_dir)],
+            work=work, env={**env, "UV_PROJECT_ENVIRONMENT": str(venv)}, failure="agent_dependency_sync_failed",
+        )
+        _prepare_step([interpreter, "-I", str(agent_dir / "install-agent.py")],
+                      work=work, env=env, failure="agent_wheel_install_failed")
+        deadline = spec.requested_deadline.isoformat() if spec.requested_deadline else ""
+        _prepare_step([interpreter, "-I", "-c", _INSTALLED_PUBLIC_CHECK, spec.scenario, deadline,
+                       validation["scenario_sha256"]],
+                      work=work, env=env, failure="installed_public_loader_failed")
+        record = json.loads(record_path.read_bytes())
+        record["config"]["agent_wheel"] = str(task_path / validation["wheel_path"])
+        record["installed_public_loader"] = {**validation, "checker": "refund_eval.task.load_agent_scenario"}
+        record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        save_setup(job_path, record_path.with_name("laura-setup.json"))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    prepare = subparsers.add_parser("prepare", help="build and check a guarded trial package offline")
+    prepare.add_argument("--run-config", type=Path, required=True)
+    prepare.add_argument("--prepared-dir", type=Path, required=True)
     save = subparsers.add_parser("save", help="snapshot a prepared JobConfig identity")
     save.add_argument("--config", type=Path, required=True)
     save.add_argument("--manifest", type=Path, required=True)
@@ -1430,6 +1576,17 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "prepare":
+        try:
+            prepare_trial(args.run_config, args.prepared_dir)
+        except SetupFailure as failure:
+            print(f"laura_prepare_failed={str(failure) or 'identity_or_job_validation'}", file=sys.stderr)
+            return 2
+        except (OSError, ValueError, TypeError, KeyError, ImportError, yaml.YAMLError, guarded_harbor.LauncherFailure):
+            print("laura_prepare_failed=invalid_saved_spec_or_package", file=sys.stderr)
+            return 2
+        print("laura_package_prepared=true installed_public_loader=true launch_started=false launch_approval=false")
+        return 0
     try:
         if args.command == "save":
             save_setup(args.config, args.manifest)
