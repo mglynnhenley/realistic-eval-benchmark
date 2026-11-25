@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 04db04ff5635160f505e4b3d6a9a3865c8827176653764cd1537679d2d7e97ec
+- Trial round: none; offline tests only.
+- Changes: Schedule initial claim adjudication ten business days after receipt, clear superseded incomplete-claim timeouts, and preserve prior line dates, decisions and payouts on refiling. Duplicate decisions include denied lines and remain idempotent. No live grading or pilot results.
+
 ## 10.9 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 153ed2b152b6cc857d2be653a680770c9f9c13b8eec271213dab62f6a31c3fc9

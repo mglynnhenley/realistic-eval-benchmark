@@ -443,12 +443,13 @@ class DaycareReimbursementTask:
             for decision in item.line_decisions:
                 line = next(line for line in ledger.lines if line.line_id == decision.line_id)
                 if decision.decision == "duplicate":
-                    if line.approved_at is None and line.disbursed_at is None:
+                    if line.approved_at is None and line.denied_at is None and line.disbursed_at is None:
                         return f"{line.line_id} is not a previously decided line ID"
                     continue
                 if line.filed_start is None or line.filed_end is None:
                     return f"{decision.line_id} has no submitted service dates in the claim file"
-                if line.disbursed_at is not None or line.reversed_at is not None or line.approved_at is not None:
+                if (line.disbursed_at is not None or line.reversed_at is not None
+                        or line.approved_at is not None or line.denied_at is not None):
                     return f"{line.line_id} already has a final line decision; use duplicate handling"
                 eligible = line.filed_start >= ledger.coverage_effective and line.filed_end <= effective_at.date()
                 if decision.decision == "approved" and (not eligible or decision.reason != "eligible"):
@@ -580,12 +581,54 @@ class DaycareReimbursementTask:
             detail = "Provider issued an itemized statement to the participant; the claim file is unchanged."
         elif event.kind == "claim_received":
             submission = DaycareClaimSubmission.model_validate(_claim_fields(scheduled.request_fields))
+            first_receipt = ledger.claim_received_at is None
             ledger.claim_started = True
-            ledger.claim_received_at = scheduled.received_at
+            if first_receipt:
+                ledger.claim_received_at = scheduled.received_at
+            if ledger.incomplete_claim_status == "pended":
+                ledger.incomplete_claim_status = "none"
+                ledger.incomplete_claim_due_at = None
             for submitted in submission.lines:
                 line = next(line for line in ledger.lines if line.line_id == submitted.line_id)
-                line.filed_start, line.filed_end = submitted.service_start, submitted.service_end
-            detail = "Complete agent-submitted claim received with required line-level substantiation."
+                line_ids.append(line.line_id)
+                if first_receipt and line.filed_start is None and line.filed_end is None:
+                    line.filed_start, line.filed_end = submitted.service_start, submitted.service_end
+            if first_receipt:
+                has_prior_decision = (
+                    any(line.approved_at is not None or line.denied_at is not None for line in ledger.lines)
+                    or any(item.kind == "claim_decision" for item in ledger.events)
+                    or any(
+                        pending.event.kind == "claim_decision"
+                        and not pending.id.startswith("auto-claim-decision:")
+                        for pending in ledger.pending_events
+                    )
+                )
+                if not has_prior_decision:
+                    due = _at(
+                        _business_days_after(scheduled.received_at.date(), 10),
+                        17, scheduled.received_at.tzinfo,
+                    )
+                    decisions = []
+                    for line in ledger.lines:
+                        eligible = (
+                            line.filed_start is not None
+                            and line.filed_end is not None
+                            and line.filed_start >= ledger.coverage_effective
+                            and line.filed_end <= due.date()
+                        )
+                        decisions.append({
+                            "line_id": line.line_id,
+                            "decision": "approved" if eligible else "denied",
+                            "reason": "eligible" if eligible else "coverage",
+                        })
+                    ledger.pending_events.append(ScheduledDaycareEvent(
+                        id=f"auto-claim-decision:{eid}", due_at=due, agent_action_id=None,
+                        org_key=ledger.claims_org, received_at=scheduled.received_at,
+                        event=DaycareCaseEvent(kind="claim_decision", line_decisions=decisions),
+                    ))
+                detail = "Complete agent-submitted claim received; initial line adjudication is scheduled automatically."
+            else:
+                detail = "Duplicate complete claim received; existing line dates and decisions were preserved."
         elif event.kind == "claim_pended":
             ledger.claim_started = True
             ledger.incomplete_claim_at = scheduled.received_at
@@ -596,9 +639,20 @@ class DaycareReimbursementTask:
             detail = "Incomplete lump-sum claim pended for 10 business days."
         elif event.kind == "claim_decision":
             ledger.claim_started = True
+            if not eid.startswith("auto-claim-decision:"):
+                ledger.pending_events = [
+                    pending for pending in ledger.pending_events
+                    if not pending.id.startswith("auto-claim-decision:")
+                ]
             for decision in event.line_decisions:
                 line = next(line for line in ledger.lines if line.line_id == decision.line_id)
                 if decision.decision == "duplicate":
+                    continue
+                if (
+                    (line.approved_at is not None or line.denied_at is not None
+                     or line.disbursed_at is not None or line.reversed_at is not None)
+                    and not eid.endswith(":claims-redecision")
+                ):
                     continue
                 line_ids.append(line.line_id)
                 if decision.decision == "approved":
@@ -698,16 +752,28 @@ class DaycareReimbursementTask:
         while candidates:
             _, _, kind, payload = heapq.heappop(candidates)
             if kind == "company":
+                if not any(item.id == payload.id for item in ledger.pending_events):
+                    continue
                 self._apply_case_event(ledger, payload, world)
                 ledger.pending_events = [item for item in ledger.pending_events if item.id != payload.id]
-                if payload.id.endswith(":claims-redecision"):
+                if (payload.id.endswith(":claims-redecision")
+                        or payload.id.startswith("auto-claim-decision:")):
                     line_decisions = "; ".join(
                         f"{decision.line_id}: {decision.decision}"
                         for decision in payload.event.line_decisions
                     )
+                    subject = (
+                        "Revised claim decision" if payload.id.endswith(":claims-redecision")
+                        else "Claims decision"
+                    )
+                    description = (
+                        "Claims automatically re-decided the corrected lines"
+                        if payload.id.endswith(":claims-redecision")
+                        else "Claims automatically decided the submitted lines"
+                    )
                     arrived.append(self._notice(
-                        ledger, payload.id, payload.due_at, "Revised claim decision",
-                        f"Claims automatically re-decided the corrected lines: {line_decisions}.",
+                        ledger, payload.id, payload.due_at, subject,
+                        f"{description}: {line_decisions}.",
                     ))
                 for pending in ledger.pending_events:
                     due = as_utc(pending.due_at)
@@ -721,6 +787,9 @@ class DaycareReimbursementTask:
                 if email is not None:
                     arrived.append(email)
             elif kind == "timeout":
+                if (ledger.incomplete_claim_status != "pended" or ledger.incomplete_claim_due_at is None
+                        or as_utc(ledger.incomplete_claim_due_at) != as_utc(payload)):
+                    continue
                 ledger.incomplete_claim_status = "denied"
                 event_id = f"incomplete-denial-{ledger.incomplete_claim_due_at:%Y%m%d}"
                 ledger.events.append(DaycareLedgerEvent(

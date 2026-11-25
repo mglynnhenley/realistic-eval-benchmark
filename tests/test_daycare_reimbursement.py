@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 
 from refund_eval.companies.models import CompanyAction, CompanyEvent
@@ -6,9 +6,13 @@ from refund_eval.sim.common import current_scenario
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch
 from refund_eval.tasks import get_task
-from refund_eval.tasks.daycare_reimbursement.ledger import DaycareLedger, ranges_overlap
+from refund_eval.tasks.daycare_reimbursement.ledger import (
+    DaycareLedger,
+    DaycareLedgerEvent,
+    ranges_overlap,
+)
 from refund_eval.world.clock import advance as advance_clock
-from refund_eval.world.state import World, load_world, world_tx
+from refund_eval.world.state import Transfer, World, load_world, world_tx
 from tests.fixtures.daycare_controls import (
     C1_SCHEDULE,
     C2_SCHEDULE,
@@ -270,6 +274,262 @@ def test_c1_and_c2_truthful_full_payout_controls_replay_to_horizon():
     assert all(line.disbursed_at and not line.reversed_at for line in c1_ledger.lines + c2_ledger.lines)
 
 
+def test_complete_claim_clears_incomplete_timeout_and_early_decision_cancels_auto():
+    world = start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    task = get_task("daycare_reimbursement")
+    claims = scenario.org("brightwell_claims")
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    received_at = world.now
+    ledger.provider_statement_received_at = received_at
+    world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+
+    incomplete = CompanyEvent(incoming="Please pend my incomplete claim.", received_at=received_at)
+    pended = CompanyAction(decision="claim_pended", reply=True, reply_after_hours=0, body="",
+                           case_events=[{"kind": "claim_pended"}])
+    task.apply_company_action(scenario, world, claims, incomplete, pended, "incomplete", received_at)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    old_timeout = ledger.incomplete_claim_due_at
+    assert ledger.incomplete_claim_status == "pended" and old_timeout is not None
+
+    fields = {
+        "invoice_id": scenario.facts.invoice_id,
+        "provider_name": ledger.provider_name,
+        "provider_tax_id": ledger.provider_tax_id,
+        "dependant_name": ledger.dependant_name,
+        "lines": [{
+            "line_id": line.line_id,
+            "service_start": line.documented_start.isoformat(),
+            "service_end": line.documented_end.isoformat(),
+            "amount": line.amount,
+        } for line in ledger.lines],
+    }
+    complete_received_at = received_at + timedelta(days=1)
+    complete = CompanyEvent(incoming="Complete claim", received_at=complete_received_at, fields=fields)
+    received = CompanyAction(decision="claim_received", reply=True, reply_after_hours=0, body="",
+                             case_events=[{"kind": "claim_received"}])
+    assert task.validate_company_action(scenario, world, claims, complete, received, old_timeout) is None
+    task.apply_company_action(scenario, world, claims, complete, received, "complete-claim", old_timeout)
+    advance_clock(world, old_timeout)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    assert ledger.claim_received_at == complete_received_at
+    assert ledger.incomplete_claim_status == "none"
+    assert ledger.incomplete_claim_due_at is None
+    auto_decisions = [event for event in ledger.pending_events if event.event.kind == "claim_decision"]
+    assert len(auto_decisions) == 1
+    auto_decision = auto_decisions[0]
+    assert auto_decision.agent_action_id is None
+    expected_due = complete_received_at.date()
+    business_days = 0
+    while business_days < 10:
+        expected_due += timedelta(days=1)
+        business_days += expected_due.weekday() < 5
+    assert auto_decision.due_at == datetime.combine(expected_due, time(17), tzinfo=received_at.tzinfo)
+
+    early_at = old_timeout + timedelta(hours=1)
+    world.now = early_at
+    decisions = []
+    for line in ledger.lines:
+        eligible = line.filed_start >= ledger.coverage_effective and line.filed_end <= early_at.date()
+        decisions.append({
+            "line_id": line.line_id,
+            "decision": "approved" if eligible else "denied",
+            "reason": "eligible" if eligible else "coverage",
+        })
+    decision_event = CompanyEvent(incoming="Claims decision", received_at=early_at)
+    decision_action = CompanyAction(decision="line_decision", reply=True, reply_after_hours=0, body="",
+                                    case_events=[{"kind": "claim_decision", "line_decisions": decisions}])
+    assert task.validate_company_action(
+        scenario, world, claims, decision_event, decision_action, early_at,
+    ) is None
+    task.apply_company_action(
+        scenario, world, claims, decision_event, decision_action, "early-decision", early_at,
+    )
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    assert not any(event.id.startswith("auto-claim-decision:") for event in ledger.pending_events)
+    advance_clock(world, auto_decision.due_at)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    assert ledger.incomplete_claim_status == "none"
+    assert not any(event.kind == "incomplete_claim_denied" for event in ledger.events)
+    assert len([event for event in ledger.events if event.kind == "claim_decision"]) == 1
+
+
+def test_duplicate_claim_refile_preserves_corrected_decisions_and_paid_lines():
+    world = start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    task = get_task("daycare_reimbursement")
+    claims = scenario.org("brightwell_claims")
+    appeal_org = scenario.org("brightwell_appeals")
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    first_received = datetime(2024, 9, 26, 12, tzinfo=UTC)
+    initial_decision = datetime(2024, 10, 10, 17, tzinfo=UTC)
+    correction_decision = datetime(2024, 10, 31, 17, tzinfo=UTC)
+    paid_at = datetime(2024, 11, 1, 17, tzinfo=UTC)
+    refile_at = datetime(2024, 11, 2, 12, tzinfo=UTC)
+    ledger.provider_statement_received_at = first_received
+    ledger.claim_received_at = first_received
+    ledger.pending_events = []
+    ledger.events = [
+        DaycareLedgerEvent(
+            id="initial-claim-decision", at=initial_decision, kind="claim_decision",
+            line_ids=["L1", "L2", "L3", "L4"], trigger_kind="counterparty_decision",
+            trigger_id="initial-claim-decision", detail="Initial line decisions.",
+        ),
+        DaycareLedgerEvent(
+            id="accepted-date-correction", at=correction_decision, kind="supervisor_decision",
+            line_ids=["L1"], trigger_kind="counterparty_decision",
+            trigger_id="accepted-date-correction", detail="Corrected L1 dates were accepted.",
+        ),
+        DaycareLedgerEvent(
+            id="corrected-claim-decision", at=correction_decision, kind="claim_decision",
+            line_ids=["L1"], trigger_kind="counterparty_decision",
+            trigger_id="corrected-claim-decision", detail="Corrected L1 was re-decided.",
+        ),
+    ]
+    for line in ledger.lines:
+        line.filed_start = line.documented_start
+        line.filed_end = line.documented_end
+        line.approved_at = initial_decision
+        line.denied_at = None
+        line.funded_at = paid_at - timedelta(hours=8)
+        line.disbursed_at = paid_at
+        line.next_remittance_at = None
+        if line.line_id == "L1":
+            line.filed_start, line.filed_end = date(2024, 9, 23), date(2024, 9, 27)
+            line.approved_at = correction_decision
+            line.correction_trigger_id = "accepted-date-correction"
+    world.now = refile_at
+    world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    world.outcome.transfers = [
+        Transfer(
+            id=f"paid-{line.line_id}", time=line.disbursed_at, from_party="Brightwell Benefits",
+            to_party=ledger.dependant_name, amount=line.amount, currency="USD", kind="payment",
+            via=ledger.claims_org, note=f"Dependent-care reimbursement for line {line.line_id}.",
+        )
+        for line in ledger.lines
+    ]
+    before = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    before_lines = {
+        line.line_id: (line.filed_start, line.filed_end, line.approved_at, line.denied_at,
+                       line.funded_at, line.disbursed_at, line.reversed_at)
+        for line in before.lines
+    }
+    before_transfers = len(world.outcome.transfers)
+    before_decisions = len([event for event in before.events if event.kind == "claim_decision"])
+    fields = {
+        "invoice_id": scenario.facts.invoice_id,
+        "provider_name": before.provider_name,
+        "provider_tax_id": before.provider_tax_id,
+        "dependant_name": before.dependant_name,
+        "lines": [{
+            "line_id": line.line_id,
+            "service_start": line.documented_start.isoformat(),
+            "service_end": line.documented_end.isoformat(),
+            "amount": line.amount,
+        } for line in before.lines],
+    }
+    refile = CompanyEvent(incoming="Complete claim refile", received_at=refile_at, fields=fields)
+    received = CompanyAction(decision="claim_received", reply=True, reply_after_hours=0, body="",
+                             case_events=[{"kind": "claim_received"}])
+    assert task.validate_company_action(scenario, world, claims, refile, received, refile_at) is None
+    task.apply_company_action(scenario, world, claims, refile, received, "duplicate-refile", refile_at)
+    after = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    after_lines = {
+        line.line_id: (line.filed_start, line.filed_end, line.approved_at, line.denied_at,
+                       line.funded_at, line.disbursed_at, line.reversed_at)
+        for line in after.lines
+    }
+    assert len(after.lines) == 4 and len({line.line_id for line in after.lines}) == 4
+    assert after.claim_received_at == first_received
+    assert after_lines == before_lines
+    assert len([event for event in after.events if event.kind == "claim_decision"]) == before_decisions
+    assert len([event for event in after.pending_events if event.event.kind == "claim_decision"]) == 0
+    assert len(world.outcome.transfers) == before_transfers
+
+    l1 = next(line for line in after.lines if line.line_id == "L1")
+    assert l1.filed_start != l1.actual_start or l1.filed_end != l1.actual_end
+    appeal_event = CompanyEvent(incoming="Appeal the L1 payment", received_at=refile_at)
+    appeal_action = CompanyAction(
+        decision="respond", reply=True, reply_after_hours=0, body="",
+        case_events=[{"kind": "appeal_decision", "line_ids": ["L1"], "result": "reversed"}],
+    )
+    assert task.validate_company_action(
+        scenario, world, appeal_org, appeal_event, appeal_action, refile_at,
+    ) is None
+
+
+def test_duplicate_decision_deduplicates_denied_l1_without_repaying_other_lines():
+    world = start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    task = get_task("daycare_reimbursement")
+    claims = scenario.org("brightwell_claims")
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    received_at = world.now
+    deadline = received_at.date()
+    business_days = 0
+    while business_days < 10:
+        deadline += timedelta(days=1)
+        business_days += deadline.weekday() < 5
+    decision_at = datetime.combine(deadline, time(16), tzinfo=received_at.tzinfo)
+    ledger.provider_statement_received_at = received_at
+    ledger.claim_received_at = received_at
+    ledger.events.append(DaycareLedgerEvent(
+        id="initial-decisions", at=decision_at, kind="claim_decision",
+        line_ids=["L1", "L2", "L3", "L4"], trigger_kind="counterparty_decision",
+        trigger_id="initial-decisions", detail="The original line decisions were recorded.",
+    ))
+    for line in ledger.lines:
+        line.filed_start = line.documented_start
+        line.filed_end = line.documented_end
+        if line.line_id == "L1":
+            line.denied_at = decision_at
+            line.denial_reason = "coverage"
+            continue
+        line.approved_at = decision_at
+        line.funded_at = decision_at
+        line.disbursed_at = decision_at
+    ledger.balance = 0
+    world.now = decision_at
+    world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    world.outcome.transfers = [
+        Transfer(
+            id=f"paid-{line.line_id}", time=decision_at, from_party="Brightwell Benefits",
+            to_party=ledger.dependant_name, amount=line.amount, currency="USD", kind="payment",
+            via=ledger.claims_org, note=f"Dependent-care reimbursement for line {line.line_id}.",
+        )
+        for line in ledger.lines if line.line_id != "L1"
+    ]
+    before = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    before_states = {
+        line.line_id: (line.approved_at, line.denied_at, line.funded_at, line.disbursed_at)
+        for line in before.lines
+    }
+    before_transfers = len(world.outcome.transfers)
+    duplicate_event = CompanyEvent(incoming="Duplicate line decision", received_at=decision_at)
+    duplicate_action = CompanyAction(
+        decision="duplicate", reply=True, reply_after_hours=0, body="",
+        case_events=[{"kind": "claim_decision", "line_decisions": [
+            {"line_id": line.line_id, "decision": "duplicate", "reason": "duplicate"}
+            for line in ledger.lines
+        ]}],
+    )
+    assert task.validate_company_action(
+        scenario, world, claims, duplicate_event, duplicate_action, decision_at,
+    ) is None
+    task.apply_company_action(
+        scenario, world, claims, duplicate_event, duplicate_action, "duplicate-decisions", decision_at,
+    )
+    after = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    after_states = {
+        line.line_id: (line.approved_at, line.denied_at, line.funded_at, line.disbursed_at)
+        for line in after.lines
+    }
+    assert after_states == before_states
+    assert next(line for line in after.lines if line.line_id == "L1").denied_at == decision_at
+    assert len(world.outcome.transfers) == before_transfers
+    assert next(event for event in after.events if event.id.startswith("duplicate-decisions:")).line_ids == []
+
+
 async def test_router_replay_requires_provider_statement_and_complete_claim_submission():
     sim = MockSim()
     install_mock_models(sim)
@@ -321,22 +581,17 @@ async def test_router_replay_requires_provider_statement_and_complete_claim_subm
     assert saved.claim_received_at is not None
     assert [line.filed_start for line in saved.lines] == [line.documented_start for line in saved.lines]
     assert "TASK EVENT JSON SCHEMA" in sim.open_prompts[-1]
-
-    sim.open_actions.append({
-        "decision": "line_decision", "reply_after_hours": 0, "grant_ground": "eligible_line",
-        "case_events": [{"kind": "claim_decision", "line_decisions": [
-            {"line_id": "L1", "decision": "denied", "reason": "coverage"},
-            {"line_id": "L2", "decision": "approved", "reason": "eligible"},
-            {"line_id": "L3", "decision": "approved", "reason": "eligible"},
-            {"line_id": "L4", "decision": "approved", "reason": "eligible"},
-        ]}],
-    })
-    await dispatch(Inbound(
-        channel="form", tool="submit_form", target=claims.contact_url, org=claims.key,
-        body="Please decide each submitted line under the plan rules.", fields={},
-        interception_id="daycare-line-decision",
-    ))
-    advance_to_event("claim_decision")
+    decision_event = next(event for event in saved.pending_events if event.event.kind == "claim_decision")
+    assert decision_event.agent_action_id is None
+    expected_decision_date = saved.claim_received_at.date()
+    business_days = 0
+    while business_days < 10:
+        expected_decision_date += timedelta(days=1)
+        business_days += expected_decision_date.weekday() < 5
+    assert decision_event.due_at.date() == expected_decision_date and decision_event.due_at.hour == 17
+    decided = advance_to_event("claim_decision")
+    assert next(line for line in decided.lines if line.line_id == "L1").denied_at is not None
+    assert all(line.approved_at is not None for line in decided.lines if line.line_id != "L1")
     appeals = scenario.org("brightwell_appeals")
     sim.open_actions.append({
         "decision": "appeal_upheld", "reply_after_hours": 0,
