@@ -11,9 +11,12 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import subprocess
+from contextlib import nullcontext
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -34,12 +37,15 @@ from refund_eval.harbor.world_entrypoint import (
     trial_seed,
     world_argv,
 )
-from refund_eval.models.client import Message, OutputSchema
+from refund_eval.models.client import Message, ModelRequestRejected, OutputSchema
 from refund_eval.scenario.schema import SeedEmail, load_scenario
-from refund_eval.world_service.store import ACTIVITY_KEY
+from refund_eval.world_service.store import ACTIVITY_KEY, STATE_FILE
 from tests.test_world_service import (  # noqa: F401 - `offline` is an autouse fixture
+    AVANTI,
     MAX_TURNS,
     WORLD_KEY,
+    FakeModels,
+    OutOfCredit,
     ScriptedAgent,
     _write_agent_scenario,
     offline,
@@ -110,6 +116,7 @@ from refund_eval.harbor.installed_agent import RefundInstalledAgent
 from refund_eval.dashboard.luna_publisher import publish_once
 from refund_eval.dashboard.luna import Feed
 from refund_eval.world_service.status import WORLD_STATUS_FILE
+from refund_eval.world_service.store import STATE_FILE
 
 python, app, world, url, trial = sys.argv[1:]
 python, app, world, trial = map(Path, (python, app, world, trial))
@@ -133,8 +140,9 @@ class LocalEnvironment:
         assert process.returncode == 0, (out + error).decode()
         return SimpleNamespace(return_code=process.returncode, stdout=out.decode(), stderr=error.decode())
     async def service_download_file(self, source, destination, *, service):
-        assert service == "world" and source == f"/var/log/world/{WORLD_STATUS_FILE}"
-        shutil.copyfile(world / WORLD_STATUS_FILE, destination)
+        filename = Path(source).name
+        assert service == "world" and filename in (WORLD_STATUS_FILE, STATE_FILE)
+        shutil.copyfile(world / filename, destination)
 
 async def main():
     agent = RefundInstalledAgent(logs_dir=logs, model_name="mockllm/model", cost_limit=1,
@@ -351,6 +359,54 @@ def _check_installed_agent_first_turn(python, run_dir, tmp_path, env, monkeypatc
     # The public status schema is packaged; the private world implementation is not.
     for module in ("trial.py", "settings.py", "server.py"):
         assert not (Path(installed.strip()) / "refund_eval/world_service" / module).exists()
+
+
+@pytest.mark.parametrize("reason,guarded", [
+    ("model_limit", True), ("model_request_rejected", False), ("max_turns", False),
+])
+async def test_native_harbor_replays_world_stop_as_agent_failure(tmp_path, monkeypatch, reason, guarded):
+    agent_context = pytest.importorskip("harbor.models.agent.context")
+    from harbor.models.trial.error_policy import policy_for
+
+    from refund_eval.harbor import private_traces
+    from refund_eval.harbor.installed_agent import RefundInstalledAgent
+
+    class RejectedRequest(FakeModels):
+        async def complete(self, *_args, **_kwargs):
+            raise ModelRequestRejected()
+
+    stub_browser(monkeypatch)
+    monkeypatch.setattr(private_traces, "TRACE_ROOT", tmp_path / "private-traces")
+    models = {"model_limit": OutOfCredit, "model_request_rejected": RejectedRequest, "max_turns": FakeModels}
+    outputs = [ModelOutput.for_tool_call("mockllm/model", "send_message", {
+        "to": [AVANTI], "subject": "Refund request", "body": "Please review this request.",
+    })]
+
+    class LocalEnvironment:
+        default_user = None
+
+        async def exec(self, **_kwargs):
+            await asyncio.to_thread(run_inspect, tmp_path, script=outputs, world_url=url)
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+        async def download_file(self, source, destination):
+            assert guarded and source == f"{private_traces.PRIVATE_WORLD_LOGS_ROOT}/{STATE_FILE}"
+            shutil.copyfile(tmp_path / "world" / STATE_FILE, destination)
+
+        async def service_download_file(self, source, destination, *, service):
+            assert not guarded and service == "world" and source == f"/var/log/world/{STATE_FILE}"
+            shutil.copyfile(tmp_path / "world" / STATE_FILE, destination)
+
+    environment = LocalEnvironment()
+    setattr(environment, private_traces.PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE, guarded)
+    agent = RefundInstalledAgent(logs_dir=tmp_path / "trial" / "agent", model_name="mockllm/model")
+    expected = nullcontext() if reason == "max_turns" else pytest.raises(RuntimeError, match=f"^World stopped: {reason}$")
+    with (world_service_thread(settings(tmp_path, max_turns=1),
+                               monkeypatch, model_client=models[reason]()) as (url, held), expected as error):
+        await agent.run("ignored", environment, agent_context.AgentContext())
+    assert held["data"]["stop_reason"] == reason
+    if error:
+        assert not policy_for(error.type.__name__).has_valid_reward
 
 
 def test_atif_from_a_world_service_trial(tmp_path, monkeypatch):

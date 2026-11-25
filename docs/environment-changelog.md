@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.5 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 2a5307a43dba9cbab95cefea3643ca960504596d9270a4c3adfc48eaa4377546
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Native Harbor records a trial error when the world stops with `model_limit` or `model_request_rejected` (MAT-224).
+
 ## 10.4 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: e11de9e771920bfaa004594c3af7a743abdd53c087f3a1c758c684c95ec4f466
