@@ -337,6 +337,15 @@ class BudgetedWorldModels:
                     worst_case_cost=None if worst_case is None else float(worst_case),
                     error={"type": type(error).__name__, "message": screened_error(str(error))},
                 )
+            except BaseException as error:
+                # Cancelled mid-call: the request may have been sent and charged.
+                try:
+                    self._mark("unknown")
+                    self.persist()
+                except BaseException as persist_error:  # noqa: BLE001 - preserve and re-raise the original interruption
+                    if hasattr(error, "add_note"):
+                        error.add_note(f"Could not persist interruption state: {type(persist_error).__name__}")
+                raise
             cost = _decimal(completion.usage.cost if completion.usage else None)
             if cost is None:
                 self._mark("unknown")

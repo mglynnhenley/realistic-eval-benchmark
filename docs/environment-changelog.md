@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.4 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: e11de9e771920bfaa004594c3af7a743abdd53c087f3a1c758c684c95ec4f466
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: A usage-only world model call cancelled mid-request (for example by the browser boundary's request timeout) now settles the world allowance as `unknown` instead of leaving it `unsettled`, which refused every later simulator call and stopped Grok job b2a80b83 with `model_limit`.
+
 ## 10.3 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 85846f43f71ffab6c1017ce8bdeb7d2c053420577a50567cac8f8dda1cb90c0d
