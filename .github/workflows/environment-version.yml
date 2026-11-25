@@ -2,6 +2,8 @@ name: Environment version
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
 
@@ -21,6 +23,8 @@ jobs:
           python-version: "3.14"
       - run: uv sync --frozen
       - run: uv run --frozen pytest -q tests/test_environment_version.py
+        env:
+          ENVIRONMENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
 
   harbor-wheel-installer:
     runs-on: ubuntu-latest

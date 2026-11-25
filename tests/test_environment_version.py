@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from itertools import pairwise
@@ -10,14 +11,39 @@ import pytest
 
 from refund_eval import environment_version as environment
 
+CHANGELOG = "docs/environment-changelog.md"
+
+
+def _changelog_entries(changelog):
+    return re.findall(r"^## (\d+\.\d+) — [^\n]+\n(.*?)(?=^## |\Z)", changelog, re.MULTILINE | re.DOTALL)
+
+
+def _entry_fingerprint(body):
+    return re.search(r"^- Fingerprint: ([0-9a-f]{64})$", body, re.MULTILINE)
+
+
+def _check_released_versions(base, candidate):
+    base_versions = [version for version, _ in base]
+    candidate_versions = [version for version, _ in candidate]
+    message = (
+        f"Preserve the base environment changelog through {base_versions[0]}. "
+        "Update from the target branch, move your bump to the next version, "
+        "and regenerate its fingerprint (see docs/environment-changelog.md)."
+    )
+    assert candidate_versions[-len(base_versions):] == base_versions, message
+    base_fingerprint = _entry_fingerprint(base[0][1])
+    candidate_fingerprint = _entry_fingerprint(candidate[-len(base_versions)][1])
+    assert base_fingerprint and candidate_fingerprint, message
+    assert candidate_fingerprint.group(1) == base_fingerprint.group(1), message
+
 
 def test_environment_changelog():
-    changelog = (environment.ROOT / "docs/environment-changelog.md").read_text()
-    entries = re.findall(r"^## (\d+\.\d+) — [^\n]+\n(.*?)(?=^## |\Z)", changelog, re.MULTILINE | re.DOTALL)
+    changelog = (environment.ROOT / CHANGELOG).read_text()
+    entries = _changelog_entries(changelog)
     message = "Bump ENVIRONMENT_VERSION and add an entry to docs/environment-changelog.md."
     assert entries, message
     assert entries[0][0] == environment.ENVIRONMENT_VERSION, message
-    fingerprint = re.search(r"^- Fingerprint: ([0-9a-f]{64})$", entries[0][1], re.MULTILINE)
+    fingerprint = _entry_fingerprint(entries[0][1])
     assert fingerprint is not None, message
     assert fingerprint.group(1) == environment.environment_fingerprint(), message
     versions = [tuple(map(int, version.split("."))) for version, _ in entries]
@@ -32,6 +58,38 @@ def test_environment_changelog():
         assert kind in {"trivial batch", "behaviour round"}, message
         expected = (major, minor + 1) if kind == "trivial batch" else (major + 1, 0)
         assert versions[index] == expected, message
+
+    if base_sha := os.environ.get("ENVIRONMENT_BASE_SHA"):
+        base = subprocess.check_output(
+            ["git", "show", f"{base_sha}:{CHANGELOG}"], cwd=environment.ROOT, text=True,
+        )
+        base_entries = _changelog_entries(base)
+        assert base_entries, f"No environment changelog entries found at {base_sha}."
+        _check_released_versions(base_entries, entries)
+
+
+@pytest.mark.parametrize(("versions", "accepted"), [
+    ([("9.10", "a"), ("9.9", "b")], True),
+    ([("9.11", "c"), ("9.10", "a"), ("9.9", "b")], True),
+    ([("10.0", "c"), ("9.10", "a"), ("9.9", "b")], True),
+    ([("9.10", "c"), ("9.9", "b")], False),
+    ([("9.9", "b")], False),
+    ([("10.0", "c"), ("9.9", "b")], False),
+], ids=["unchanged", "minor", "major", "duplicate bump", "stale bump", "dropped release"])
+def test_released_versions(versions, accepted):
+    def entries(releases):
+        changelog = "".join(
+            f"## {version} — Release\n- Fingerprint: {digest * 64}\n" for version, digest in releases
+        )
+        return _changelog_entries(changelog)
+
+    base = entries([("9.10", "a"), ("9.9", "b")])
+    candidate = entries(versions)
+    if accepted:
+        _check_released_versions(base, candidate)
+    else:
+        with pytest.raises(AssertionError, match="Preserve the base environment changelog through 9.10"):
+            _check_released_versions(base, candidate)
 
 
 def test_fingerprint_inventory(tmp_path, monkeypatch):

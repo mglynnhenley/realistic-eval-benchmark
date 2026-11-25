@@ -14,10 +14,22 @@ caches. The path list in `ENVIRONMENT_PATHS` includes shared runtime code and
 `refund_eval/config.py` defaults as well as the scenario, agent and grading code.
 Git checkouts use Git's tracked and unignored file inventory; a frozen Harbor
 source tree validates its source manifest file allowlist before hashing it.
-The changelog test checks the version, fingerprint and bump kind.
+The changelog test checks the version, fingerprint and bump kind. CI also
+compares the merge result with its target revision: keep the target's released
+version numbers and its current fingerprint, then prepend your new entry. If
+another PR lands first, merge or rebase onto the latest target branch, keep its
+entry, take the next version for your bump, and regenerate your fingerprint.
+Don't overwrite the winning PR's entry, even if both PRs picked the same number.
+
+To prevent stale green checks from allowing a merge, require the
+`environment-version` status check and up-to-date branches in the target
+branch's protection settings, or require the check in a merge queue. The
+workflow runs on pull requests, merge groups and pushes to `main`.
 
 Run the CI changelog check locally with
-`uv run --frozen pytest -q tests/test_environment_version.py`. Native task
+`uv run --frozen pytest -q tests/test_environment_version.py`. To also compare
+with the latest target revision, fetch it and prefix the command with
+`ENVIRONMENT_BASE_SHA=origin/main` (or the target ref for your PR). Native task
 `task.toml` metadata and prepared batch `run.json` task records carry
 `environment_version` and `environment_fingerprint`; the adapter's default task
 version is also the environment version. The 1.0 baseline fingerprint below was
