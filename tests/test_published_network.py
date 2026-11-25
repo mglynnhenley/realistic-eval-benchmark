@@ -959,6 +959,13 @@ async def test_public_login_page_remains_readable_and_nonaccount_registration_st
     assert (await boundary(submitted))["status"] == 200
     assert len(submissions) == 1 and submissions[0].channel == "form"
 
+# A newline-delimited analytics batch (the shape of a 1DS/OneCollector upload): it opens
+# with "{" but is not one JSON object, and its "=" signs once split it into a fake field.
+ANALYTICS_BATCH = "\n".join(json.dumps({
+    "name": "Ms.Web.PageAction", "time": "2026-11-25T13:27:40Z", "iKey": "o:test",
+    "ext": {"user": {"localId": "t:0"}}, "data": {"message": "Make a complaint", "uri": f"/complaint?step={step}"},
+}) for step in range(3))
+
 DOCUSIGN_TELEMETRY = {
     "stack": {}, "message": "",
     "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0 Safari/537.36",
@@ -973,6 +980,8 @@ DOCUSIGN_TELEMETRY = {
                  "stack": "TypeError: x is undefined\n at load"}), "application/json"),
     (json.dumps({"message": "", "subject": None, "comment": "   "}), "application/json"),
     ("level=error&message=&message=+&page=%2Fclaim", "application/x-www-form-urlencoded"),
+    (ANALYTICS_BATCH, "text/plain;charset=UTF-8"),
+    (json.dumps([{"name": "PageView", "message": "Complaint form opened"}]), "application/json"),
 ])
 def test_page_telemetry_is_not_a_background_form(text, content_type):
     """An error logger's beacon names `message` and `stack` fields on every page load.
@@ -1082,4 +1091,30 @@ async def test_public_web_allows_narrow_uk_help_and_form_pages(ctx, url):
 async def test_public_web_uk_narrow_rules_keep_action_and_token_guards(ctx, url, resource, navigation, reason):
     assert (await public_web(ctx)(public_req(url, resource=resource, navigation=navigation)))["status"] == 403
     assert store().get(AUDIT_KEY)[-1]["policy_reason"] == reason
+    assert load_world().interceptions == []
+
+
+@pytest.mark.parametrize("resource, content_type, body", [
+    ("ping", "text/plain;charset=UTF-8", ANALYTICS_BATCH),
+    ("fetch", "text/plain;charset=UTF-8", ANALYTICS_BATCH),
+    ("ping", "application/x-www-form-urlencoded", "email=pat%40example.com&message=Please+reconsider"),
+], ids=["beacon-batch", "fetch-batch", "beacon-form-fields"])
+async def test_analytics_ping_is_blocked_without_a_simulator_call(ctx, monkeypatch, resource, content_type, body):
+    """A page's analytics beacon (sendBeacon `ping`, or a newline-delimited event batch)
+    is never a customer form: no simulator call and no made-up organisation."""
+    async def fetch(request):
+        pytest.fail("A background write reached the network")
+
+    async def dispatch(inbound):
+        pytest.fail("Page telemetry was sent to the simulator as a form")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    boundary = BrowserBoundary(ctx, public_read_urls=[], public_read_policy="public_web", fetch=fetch)
+    request = public_req("https://eu-mobile.events.data.microsoft.com/OneCollector/1.0/?cors=true",
+                         "POST", resource=resource, navigation=False, body=body)
+    request["headers"]["content-type"] = content_type
+    result = await boundary(request)
+    assert result["status"] == 403 and body_text(result) == "Forbidden"
+    decision = store().get(AUDIT_KEY)[-1]
+    assert decision["action"] == "blocked" and decision["policy_reason"] == "background_write"
     assert load_world().interceptions == []
