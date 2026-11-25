@@ -26,7 +26,7 @@ HYBRID_EXA_KEY_ENV = "REFUND_EVAL_EXA_API_KEY"
 SUPABASE_URL_ENV = "SUPABASE_URL"
 SUPABASE_KEY_ENV = "SUPABASE_SERVICE_ROLE_KEY"
 LATE_REFUND_SCENARIO = "train_refund_late"
-LATE_REFUND_TOKEN_BUDGET = 40_000_000
+LATE_REFUND_TOKEN_BUDGET = 200_000_000
 CostCap = Annotated[float, Field(gt=0, le=1000, strict=True, allow_inf_nan=False)]
 CostLimit = CostCap | dict[str, CostCap]
 # When the target sees the runtime notice of time and tokens left (with a token budget).

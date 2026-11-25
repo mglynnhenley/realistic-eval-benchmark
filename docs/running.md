@@ -64,7 +64,7 @@ Prices come from Inspect, explicit `--model-cost-config` overrides, bundled defa
 
 `train_refund` is the original refund request. `train_refund_pressure` adds increasingly insistent self-addressed user emails and authored policies for late claims and evidence requirements. Both are archived and unavailable for new launches; their authored facts and policies live in [the scenario archive](../refund_eval/scenario/archive/). Loading them by name still works for historical logs and tooling. To resume an old log, supply its original scenario and `resume_log`; the saved scenario identity is checked before restoration.
 
-New runs default to `train_refund_late`, six simulated weeks, 1,000 target generations and a 40-million-target-token budget. An explicit total model-cost cap is required; launching without one fails. `bills_price_rise` remains runnable with its $1 default cap. The late-refund Scout rubrics do not apply to these earlier scenarios.
+New runs default to `train_refund_late`, six simulated weeks, 1,000 target generations and a 200-million-target-token budget. An explicit total model-cost cap is required; launching without one fails. `bills_price_rise` remains runnable with its $1 default cap. The late-refund Scout rubrics do not apply to these earlier scenarios.
 
 ## Common settings
 
@@ -81,7 +81,7 @@ Pass task settings as `-T name=value`:
 | `max_turns` | `1000` | Maximum target model generations. |
 | `sim_weeks` | `6` | Simulated session horizon in weeks; any positive finite duration. |
 | `cost_limit` | required for default late refund; `1` for bills | Trial model USD cap, including target, simulator and financial consistency checks; a scalar for one target or a mapping from target model IDs to caps. Late-refund batches require a cap for every target. |
-| `token_budget` | none; `40000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
+| `token_budget` | none; `200000000` for late refund | Target input (including cache reads/writes) + output tokens. Separate from history size and Inspect's general `token_limit`. |
 | `history_tokens` | `60000` | Visible history window; `0` retains all history. |
 | `budget_notice` | `every_step` | With a `token_budget`, when the runtime notice appears: `every_step` before each step, `daily` on the first step of each simulated London day, `low` only once under 20% of the tokens or session time remains. The system prompt's description of the notice follows the mode. |
 | `seed` | drawn per trial | Seed for simulated randomness (company temperaments, reply timing); later epochs derive their own. Each trial's seed is saved as `seed` in its world (`world.json`), so `-T seed=<that value>` reproduces it. Model replies stay non-deterministic. |
@@ -144,7 +144,7 @@ Use the same source revision, Python version, lockfile, scenario and inbox snaps
 
 ## Late-refund runs
 
-A twelve-week late-refund configuration uses `token_budget=40000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Inspect and dashboard late-refund launches accept `auto` (the default) or `saved`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
+A twelve-week late-refund configuration uses `token_budget=200000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Inspect and dashboard late-refund launches accept `auto` (the default) or `saved`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
 
 The ledger lives in saved world state and survives trimming and resume. A final response can exceed the remaining budget; its full usage and overrun are saved. `stop_reason=token_budget` means the intended compute limit ended the trial. Missing usage fails with a token-accounting error. A cost-ended trial is reported separately. Inspect's general `token_limit` is a separate guard and is not a substitute for this ledger.
 
