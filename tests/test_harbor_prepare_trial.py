@@ -105,6 +105,24 @@ def test_prepare_rejects_planning_caps_the_manifest_runner_would_not_read(saved_
     assert not out.exists()
 
 
+@pytest.mark.parametrize(("overrides", "reason"), [
+    ({"simulator_model": "mockllm/simulator"}, "all_active_models_must_use_openrouter"),
+    ({"grader_model": "mockllm/grader"}, "all_active_models_must_use_openrouter"),
+    ({"world_cost_limit": 31.01}, "agent_and_world_caps_exceed_runtime_trial_delta"),
+])
+def test_prepare_rejects_unlaunchable_shared_key_spec(saved_spec, overrides, reason, monkeypatch, capsys):
+    path, out, values = saved_spec
+    for key in ("agent_max_output_tokens", "requested_deadline", "shared_allowance_usd"):
+        del values[key]
+    values.update(openrouter_key_mode="shared", world_cost_limit=31)
+    values.update(overrides)
+    path.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setattr(adapter, "copy_source", lambda *_: pytest.fail("started building an unlaunchable spec"))
+    assert laura_trial.main(_args(path, out)) == 2
+    assert f"laura_prepare_failed={reason}" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_prepare_rejects_conflicting_effective_world_identity(saved_spec, monkeypatch, capsys):
     path, out, _ = saved_spec
     prepare_batch = batch.prepare

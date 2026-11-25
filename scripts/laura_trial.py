@@ -1499,7 +1499,10 @@ def prepare_trial(run_config: Path, out: Path) -> None:
         or spec.resume_log is not None or spec.inbox_snapshot is not None
     ):
         raise SetupFailure("prepare_requires_one_fresh_late_refund_modal_trial")
-    _native_targets(spec)
+    if spec.openrouter_key_mode == "shared":
+        _native_effective_parameters(spec, Thresholds(KEY_CEILING, KEY_CEILING))
+    else:
+        _native_targets(spec)
     out = validate_private_output(out)
     if out.exists() and any(out.iterdir()):
         raise SetupFailure("prepare_requires_empty_output_directory")
