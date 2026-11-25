@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.9 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 153ed2b152b6cc857d2be653a680770c9f9c13b8eec271213dab62f6a31c3fc9
+- Trial round: none; offline published-form replay and tests only.
+- Changes: Expose daycare claim and service-date attestation fields on the retrievable portal and preserve nested form submissions through the shared claims queue. No live grading or pilot results.
+
 ## 10.8 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: d282e1f35877a210dd0d7443a480d59d7e7c7bfd4f4f226208a87cc19ae45413

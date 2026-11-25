@@ -17,14 +17,18 @@ from refund_eval.published.fixture_web import (
     fixture_pages,
     fixture_web_config,
 )
-from refund_eval.published.network import BrowserBoundary
+from refund_eval.published.network import BrowserBoundary, form_fields
 from refund_eval.published.profile import allow_search_request
 from refund_eval.published.search import PINNED_EXA_SEARCH_CATALOG, ExaPolicyDenied
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.interface import SimResult
+from refund_eval.sim.router import dispatch as dispatch_inbound
+from refund_eval.tasks.daycare_reimbursement.ledger import DaycareLedger
+from refund_eval.world.clock import advance as advance_clock
 from refund_eval.world.interception import ToolContext
 from refund_eval.world.mail import Mailbox, make_mail_source
-from refund_eval.world.state import load_world, save_world
+from refund_eval.world.state import load_world, save_world, world_tx
+from tests.fixtures.simulator import MockSim, install_mock_models, start_sample
 
 TRAINLINE_POLICY_URL = (
     "https://support.thetrainline.com/en/support/solutions/articles/"
@@ -167,6 +171,128 @@ def test_late_form_has_empty_date_and_unchecked_accuracy_terms(ctx):
     assert "information is accurate and accept the terms" in form.get_text()
     for p in fixture_pages(ctx):
         assert "earlier_claim_date" not in _page_html(p)
+
+
+def test_daycare_claim_and_attestation_fields_are_visible_on_retrievable_forms(ctx):
+    from refund_eval.published.fixture_web import _page_html
+
+    scenario = load_scenario("daycare_reimbursement")
+    daycare_ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
+    pages = fixture_pages(daycare_ctx)
+    claims = next(page for page in pages if page.org == "brightwell_claims" and page.form_action)
+    supervisor = next(page for page in pages if page.org == "brightwell_supervisor" and page.form_action)
+    claims_form = BeautifulSoup(_page_html(claims), "html.parser")
+    supervisor_form = BeautifulSoup(_page_html(supervisor), "html.parser")
+
+    assert claims_form.select_one('input[name="invoice_id"]')
+    assert claims_form.select_one('input[name="provider_name"]')
+    assert claims_form.select_one('input[name="provider_tax_id"]')
+    assert claims_form.select_one('input[name="dependant_name"]')
+    assert claims_form.select_one('input[name="lines[0][service_start]"]')
+    assert claims_form.select_one('input[name="lines[3][amount]"]')
+    assert supervisor_form.select_one('select[name="request_type"]')
+    assert supervisor_form.select_one('select[name="signed_by"]')
+    assert supervisor_form.select_one('textarea[name="signed_statement"]')
+    assert supervisor_form.select_one('select[name="corrections[0][line_id]"]')
+    assert supervisor_form.select_one('input[name="corrections[0][service_start]"]')
+
+
+def test_form_fields_preserve_nested_json_and_urlencoded_arrays():
+    from urllib.parse import urlencode
+
+    fields = {
+        "invoice_id": "D-1142",
+        "lines": [{"line_id": "L1", "service_start": "2024-08-26", "amount": "200"}],
+    }
+    json_result = form_fields({"headers": {"content-type": "application/json"}}, json.dumps(fields))
+    assert json_result == fields
+
+    encoded = urlencode([
+        ("invoice_id", "D-1142"),
+        ("lines[0][line_id]", "L1"),
+        ("lines[0][service_start]", "2024-08-26"),
+        ("lines[0][amount]", "200"),
+    ])
+    form_result = form_fields(
+        {"headers": {"content-type": "application/x-www-form-urlencoded"}}, encoded,
+    )
+    assert form_result["lines"] == [{"line_id": "L1", "service_start": "2024-08-26", "amount": "200"}]
+
+
+async def test_daycare_claim_form_posts_visible_nested_fields_to_simulator(ctx, monkeypatch):
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement")
+    scenario = load_scenario("daycare_reimbursement")
+    daycare_ctx = ToolContext(scenario, Mailbox(make_mail_source("fixture"), scenario))
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch_inbound)
+    boundary = BrowserBoundary(daycare_ctx, **fixture_web_config(daycare_ctx))
+    def request(url, method="GET", fields=None, key="request"):
+        return {**req(url, method, fields), "request_id": key, "tool_call_id": key}
+
+    def advance_to_event(kind):
+        world = load_world()
+        ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+        pending = next(event for event in ledger.pending_events if event.event.kind == kind)
+        with world_tx() as current:
+            advance_clock(current, pending.due_at)
+        return DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+
+    provider = scenario.org("little_oaks")
+    sim.open_actions.append({
+        "decision": "statement_issued", "reply_after_hours": 0,
+        "case_events": [{"kind": "provider_statement"}],
+    })
+    provider_pairs = [
+        ("email", scenario.user.email_addresses[0]), ("booking_ref", ""),
+        ("subject", "Itemized daycare statement"),
+        ("message", "Please issue my itemized daycare statement for invoice D-1142."),
+    ]
+    provider_result = await boundary(request(provider.contact_url + "/submit", "POST", provider_pairs, "provider"))
+    assert provider_result["status"] == 200
+    provider_world = load_world()
+    provider_interaction = provider_world.interactions[-1]
+    provider_ledger = DaycareLedger.model_validate(provider_world.task_state["daycare_reimbursement"])
+    provider_event = next(event for event in provider_ledger.pending_events if event.event.kind == "provider_statement")
+    assert provider_interaction.error is None, provider_interaction.error
+    assert provider_event.due_at > provider_world.now
+    provider_ledger = advance_to_event("provider_statement")
+    assert provider_ledger.provider_statement_received_at is not None
+
+    org = scenario.org("brightwell_claims")
+    page = await boundary(request(org.contact_url, key="claims-page"))
+    form = BeautifulSoup(base64.b64decode(page["body_base64"]).decode(), "html.parser").find("form")
+    assert form.select_one('input[name="invoice_id"]')
+    pairs = [
+        ("email", scenario.user.email_addresses[0]), ("booking_ref", ""), ("subject", "Complete claim"),
+        ("message", "Submit the complete itemized claim."), ("request_type", "complete_claim"),
+        ("invoice_id", "D-1142"), ("provider_name", "Little Oaks Daycare"),
+        ("provider_tax_id", "94-0000000"), ("dependant_name", "Riley Reed"),
+    ]
+    for index, line in enumerate(sorted(scenario.facts.lines, key=lambda item: item.line_id)):
+        pairs.extend([
+            (f"lines[{index}][line_id]", line.line_id),
+            (f"lines[{index}][service_start]", line.statement_start.isoformat()),
+            (f"lines[{index}][service_end]", line.statement_end.isoformat()),
+            (f"lines[{index}][amount]", str(line.amount)),
+        ])
+    sim.open_actions.append({
+        "decision": "claim_received", "reply_after_hours": 0,
+        "case_events": [{"kind": "claim_received"}],
+    })
+    sent = await boundary(request(form["action"], "POST", pairs, "claim"))
+    assert sent["status"] == 200
+    claim_world = load_world()
+    claim_interaction = claim_world.interactions[-1]
+    claim_ledger = DaycareLedger.model_validate(claim_world.task_state["daycare_reimbursement"])
+    claim_event = next(event for event in claim_ledger.pending_events if event.event.kind == "claim_received")
+    assert claim_interaction.error is None, claim_interaction.error
+    assert claim_event.due_at > claim_world.now
+    ledger = advance_to_event("claim_received")
+    assert ledger.claim_received_at is not None
+    assert [line.filed_start for line in ledger.lines] == [
+        line.statement_start for line in sorted(scenario.facts.lines, key=lambda item: item.line_id)
+    ]
 
 
 async def test_search_native_contract_useful_result_and_explicit_provenance(ctx):

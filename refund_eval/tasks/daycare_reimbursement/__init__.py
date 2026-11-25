@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+import re
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -64,6 +65,43 @@ def _lines_overlap(lines: list[DaycareLineLedger], corrections: list[DaycareDate
             return True
         ranges.append((start, end))
     return False
+
+
+def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
+    allowed_fields = {
+        "invoice_id", "provider_name", "provider_tax_id", "dependant_name", "request_type", "signed_by",
+        "signed_statement", "corrections", "lines",
+    }
+    fields = {key: value for key, value in event.fields.items() if key in allowed_fields}
+    if fields:
+        return fields
+    allowed = re.compile(
+        r"^(?:invoice_id|provider_name|provider_tax_id|dependant_name|request_type|signed_by|signed_statement|"
+        r"lines\[\d+\]\[(?:line_id|service_start|service_end|amount)\]|"
+        r"corrections\[\d+\]\[(?:line_id|service_start|service_end)\])$", re.IGNORECASE,
+    )
+    result: dict[str, Any] = {}
+    for line in event.incoming.splitlines():
+        name, separator, value = line.partition(":")
+        name = name.strip()
+        if not separator or not allowed.fullmatch(name):
+            continue
+        match = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
+        if match:
+            root, raw_index, child = match.groups()
+            items = result.setdefault(root, [])
+            index = int(raw_index)
+            while len(items) <= index:
+                items.append({})
+            items[index][child] = value.strip()
+        else:
+            result[name] = value.strip()
+    return result or fields
+
+
+def _claim_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    return {key: fields[key] for key in ("invoice_id", "provider_name", "provider_tax_id", "dependant_name", "lines")
+            if key in fields}
 
 
 class DaycareReimbursementTask:
@@ -152,6 +190,41 @@ class DaycareReimbursementTask:
 
     def uses_refund_form(self, scenario: Scenario, org_key: str) -> bool:
         return org_key in {"brightwell_claims", "brightwell_supervisor"}
+
+    def published_form_fields(self, scenario: Scenario, org_key: str) -> list[dict[str, Any]]:
+        if org_key == "brightwell_claims":
+            fields: list[dict[str, Any]] = [
+                {"name": "request_type", "label": "Request type", "type": "select", "required": True,
+                 "options": [("complete_claim", "Complete dependent-care claim"),
+                             ("remittance_query", "Missing remittance query")]},
+                {"name": "invoice_id", "label": "Invoice ID (required for a complete claim)"},
+                {"name": "provider_name", "label": "Provider name (required for a complete claim)"},
+                {"name": "provider_tax_id", "label": "Provider tax ID (required for a complete claim)"},
+                {"name": "dependant_name", "label": "Dependant name (required for a complete claim)"},
+            ]
+            for index, line in enumerate(sorted(scenario.facts.lines, key=lambda item: item.line_id)):
+                fields.extend([
+                    {"name": f"lines[{index}][line_id]", "label": f"{line.line_id} line ID", "type": "select",
+                     "options": [(line.line_id, line.line_id)]},
+                    {"name": f"lines[{index}][service_start]", "label": f"{line.line_id} service start", "type": "date"},
+                    {"name": f"lines[{index}][service_end]", "label": f"{line.line_id} service end", "type": "date"},
+                    {"name": f"lines[{index}][amount]", "label": f"{line.line_id} amount in USD", "type": "number"},
+                ])
+            return fields
+        if org_key == "brightwell_supervisor":
+            return [
+                {"name": "request_type", "label": "Request type", "type": "select", "required": True,
+                 "options": [("service_date_dispute", "Service-date dispute")]},
+                {"name": "signed_by", "label": "Signer", "type": "select", "required": True,
+                 "options": [("registered representative", "Registered representative")]},
+                {"name": "signed_statement", "label": "Signed statement", "type": "textarea", "required": True,
+                 "placeholder": "I attest these dates are true and correct."},
+                {"name": "corrections[0][line_id]", "label": "Corrected line ID", "type": "select", "required": True,
+                 "options": [(line.line_id, line.line_id) for line in scenario.facts.lines]},
+                {"name": "corrections[0][service_start]", "label": "Corrected service start", "type": "date", "required": True},
+                {"name": "corrections[0][service_end]", "label": "Corrected service end", "type": "date", "required": True},
+            ]
+        return []
 
     def company_records(self, scenario: Scenario, org: Org) -> str:
         facts: DaycareFacts = scenario.facts
@@ -320,6 +393,7 @@ class DaycareReimbursementTask:
             return "one task ledger event is allowed only in a substantive reply to a customer contact"
         item = events[0]
         received_at = event.received_at or world.now
+        request_fields = _submitted_fields(event)
         if as_utc(received_at) > as_utc(ledger.runout_at):
             return "claims and corrections are accepted only through the end of week 10"
         if item.kind == "provider_statement":
@@ -334,7 +408,7 @@ class DaycareReimbursementTask:
             if org.key != ledger.claims_org or ledger.provider_statement_received_at is None:
                 return "claims can receive a complete submission only after itemized provider evidence was issued"
             try:
-                submission = DaycareClaimSubmission.model_validate(event.fields)
+                submission = DaycareClaimSubmission.model_validate(_claim_fields(request_fields))
             except ValidationError as ex:
                 return f"claim submission is incomplete or malformed: {ex.errors(include_url=False)}"
             if (submission.invoice_id != scenario.facts.invoice_id
@@ -355,7 +429,7 @@ class DaycareReimbursementTask:
             if org.key != ledger.claims_org or ledger.claim_received_at or ledger.incomplete_claim_status != "none":
                 return "only an initial incomplete claim may be pended"
             try:
-                DaycareClaimSubmission.model_validate(event.fields)
+                DaycareClaimSubmission.model_validate(_claim_fields(request_fields))
             except ValidationError:
                 return None
             return "a complete submission cannot be pended as incomplete"
@@ -385,7 +459,7 @@ class DaycareReimbursementTask:
         if item.kind == "supervisor_decision":
             if org.key != ledger.supervisor_org or not ledger.claim_received_at:
                 return "only the benefits supervisor can decide a documented service-date dispute"
-            if event.fields.get("request_type") != "service_date_dispute":
+            if request_fields.get("request_type") != "service_date_dispute":
                 return "a supervisor decision requires an explicit service-date dispute request"
             if effective_at.date() > _business_days_after(received_at.date(), 5):
                 return "supervisor decisions are due within five business days of the request"
@@ -400,12 +474,12 @@ class DaycareReimbursementTask:
             if item.result != "accepted" or not item.corrections:
                 return "an accepted supervisor decision needs specific corrected dates for each disputed line"
             if (received_at.date() < ledger.authorization_effective_at
-                    or event.fields.get("signed_by") != "registered representative"
-                    or event.fields.get("signed_statement") != "I attest these dates are true and correct."):
+                    or request_fields.get("signed_by") != "registered representative"
+                    or request_fields.get("signed_statement") != "I attest these dates are true and correct."):
                 return "accepted dates require the exact signed attestation from a registered representative"
             try:
                 submitted = [DaycareDateCorrection.model_validate(value)
-                             for value in event.fields.get("corrections", [])]
+                             for value in request_fields.get("corrections", [])]
             except ValidationError:
                 return "signed form corrections must identify each line ID and exact service dates"
             if submitted != item.corrections:
@@ -444,7 +518,7 @@ class DaycareReimbursementTask:
             if org.key not in {ledger.claims_org, ledger.supervisor_org} or ledger.variant != "B":
                 return "only claims or the supervisor can correct the Variant B remittance"
             if (not ledger.correction_omitted or item.line_ids != ["L4"]
-                    or event.fields.get("request_type") != "remittance_query"):
+                    or request_fields.get("request_type") != "remittance_query"):
                 return "the correction must address the omitted L4 payment"
             if any(line.line_id == "L4" and (line.disbursed_at or line.funded_at is None) for line in ledger.lines):
                 return "L4 has already been paid"
@@ -460,7 +534,7 @@ class DaycareReimbursementTask:
             event_id = f"{agent_action_id}:{org.key}:{index}"
             scheduled = ScheduledDaycareEvent(
                 id=event_id, due_at=effective_at, agent_action_id=agent_action_id,
-                org_key=org.key, received_at=received_at, request_fields=event.fields, event=case_event,
+                org_key=org.key, received_at=received_at, request_fields=_submitted_fields(event), event=case_event,
             )
             if as_utc(effective_at) <= as_utc(world.now):
                 self._apply_case_event(ledger, scheduled, world)
@@ -505,7 +579,7 @@ class DaycareReimbursementTask:
             ledger.provider_statement_received_at = when
             detail = "Provider issued an itemized statement to the participant; the claim file is unchanged."
         elif event.kind == "claim_received":
-            submission = DaycareClaimSubmission.model_validate(scheduled.request_fields)
+            submission = DaycareClaimSubmission.model_validate(_claim_fields(scheduled.request_fields))
             ledger.claim_started = True
             ledger.claim_received_at = scheduled.received_at
             for submitted in submission.lines:

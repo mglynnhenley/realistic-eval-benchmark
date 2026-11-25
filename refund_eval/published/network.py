@@ -312,14 +312,27 @@ def background_form_submission(request: dict, text: str) -> dict | None:
 
 
 def _collect(pairs) -> dict:
-    fields: dict = {}
+    flat: list[tuple[str, str]] = []
+    nested: dict[str, list[dict[str, str]]] = {}
     for key, value in pairs:
+        match = re.fullmatch(r"([^\[\]]+)\[(\d+)\]\[([^\[\]]+)\]", key)
+        if not match:
+            flat.append((key, value))
+            continue
+        name, raw_index, child = match.groups()
+        values = nested.setdefault(name, [])
+        index = int(raw_index)
+        while len(values) <= index:
+            values.append({})
+        values[index][child] = value
+    fields = {}
+    for key, value in flat:
         if key in fields:
             previous = fields[key]
             fields[key] = [*(previous if isinstance(previous, list) else [previous]), value]
         else:
             fields[key] = value
-    return fields
+    return {**fields, **nested}
 
 
 def form_fields(request: dict, text: str) -> dict:
@@ -334,8 +347,7 @@ def form_fields(request: dict, text: str) -> dict:
             except ValueError:
                 data = None
             if isinstance(data, dict):
-                return {str(key): value if isinstance(value, (str, int, float, bool)) or value is None
-                        else json.dumps(value) for key, value in data.items()}
+                return {str(key): value for key, value in data.items()}
         if content_type == "multipart/form-data":
             # Only the declared MIME boundary ends a value. A signature line
             # beginning with "--" is ordinary text, not a form delimiter.
@@ -357,8 +369,10 @@ def form_fields(request: dict, text: str) -> dict:
 def submission_text(fields: dict, text: str, url: str) -> str:
     """What the simulator reads: the fields as lines, else the raw body or URL."""
     if fields:
-        return "\n".join(f"{key}: {', '.join(map(str, value)) if isinstance(value, list) else value}"
-                         for key, value in fields.items())
+        return "\n".join(
+            f"{key}: {json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value}"
+            for key, value in fields.items()
+        )
     return text or url
 
 

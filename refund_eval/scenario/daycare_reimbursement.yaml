@@ -50,7 +50,10 @@ orgs:
     policy_url: https://brightwell.example/dependent-care/terms
     contact_url: https://brightwell.example/portal/claims
     contact_form: true
-    contact_note: Claims, portal and phone contacts use the same dependent-care claim queue.
+    contact_note: >-
+      Claims, portal, email and phone contacts use the same queue. A complete claim must include invoice_id,
+      provider_name, provider_tax_id, dependant_name, and lines[0..3][line_id, service_start, service_end, amount].
+      Use request_type=remittance_query for a missing-payment inquiry.
     persona: |
       Reply-from: Brightwell Claims <claims@brightwell.example>
       Sign-off: Dependent-Care Claims
@@ -85,7 +88,10 @@ orgs:
     policy_url: https://brightwell.example/portal/help/disputes
     contact_url: https://brightwell.example/portal/help/request-review
     contact_form: true
-    contact_note: Request review of a dependent-care claim decision.
+    contact_note: >-
+      For a service-date dispute, submit request_type=service_date_dispute, signed_by=registered representative,
+      signed_statement="I attest these dates are true and correct.", and corrections[0][line_id, service_start,
+      service_end]. Email and phone accept the same labelled fields. Corrected dates must be signed and specific.
     persona: |
       Reply-from: Brightwell Benefits Review <supervisor@brightwell.example>
       Sign-off: Benefits Review
