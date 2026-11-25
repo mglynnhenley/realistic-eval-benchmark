@@ -26,7 +26,7 @@ this was not a second version or trial round.
 
 ## 9.10 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: a1e86bb6a264c928a06eb5ba5bb2d18330fa2d99005cdb0144e0de86b8078d54
+- Fingerprint: 2889a108485dac75b51b871f75a0794ca6afb0a9b02ee62ff6d81d04430a376f
 - Trial round: none. Offline checks and free replay only; no paid execution.
 - Changes: Pin Modal sandboxes to `region="uk"` by default in Harbor batch/job preparation (configurable via `modal_region`), and narrowly allow long UK help/contact prose slugs, local Citizens Advice directory contact paths, and public Microsoft Forms/Customer Voice fallback query flags in `BrowserBoundary` without weakening isolation or write/action guards.
 

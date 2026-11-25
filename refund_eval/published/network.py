@@ -438,7 +438,7 @@ def _anonymous_form_guard_url(url: str) -> str | None:
     the provider serves the form anonymously or accepts a submission.
     """
     parts = urlsplit(url)
-    if (parts.scheme != "https" or parts.netloc not in {"customervoice.microsoft.com", "forms.office.com"}
+    if (parts.scheme != "https" or parts.netloc not in {"customervoice.microsoft.com", "forms.office.com", "forms.cloud.microsoft"}
             or parts.path != "/Pages/ResponsePage.aspx" or parts.fragment):
         return None
     pairs = parse_qsl(parts.query, keep_blank_values=True)
