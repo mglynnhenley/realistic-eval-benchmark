@@ -458,8 +458,11 @@ def _normal(text: str) -> str:
 
 
 def _normal_url(url: str) -> str:
-    value = re.sub(r"^https?://", "", url.strip().casefold())
-    return value.removeprefix("www.").split("#", 1)[0].rstrip("/")
+    value = re.sub(r"^https?://", "", url.strip(), flags=re.IGNORECASE).split("#", 1)[0]
+    authority, *suffix = re.split(r"(?=[/?])", value, maxsplit=1)
+    user_info, at, host = authority.rpartition("@")
+    tail = suffix[0] if suffix else ""
+    return user_info + at + host.casefold().removeprefix("www.") + (tail if "?" in tail else tail.rstrip("/"))
 
 
 def _verified_facts(facts: list[Fact], pages: list[dict[str, Any]]) -> list[Fact]:

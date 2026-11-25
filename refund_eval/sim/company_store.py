@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from refund_eval.scenario.schema import Org, Scenario, load_scenario
+from refund_eval.sim.research import _normal_url
 from refund_eval.world.orgs import parse_address
 
 DEFAULT_ROOT = Path.home() / "refund-eval-data" / "company-store"
@@ -70,11 +71,6 @@ def _only_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
     return {key: value[key] for key in fields if key in value}
 
 
-def _normal_url(url: str) -> str:
-    value = url.strip().casefold() if isinstance(url, str) else ""
-    return re.sub(r"^https?://", "", value).removeprefix("www.").split("#", 1)[0].rstrip("/")
-
-
 def _owned_address(org: Org, value: Any) -> str | None:
     address = parse_address(value) if isinstance(value, str) else None
     if not address:
@@ -129,9 +125,9 @@ def public_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
         result["rules"] = None
 
     pages = {
-        _normal_url(page.get("url", "")): page
+        _normal_url(page["url"]): page
         for page in (result["research"] or {}).get("pages", [])
-        if page.get("url")
+        if isinstance(page.get("url"), str) and page["url"]
     }
     examples = []
     for candidate in entry.get("examples") or []:

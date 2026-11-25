@@ -74,7 +74,7 @@ async def test_live_research_runs_the_tool_loop_then_takes_the_dossier(sim):
 
 
 async def test_live_research_keeps_only_quotes_found_on_their_cited_pages(sim, monkeypatch):
-    source = "https://www.example.test/terms/"
+    source = "https://www.example.test/Terms?item=ABC"
     other = "https://www.example.test/faq"
 
     async def read(url, *, scenario):
@@ -82,11 +82,14 @@ async def test_live_research_keeps_only_quotes_found_on_their_cited_pages(sim, m
         return f"URL: {url}\n\n{text}"
 
     monkeypatch.setattr(research, "_read_page", read)
-    supported = {"statement": "Proof is required.", "quote": "need a receipt", "url": "https://example.test/terms#proof"}
+    supported = {"statement": "Proof is required.", "quote": "need a receipt",
+                 "url": "HTTPS://EXAMPLE.TEST/Terms?item=ABC#proof"}
     proposal = {"summary": "A synthetic service.", "facts": [
         supported,
         {"statement": "Wrong page.", "quote": "within seven days", "url": source},
         {"statement": "Unread page.", "quote": "need a receipt", "url": "https://example.test/unread"},
+        {"statement": "Wrong path case.", "quote": "need a receipt", "url": "https://example.test/terms?item=ABC"},
+        {"statement": "Wrong query case.", "quote": "need a receipt", "url": "https://example.test/Terms?item=abc"},
         {"statement": "Blank quote.", "quote": " ", "url": other},
     ], "persona": {"voice": "Brief."}}
     sim.research_script = [("read_page", {"url": source}), ("read_page", {"url": other}), proposal]
