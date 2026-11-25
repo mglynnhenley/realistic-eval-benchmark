@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 36c2e32310fa84d0ab7a8a506751b6a14fe20822e353591f57453e277fd9b173
+- Trial round: none. Offline checks and free replay only; no paid execution.
+- Changes: Pin Modal sandboxes to `region="uk"` by default in Harbor batch/job preparation (configurable via `modal_region`), and narrowly allow long UK help/contact prose slugs, local Citizens Advice directory contact paths, and public Microsoft Forms/Customer Voice fallback query flags in `BrowserBoundary` without weakening isolation or write/action guards.
+
 ## 9.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 41268c36b2991f94aef7736ef766c87093ffa1194a6f10e6e3ba398388bbaa87
