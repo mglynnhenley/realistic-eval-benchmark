@@ -36,11 +36,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 10.5 — 2026-11-25
+## 10.6 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 8743f5f6f4dd12067052da7f06aed7dc42bdb09c81477bf9a6696ff66a10e5f0
+- Fingerprint: 77f20c57ee7c13b3c51f7bdf2bcc4c7186ab5fc5c366838fa5bf0ce85c4be86b
 - Trial round: none; offline tests only.
 - Changes: block beacon `ping` requests and JSON-looking script-sent bodies that are not one JSON object (newline-delimited analytics batches) as page telemetry instead of answering them as customer forms with a made-up organisation (MAT-225).
+
+## 10.5 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: d8a747cc68c8ccde49026fd6f5a9272a0d1902415587bbcaa5c73b3b5b3c08fa
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Native Harbor records a trial error when the world stops with `model_limit` or `model_request_rejected` (MAT-224).
 
 ## 10.4 — 2026-11-25
 - Kind: trivial batch
