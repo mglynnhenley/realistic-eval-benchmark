@@ -21,11 +21,11 @@ def test_cost_limit_schema_documents_in_process_scope(config_type):
 
 
 @pytest.mark.parametrize("config_type", [RunConfig, TrialSettings])
-def test_late_refund_requires_explicit_cap_and_defaults_to_frozen_40m(config_type):
+def test_late_refund_requires_explicit_cap_and_defaults_to_200m(config_type):
     with pytest.raises(ValidationError, match="explicit cost_limit"):
         config_type(scenario="train_refund_late")
     config = config_type(scenario="train_refund_late", cost_limit=5)
-    assert config.token_budget == 40_000_000
+    assert config.token_budget == 200_000_000
     assert config.research_mode == "auto"
     with pytest.raises(ValidationError, match="explicit cost_limit"):
         config_type()
@@ -108,9 +108,9 @@ def test_task_applies_late_budget_before_constructing_harness(monkeypatch, resea
     monkeypatch.setattr(task_module, "refund_agent", capture)
     kwargs = {} if research_mode is None else {"research_mode": research_mode}
     result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, **kwargs)
-    assert captured["token_budget"] == 40_000_000
+    assert captured["token_budget"] == 200_000_000
     assert captured["research_mode"] == (research_mode or "auto")
-    assert result.metadata["token_budget"] == 40_000_000
+    assert result.metadata["token_budget"] == 200_000_000
     assert result.metadata["research_mode"] == captured["research_mode"]
     assert result.dataset[0].metadata["research_mode"] == captured["research_mode"]
     assert result.cost_limit == 5
@@ -145,3 +145,61 @@ def test_world_service_task_preserves_native_research_metadata(tmp_path, monkeyp
     assert "research_mode" not in task.dataset[0].metadata
     assert "environment_fingerprint" not in task.metadata
     assert "environment_version" not in task.metadata
+
+
+def test_default_late_budget_allows_long_horizon_cached_calls_and_stops_at_200m():
+    from datetime import datetime
+
+    from refund_eval.config import LATE_REFUND_TOKEN_BUDGET
+    from refund_eval.world.state import TargetTokenCall, TargetTokenLedger
+    from refund_eval.world.timeutil import LONDON
+
+    ledger = TargetTokenLedger(budget=LATE_REFUND_TOKEN_BUDGET, model="openrouter/openai/gpt-6-luna")
+    now = datetime(2026, 10, 12, 9, 0, tzinfo=LONDON)
+    for _ in range(1000):
+        ledger.calls.append(TargetTokenCall(
+            time=now, model="openrouter/openai/gpt-6-luna",
+            input_tokens=10, input_tokens_cache_read=37_500, input_tokens_cache_write=4_000,
+            output_tokens=490, total_tokens=42_000, reported_total_tokens=42_000,
+        ))
+    assert ledger.used == 42_000_000
+    assert ledger.remaining == 158_000_000
+    assert ledger.overrun == 0
+    for _ in range(3762):
+        ledger.calls.append(TargetTokenCall(
+            time=now, model="openrouter/openai/gpt-6-luna",
+            input_tokens=10, input_tokens_cache_read=37_500, input_tokens_cache_write=4_000,
+            output_tokens=490, total_tokens=42_000, reported_total_tokens=42_000,
+        ))
+    assert ledger.remaining == 0
+    assert ledger.overrun == 4_000
+
+
+def test_late_refund_resume_without_explicit_budget_leaves_budget_to_saved_ledger(monkeypatch):
+    import importlib
+
+    assert RunConfig(scenario="train_refund_late", cost_limit=5, resume_log="old.eval").token_budget is None
+    assert TrialSettings(scenario="train_refund_late", cost_limit=5, resume_sha256="a" * 64).token_budget is None
+    assert RunConfig(
+        scenario="train_refund_late", cost_limit=5, resume_log="old.eval", token_budget=40_000_000,
+    ).token_budget == 40_000_000
+
+    task_module = importlib.import_module("refund_eval.task")
+    from refund_eval.published import profile
+
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: {"configured": True})
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: "mockllm/model")
+    captured = {}
+    original = task_module.refund_agent
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(task_module, "refund_agent", capture)
+    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, resume_log="old.eval")
+    assert captured.get("token_budget") is None
+    assert result.metadata.get("token_budget") is None
+
+

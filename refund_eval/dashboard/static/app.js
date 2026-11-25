@@ -1392,7 +1392,7 @@
       : "The simulator decides how every organisation and person responds. Companies decide whether claims meet their terms.";
     $("token-budget-required").textContent = lateRefund ? "required" : "optional";
     $("token-budget").required = lateRefund;
-    $("token-budget").placeholder = lateRefund ? "40,000,000 target tokens" : "No target token budget";
+    $("token-budget").placeholder = lateRefund ? "200,000,000 target tokens" : "No target token budget";
     const batch = $("execution").value !== "local";
     $("batch-settings").hidden = !batch;
     $("batch-settings").querySelectorAll("input").forEach((input) => { input.disabled = !batch; });
@@ -1621,7 +1621,7 @@
   });
   $("scenario").addEventListener("change", () => {
     if ($("scenario").value === "train_refund_late") {
-      $("token-budget").value = "40000000";
+      $("token-budget").value = "200000000";
       $("cost-limit").value = "";
       $("batch-trials").value = "1";
       modelCostLimits.clear();

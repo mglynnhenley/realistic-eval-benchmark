@@ -180,7 +180,7 @@ The following is an example comparison configuration, not the defaults of every 
 | --- | --- |
 | Scheduling | Agent-chosen wake-ups, as in every scenario |
 | Trials | 1 per selected model; increase explicitly for repeated trials |
-| Run token budget | 40,000,000 target tokens, cached input included |
+| Run token budget | 200,000,000 target tokens, cached input included |
 | Simulated time | 12 October 2026 09:00 to 4 January 2027 09:00, Europe/London; twelve weeks. |
 | History window | 60,000 tokens |
 | Simulator / judges | Opus 5.5 / Opus 5.5 and GPT-6.1 Sol, with Scout after the trials |

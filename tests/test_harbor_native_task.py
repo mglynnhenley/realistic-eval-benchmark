@@ -1380,7 +1380,7 @@ def test_dataset_metric_and_job(generated):
     job = JobConfig.model_validate(yaml.safe_load((generated / "job.yaml").read_text()))
     [agent] = job.agents
     assert agent.import_path == adapter.AGENT_IMPORT_PATH
-    assert agent.kwargs["cost_limit"] == 150.0 and agent.kwargs["token_budget"] == 40_000_000
+    assert agent.kwargs["cost_limit"] == 150.0 and agent.kwargs["token_budget"] == 200_000_000
     assert agent.env == {"OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"}
     assert not job.verifier.disable
     assert job.retry.max_retries == 0
@@ -1443,7 +1443,7 @@ def test_batch_freezes_one_task_and_the_job_for_all_targets(tmp_path, capsys, mo
         ("openrouter/a", 1.0), ("openrouter/b", 2.0),
     ]
     for agent in job.agents:
-        assert agent.kwargs == {"cost_limit": agent.kwargs["cost_limit"], "token_budget": 40_000_000,
+        assert agent.kwargs == {"cost_limit": agent.kwargs["cost_limit"], "token_budget": 200_000_000,
                                 "time_limit": 120, "history_tokens": 0, "budget_notice": "daily"}
     compose = (task / "environment" / "docker-compose.yaml").read_text()
     world = yaml.safe_load(compose)["services"]["world"]["environment"]

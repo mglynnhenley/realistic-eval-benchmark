@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.0 — 2026-11-25
+- Kind: behaviour round
+- Fingerprint: 36d35a86c488f2fbb9f71170dc0c3d538528ccc0822a733ed222650e386b5bd4
+- Trial round: pending; offline verification and replay only in this PR. Paid rerun coordinated separately via Repro Auditor after review.
+- Changes: Raise default `LATE_REFUND_TOKEN_BUDGET` from 40,000,000 to 200,000,000 target tokens (retaining cached-input accounting and existing simulated-clock rules) so long-horizon `train_refund_late` runs are not stopped early by cached-input re-reads before reaching their simulated horizon (MAT-206).
+
 ## 9.11 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 7e6a73b432250e96b72d31b0d1e62a0cb937c41a4a15c0c27932876ec547a53e
@@ -35,6 +41,7 @@ this was not a second version or trial round.
 - Fingerprint: 892b38ba985f804fa2bf907765cbd278b1547a8293d370ae587d7361316d5a42
 - Trial round: none. Offline checks only; no paid execution.
 - Changes: Use Walthamstow's E17 district in the late-refund user's email alias and matching seed-mail headers; archived scenarios are unchanged (MAT-202).
+
 ## 9.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 41268c36b2991f94aef7736ef766c87093ffa1194a6f10e6e3ba398388bbaa87

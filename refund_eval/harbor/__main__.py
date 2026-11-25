@@ -14,6 +14,7 @@ from refund_eval.config import (
     DEFAULT_GRADER_MODEL,
     DEFAULT_ROLE_MODEL,
     HYBRID_EXA_KEY_ENV,
+    LATE_REFUND_TOKEN_BUDGET,
     SUPABASE_KEY_ENV,
     SUPABASE_URL_ENV,
     resolve_cost_limits,
@@ -306,7 +307,7 @@ def main() -> None:
                         help="Model-visible history in tokens, with a memory tool; 0 shows the full history")
     parser.add_argument("--sim-weeks", type=float, default=argparse.SUPPRESS)
     parser.add_argument("--token-budget", type=int, default=argparse.SUPPRESS,
-                        help="Target tokens including cached input; late-refund defaults to 40000000")
+                        help=f"Target tokens including cached input; late-refund defaults to {LATE_REFUND_TOKEN_BUDGET}")
     parser.add_argument("--budget-notice", choices=list(BUDGET_NOTICES),
                         default=TrialSettings.model_fields["budget_notice"].default,
                         help="With a token budget, show the runtime notice every step, daily, or when low")
