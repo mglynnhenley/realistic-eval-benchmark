@@ -1506,7 +1506,7 @@ def prepare_trial(run_config: Path, out: Path) -> None:
     out = validate_private_output(out)
     if out.exists() and any(out.iterdir()):
         raise SetupFailure("prepare_requires_empty_output_directory")
-    env = {name: os.environ[name] for name in ("PATH", "HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
+    env = {name: os.environ[name] for name in ("PATH", "HOME", "XDG_CACHE_HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
            if name in os.environ}
     env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never", PYTHON_DOTENV_DISABLED="1")
     with TemporaryDirectory(prefix="harbor-prepare-") as scratch:

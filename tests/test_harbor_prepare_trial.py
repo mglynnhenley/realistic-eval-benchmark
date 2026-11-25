@@ -51,9 +51,18 @@ def _args(path, out):
     return ["prepare", "--run-config", str(path), "--prepared-dir", str(out)]
 
 
-def test_offline_prepare_command_packages_and_loads_exact_public_wheel(saved_spec):
+def test_offline_prepare_command_packages_and_loads_exact_public_wheel(saved_spec, monkeypatch):
     path, out, values = saved_spec
     original_spec = path.read_bytes()
+    warmed_cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, text=True, check=True).stdout.strip()
+    python_dir = subprocess.run(["uv", "python", "dir"], capture_output=True, text=True, check=True).stdout.strip()
+    xdg_cache = path.parent / "xdg-cache"
+    xdg_cache.mkdir()
+    (xdg_cache / "uv").symlink_to(warmed_cache, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(path.parent))
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", python_dir)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_cache))
+    monkeypatch.delenv("UV_CACHE_DIR", raising=False)
     result = subprocess.run(
         [str(ROOT / "scripts" / "harbor"), "python", "-m", "scripts.laura_trial", *_args(path, out)],
         cwd=ROOT, check=False, capture_output=True, text=True, timeout=240,
