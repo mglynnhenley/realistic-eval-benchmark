@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path, PurePosixPath
 
-ENVIRONMENT_VERSION = "9.10"
+ENVIRONMENT_VERSION = "9.11"
 ENVIRONMENT_PATHS = (
     "refund_eval/scenario", "refund_eval/companies", "refund_eval/sim",
     "refund_eval/model_pricing.py", "refund_eval/model_io.py", "refund_eval/models", "refund_eval/world", "refund_eval/world_service",

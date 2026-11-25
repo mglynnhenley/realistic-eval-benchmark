@@ -51,6 +51,7 @@ class NativeBatchConfig(RunConfig):
     disable_application_price_cutoffs: bool = False
     disable_verifier: bool = False
     requested_deadline: date | None = None
+    modal_region: str | None = Field(default="uk", min_length=1, pattern=r"^[a-z0-9-]+$")
     shared_allowance_usd: CostCap | None = None
     trial_spend_cap_usd: CostCap | None = None
     key_spend_cap_usd: CostCap | None = None
@@ -223,13 +224,16 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         include={"token_budget", "history_tokens", "budget_notice", "requested_deadline"}, exclude_none=True,
     )
     options["time_limit"] = worker_time_limit
+    environment: dict[str, object] = {"type": config.execution, "delete": True}
+    if config.execution == "modal" and config.modal_region is not None:
+        environment["kwargs"] = {"region": config.modal_region}
     job = {
         "job_name": (f"refund-native-{config.scenario}" if config.suite is None else "refund-native-long-horizon-10"),
         "jobs_dir": str(out / "jobs"),
         "n_attempts": config.trials,
         "n_concurrent_trials": config.concurrency,
         "retry": {"max_retries": 0},
-        "environment": {"type": config.execution, "delete": True},
+        "environment": environment,
         "agents": [
             {"import_path": AGENT_IMPORT_PATH, "model_name": model,
              "kwargs": {**options, "cost_limit": caps[model],
@@ -295,6 +299,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         "effective_enforced_total_time_limit_seconds": None,
         "total_time_limit_enforcement": "not_requested",
         "usage_reporting_mode": config.usage_reporting_mode,
+        **({"modal_region": config.modal_region} if config.execution == "modal" else {}),
     }
     if config.usage_reporting_mode == "usage_only":
         effective_parameters["cost_limit_enforcement"] = "response_reported_observed_not_pre_call"
