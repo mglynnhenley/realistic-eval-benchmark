@@ -1,5 +1,7 @@
 # Parallel trials with Harbor
 
+Harbor execution is shared across all benchmark cases (pass `--scenario` or `"scenario"` in config; see [docs/cases/](cases/README.md) for per-case details, with `train_refund_late` used in the examples below). Two Harbor paths exist: the opt-in [native two-container Harbor task](#native-harbor-task-new) (world sidecar + agent container over MCP) and the legacy single-container batch path still used by the dashboard and existing Harbor launcher.
+
 Exact browser artifact locks currently support local Docker runs only; Harbor
 subprocess and native sidecar builds do not expose an immutable browser artifact
 identity. Native task source and rules identities are recorded from the

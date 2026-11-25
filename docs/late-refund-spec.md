@@ -1,6 +1,6 @@
 # Spec: late refund, agent-chosen wake-ups, token budget
 
-This specification describes the authored late-refund scenario, scheduling rules and target-token budget. It contains no trial results. For launch commands and a fixed example configuration, see [the run guide](running.md#prepare-the-muse-configuration). The scenario's source is [train_refund_late.yaml](../refund_eval/scenario/train_refund_late.yaml).
+This specification is the detailed requirements and traceability document for the late-refund case (`train_refund_late`), along with its scheduling rules and target-token budget. For the short per-case summary, see [docs/cases/late-refund.md](cases/late-refund.md); shared platform behaviour (Harbor, world service, tools and network containment) is documented once in [architecture.md](architecture.md), [harbor.md](harbor.md) and [running.md](running.md). This spec contains no trial results. For launch commands and a fixed example configuration, see [the run guide](running.md#prepare-the-muse-configuration). The scenario's source is [train_refund_late.yaml](../refund_eval/scenario/train_refund_late.yaml).
 
 ## Summary
 
