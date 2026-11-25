@@ -3049,8 +3049,10 @@ def test_world_url_comes_from_the_tasks_mcp_server(tmp_path):
 def test_scripted_parity_agent_runs_inspect_through_its_script(tmp_path):
     from refund_eval.parity.harbor_agent import ScriptedRefundAgent
 
-    command = ScriptedRefundAgent(logs_dir=tmp_path / "t__abc" / "agent", model_name="mockllm/model",
-                                  mcp_servers=WORLD, script="turn_cap", cost_limit=1).inspect_command()
+    agent = ScriptedRefundAgent(logs_dir=tmp_path / "t__abc" / "agent", model_name="mockllm/model",
+                               mcp_servers=WORLD, script="turn_cap", cost_limit=1)
+    command = agent.inspect_command()
+    assert agent.inspect_command(None) == command
     assert ('/app/.venv/bin/python -m refund_eval.parity.inspect_cli turn_cap eval '
             '"$(/app/.venv/bin/python -c \'import os, refund_eval.task; '
             'print(os.path.relpath(refund_eval.task.__file__, os.getcwd()))\')" ') in command

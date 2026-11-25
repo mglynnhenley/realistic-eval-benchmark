@@ -28,10 +28,10 @@ class ScriptedRefundAgent(RefundInstalledAgent):
     def name() -> str:
         return "refund-inspect-world-scripted"
 
-    def inspect_command(self) -> str:
+    def inspect_command(self, instruction: str | None = None) -> str:
         if not (self.model_name or "").startswith("mockllm/"):
             raise ValueError("The scripted agent needs a mockllm target")
-        command = super().inspect_command()
+        command = super().inspect_command(instruction)
         run = f"{INSPECT} eval "
         if command.count(run) != 1:
             raise ValueError("Unexpected installed agent command")
