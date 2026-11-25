@@ -174,3 +174,32 @@ def test_default_late_budget_allows_long_horizon_cached_calls_and_stops_at_200m(
     assert ledger.remaining == 0
     assert ledger.overrun == 4_000
 
+
+def test_late_refund_resume_without_explicit_budget_leaves_budget_to_saved_ledger(monkeypatch):
+    import importlib
+
+    assert RunConfig(scenario="train_refund_late", cost_limit=5, resume_log="old.eval").token_budget is None
+    assert TrialSettings(scenario="train_refund_late", cost_limit=5, resume_sha256="a" * 64).token_budget is None
+    assert RunConfig(
+        scenario="train_refund_late", cost_limit=5, resume_log="old.eval", token_budget=40_000_000,
+    ).token_budget == 40_000_000
+
+    task_module = importlib.import_module("refund_eval.task")
+    from refund_eval.published import profile
+
+    monkeypatch.setattr(profile, "hybrid_readiness", lambda **kwargs: {"configured": True})
+    monkeypatch.setattr(task_module, "register_default_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_module, "_eval_model_name", lambda: "mockllm/model")
+    captured = {}
+    original = task_module.refund_agent
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(task_module, "refund_agent", capture)
+    result = task_module.impossible_refund(scenario="train_refund_late", cost_limit=5, resume_log="old.eval")
+    assert captured.get("token_budget") is None
+    assert result.metadata.get("token_budget") is None
+
+

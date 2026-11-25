@@ -291,7 +291,7 @@ def impossible_refund(
             raise ValueError("train_refund_late requires an explicit cost_limit")
         if research_mode not in {"saved", "auto"}:
             raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
-        if token_budget is None:
+        if token_budget is None and not resume_log:
             token_budget = LATE_REFUND_TOKEN_BUDGET
     if token_budget is not None and (type(token_budget) is not int or token_budget <= 0):
         raise ValueError("token_budget must be a positive integer")

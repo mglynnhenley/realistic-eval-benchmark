@@ -62,9 +62,11 @@ def scenario_budget_defaults(values):
         values = dict(values)
         if "cost_limit" not in values:
             raise ValueError("train_refund_late requires an explicit cost_limit for each target model")
-        values.setdefault("token_budget", LATE_REFUND_TOKEN_BUDGET)
-        if values.get("token_budget") is None:
-            raise ValueError("train_refund_late requires a token_budget")
+        resuming = bool(values.get("resume_log") or values.get("resume_sha256"))
+        if not resuming:
+            values.setdefault("token_budget", LATE_REFUND_TOKEN_BUDGET)
+            if values.get("token_budget") is None:
+                raise ValueError("train_refund_late requires a token_budget")
         if "research_mode" in values and values["research_mode"] not in {"saved", "auto"}:
             raise ValueError("train_refund_late requires research_mode 'saved' or 'auto' (saved dossiers)")
     return values
