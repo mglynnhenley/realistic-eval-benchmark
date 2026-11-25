@@ -24,6 +24,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 9.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 892b38ba985f804fa2bf907765cbd278b1547a8293d370ae587d7361316d5a42
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Use Walthamstow's E17 district in the late-refund user's email alias and matching seed-mail headers; archived scenarios are unchanged (MAT-202).
+
 ## 9.9 — 2026-11-24
 - Kind: trivial batch
 - Fingerprint: 41268c36b2991f94aef7736ef766c87093ffa1194a6f10e6e3ba398388bbaa87
