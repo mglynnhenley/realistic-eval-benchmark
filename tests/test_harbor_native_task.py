@@ -1145,6 +1145,61 @@ def test_usage_only_can_disable_application_price_cutoffs_under_shared_caps(
     assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
 
 
+def test_shared_caps_and_shared_roles_allow_per_run_target_cap_while_keeping_100_world_ceiling(
+        tmp_path, approved_split_budget_wheel):
+    wheel, digest = approved_split_budget_wheel
+    base = {
+        "scenario": "train_refund_late", "execution": "modal", "data_mode": "hybrid", "research_mode": "auto",
+        "model": "openrouter/target", "simulator_model": "openrouter/simulator", "grader_model": "openrouter/grader",
+        "max_turns": 3000, "sim_weeks": 365 / 7, "time_limit": 36000, "agent_max_output_tokens": 4096,
+        "trials": 1, "concurrency": 1, "agent_wheel": wheel, "agent_wheel_sha256": digest,
+    }
+
+    caps_out = tmp_path / "shared-caps-250"
+    caps_config = batch.NativeBatchConfig(
+        **base, cost_limit=250, world_cost_limit=100, openrouter_key_mode="shared_caps",
+        usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    )
+    caps_record = json.loads(batch.prepare(caps_out, caps_config).read_text(encoding="utf-8"))
+    assert caps_record["shared_caps_guard_role_limits_usd"] == {"agent": 250, "world": 100}
+    assert caps_record["effective_parameters"]["shared_aggregate_ceiling_usd"] == "350"
+    caps_manifest = tmp_path / "shared-caps-250-manifest.json"
+    assert laura_trial_main(["save", "--config", str(caps_out / "job.yaml"), "--manifest", str(caps_manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(caps_manifest)]) == 0
+
+    roles_out = tmp_path / "shared-roles-250"
+    roles_config = batch.NativeBatchConfig(
+        **base, cost_limit=250, world_cost_limit=100, openrouter_key_mode="shared_roles",
+        shared_allowance_usd=275,
+    )
+    roles_record = json.loads(batch.prepare(roles_out, roles_config).read_text(encoding="utf-8"))
+    assert roles_record["effective_parameters"]["role_caps_usd"] == {"target": "250.0", "world": "100.0"}
+    assert roles_record["effective_parameters"]["shared_allowance_usd"] == "275.0"
+    roles_manifest = tmp_path / "shared-roles-250-manifest.json"
+    assert laura_trial_main(["save", "--config", str(roles_out / "job.yaml"), "--manifest", str(roles_manifest)]) == 0
+    assert laura_trial_main(["verify", "--manifest", str(roles_manifest)]) == 0
+
+    high_roles_config = batch.NativeBatchConfig(
+        **base, cost_limit=950, world_cost_limit=100, openrouter_key_mode="shared_roles",
+        shared_allowance_usd=1050,
+    )
+    assert high_roles_config.shared_allowance_usd == 1050
+
+    with pytest.raises(ValueError, match=r"world cap exceeds supported \$100 ceiling"):
+        batch.NativeBatchConfig(
+            **base, cost_limit=250, world_cost_limit=101, openrouter_key_mode="shared_caps",
+        )
+    with pytest.raises(ValueError, match=r"world cap exceeds supported \$100 ceiling"):
+        batch.NativeBatchConfig(
+            **base, cost_limit=250, world_cost_limit=101, openrouter_key_mode="shared_roles",
+            shared_allowance_usd=275,
+        )
+    with pytest.raises(ValueError, match=r"exceed supported \$50/\$100 ceilings"):
+        batch.NativeBatchConfig(
+            **base, cost_limit=51, world_cost_limit=100, openrouter_key_mode="split",
+        )
+
+
 @pytest.mark.parametrize("stale_source", [
     "refund_eval/task.py",
     "refund_eval/agent/prompt.py",

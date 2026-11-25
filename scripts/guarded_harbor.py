@@ -57,6 +57,7 @@ from refund_eval.harbor.private_traces import (
 )
 from refund_eval.models.shared_role_spend_ledger import (
     SHARED_CAPS_HEADROOM_BOUND_ENV,
+    WORLD_ROLE_CAP_CEILING_USD,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedgerError,
 )
@@ -501,10 +502,10 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             role_config = SharedRoleBudgetConfig.from_json(role_config_raw)
         except (KeyError, InvalidOperation, ValueError, TypeError, SharedRoleSpendLedgerError):
             raise LauncherFailure("shared_roles agent caps or budget configuration are invalid") from None
-        if (not cap.is_finite() or cap <= 0 or cap > 50 or cap != declared_cap or output_cap <= 0
+        if (not cap.is_finite() or cap <= 0 or cap != declared_cap or output_cap <= 0
                 or role_config.role_limits_usd["target"] != cap
-                or (shared_caps and (cap != 50 or role_config.role_limits_usd["world"] != 100
-                    or not Decimal(0) < role_config.allowance_usd <= Decimal(150)))):
+                or (shared_caps and (role_config.role_limits_usd["world"] != WORLD_ROLE_CAP_CEILING_USD
+                    or not Decimal(0) < role_config.allowance_usd <= cap + WORLD_ROLE_CAP_CEILING_USD))):
             raise LauncherFailure("shared-role target cap or output bound is invalid")
         expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
                               "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
@@ -628,13 +629,14 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             allowance = Decimal(str(metadata["shared_allowance_usd"]))
             declared_agent = Decimal(str(agent_env["REFUND_EVAL_AGENT_DOLLAR_CAP"]))
             output_tokens = agent_env["REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS"]
-            if (not world_cap.is_finite() or world_cap <= 0 or world_cap > 100
+            if (not world_cap.is_finite() or world_cap <= 0 or world_cap > WORLD_ROLE_CAP_CEILING_USD
                     or target_cap != declared_agent or target_cap != role_config.role_limits_usd["target"]
                     or world_cap != role_config.role_limits_usd["world"]
                     or (shared_roles and (allowance != role_config.allowance_usd
-                        or allowance > min(Decimal(150), target_cap + world_cap)))
-                    or (shared_caps and (allowance != Decimal(150) or target_cap != 50 or world_cap != 100
-                        or not Decimal(0) < role_config.allowance_usd <= Decimal(150)))
+                        or allowance > target_cap + world_cap))
+                    or (shared_caps and (allowance != target_cap + world_cap
+                        or world_cap != WORLD_ROLE_CAP_CEILING_USD
+                        or not Decimal(0) < role_config.allowance_usd <= target_cap + world_cap))
                     or (shared_caps and expected_shared_caps_allowance is not None
                         and role_config.allowance_usd != expected_shared_caps_allowance)
                     or metadata.get("scenario") != role_config.scenario or metadata.get("scenario") != "train_refund_late"

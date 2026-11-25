@@ -113,8 +113,8 @@ class SharedRoleThresholds:
             allowance = _money(self.shared_allowance_usd)
         except ValueError:
             raise ValueError("Shared-role allowance must be finite and nonnegative") from None
-        if allowance <= 0 or allowance > Decimal(150):
-            raise ValueError("Shared-role allowance must be positive and no greater than $150")
+        if allowance <= 0:
+            raise ValueError("Shared-role allowance must be positive")
         for value in (self.probe_timeout, self.poll_interval, self.max_sample_age, self.cleanup_timeout):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
                 raise ValueError("guard timeouts and intervals must be finite and positive")
@@ -130,12 +130,17 @@ class SharedCapsThresholds:
     max_sample_age: float = 35.0
     cleanup_timeout: float = 10.0
     disable_application_price_cutoffs: bool = False
+    aggregate_ceiling_usd: Decimal = Decimal(150)
 
     def __post_init__(self) -> None:
         if not isinstance(self.disable_application_price_cutoffs, bool):
             raise TypeError("disable_application_price_cutoffs must be a boolean")
-        SharedRoleThresholds(Decimal(150), self.probe_timeout, self.poll_interval,
-                             self.max_sample_age, self.cleanup_timeout)
+        validated = SharedRoleThresholds(
+            self.aggregate_ceiling_usd, self.probe_timeout, self.poll_interval,
+            self.max_sample_age, self.cleanup_timeout,
+        )
+        normalized = Decimal(format(validated.shared_allowance_usd.normalize(), "f"))
+        object.__setattr__(self, "aggregate_ceiling_usd", normalized)
 
 
 _OPENROUTER_BUDGET_SCOPES = frozenset({
@@ -800,7 +805,7 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
         self.effective_allowance_usd: Decimal | None = None
         self._provider_controls: tuple[object, ...] | None = None
         role_thresholds = SharedRoleThresholds(
-            Decimal(150), thresholds.probe_timeout, thresholds.poll_interval,
+            thresholds.aggregate_ceiling_usd, thresholds.probe_timeout, thresholds.poll_interval,
             thresholds.max_sample_age, thresholds.cleanup_timeout,
         )
         super().__init__(role_thresholds, openrouter_probe=openrouter_probe, clock=clock)
@@ -862,7 +867,7 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
                         or budget.spend + budget.remaining > budget.limit + _MONEY_EPSILON):
                     raise GuardFailure("OpenRouter budget metadata is malformed")
                 headroom.append(budget.remaining)
-            allowance = min(Decimal(150), *headroom)
+            allowance = min(self.shared_caps_thresholds.aggregate_ceiling_usd, *headroom)
             if allowance <= 0:
                 raise GuardFailure("shared_caps has no positive verified key headroom")
             self.effective_allowance_usd = allowance
@@ -885,7 +890,7 @@ class SharedCapsSpendGuard(SharedRoleSpendGuard):
             return None
         return parameters | {
             "shared_allowance_source": "verified_key_headroom",
-            "shared_aggregate_ceiling_usd": "150",
+            "shared_aggregate_ceiling_usd": str(self.shared_caps_thresholds.aggregate_ceiling_usd),
         }
 
 

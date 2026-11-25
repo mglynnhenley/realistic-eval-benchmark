@@ -39,6 +39,7 @@ from refund_eval.config import resolve_cost_limits
 from refund_eval.harbor import adapter, batch
 from refund_eval.models.shared_role_spend_ledger import (
     SHARED_CAPS_HEADROOM_BOUND_ENV,
+    WORLD_ROLE_CAP_CEILING_USD,
     SharedRoleBudgetConfig,
     SharedRoleSpendLedgerError,
 )
@@ -747,7 +748,7 @@ def _guard_parameters(
             }
         return common | {
             "openrouter_key_mode": "shared_caps",
-            "shared_aggregate_ceiling_usd": "150",
+            "shared_aggregate_ceiling_usd": str(thresholds.aggregate_ceiling_usd),
             "shared_allowance_source": "verified_key_headroom",
             "runtime_metadata_confirmed": False,
         }
@@ -811,7 +812,10 @@ def _shared_role_thresholds(args: argparse.Namespace, allowance: Any) -> SharedR
 
 
 def _shared_caps_thresholds(
-    args: argparse.Namespace, *, disable_application_price_cutoffs: bool = False
+    args: argparse.Namespace,
+    *,
+    disable_application_price_cutoffs: bool = False,
+    aggregate_ceiling_usd: Decimal = Decimal(150),
 ) -> SharedCapsThresholds:
     if args.openrouter_key_ceiling is not None or args.openrouter_trial_delta is not None:
         raise SetupFailure("shared_caps_rejects_operator_allowance_flags")
@@ -819,6 +823,7 @@ def _shared_caps_thresholds(
         probe_timeout=args.probe_timeout, poll_interval=args.poll_interval,
         max_sample_age=args.max_sample_age, cleanup_timeout=args.cleanup_timeout,
         disable_application_price_cutoffs=disable_application_price_cutoffs,
+        aggregate_ceiling_usd=aggregate_ceiling_usd,
     )
 
 
@@ -878,10 +883,10 @@ def _native_effective_parameters(
             assert isinstance(thresholds, SharedRoleThresholds)
             allowance = _amount(config.shared_allowance_usd)
             if (allowance is None or allowance != thresholds.shared_allowance_usd
-                    or allowance > min(Decimal(150), agent_cost + world_cost)):
+                    or allowance > agent_cost + world_cost):
                 raise SetupFailure("shared_roles_allowance_does_not_match_role_caps")
-        if shared_caps and (agent_cost != 50 or world_cost != 100):
-            raise SetupFailure("shared_caps_requires_50_target_and_100_world_caps")
+        if shared_caps and (agent_cost <= 0 or world_cost != WORLD_ROLE_CAP_CEILING_USD):
+            raise SetupFailure("shared_caps_requires_positive_target_and_100_world_caps")
     else:
         assert isinstance(thresholds, Thresholds)
         runtime_delta = thresholds.openrouter_trial_delta
@@ -953,7 +958,7 @@ def _native_effective_parameters(
             effective.update({
                 "openrouter_key_mode": "shared_caps",
                 "agent_max_output_tokens": config.agent_max_output_tokens,
-                "shared_aggregate_ceiling_usd": "150",
+                "shared_aggregate_ceiling_usd": str(thresholds.aggregate_ceiling_usd),
                 "shared_allowance_source": "verified_key_headroom",
                 "role_caps_usd": {"target": str(agent_cost), "world": str(world_cost)},
                 "runtime_metadata_confirmed": False,
@@ -1212,7 +1217,8 @@ def _saved_effective_parameters(
             assert isinstance(thresholds, SharedRoleThresholds)
             allowance_matches = shared_config.allowance_usd == thresholds.shared_allowance_usd
         else:
-            allowance_matches = shared_config.allowance_usd == Decimal(150)
+            assert isinstance(thresholds, SharedCapsThresholds)
+            allowance_matches = shared_config.allowance_usd == thresholds.aggregate_ceiling_usd
         declared_agent = _amount(agent_env.get("REFUND_EVAL_AGENT_DOLLAR_CAP"))
         raw_output = agent_env.get("REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS")
         if isinstance(raw_output, str) and raw_output.isdecimal():
@@ -1225,7 +1231,8 @@ def _saved_effective_parameters(
                 or shared_config.role_limits_usd["world"] != world_amount
                 or not allowance_matches
                 or _amount(task_metadata.get("shared_allowance_usd")) != shared_config.allowance_usd
-                or (shared_caps and (agent_amount != 50 or world_amount != 100))
+                or (shared_caps and (world_amount != WORLD_ROLE_CAP_CEILING_USD
+                    or agent_amount + world_amount != thresholds.aggregate_ceiling_usd))
                 or agent_output_tokens is None or agent_output_tokens <= 0):
             raise SetupFailure("saved_shared_role_scope_or_caps_mismatch")
     if split:
@@ -1316,7 +1323,7 @@ def _saved_effective_parameters(
             effective.update({
                 "openrouter_key_mode": "shared_caps",
                 "agent_max_output_tokens": agent_output_tokens,
-                "shared_aggregate_ceiling_usd": "150",
+                "shared_aggregate_ceiling_usd": str(thresholds.aggregate_ceiling_usd),
                 "shared_allowance_source": "verified_key_headroom",
                 "role_caps_usd": {"target": _amount_text(agent_amount), "world": _amount_text(world_amount)},
                 "runtime_metadata_confirmed": False,
@@ -1327,7 +1334,7 @@ def _saved_effective_parameters(
 
 
 def _bind_shared_caps_allowance(config: JobConfig, allowance: Decimal) -> None:
-    if not allowance.is_finite() or not Decimal(0) < allowance <= Decimal(150):
+    if not allowance.is_finite() or allowance <= Decimal(0):
         raise SetupFailure("shared_caps_verified_allowance_invalid")
     if len(config.tasks) != 1 or not config.tasks[0].path:
         raise SetupFailure("shared_caps_task_unavailable")
@@ -1632,10 +1639,17 @@ def main(argv: list[str] | None = None) -> int:
                     raise SetupFailure("saved_shared_role_config_invalid") from None
                 thresholds = _shared_role_thresholds(args, role_config.allowance_usd)
             elif shared_caps:
+                try:
+                    role_config = SharedRoleBudgetConfig.from_json(agent_env["REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"])
+                except (KeyError, SharedRoleSpendLedgerError):
+                    raise SetupFailure("saved_shared_role_config_invalid") from None
                 thresholds = _shared_caps_thresholds(
                     args,
                     disable_application_price_cutoffs=(
                         world_env.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS") == "true"
+                    ),
+                    aggregate_ceiling_usd=(
+                        role_config.role_limits_usd["target"] + role_config.role_limits_usd["world"]
                     ),
                 )
             else:
@@ -1656,8 +1670,16 @@ def main(argv: list[str] | None = None) -> int:
             elif native_config.openrouter_key_mode == "shared_roles":
                 thresholds = _shared_role_thresholds(args, native_config.shared_allowance_usd)
             elif native_config.openrouter_key_mode == "shared_caps":
+                targets = _native_targets(native_config)
+                costs = resolve_cost_limits(native_config.cost_limit, targets, scenario=native_config.scenario)
+                agent_cost = _amount(costs[targets[0]])
+                world_cost = _amount(native_config.world_cost_limit)
+                if agent_cost is None or world_cost is None:
+                    raise SetupFailure("native_cost_limits_must_be_finite")
                 thresholds = _shared_caps_thresholds(
-                    args, disable_application_price_cutoffs=native_config.disable_application_price_cutoffs
+                    args,
+                    disable_application_price_cutoffs=native_config.disable_application_price_cutoffs,
+                    aggregate_ceiling_usd=agent_cost + world_cost,
                 )
             else:
                 thresholds = _shared_thresholds(args)
