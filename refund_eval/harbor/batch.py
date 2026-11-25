@@ -25,7 +25,10 @@ from refund_eval.harbor.adapter import (
     verify_suite_task_wheel,
     write_task,
 )
-from refund_eval.models.shared_role_spend_ledger import SHARED_CAPS_HEADROOM_BOUND_ENV
+from refund_eval.models.shared_role_spend_ledger import (
+    SHARED_CAPS_HEADROOM_BOUND_ENV,
+    WORLD_ROLE_CAP_CEILING_USD,
+)
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import scenario_names
 
@@ -113,16 +116,20 @@ class NativeBatchConfig(RunConfig):
                 raise ValueError(f"{mode} mode requires OpenRouter models for all roles")
             agent = Decimal(str(resolve_cost_limits(self.cost_limit, targets, scenario=self.scenario)[targets[0]]))
             world = Decimal(str(self.world_cost_limit))
-            if agent <= 0 or agent > 50 or world <= 0 or world > 100:
-                raise ValueError(f"{mode} role caps exceed supported $50/$100 ceilings")
-            if mode == "shared_caps" and (agent != 50 or world != 100):
-                raise ValueError("shared_caps mode requires $50 target and $100 world role caps")
+            if mode == "split":
+                if agent <= 0 or agent > 50 or world <= 0 or world > 100:
+                    raise ValueError(f"{mode} role caps exceed supported $50/$100 ceilings")
+            else:
+                if agent <= 0 or world <= 0 or world > WORLD_ROLE_CAP_CEILING_USD:
+                    raise ValueError(f"{mode} world cap exceeds supported ${WORLD_ROLE_CAP_CEILING_USD} ceiling")
+            if mode == "shared_caps" and world != WORLD_ROLE_CAP_CEILING_USD:
+                raise ValueError(f"shared_caps mode requires a ${WORLD_ROLE_CAP_CEILING_USD} world role cap")
             if mode == "shared_roles":
                 if self.shared_allowance_usd is None:
                     raise ValueError("shared_roles mode requires shared_allowance_usd")
                 allowance = Decimal(str(self.shared_allowance_usd))
-                if allowance <= 0 or allowance > min(Decimal(150), agent + world):
-                    raise ValueError("shared_allowance_usd must be positive and no greater than the role caps or $150")
+                if allowance <= 0 or allowance > agent + world:
+                    raise ValueError("shared_allowance_usd must be positive and no greater than the role caps")
             elif "shared_allowance_usd" in self.model_fields_set:
                 raise ValueError("shared_allowance_usd is only valid in shared_roles mode")
         elif self.agent_max_output_tokens is not None:
@@ -175,7 +182,11 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
     shared_role_budget_config = None
     shared_allowance = None
     if config.openrouter_key_mode in {"shared_roles", "shared_caps"}:
-        shared_allowance = config.shared_allowance_usd if config.openrouter_key_mode == "shared_roles" else Decimal(150)
+        shared_allowance = (
+            config.shared_allowance_usd
+            if config.openrouter_key_mode == "shared_roles"
+            else Decimal(format((Decimal(str(caps[targets[0]])) + Decimal(str(config.world_cost_limit))).normalize(), "f"))
+        )
         shared_role_budget_config = json.dumps({
             "schema_version": 1,
             "shared_allowance_usd": str(shared_allowance),
@@ -334,7 +345,7 @@ def prepare(out: Path, config: NativeBatchConfig) -> Path:
         effective_parameters.update({
             "openrouter_key_mode": "shared_caps",
             "agent_max_output_tokens": config.agent_max_output_tokens,
-            "shared_aggregate_ceiling_usd": "150",
+            "shared_aggregate_ceiling_usd": str(shared_allowance),
             "shared_allowance_source": "verified_key_headroom",
             "runtime_metadata_confirmed": False,
         })

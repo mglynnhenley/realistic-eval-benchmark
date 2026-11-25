@@ -579,3 +579,42 @@ def test_shared_caps_concurrency_and_unknown_retry_preserve_derived_hold(tmp_pat
     with pytest.raises(SharedRoleSpendLedgerError, match="unresolved hold"):
         second.reserve("world", str(uuid4()), "b" * 64, "1")
     assert Decimal(first.snapshot()["aggregate_reserved_usd"]) == Decimal(40)
+
+
+def test_shared_role_budget_config_allows_per_run_target_cap_and_keeps_100_world_ceiling():
+    config = _config(allowance="350", target="250", world="100")
+    assert config.role_limits_usd == {"target": Decimal(250), "world": Decimal(100)}
+    assert config.allowance_usd == Decimal(350)
+
+    higher = _config(allowance="500", target="400", world="100")
+    assert higher.role_limits_usd["target"] == Decimal(400)
+    assert higher.allowance_usd == Decimal(500)
+
+    with pytest.raises(SharedRoleSpendLedgerError, match=r"world cap exceeds its \$100 ceiling"):
+        _config(allowance="200", target="250", world="101")
+
+    with pytest.raises(SharedRoleSpendLedgerError, match="no greater than the role caps"):
+        _config(allowance="351", target="250", world="100")
+
+
+def test_shared_caps_uses_per_run_aggregate_ceiling_from_thresholds():
+    async def probe():
+        return _shared_caps_key_metadata(limit=500, remaining=400, budget_remaining=380, budget_limit=500)
+
+    guard = SharedCapsSpendGuard(
+        SharedCapsThresholds(
+            probe_timeout=0.1, poll_interval=0.1, max_sample_age=1, aggregate_ceiling_usd=Decimal(350),
+        ),
+        openrouter_probe=probe,
+    )
+
+    async def run():
+        await guard.start()
+        parameters = guard.sanitized_effective_parameters()
+        await guard.close()
+        return parameters
+
+    parameters = asyncio.run(run())
+    assert parameters["shared_allowance_usd"] == "350"
+    assert parameters["shared_aggregate_ceiling_usd"] == "350"
+

@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.3 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 960dea698923edcb4c81a046e97266a485ccdafb0bd8d87c6da0ec6700684919
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Allow shared-cost (`shared_roles` and `shared_caps`) runs to define the target model cap per run via `cost_limit` (with aggregate ceiling `target + world`) instead of a hard-coded $50 target ceiling, while keeping the simulator/world cap ceiling at $100 (MAT-221).
+
 ## 10.2 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 377dd6f90f8c3bba7b29db5d857e857e831189dd37765f13617cb1c6af0bc594

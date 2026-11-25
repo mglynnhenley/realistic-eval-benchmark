@@ -24,6 +24,7 @@ LEDGER_FILE = "role-spend-ledger.json"
 CONFIG_ENV = "REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG"
 SHARED_CAPS_HEADROOM_BOUND_ENV = "REFUND_EVAL_SHARED_CAPS_HEADROOM_BOUND"
 ROLES = ("target", "world")
+WORLD_ROLE_CAP_CEILING_USD = Decimal(100)
 _VERSION = 1
 
 
@@ -69,14 +70,16 @@ class SharedRoleBudgetConfig:
         limits = {role: _amount(role_limits_usd.get(role), f"{role} limit") for role in ROLES}
         if set(role_limits_usd) != set(ROLES) or any(value <= 0 for value in limits.values()):
             raise SharedRoleSpendLedgerError("Shared-role caps must define positive target and world limits")
-        if allowance <= 0 or allowance > sum(limits.values()) or allowance > Decimal(150):
-            raise SharedRoleSpendLedgerError("Shared allowance must be positive and no greater than the role caps or $150")
+        if allowance <= 0 or allowance > sum(limits.values()):
+            raise SharedRoleSpendLedgerError("Shared allowance must be positive and no greater than the role caps")
         expected_models = {"target", "simulator", "grader"}
         if (not isinstance(scenario, str) or not scenario or set(models) != expected_models
                 or any(not isinstance(value, str) or not value.startswith("openrouter/") for value in models.values())):
             raise SharedRoleSpendLedgerError("Shared-role ledger scope is invalid")
-        if limits["target"] > Decimal(50) or limits["world"] > Decimal(100):
-            raise SharedRoleSpendLedgerError("Shared-role caps exceed their $50/$100 ceilings")
+        if limits["world"] > WORLD_ROLE_CAP_CEILING_USD:
+            raise SharedRoleSpendLedgerError(
+                f"Shared-role world cap exceeds its ${WORLD_ROLE_CAP_CEILING_USD} ceiling"
+            )
         self.allowance_usd = allowance
         self.role_limits_usd = limits
         self.scenario = scenario

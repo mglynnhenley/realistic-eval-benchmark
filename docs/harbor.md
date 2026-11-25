@@ -582,15 +582,16 @@ the canonical scenario, world facts, or company refund window. Omitting it
 preserves the existing task wording.
 
 `openrouter_key_mode: "shared_roles"` is a separate native Modal mode for one ordinary
-`OPENROUTER_API_KEY`. It keeps the target and world request ceilings separate (at most `$50`
-and `$100`) and requires an explicit positive `shared_allowance_usd` (`H`) no greater than
-their sum or `$150`. For example, target `$50`, world `$100`, and `H = $90` leaves the role
-ceilings at `$50`/`$100`; it does **not** raise the shared allocation to `$150`. The task stops
-before dispatch when its next bounded reservation would exceed either the relevant role cap
-or `H`. Roles share the aggregate allowance; neither role has an earmarked allocation.
+`OPENROUTER_API_KEY`. It defines the target cap per run via `cost_limit` while keeping the
+world request ceiling at most `$100`, and requires an explicit positive `shared_allowance_usd`
+(`H`) no greater than their sum (`target + world`). For example, target `$50`, world `$100`,
+and `H = $90` leaves the role ceilings at `$50`/`$100`; it does **not** raise the shared
+allocation to `$150`. The task stops before dispatch when its next bounded reservation would
+exceed either the relevant role cap or `H`. Roles share the aggregate allowance; neither role
+has an earmarked allocation.
 
 `H` is the operator-verified allocation available to this task after other known commitments,
-not a claim that the account is funded for `$150` or that the provider has reserved this amount.
+not a claim that the account is funded for `target + world` or that the provider has reserved this amount.
 The guarded launcher uses one fresh ordinary-key metadata baseline and requires enough finite
 `limit_remaining` plus any applicable finite budget/effective-budget remainder. It rejects
 resetting or unsupported metadata. `/api/v1/key` is a runtime limit check, not proof of account
@@ -606,12 +607,13 @@ checked before the metadata probe.
 
 ### Headroom-derived shared caps (`shared_caps`)
 
-`openrouter_key_mode: "shared_caps"` is a separate opt-in native Modal mode with fixed `$50`
-target and `$100` world role caps and a `$150` aggregate ceiling. Before creating a Harbor job,
+`openrouter_key_mode: "shared_caps"` is a separate opt-in native Modal mode that defines the
+target role cap per run via `cost_limit`, keeps the `$100` world role cap, and sets the run's
+aggregate ceiling to their sum (`target + world`). Before creating a Harbor job,
 the guarded launcher requires a verified finite `limit_remaining` and derives one immutable
-run allowance `H = min($150, key headroom, each applicable finite budget/effective-budget
+run allowance `H = min(target + world, key headroom, each applicable finite budget/effective-budget
 remainder)`. Missing, null/unlimited, malformed, resettable, zero, or otherwise unverifiable
-headroom refuses the run; `$150` is only a ceiling, not evidence of available funds. The derived
+headroom refuses the run; the aggregate ceiling is only a cap, not evidence of available funds. The derived
 `H` is bound to a run-only copy of the task, leaving the saved setup manifest unchanged. The
 existing atomic target/world reservation ledger and strict pre-call paths enforce the role and
 aggregate caps. `requested_deadline` may be set independently for this mode as for `shared_roles`.
@@ -633,7 +635,7 @@ threshold or after an unknown charge. A single prepared run can instead set
 disables both application-level price cutoffs while retaining response records, zero retries, and the
 ordinary provider-key control checks rather than a monetary headroom precondition. Non-price provider
 failures remain failures. The configured
-`$50`/`$100` values remain in the guarded role metadata but are not runtime application cutoffs in
+target/world role cap values remain in the guarded role metadata but are not runtime application cutoffs in
 this opt-in mode; provider/account limits and finite workload and privacy controls are unchanged.
 
 ## Ten-task rail and bills suite
