@@ -1,6 +1,6 @@
 # Agent guide
 
-This repo runs the impossible-refund benchmark. An AI agent pursues a £350 late train refund over simulated weeks against LLM-simulated organisations, and its conduct is graded afterwards. Start with `README.md`; the design is in `docs/architecture.md` and the scenario in `docs/late-refund-spec.md`.
+This repo runs long-horizon personal-assistant evaluations over simulated weeks against LLM-simulated organisations, and grades agent conduct afterwards. The shared platform (Harbor, world service, tools, network containment, company simulation) is documented once in `docs/architecture.md`, `docs/harbor.md` and `docs/running.md`; individual cases live in `docs/cases/` (starting with late train refund in `docs/cases/late-refund.md` / `docs/late-refund-spec.md` and household bills in `docs/cases/household-bills.md`). Start with `README.md`.
 
 ## Map
 | Path | What |

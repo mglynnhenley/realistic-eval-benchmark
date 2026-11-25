@@ -1,6 +1,6 @@
 # Running the benchmark
 
-The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a real Chromium browser. An open-world simulator answers intercepted emails and website submissions. See [architecture.md](architecture.md) for the design and [harbor.md](harbor.md) for isolated Modal or Docker batches.
+This guide covers shared setup, execution settings, tool/network boundaries, inbox snapshots, Supabase uploads and post-run grading across all cases. Per-case facts, counterparties and grading caveats live in [docs/cases/](cases/README.md). The benchmark uses Gmail-compatible tools over a local inbox, Exa search and a real Chromium browser, with an open-world simulator answering intercepted emails and website submissions. See [architecture.md](architecture.md) for the shared design and [harbor.md](harbor.md) for isolated Modal or Docker batches (including the opt-in native Harbor task).
 
 See the identity-lock guide at docs/identity-locks.md to pin and enforce
 source, scenario, and local browser-runtime identities for repeatable runs.
@@ -27,7 +27,7 @@ For direct Anthropic, Google or xAI routes, run `uv sync --frozen --extra provid
 uv run --frozen python -m refund_eval.dashboard
 ```
 
-Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the scenario's bundled fictional mailbox and your saved snapshots. **Scenario** defaults to `train_refund_late`; `bills_price_rise` is also runnable. The late-refund scenario requires an explicit cost ceiling and uses a £350 cancelled journey and company decisions under their terms, described in [the late-refund specification](late-refund-spec.md).
+Open **http://127.0.0.1:8765**. Under **Start a run**, choose a target model, scenario, inbox and budget. **Inbox** lists the scenario's bundled fictional mailbox and your saved snapshots. **Scenario** defaults to `train_refund_late` ([case page](cases/late-refund.md)); `bills_price_rise` ([case page](cases/household-bills.md)) is also runnable.
 
 The dashboard launches paid model trials only when you start a run. The default data mode is hybrid. For batches, choose **Modal** or **Docker** under **Run location**; [Harbor setup](harbor.md#setup) covers their separate runtime requirements. Harbor packages Node, Chromium and the pinned browser alongside Inspect in each trial sandbox, using `browser_runtime=subprocess` without nested Docker.
 
@@ -42,19 +42,13 @@ Both modes use the same tools and open-world simulator. During a trial, mail com
 
 Website submissions and other navigation writes are intercepted and answered by the simulator. Hybrid GET/HEAD requests pass through URL and public-IP checks. Recognized private scenario values (such as configured names, email addresses, phone numbers and task-marked sensitive values) are screened from live search queries/objectives, browser read URLs and simulator research requests, including page URLs and redirects. A denial stops live company research and uses an existing saved dossier when available. Matching covers recognized values, not arbitrary private prose; denied fields are redacted in that request's audit record, not rewritten in model transcripts. Other permitted reads with personal-identifier fields can still be recorded as disclosures by the resource-use check. Website content and search results reflect the internet at run time, so hybrid trials are not frozen web snapshots. Authentication, file uploads and some script-driven workflows are unsupported.
 
-The unsupported Trainline background booking lookup returns a service error before
-company processing. The attempted request remains recorded, but it cannot open a
-customer case or queue an email. Ordinary supported contact forms retain their
-normal simulated replies; a service error from another route does not imply that
-its effects were rolled back.
-This failed lookup has no pre-contact claim observation, so claim evaluation can
-report unavailable evidence for it; the recorded 503 is not a 403 exemption.
+Case-specific browser overrides (such as the Trainline booking-lookup 503 and local retailer pages) are documented on [the late-refund case page](cases/late-refund.md#case-specific-web-and-tool-notes).
 
 For OpenRouter and Inspect `openai-api` targets, pass `-M strict_tools=false` when using the CLI. The dashboard and Harbor set it automatically. Tool schemas retain their optional fields, and the adapter validates calls against the full schema before dispatch.
 
 ## Running a trial
 
-Use the explicit [late-refund example in the README](../README.md#run-a-late-refund-trial) to start a twelve-week trial. The target model is selected independently from the simulator (`openrouter/anthropic/claude-opus-5.5` by default) and its financial consistency-check role (`openrouter/anthropic/claude-haiku-4.5`). All trial model roles count towards the cost cap. Runs record code checks; grade late-refund behaviours afterwards [with Scout](#grading-saved-runs-with-scout), at a separate cost.
+Use the explicit [trial example in the README](../README.md#run-a-trial) to start a twelve-week trial. The target model is selected independently from the simulator (`openrouter/anthropic/claude-opus-5.5` by default) and its financial consistency-check role (`openrouter/anthropic/claude-haiku-4.5`). All trial model roles count towards the cost cap. Runs record code checks; grade late-refund behaviours afterwards [with Scout](#grading-saved-runs-with-scout), at a separate cost.
 
 Late-refund launches require an explicit `cost_limit`. Choose a cap before launching: it is a ceiling, not a cost estimate or a guarantee that the trial reaches its time horizon. An in-flight call can overshoot the ceiling. The README example explicitly selects `research_mode=auto`, which is also the default. Use `-T published_data=fixture` for authored search results and pages instead of live web reads.
 
@@ -144,7 +138,7 @@ Use the same source revision, Python version, lockfile, scenario and inbox snaps
 
 ## Late-refund runs
 
-A twelve-week late-refund configuration uses `token_budget=200000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Inspect and dashboard late-refund launches accept `auto` (the default) or `saved`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
+See [docs/cases/late-refund.md](cases/late-refund.md) for the case facts, rules and success condition. A twelve-week late-refund configuration uses `token_budget=200000000`, `sim_weeks=12` and `history_tokens=60000`, with a deadline of Monday 4 January 2027. Inspect and dashboard late-refund launches accept `auto` (the default) or `saved`; the retailer/operator policy dossiers remain pinned, while `auto` allows research of newly contacted organisations. Behaviours are graded afterwards with Scout. Before every target call (with the default `budget_notice=every_step`), a runtime notice gives the simulated time and the used, total and remaining target tokens; the system prompt states the budget. Only target calls count, even when the simulator uses the same model. Cached input counts; reasoning already included in output does not count twice.
 
 The ledger lives in saved world state and survives trimming and resume. A final response can exceed the remaining budget; its full usage and overrun are saved. `stop_reason=token_budget` means the intended compute limit ended the trial. Missing usage fails with a token-accounting error. A cost-ended trial is reported separately. Inspect's general `token_limit` is a separate guard and is not a substitute for this ledger.
 
@@ -284,11 +278,7 @@ fields keep the normal guards, and every redirect is checked again. Opening a
 template establishes neither bank affiliation nor authentication or a successful
 dispute; submissions remain intercepted and account access remains unchanged.
 
-Public news articles at `railombudsman.org/en/news/` may likewise use opaque
-article IDs. Anonymous reads of that fixed news route retain the original URL
-and provider response. Query strings, fragments, private/account routes and
-lookalike hosts receive the normal guards; a news link grants no account or
-submission capability. This does not guarantee the upstream article is available.
+Case-specific public-route exceptions (such as `railombudsman.org/en/news/`) are listed on their case page (see [late train refund](cases/late-refund.md#case-specific-web-and-tool-notes)).
 
 An intercepted browser request may include a company-model decision and its
 existing validation steps, rather than just an HTTP fetch. Its host callback has
