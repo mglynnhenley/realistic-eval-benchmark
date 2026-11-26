@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.19 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: ba5e642dce04446924a0f4d62b3b7ac6a8289ae921cb1fe0b009a2be0d82a796
+- Trial round: none; focused offline tests only.
+- Changes: Explicitly state in Brightwell Claims' public terms and saved rules that care before the coverage effective date is ineligible regardless of invoice or payment date; add reviewer-facing explanation of the existing rule. No eligibility behavior change or agent pilot.
+
 ## 10.18 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: bcf11afa18722723436606c43a04aefaa9c48a34e63006c057ef0d6461fd83e4

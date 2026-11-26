@@ -126,6 +126,16 @@ def test_other_organisations_quotations_become_related_links_not_page_text():
     assert "no later than 28 days after the ticket expiry date" in text
 
 
+def test_daycare_public_claim_terms_exclude_precoverage_services():
+    from refund_eval.published.fixture_web import policy_page_text
+
+    scenario = load_scenario("daycare_reimbursement")
+    text = policy_page_text(scenario.org("brightwell_claims"), scenario.subject, scenario.orgs)
+    assert "before the dependent-care coverage effective date is not eligible" in text
+    assert "regardless of invoice or payment date" in text
+    assert "L1" not in text
+
+
 @pytest.fixture
 def ctx():
     init_subtask_store(Store())

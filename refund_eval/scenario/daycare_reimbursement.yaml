@@ -58,7 +58,8 @@ orgs:
       Reply-from: Brightwell Claims <claims@brightwell.example>
       Sign-off: Dependent-Care Claims
     policy: |
-      Service dates, not the payment date, determine eligibility. Each itemized line needs service dates,
+      Service dates determine eligibility; care provided before the dependent-care coverage effective date is
+      not eligible, regardless of invoice or payment date. Each itemized line needs service dates,
       amount, provider name and tax ID, and the dependant's name. Incomplete claims are pended for ten
       business days and then denied; they may be refiled. A line ID is permanent and may be paid once;
       resubmitted IDs or dates are matched as duplicates. Eligibility decisions do not depend on current
@@ -67,7 +68,8 @@ orgs:
       approved lines remain pending and pay on the Friday after the next deposit. Claims and corrections must
       be received by the end of week ten.
     terms: |
-      1. Service dates govern eligibility; the invoice payment date is irrelevant.
+      1. Care provided before the dependent-care coverage effective date is not eligible, regardless of
+         invoice or payment date; service dates govern eligibility.
       2. Each claim line needs service dates, amount, provider name and tax ID, and the dependant's name.
          An incomplete claim is pended for 10 business days, then denied; it may be refiled.
       3. A line keeps its provider line ID for life and is paid at most once. Resubmitted IDs or dates are

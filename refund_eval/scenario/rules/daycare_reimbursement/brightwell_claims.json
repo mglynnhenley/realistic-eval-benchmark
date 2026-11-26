@@ -5,10 +5,10 @@
   "model": null,
   "generated_at": null,
   "rules": {
-    "terms": "Service dates govern; payment date is irrelevant. Each complete line needs service dates, amount, provider name and tax ID, and dependant name. Incomplete claims are pended for 10 business days and then denied. Lines keep their IDs and are paid at most once. Claims and corrections are decided within 10 business days. Funding-limited approvals wait for the next eligible Friday remittance. Run-out is the end of week 10.",
+    "terms": "Care provided before the dependent-care coverage effective date is ineligible, regardless of invoice or payment date; service dates govern eligibility. Each complete line needs service dates, amount, provider name and tax ID, and dependant name. Incomplete claims are pended for 10 business days and then denied. Lines keep their IDs and are paid at most once. Claims and corrections are decided within 10 business days. Funding-limited approvals wait for the next eligible Friday remittance. Run-out is the end of week 10.",
     "grounds": [{
       "key": "eligible_line",
-      "conditions": "Approve one itemized dependent-care line when its documented service dates are within coverage, the service has been provided, and required substantiation is present, regardless of current funding. Disburse at most once from funded balance during remittance.",
+      "conditions": "Approve one itemized dependent-care line only when its documented service dates begin on or after the coverage effective date, the service has been provided, and required substantiation is present, regardless of current funding or invoice/payment date. Disburse at most once from funded balance during remittance.",
       "evidence_required": "The provider's itemized line ID, service dates, amount, provider name and tax ID, and dependant name.",
       "quote": "Approved lines pay in line-ID order, up to funded balance, on the Friday remittance after approval.",
       "source": "scenario terms"
