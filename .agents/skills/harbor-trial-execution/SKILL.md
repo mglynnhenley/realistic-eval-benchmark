@@ -83,8 +83,14 @@ UV_OFFLINE=1 scripts/harbor python -m refund_eval.harbor.batch \
   --out <new-private-batch-directory>
 ```
 
+Although the CLI help calls its input a `RunConfig` JSON, `batch.py` validates
+it as `NativeBatchConfig`. In addition to the inherited run fields, this type
+requires `world_cost_limit`, `agent_wheel`, and `agent_wheel_sha256`; supply
+an already available, verified agent wheel and matching digest. If the wheel or
+locked dependencies are unavailable offline, stop rather than downloading them.
+
 Use this only to prepare the canonical bills scenario from a private explicit
-`RunConfig` with `scenario: "bills_price_rise"`, `trials: 1`,
+`NativeBatchConfig` with `scenario: "bills_price_rise"`, `trials: 1`,
 `concurrency: 1`, no suite, and the selected case's explicitly specified
 limits; do not rely on config defaults. Preparation launches nothing and grants
 no execution approval. This path does not preserve a design-suite task's custom
