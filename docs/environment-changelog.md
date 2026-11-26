@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.25 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 893190eaad52b2c2f25d365905188f5ca979404ba514e88d91e396d14b395136
+- Trial round: none; offline rendered-mailbox parity only. No model or paid run.
+- Changes: Preserve the five incidental refund-baseline correspondence threads in the London fixture with profile/date substitutions and no train-case-specific details. The five London-specific seed emails and three scheduled check-ins remain scenario-specific.
+
 ## 10.24 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: 9945b2aa40160db0832459925923d980eb1d24af0a6438d13530c8080f09a5ce
