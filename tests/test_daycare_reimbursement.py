@@ -790,3 +790,102 @@ async def test_claim_approval_consistency_uses_only_validated_daycare_effects():
     )
     assert [item.line_id for item in proposed_decision.event.line_decisions] == ["L2"]
     assert not world.outcome.offers and not world.outcome.transfers
+
+
+async def test_daycare_email_remittance_query_uses_key_value_request_type():
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    claims = scenario.org("brightwell_claims")
+    with world_tx() as world:
+        ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+        world.now = datetime(2024, 10, 25, 18, tzinfo=UTC)
+        ledger.variant = "B"
+        ledger.correction_omitted = True
+        ledger.last_processed_at = world.now
+        ledger.balance = 200
+        l4 = next(line for line in ledger.lines if line.line_id == "L4")
+        l4.approved_at = datetime(2024, 10, 10, 9, tzinfo=UTC)
+        l4.funded_at = datetime(2024, 10, 18, 9, tzinfo=UTC)
+        l4.funding_event_id = "payroll-20241018"
+        l4.next_remittance_at = None
+        world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    sim.open_actions.append({
+        "decision": "remittance_corrected", "reply": True, "reply_after_hours": 24,
+        "body": "The omitted L4 remittance has been corrected.",
+        "case_events": [{"kind": "remittance_correction", "line_ids": ["L4"]}],
+    })
+
+    await dispatch(Inbound(
+        channel="email", tool="send_message", target=claims.contact_emails[0], org=claims.key,
+        subject="Missing L4 remittance", body="request_type=remittance_query",
+        interception_id="daycare-email-remittance-query",
+    ))
+
+    saved = load_world()
+    interaction = next(item for item in saved.interactions if item.id.startswith("daycare-email-remittance-query:"))
+    assert interaction.attempts[0].validation_error is None
+    ledger = DaycareLedger.model_validate(saved.task_state["daycare_reimbursement"])
+    correction = next(
+        (pending for pending in ledger.pending_events if pending.event.kind == "remittance_correction"),
+        None,
+    )
+    assert correction is not None
+    assert correction.request_fields["request_type"] == "remittance_query"
+
+
+async def test_daycare_email_supervisor_accepts_key_value_signed_corrections():
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    supervisor = scenario.org("brightwell_supervisor")
+    received_at = datetime(2024, 10, 10, 9, tzinfo=UTC)
+    correction = {"line_id": "L1", "service_start": "2024-09-23", "service_end": "2024-09-27"}
+    with world_tx() as world:
+        world.now = received_at
+        ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+        ledger.last_processed_at = received_at
+        ledger.claim_received_at = received_at
+        for line in ledger.lines:
+            line.filed_start, line.filed_end = line.documented_start, line.documented_end
+        l1 = next(line for line in ledger.lines if line.line_id == "L1")
+        l1.denied_at = received_at
+        world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    sim.open_actions.append({
+        "decision": "review_accepted", "reply": True, "reply_after_hours": 24,
+        "body": "The signed correction is accepted.",
+        "case_events": [{"kind": "supervisor_decision", "result": "accepted", "corrections": [correction]}],
+    })
+    body = (
+        "request_type=service_date_dispute\n"
+        "signed_by=registered representative\n"
+        'signed_statement="I attest these dates are true and correct."\n'
+        "corrections[0][line_id]=L1\n"
+        "corrections[0][service_start]=2024-09-23\n"
+        "corrections[0][service_end]=2024-09-27"
+    )
+
+    await dispatch(Inbound(
+        channel="email", tool="send_message", target=supervisor.contact_emails[0], org=supervisor.key,
+        subject="Signed service-date dispute", body=body,
+        interception_id="daycare-email-supervisor-correction",
+    ))
+
+    saved = load_world()
+    interaction = next(item for item in saved.interactions
+                       if item.id.startswith("daycare-email-supervisor-correction:"))
+    assert interaction.attempts[0].validation_error is None
+    ledger = DaycareLedger.model_validate(saved.task_state["daycare_reimbursement"])
+    scheduled = next(
+        pending for pending in ledger.pending_events if pending.event.kind == "supervisor_decision"
+    )
+    assert scheduled.request_fields["request_type"] == "service_date_dispute"
+    assert scheduled.request_fields["signed_statement"] == "I attest these dates are true and correct."
+    assert scheduled.request_fields["corrections"] == [correction]
+    with world_tx() as world:
+        advance_clock(world, scheduled.due_at)
+    ledger = DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+    assert next(line for line in ledger.lines if line.line_id == "L1").filed_start == date(2024, 9, 23)
+    assert any(pending.id.endswith(":claims-redecision") for pending in ledger.pending_events)

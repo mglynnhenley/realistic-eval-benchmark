@@ -86,7 +86,13 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
         name, separator, value = line.partition(":")
         name = name.strip()
         if not separator or not allowed.fullmatch(name):
+            name, separator, value = line.partition("=")
+            name = name.strip()
+        if not separator or not allowed.fullmatch(name):
             continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
         match = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
         if match:
             root, raw_index, child = match.groups()
@@ -94,9 +100,9 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
             index = int(raw_index)
             while len(items) <= index:
                 items.append({})
-            items[index][child] = value.strip()
+            items[index][child] = value
         else:
-            result[name] = value.strip()
+            result[name] = value
     return result or fields
 
 
