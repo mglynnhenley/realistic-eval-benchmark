@@ -68,6 +68,9 @@ def _lines_overlap(lines: list[DaycareLineLedger], corrections: list[DaycareDate
     return False
 
 
+_MAX_NESTED_FORM_INDEX = 255
+
+
 def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
     allowed_fields = {
         "invoice_id", "provider_name", "provider_tax_id", "dependant_name", "request_type", "signed_by",
@@ -96,8 +99,12 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
         match = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
         if match:
             root, raw_index, child = match.groups()
-            items = result.setdefault(root, [])
+            if len(raw_index) > 3:
+                continue
             index = int(raw_index)
+            if index > _MAX_NESTED_FORM_INDEX:
+                continue
+            items = result.setdefault(root, [])
             while len(items) <= index:
                 items.append({})
             items[index][child] = value

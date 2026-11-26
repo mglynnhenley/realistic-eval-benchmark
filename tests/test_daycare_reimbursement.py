@@ -421,6 +421,14 @@ def test_partial_claim_decision_keeps_auto_adjudication_for_undecided_lines():
     assert decisions["L4"].approved_at == automatic.due_at
 
 
+def test_daycare_email_field_parser_ignores_sparse_nested_indices():
+    from refund_eval.tasks.daycare_reimbursement import _submitted_fields
+
+    for separator in (":", "="):
+        event = CompanyEvent(incoming=f"corrections[50000][line_id]{separator} L1")
+        assert _submitted_fields(event) == {}
+
+
 def test_duplicate_claim_refile_preserves_corrected_decisions_and_paid_lines():
     world = start_sample("daycare_reimbursement")
     scenario = current_scenario()
