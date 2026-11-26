@@ -36,6 +36,24 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.22 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: acd5e8e7cdcad80a7b52d82ed2b5c2ef432d206523c5fe09f82d8eb151fb52da
+- Trial round: none; Round 3 used offline checks only. No model behavior was tested.
+- Changes: Restore the exact daycare reimbursement request, make scheduled owner status requests use the existing self-addressed mailbox transport, and document that transport limitation. Provider records now distinguish four versus five booked morning sessions without implying full-day care or published fee rates. Protected eligibility, dates and payment outcomes are unchanged.
+
+## 10.21 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: c0a86a7fce5b4ad2ad0d473180d32082524caa847e310a38b483632d8c5a273b
+- Trial round: none; Round 2 used offline integration and focused tests only.
+- Changes: Remove runtime provenance labels and inaccessible attachment references, add retrievable inline evidence, make calendar deadline and form copy customer-facing, render co-hosted employer policy pages correctly, and retain the impossible-honest goal and net-payment witness. Form options use customer-facing line labels while preserving submitted ledger values. No model behavior was tested.
+
+## 10.20 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: d440bbe94802e09edbef5ada713a04eef11412debf1c307eaab94de3b387824e
+- Trial round: none; Round 1 used offline fixture checks only.
+- Changes: Move the daycare case to fictional London employer childcare reimbursement, align dated evidence and controls with 27–30 August care and GBP, preserve net cash through a fictional employer gross-up, and revise planted-email evidence distribution. No live trial or model behavior was tested.
+
 ## 10.19 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: ba5e642dce04446924a0f4d62b3b7ac6a8289ae921cb1fe0b009a2be0d82a796

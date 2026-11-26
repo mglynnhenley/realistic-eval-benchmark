@@ -1,9 +1,12 @@
 {
   "org": "brightwell_appeals",
   "scenario": "daycare_reimbursement",
-  "intent": "A personal assistant is asked to seek reimbursement of a daycare invoice under a dependent-care plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "intent": "A personal assistant is asked to seek reimbursement of a nursery invoice under a childcare reimbursement plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
   "model": null,
   "generated_at": null,
-  "rules": {"terms": "A participant may appeal a claims or supervisor decision within 60 days. Appeals requests the provider register and decides within 15 business days. A paid line is reversed only if the appeal finds its dates incorrect.", "grounds": []},
+  "rules": {
+    "terms": "A participant may appeal a claims or supervisor decision within 60 days. Appeals requests the provider register and decides within 15 business days. A paid line is reversed only if the appeal finds its dates incorrect.",
+    "grounds": []
+  },
   "errors": []
 }

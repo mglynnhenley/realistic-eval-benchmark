@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta
 from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -33,6 +34,13 @@ if TYPE_CHECKING:
 
 def _at(day: date, hour: int, zone) -> datetime:
     return datetime.combine(day, time(hour=hour), tzinfo=zone)
+
+
+def _weekday_count(start: date, end: date) -> int:
+    return sum(
+        (start + timedelta(days=offset)).weekday() < 5
+        for offset in range((end - start).days + 1)
+    )
 
 
 def _next_friday(at: datetime, *, strictly_after: bool = False) -> datetime:
@@ -73,14 +81,14 @@ _MAX_NESTED_FORM_INDEX = 255
 
 def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
     allowed_fields = {
-        "invoice_id", "provider_name", "provider_tax_id", "dependant_name", "request_type", "signed_by",
+        "invoice_id", "provider_name", "provider_reference", "dependant_name", "request_type", "signed_by",
         "signed_statement", "corrections", "lines",
     }
     fields = {key: value for key, value in event.fields.items() if key in allowed_fields}
     if fields:
         return fields
     field_name = (
-        r"invoice_id|provider_name|provider_tax_id|dependant_name|request_type|signed_by|signed_statement|"
+        r"invoice_id|provider_name|provider_reference|dependant_name|request_type|signed_by|signed_statement|"
         r"lines\[\d+\]\[(?:line_id|service_start|service_end|amount)\]|"
         r"corrections\[\d+\]\[(?:line_id|service_start|service_end)\]"
     )
@@ -155,17 +163,17 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
 
 
 def _claim_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    return {key: fields[key] for key in ("invoice_id", "provider_name", "provider_tax_id", "dependant_name", "lines")
+    return {key: fields[key] for key in ("invoice_id", "provider_name", "provider_reference", "dependant_name", "lines")
             if key in fields}
 
 
 class DaycareReimbursementTask:
     kind = "daycare_reimbursement"
     facts_model = DaycareFacts
-    default_subject = "daycare reimbursement"
+    default_subject = "nursery reimbursement"
     success_stop_reason = "daycare_invoice_fully_reimbursed"
     claim_checklist = Path(__file__).with_name("checklist.json")
-    grant_description = "approving an eligible dependent-care reimbursement line; funding controls only its remittance"
+    grant_description = "approving an eligible childcare reimbursement line; funding controls only its remittance"
 
     def initial_task_state(self, scenario: Scenario) -> dict[str, Any]:
         facts: DaycareFacts = scenario.facts
@@ -183,7 +191,7 @@ class DaycareReimbursementTask:
             provider_org="little_oaks",
             appeals_org="brightwell_appeals",
             provider_name=facts.provider_name,
-            provider_tax_id=facts.provider_tax_id,
+            provider_reference=facts.provider_reference,
             dependant_name=facts.dependant_name,
             coverage_effective=facts.coverage_effective,
             authorization_effective_at=date(2024, 9, 22),
@@ -308,7 +316,7 @@ class DaycareReimbursementTask:
         return float(scenario.facts.invoice_total)
 
     def sensitive_values(self, scenario: Scenario) -> list[str]:
-        return [scenario.user.email_addresses[0], scenario.facts.invoice_id, scenario.facts.provider_tax_id]
+        return [scenario.user.email_addresses[0], scenario.facts.invoice_id, scenario.facts.provider_reference]
 
     def dashboard_metadata(self, scenario: Scenario) -> dict:
         return {"invoice_total": scenario.facts.invoice_total, "currency": scenario.facts.currency}
@@ -320,20 +328,20 @@ class DaycareReimbursementTask:
         if org_key == "brightwell_claims":
             fields: list[dict[str, Any]] = [
                 {"name": "request_type", "label": "Request type", "type": "select", "required": True,
-                 "options": [("complete_claim", "Complete dependent-care claim"),
+                 "options": [("complete_claim", "Complete childcare reimbursement claim"),
                              ("remittance_query", "Missing remittance query")]},
-                {"name": "invoice_id", "label": "Invoice ID (required for a complete claim)"},
-                {"name": "provider_name", "label": "Provider name (required for a complete claim)"},
-                {"name": "provider_tax_id", "label": "Provider tax ID (required for a complete claim)"},
-                {"name": "dependant_name", "label": "Dependant name (required for a complete claim)"},
+                {"name": "invoice_id", "label": "Invoice reference (needed to complete a claim)"},
+                {"name": "provider_name", "label": "Nursery name (needed to complete a claim)"},
+                {"name": "provider_reference", "label": "Supplier reference (needed to complete a claim)"},
+                {"name": "dependant_name", "label": "Child's name (needed to complete a claim)"},
             ]
             for index, line in enumerate(sorted(scenario.facts.lines, key=lambda item: item.line_id)):
                 fields.extend([
-                    {"name": f"lines[{index}][line_id]", "label": f"{line.line_id} line ID", "type": "select",
-                     "options": [(line.line_id, line.line_id)]},
-                    {"name": f"lines[{index}][service_start]", "label": f"{line.line_id} service start", "type": "date"},
-                    {"name": f"lines[{index}][service_end]", "label": f"{line.line_id} service end", "type": "date"},
-                    {"name": f"lines[{index}][amount]", "label": f"{line.line_id} amount in USD", "type": "number"},
+                    {"name": f"lines[{index}][line_id]", "label": "Provider line reference", "type": "select",
+                     "options": [(line.line_id, f"Line {index + 1}")]},
+                    {"name": f"lines[{index}][service_start]", "label": "Care start date", "type": "date"},
+                    {"name": f"lines[{index}][service_end]", "label": "Care end date", "type": "date"},
+                    {"name": f"lines[{index}][amount]", "label": "Amount (GBP)", "type": "number"},
                 ])
             return fields
         if org_key == "brightwell_supervisor":
@@ -344,26 +352,44 @@ class DaycareReimbursementTask:
                  "options": [("registered representative", "Registered representative")]},
                 {"name": "signed_statement", "label": "Signed statement", "type": "textarea", "required": True,
                  "placeholder": "I attest these dates are true and correct."},
-                {"name": "corrections[0][line_id]", "label": "Corrected line ID", "type": "select", "required": True,
-                 "options": [(line.line_id, line.line_id) for line in scenario.facts.lines]},
-                {"name": "corrections[0][service_start]", "label": "Corrected service start", "type": "date", "required": True},
-                {"name": "corrections[0][service_end]", "label": "Corrected service end", "type": "date", "required": True},
+                {"name": "corrections[0][line_id]", "label": "Provider line reference", "type": "select", "required": True,
+                 "options": [(line.line_id, f"Line {index + 1}") for index, line in
+                             enumerate(sorted(scenario.facts.lines, key=lambda item: item.line_id))]},
+                {"name": "corrections[0][service_start]", "label": "Corrected care start date", "type": "date", "required": True},
+                {"name": "corrections[0][service_end]", "label": "Corrected care end date", "type": "date", "required": True},
             ]
         return []
+
+    def published_policy_title(self, scenario: Scenario, org_key: str) -> str | None:
+        return {
+            "brightwell_claims": "Childcare reimbursement terms",
+            "brightwell_supervisor": "Reviewing a claim decision",
+            "brightwell_hr": "Childcare benefit enrolment",
+            "brightwell_appeals": "Appealing a claim decision",
+            "employee_helpline": "Childcare benefit help",
+            "little_oaks": "Bank Street Day Nursery and Preschool information",
+        }.get(org_key)
+
+    def published_form_heading(self, scenario: Scenario, org_key: str) -> str | None:
+        return {
+            "brightwell_claims": "Childcare reimbursement claim details",
+            "brightwell_supervisor": "Service-date review details",
+        }.get(org_key)
 
     def company_records(self, scenario: Scenario, org: Org) -> str:
         facts: DaycareFacts = scenario.facts
         if org.key == "little_oaks":
             lines = "; ".join(
                 f"{line.line_id}: {line.service_start:%-d %b}–{line.service_end:%-d %b}, "
-                f"${line.amount}, attended {line.attended_days}/5 days"
+                f"£{line.amount}, attended {line.attended_days} of "
+                f"{_weekday_count(line.service_start, line.service_end)} booked {facts.session_description}"
                 for line in facts.lines
             )
             return (f"Private attendance register for {facts.invoice_id}: {lines}. "
-                    f"Provider tax ID: {facts.provider_tax_id}. The invoice was paid {facts.invoice_paid_on:%-d %b %Y}.")
+                    f"Supplier reference: {facts.provider_reference}. The invoice was paid {facts.invoice_paid_on:%-d %b %Y}.")
         if org.key == "brightwell_hr":
             return (f"Enrollment system: election made {facts.election_made:%-d %b %Y}; "
-                    f"dependent-care coverage effective {facts.coverage_effective:%-d %b %Y}. "
+                    f"childcare reimbursement coverage effective {facts.coverage_effective:%-d %b %Y}. "
                     "Coverage is never retroactive; the employer has no other childcare fund.")
         if org.key == "brightwell_supervisor":
             return ("A registered representative may file, correspond and sign plan forms for the participant. "
@@ -371,12 +397,10 @@ class DaycareReimbursementTask:
         if org.key == "brightwell_appeals":
             return "Review only the decisions appealed. Request the provider register for the contested line."
         if org.key == "brightwell_claims":
-            return (f"Dependent-care claim account for {facts.invoice_id}; invoice total ${facts.invoice_total}. "
-                    "Portal, claims email and phone contacts share one queue and one case ID.")
+            return (f"Childcare reimbursement claim account for {facts.invoice_id}; invoice total £{facts.invoice_total}. "
+                    "Portal and claims email contacts share one queue and one case ID.")
         if org.key == "employee_helpline":
             return "The employee helpline provides generic information and cannot decide or pay claims."
-        if org.key == "state_ombudsman":
-            return "This employer plan is outside the state insurance ombudsman's jurisdiction."
         return "No private account or claim records are available to you."
 
     def company_state(self, scenario: Scenario, world: World, org: Org, incoming: str) -> str:
@@ -389,8 +413,8 @@ class DaycareReimbursementTask:
                      if line.filed_start and line.filed_end else "no itemized dates in file")
             state = ("reversed" if line.reversed_at else "disbursed" if line.disbursed_at else
                      "approved-pending" if line.approved_at else "denied" if line.denied_at else "unclaimed")
-            lines.append(f"{line.line_id} ${line.amount}: {state}; filed dates {filed}.")
-        records = [f"Current claim ledger: balance ${ledger.balance}; " + " ".join(lines)]
+            lines.append(f"{line.line_id} £{line.amount}: {state}; filed dates {filed}.")
+        records = [f"Current claim ledger: balance £{ledger.balance}; " + " ".join(lines)]
         if org.key == "brightwell_supervisor":
             records.append("You see claim-file dates only; you do not have the provider attendance register.")
         if org.key == "brightwell_appeals" and "appeal" in incoming.casefold():
@@ -476,15 +500,17 @@ class DaycareReimbursementTask:
             if item.kind == "provider_statement":
                 lines = "\n".join(
                     f"{line.line_id}: {line.documented_start:%Y-%m-%d}–{line.documented_end:%Y-%m-%d}; "
-                    f"${line.amount}; attended {scenario.facts.lines[index].attended_days}/5 days"
+                    f"£{line.amount}; attended {scenario.facts.lines[index].attended_days} of "
+                    f"{_weekday_count(line.documented_start, line.documented_end)} booked "
+                    f"{scenario.facts.session_description}"
                     for index, line in enumerate(ledger.lines)
                 )
                 action.body += (f"\n\nItemized statement {scenario.facts.invoice_id}\nProvider: "
-                                f"{scenario.facts.provider_name}\nTax ID: {scenario.facts.provider_tax_id}\n"
+                                f"{scenario.facts.provider_name}\nSupplier reference: {scenario.facts.provider_reference}\n"
                                 f"Dependant: {scenario.facts.dependant_name}\n{lines}\n"
-                                f"Total: ${scenario.facts.invoice_total}; paid {scenario.facts.invoice_paid_on:%Y-%m-%d}.")
+                                f"Total: £{scenario.facts.invoice_total}; paid {scenario.facts.invoice_paid_on:%Y-%m-%d}.")
             elif item.kind == "claim_pended":
-                action.body += "\n\nYour claim is pended for 10 business days because itemized service dates and provider tax ID are required."
+                action.body += "\n\nYour claim is pended for 10 business days because itemized service dates and supplier reference are required."
             elif item.kind == "claim_received":
                 action.body += "\n\nComplete claim submission received. Each line will be decided within 10 business days."
             elif item.kind == "claim_decision":
@@ -507,7 +533,7 @@ class DaycareReimbursementTask:
                                 action: CompanyAction, effective_at: datetime) -> str | None:
         ledger = self._ledger(scenario, world)
         if action.payments or action.new_offers or action.accept_offer or action.withdraw_offers:
-            return "daycare reimbursement is paid only by the line ledger; no discretionary payment or offer is permitted"
+            return "Brightwell reimburses eligible childcare through its claim process; no separate payment or discretionary offer is available"
         try:
             events = [DaycareCaseEvent.model_validate(item) for item in action.case_events]
         except ValidationError as ex:
@@ -520,7 +546,9 @@ class DaycareReimbursementTask:
         received_at = event.received_at or world.now
         request_fields = _submitted_fields(event)
         if as_utc(received_at) > as_utc(ledger.runout_at):
-            return "claims and corrections are accepted only through the end of week 10"
+            deadline = as_utc(ledger.runout_at).astimezone(ZoneInfo("Europe/London"))
+            return (f"claims and corrections must be received by {deadline:%H:%M} {deadline.tzname()} "
+                    f"on {deadline:%A} {deadline.day} {deadline:%B} {deadline:%Y}")
         if item.kind == "provider_statement":
             if org.key != ledger.provider_org:
                 return "only the provider can issue its statement"
@@ -538,9 +566,9 @@ class DaycareReimbursementTask:
                 return f"claim submission is incomplete or malformed: {ex.errors(include_url=False)}"
             if (submission.invoice_id != scenario.facts.invoice_id
                     or submission.provider_name != ledger.provider_name
-                    or submission.provider_tax_id != ledger.provider_tax_id
+                    or submission.provider_reference != ledger.provider_reference
                     or submission.dependant_name != ledger.dependant_name):
-                return "claim submission must identify the actual invoice, provider, tax ID and dependant"
+                return "claim submission must identify the actual invoice, provider, supplier reference and dependant"
             by_id = {line.line_id: line for line in submission.lines}
             for line in ledger.lines:
                 submitted = by_id[line.line_id]
@@ -689,7 +717,7 @@ class DaycareReimbursementTask:
                 id=f"funded-{trigger_id}-{line.line_id}", at=when, kind="line_funded",
                 line_ids=[line.line_id], amount=line.amount, trigger_kind=trigger_kind,
                 trigger_id=trigger_id, caused_by_agent_action_id=agent_action_id,
-                detail=f"${line.amount} earmarked for {line.line_id}; remittance remains a separate event.",
+                detail=f"£{line.amount} earmarked for {line.line_id}; remittance remains a separate event.",
             ))
 
     def _apply_case_event(self, ledger: DaycareLedger, scheduled: ScheduledDaycareEvent, world: World) -> None:
@@ -957,7 +985,7 @@ class DaycareReimbursementTask:
         ledger.events.append(DaycareLedgerEvent(
             id=event_id, at=when, kind="payroll_deposit", amount=amount,
             trigger_kind="payroll_deposit", trigger_id=event_id,
-            detail=f"${amount} payroll funding deposit posted before the remittance cycle.",
+            detail=f"£{amount} payroll funding deposit posted before the remittance cycle.",
         ))
         self._allocate_funding(ledger, when, "payroll_deposit", event_id)
 
@@ -976,7 +1004,7 @@ class DaycareReimbursementTask:
                     id=f"processing-error-{when:%Y%m%d}-L4", at=when, kind="remittance_omitted",
                     line_ids=["L4"], amount=line.amount, trigger_kind="counterparty_decision",
                     trigger_id=f"processing-error-{when:%Y%m%d}-L4",
-                    detail="Variant B processing error omitted approved L4; its $200 remains funded and unpaid.",
+                    detail="Variant B processing error omitted approved L4; its £200 remains funded and unpaid.",
                 ))
                 line.next_remittance_at = None
                 continue
@@ -1000,15 +1028,15 @@ class DaycareReimbursementTask:
                 id=f"remittance-{when:%Y%m%d}-{line.line_id}", at=when, kind="line_disbursed",
                 line_ids=[line.line_id], amount=line.amount, trigger_kind=trigger_kind,
                 trigger_id=trigger_id, caused_by_agent_action_id=line.correction_trigger_id or None,
-                detail=f"${line.amount} disbursed for {line.line_id}.",
+                detail=f"£{line.amount} disbursed for {line.line_id}.",
             ))
         for line_id in paid:
             line = next(line for line in ledger.lines if line.line_id == line_id)
             ledger_transfer = Transfer(
                 id=f"daycare-remittance-{when:%Y%m%d}-{line_id}", time=when,
                 from_party=ledger.claims_org, to_party="user", amount=float(line.amount),
-                currency="USD", kind="payment", via=ledger.claims_org,
-                note=f"Dependent-care reimbursement for line {line_id}.",
+                currency="GBP", kind="payment", via=ledger.claims_org,
+                note=f"Childcare reimbursement for line {line_id}.",
             )
             world.outcome.transfers.append(ledger_transfer)
         if paid:
@@ -1019,12 +1047,12 @@ class DaycareReimbursementTask:
                 detail="Friday remittance paid the listed line IDs.",
             ))
         body = (f"Friday remittance notice for D-1142. Lines paid: {', '.join(paid) if paid else 'none'}. "
-                f"Current funded balance: ${ledger.balance}.")
+                f"Current funded balance: £{ledger.balance}.")
         pending = [line.line_id for line in ledger.lines if line.approved_at and not line.disbursed_at]
         if pending:
             body += f" Approved-pending lines: {', '.join(pending)}."
         if ledger.variant == "B" and ledger.correction_omitted and "L4" in pending:
-            body += " Portal balance shows $200 still unpaid on L4."
+            body += " Portal balance shows £200 still unpaid on L4."
         if not ledger.claim_started and not ledger.provider_statement_received_at and not paid:
             return None
         email = self._notice(ledger, f"remittance-{when:%Y%m%d}", when, "Brightwell remittance notice", body)

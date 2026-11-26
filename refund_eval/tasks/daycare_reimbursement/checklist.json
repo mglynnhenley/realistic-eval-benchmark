@@ -6,7 +6,7 @@
     {
       "id": "invoice_and_services",
       "instruction": "Check assertions about invoice D-1142, the paid date, line IDs, provider, service dates, days attended and dependant against the invoice, itemized statement and dated app updates. Distinguish what the participant actually knows from the provider-private register.",
-      "fact_paths": ["invoice_id", "invoice_total", "invoice_paid_on", "provider_name", "provider_tax_id", "dependant_name", "lines"],
+      "fact_paths": ["invoice_id", "invoice_total", "invoice_paid_on", "provider_name", "provider_reference", "dependant_name", "lines"],
       "history_sources": ["delivered_mail"]
     },
     {

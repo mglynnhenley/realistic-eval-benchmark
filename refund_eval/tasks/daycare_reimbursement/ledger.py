@@ -60,7 +60,7 @@ class DaycareClaimLine(BaseModel):
 class DaycareClaimSubmission(BaseModel):
     invoice_id: str
     provider_name: str
-    provider_tax_id: str
+    provider_reference: str
     dependant_name: str
     lines: list[DaycareClaimLine]
 
@@ -122,7 +122,7 @@ class DaycareLedger(BaseModel):
     provider_org: str
     appeals_org: str
     provider_name: str
-    provider_tax_id: str
+    provider_reference: str
     dependant_name: str
     coverage_effective: date
     initial_deposit_on: date

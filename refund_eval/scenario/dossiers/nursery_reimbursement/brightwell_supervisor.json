@@ -1,0 +1,19 @@
+{
+  "org": "brightwell_supervisor",
+  "subject": "nursery reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Brightwell's benefits supervisor reviews documented service-date disputes using the claim file and an attestation.",
+    "facts": [
+      {
+        "statement": "A representative may submit a service-date attestation under the plan's review procedure.",
+        "quote": "A participant may ask the Benefits Supervisor to review dates in a claim record. Supporting dates must be specific and consistent with services provided. An authorised representative may correspond and sign plan forms; the participant remains responsible for accuracy.",
+        "url": "https://brightwell.example/portal/help/disputes"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Brightwell Benefits Review <supervisor@brightwell.example>",
+      "Sign-off": "Benefits Review"
+    }
+  }
+}

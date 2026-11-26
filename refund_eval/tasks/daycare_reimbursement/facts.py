@@ -1,4 +1,4 @@
-"""Private facts for the fictional dependent-care reimbursement case."""
+"""Private facts for the fictional employer childcare reimbursement case."""
 
 from __future__ import annotations
 
@@ -30,10 +30,11 @@ class DaycareLineFacts(BaseModel):
 class DaycareFacts(BaseModel):
     invoice_id: str
     invoice_total: int = Field(gt=0)
-    currency: str = "USD"
+    currency: str = "GBP"
+    session_description: str = "morning sessions"
     invoice_paid_on: date
     provider_name: str
-    provider_tax_id: str
+    provider_reference: str
     dependant_name: str
     coverage_effective: date
     election_made: date

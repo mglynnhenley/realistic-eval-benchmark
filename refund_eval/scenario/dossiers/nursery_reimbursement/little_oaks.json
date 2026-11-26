@@ -1,0 +1,34 @@
+{
+  "org": "little_oaks",
+  "subject": "nursery reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Bank Street Day Nursery and Preschool is at 50 Bank Street, Canary Wharf, London E14 5NS. Parent Enquiry lists parentenquiry@brighthorizons.com for general enquiries.",
+    "facts": [
+      {
+        "statement": "Bright Horizons identifies the centre as Bank Street Day Nursery and Preschool.",
+        "quote": "Bank Street Day Nursery and Preschool",
+        "url": "https://www.brighthorizons.co.uk/our-nurseries/bank-street-day-nursery-and-preschool"
+      },
+      {
+        "statement": "The centre page lists its London address.",
+        "quote": "50 Bank Street, Canary Wharf, London, E14 5NS",
+        "url": "https://www.brighthorizons.co.uk/our-nurseries/bank-street-day-nursery-and-preschool"
+      },
+      {
+        "statement": "The centre page lists its phone number.",
+        "quote": "0203 319 3503",
+        "url": "https://www.brighthorizons.co.uk/our-nurseries/bank-street-day-nursery-and-preschool"
+      },
+      {
+        "statement": "The FAQ lists a general Parent Enquiry email address.",
+        "quote": "parentenquiry@brighthorizons.com",
+        "url": "https://www.brighthorizons.co.uk/faqs"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Bright Horizons Parent Enquiries <parentenquiry@brighthorizons.com>",
+      "Sign-off": "Parent Enquiries"
+    }
+  }
+}
