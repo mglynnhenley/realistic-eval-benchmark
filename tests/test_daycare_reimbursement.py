@@ -858,7 +858,8 @@ async def test_daycare_email_remittance_query_uses_key_value_request_type():
 
 
 @pytest.mark.parametrize("inline", [False, True])
-async def test_daycare_email_supervisor_accepts_key_value_signed_corrections(inline):
+@pytest.mark.parametrize("blank_line", [False, True])
+async def test_daycare_email_supervisor_accepts_key_value_signed_corrections(inline, blank_line):
     sim = MockSim()
     install_mock_models(sim)
     start_sample("daycare_reimbursement")
@@ -898,6 +899,8 @@ async def test_daycare_email_supervisor_accepts_key_value_signed_corrections(inl
             "corrections[0][service_start]=2024-09-23\n"
             "corrections[0][service_end]=2024-09-27"
         )
+    if blank_line:
+        body = body.replace("\ncorrections[0]", "\n\ncorrections[0]", 1)
     body += (
         "\nPrior message follows:\n"
         "> request_type=remittance_query\n"

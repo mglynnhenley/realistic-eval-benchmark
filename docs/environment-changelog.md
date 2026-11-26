@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.18 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: bcf11afa18722723436606c43a04aefaa9c48a34e63006c057ef0d6461fd83e4
+- Trial round: none; offline tests only.
+- Changes: Treat blank lines between structured daycare email fields as separators, preserving complete signed corrections in spaced messages. No live grading or pilot results.
+
 ## 10.17 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: 52dd04a2c7898aa04887d8b0bdef536afab718723da7c1ec47f351db9f898a1d

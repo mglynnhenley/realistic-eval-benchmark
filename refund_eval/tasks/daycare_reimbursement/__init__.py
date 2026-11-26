@@ -89,6 +89,8 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
     structured_block_started = False
     for line in event.incoming.splitlines():
         line = line.strip()
+        if not line:
+            continue
         assignments = []
         quote = None
         escaped = False
