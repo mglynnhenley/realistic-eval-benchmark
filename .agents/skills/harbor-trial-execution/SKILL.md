@@ -60,6 +60,21 @@ per-response ceiling required by strict key modes. Record each in its own config
 field when applicable. Neither field supplies a default for the other, and do
 not infer either from a previous run or example.
 
+## Verifier and grading boundary
+
+The native run config's `disable_verifier` field defaults to `false`, so omitting
+it leaves the Harbor verifier enabled. Set `"disable_verifier": true` in the
+private JSON passed to `prepare` for the standard ungraded execution below. This
+is a supported config field, not a `--disable-verifier` CLI option. The setting
+disables Harbor's verifier while preserving trace artifact collection.
+
+Trial execution approval must explicitly cover the task's configured
+`grader_model` role and its world budget: it is used by the financial consistency
+checker and is not disabled by `disable_verifier`. Stop if that role is not
+approved and budgeted. Separately, enabling the Harbor verifier, analysis, or
+any post-run grading requires its own explicit owner approval and budget; a
+one-trial authorization alone does not grant it.
+
 Use the repository's current Harbor documentation and guarded CLI as authority
 for supported modes and flags. In particular, `train_refund_late` needs an
 explicit target `cost_limit`; strict key modes also require their documented
@@ -73,8 +88,18 @@ logs, or handoff text.
    Confirm the exact current command and budget fields in `scripts/laura_trial.py`
    and `refund_eval/harbor/batch.py`; do not rely on an old launch recipe.
 2. Save a complete native run config in a private location outside tracked
-   source. Include the explicitly approved limits and identities. Do not hand-edit
-   a generated `job.yaml` or substitute a wheel after its identity is recorded.
+   source. Include the explicitly approved limits and identities, and explicitly
+   set `"disable_verifier": true` as described above. Do not hand-edit a generated
+   `job.yaml` or substitute a wheel after its identity is recorded.
+
+   Include this field in the complete JSON config (excerpt, not a standalone
+   run config):
+
+   ```json
+   {
+     "disable_verifier": true
+   }
+   ```
 3. Use a new empty private preparation directory. Prepare through the guarded
    command; it validates a fresh single Modal trial, builds the public agent
    wheel offline, checks the installed public scenario loader, and records the
@@ -170,10 +195,12 @@ scripts/harbor python -m scripts.laura_trial run \
 ```
 
 The run command prints `laura_setup_verified=...` before starting the guarded
-runner; that marker is not evidence that a job completed. Count the attempt as
-complete only when the final output is `guarded_harbor_job=complete` (or
-`guarded_harbor_job=complete grading=disabled`) and the Harbor result is
-collected. Preserve and report `guard_failed=...`, `launcher_failed=...`, or
+runner; that marker is not evidence that a job completed. For this ungraded
+workflow, count the attempt as complete only when the final output is
+`guarded_harbor_job=complete grading=disabled` and the Harbor result is
+collected. If it prints `guarded_harbor_job=complete`, treat that as a verifier
+configuration mismatch; do not accept or perform grading without separate
+approval. Preserve and report `guard_failed=...`, `launcher_failed=...`, or
 `guarded_harbor_job=failed ...` as a failed or incomplete attempt.
 
 Do not start another attempt after a timeout, partial result, launch failure, or
@@ -196,8 +223,7 @@ owner one private, evidence-backed record for the authorized attempt, with:
   issue, or missing artifact; say explicitly that no retry or replacement ran;
 - `jobs/<job-name>/effective_parameters.json` and the Harbor job/trial
   `result.json` and `usage.json`, plus the trial's `agent/inspect/` `.eval`,
-  `agent/trajectory.json`, `artifacts/world/` state/events/snapshot, and `verifier/`
-  reward/details when present;
+  `agent/trajectory.json`, and `artifacts/world/` state/events/snapshot;
 - target charge receipts and guard evidence when present, with target and world
   actual charges kept separate from estimates and caps. If receipts are missing,
   partial, or ambiguous, label actual spend unknown rather than estimating it;
@@ -218,6 +244,7 @@ Prepared record: [private run.json path; setup manifest]
 Execution: [job name; trial ID; started/completed/failed/incomplete]
 Outcome evidence: [private result and artifact paths; missing items]
 Limits: [target/world dollar caps; key guard; total token budget; per-response cap]
+Grading: [Harbor verifier disabled; separate approval reference if enabled]
 Usage: [actual target/world charges or unknown; estimates separately labeled]
 Integrity: [run.json.task.source_sha256; laura-setup.json.current_source.sha256; environment fingerprint, task and wheel digests; Git revision if known]
 Follow-up: [failure/cleanup notes; no retry or replacement, unless authorized]
