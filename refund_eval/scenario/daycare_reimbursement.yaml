@@ -81,6 +81,7 @@ orgs:
   - key: brightwell_supervisor
     name: Brightwell Benefits Supervisor
     kind: other
+    reply_delay_hours: [24, 156]
     email_domains: [brightwell.example]
     contact_emails: [supervisor@brightwell.example]
     phone_numbers: [+1-202-555-0131]

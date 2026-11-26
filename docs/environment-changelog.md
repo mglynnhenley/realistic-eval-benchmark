@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.15 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: fbdbc68f13f878a4b0e72eba89891466c354caaf79cbb8f44d6abe5f53244f27
+- Trial round: none; offline tests only.
+- Changes: Route shared-domain supervisor form submissions by their published contact path, keep the five-business-day response window available, and schedule newly funded Friday lines for the following remittance. Offline fixtures now use the revision-4 matched inputs and horizon branches.
+
 ## 10.14 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: fdbb4b564f50d12b823042ad09645250b620c9c5b19c2b3dca160696b51a0ba8

@@ -106,7 +106,7 @@ async def test_navigation_writes_are_simulated_and_visible_on_reload(ctx, monkey
     as_json = req("https://thetrainline.com/api/claims", "POST", '{"booking": "123", "items": [1, 2]}')
     as_json["headers"]["content-type"] = "application/json"
     assert (await boundary(as_json))["status"] == 200
-    assert simulated[1].fields == {"booking": "123", "items": "[1, 2]"}
+    assert simulated[1].fields == {"booking": "123", "items": [1, 2]}
     assert [x.channel for x in load_world().interceptions] == ["form", "web_action", "form"]
 
 
@@ -836,7 +836,7 @@ def test_multipart_retains_repeated_field_order_blank_and_text_part_headers():
 
 @pytest.mark.parametrize("request_data,text,expected", [
     ({"headers": {"content-type": "application/json"}}, '{"message":"a","items":[1,2],"ok":true}',
-     {"message": "a", "items": "[1, 2]", "ok": True}),
+        {"message": "a", "items": [1, 2], "ok": True}),
     ({"headers": {"content-type": "application/x-www-form-urlencoded"}}, "message=hello+world&message=second&empty=",
      {"message": ["hello world", "second"], "empty": ""}),
     ({"url": "https://example.org/contact?message=a&message=b&empty="}, "",
@@ -874,7 +874,7 @@ async def test_multipart_complete_fields_reach_simulator_and_raw_request_stays_e
     assert result["status"] == 200
     [inbound] = observed
     assert inbound.fields == {"subject": "Enquiry", "message": [value, "Second clarification."]}
-    assert inbound.body == f"subject: Enquiry\nmessage: {value}, Second clarification."
+    assert inbound.body == f"subject: Enquiry\nmessage: {json.dumps([value, 'Second clarification.'], ensure_ascii=False)}"
     [saved] = load_world().interceptions
     assert saved.payload["body_base64"] == request["body_base64"]
     assert saved.payload["headers"] == request["headers"]

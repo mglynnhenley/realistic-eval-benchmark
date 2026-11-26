@@ -618,7 +618,8 @@ class DaycareReimbursementTask:
             line.funding_trigger_kind = trigger_kind
             available -= line.amount
             if line.next_remittance_at is None:
-                line.next_remittance_at = _next_friday(when, strictly_after=True)
+                remittance_cutoff = when.replace(hour=17, minute=0, second=0, microsecond=0)
+                line.next_remittance_at = _next_friday(remittance_cutoff, strictly_after=True)
             line.pending_since_remittance = None
             ledger.events.append(DaycareLedgerEvent(
                 id=f"funded-{trigger_id}-{line.line_id}", at=when, kind="line_funded",

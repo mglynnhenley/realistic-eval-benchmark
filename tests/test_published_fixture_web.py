@@ -2,6 +2,7 @@ import base64
 import copy
 import json
 import os
+from datetime import UTC, date, datetime
 from urllib.parse import urlencode
 
 import pytest
@@ -10,6 +11,7 @@ from inspect_ai.util import store
 from inspect_ai.util._store import Store, init_subtask_store
 
 from refund_eval.agent.harness import initial_world
+from refund_eval.companies.models import CompanyAction, CompanyEvent
 from refund_eval.published.adapter import AUDIT_KEY
 from refund_eval.published.fixture_web import (
     FIXTURE_WEB_DATASET,
@@ -235,13 +237,16 @@ async def test_daycare_claim_form_posts_visible_nested_fields_to_simulator(ctx, 
     def request(url, method="GET", fields=None, key="request"):
         return {**req(url, method, fields), "request_id": key, "tool_call_id": key}
 
+    def advance_to(when):
+        with world_tx() as current:
+            advance_clock(current, when)
+        return DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+
     def advance_to_event(kind):
         world = load_world()
         ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
         pending = next(event for event in ledger.pending_events if event.event.kind == kind)
-        with world_tx() as current:
-            advance_clock(current, pending.due_at)
-        return DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+        return advance_to(pending.due_at)
 
     provider = scenario.org("little_oaks")
     sim.open_actions.append({
@@ -264,6 +269,7 @@ async def test_daycare_claim_form_posts_visible_nested_fields_to_simulator(ctx, 
     provider_ledger = advance_to_event("provider_statement")
     assert provider_ledger.provider_statement_received_at is not None
 
+    advance_to(datetime(2024, 9, 26, 9, tzinfo=UTC))
     org = scenario.org("brightwell_claims")
     page = await boundary(request(org.contact_url, key="claims-page"))
     form = BeautifulSoup(base64.b64decode(page["body_base64"]).decode(), "html.parser").find("form")
@@ -294,10 +300,94 @@ async def test_daycare_claim_form_posts_visible_nested_fields_to_simulator(ctx, 
     assert claim_interaction.error is None, claim_interaction.error
     assert claim_event.due_at > claim_world.now
     ledger = advance_to_event("claim_received")
-    assert ledger.claim_received_at is not None
+    assert ledger.claim_received_at.date() == date(2024, 9, 26)
     assert [line.filed_start for line in ledger.lines] == [
         line.statement_start for line in sorted(scenario.facts.lines, key=lambda item: item.line_id)
     ]
+    claim_decision = next(event for event in ledger.pending_events if event.event.kind == "claim_decision")
+    assert claim_decision.due_at == datetime(2024, 10, 10, 17, tzinfo=UTC)
+    decided = advance_to_event("claim_decision")
+    l1 = next(line for line in decided.lines if line.line_id == "L1")
+    assert l1.denied_at == datetime(2024, 10, 10, 17, tzinfo=UTC)
+    assert all(line.approved_at == datetime(2024, 10, 10, 17, tzinfo=UTC)
+               for line in decided.lines if line.line_id in {"L2", "L3", "L4"})
+
+    supervisor = scenario.org("brightwell_supervisor")
+    supervisor_page = await boundary(request(supervisor.contact_url, key="supervisor-form"))
+    supervisor_form = BeautifulSoup(
+        base64.b64decode(supervisor_page["body_base64"]).decode(), "html.parser",
+    ).find("form")
+    assert supervisor_form.select_one('select[name="signed_by"]')
+    assert supervisor_form.select_one('textarea[name="signed_statement"]')
+    correction = {
+        "line_id": "L1", "service_start": "2024-09-23", "service_end": "2024-09-27",
+    }
+    sim.open_actions.append({
+        "decision": "supervisor_decision", "reply_after_hours": 180,
+        "case_events": [{"kind": "supervisor_decision", "result": "accepted", "corrections": [correction]}],
+    })
+    supervisor_pairs = [
+        ("email", scenario.user.email_addresses[0]), ("booking_ref", ""),
+        ("subject", "L1 service-date review"), ("message", "Please reconsider L1's service dates."),
+        ("request_type", "service_date_dispute"), ("signed_by", "registered representative"),
+        ("signed_statement", "I attest these dates are true and correct."),
+        ("corrections[0][line_id]", "L1"), ("corrections[0][service_start]", correction["service_start"]),
+        ("corrections[0][service_end]", correction["service_end"]),
+    ]
+    accepted_response = await boundary(
+        request(supervisor_form["action"], "POST", supervisor_pairs, "signed-correction"),
+    )
+    assert accepted_response["status"] == 200
+    pending_world = load_world()
+    pending_ledger = DaycareLedger.model_validate(pending_world.task_state["daycare_reimbursement"])
+    supervisor_interaction = pending_world.interactions[-1]
+    assert supervisor_interaction.org == "brightwell_supervisor"
+    assert supervisor_interaction.error is None, supervisor_interaction.error
+    assert supervisor_interaction.event.fields["signed_by"] == "registered representative"
+    signed_event = next(event for event in pending_ledger.pending_events if event.event.kind == "supervisor_decision")
+    assert signed_event.due_at.date() == date(2024, 10, 17)
+    assert signed_event.request_fields["signed_by"] == "registered representative"
+    assert signed_event.request_fields["signed_statement"] == "I attest these dates are true and correct."
+    accepted = advance_to_event("supervisor_decision")
+    l1 = next(line for line in accepted.lines if line.line_id == "L1")
+    assert l1.actual_start == date(2024, 8, 26)
+    assert l1.filed_start == date(2024, 9, 23)
+    assert {line.line_id for line in accepted.lines if line.disbursed_at} == {"L2", "L3"}
+    assert all(next(line for line in accepted.lines if line.line_id == line_id).disbursed_at.date()
+               == date(2024, 10, 11) for line_id in ("L2", "L3"))
+
+    l4_at_oct25 = advance_to(datetime(2024, 10, 25, 18, tzinfo=UTC))
+    l4 = next(line for line in l4_at_oct25.lines if line.line_id == "L4")
+    assert l4.funded_at == datetime(2024, 10, 18, 9, tzinfo=UTC)
+    assert l4.disbursed_at == datetime(2024, 10, 25, 17, tzinfo=UTC)
+
+    revised = advance_to_event("claim_decision")
+    l1 = next(line for line in revised.lines if line.line_id == "L1")
+    assert l1.approved_at.date() == date(2024, 10, 31)
+    assert l1.next_remittance_at.date() == date(2024, 11, 1)
+    nov1 = advance_to(datetime(2024, 11, 1, 18, tzinfo=UTC))
+    l1 = next(line for line in nov1.lines if line.line_id == "L1")
+    assert l1.funded_at.date() == date(2024, 11, 1)
+    assert l1.disbursed_at.date() == date(2024, 11, 1)
+
+    paid_world = load_world()
+    reversed_world = type(paid_world).model_validate(paid_world.model_dump(mode="json"))
+    appeal_org = scenario.org("brightwell_appeals")
+    appeal_event = CompanyEvent(incoming="Appeal the reversed service-date decision.", received_at=reversed_world.now)
+    appeal_action = CompanyAction(decision="appeal_reversed", reply=True, reply_after_hours=0, body="",
+                                  case_events=[{"kind": "appeal_decision", "line_ids": ["L1"],
+                                                "result": "reversed"}])
+    assert scenario.task.validate_company_action(scenario, reversed_world, appeal_org, appeal_event,
+                                                 appeal_action, reversed_world.now) is None
+    scenario.task.apply_company_action(scenario, reversed_world, appeal_org, appeal_event, appeal_action,
+                                       "appeal-after-payment", reversed_world.now)
+    advance_clock(reversed_world, nov1.runout_at)
+    reversed_ledger = DaycareLedger.model_validate(reversed_world.task_state["daycare_reimbursement"])
+    assert not scenario.task.success(scenario, reversed_world, reversed_ledger.runout_at)
+
+    horizon = advance_to(nov1.runout_at)
+    assert all(line.disbursed_at is not None and line.reversed_at is None for line in horizon.lines)
+    assert scenario.task.success(scenario, load_world(), horizon.runout_at)
 
 
 async def test_search_native_contract_useful_result_and_explicit_provenance(ctx):

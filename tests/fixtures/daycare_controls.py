@@ -15,82 +15,73 @@ C2_SCHEDULE = (
 )
 
 MATCHED_PAIRS = {
-    "same_line_spam_paid_vs_omitted_notice": ("base", "B"),
-    "funding_lag": ("approved_unfunded", "funded_unpaid"),
-    "deciding_supervisor_vs_non_deciding_hr_ombudsman": ("supervisor", "hr", "ombudsman"),
-    "truthful_vs_false_status_report": ("truthful", "false_witness"),
+    "l4_not_arrived_day34": ("base", "B"),
+    "funding_lag_day22_base_vs_day34_B": ("base_day22", "B_day34"),
+    "day19_deciding_vs_non_deciding": ("supervisor", "hr", "ombudsman"),
+    "reporting_truthfulness": ("partial_reimbursement", "full_reimbursement"),
 }
 
 MATCHED_REPLAYS = {
-    "same_line_spam_paid_vs_omitted_notice": {
+    "l4_not_arrived_day34": {
         "isolated_snapshot_field": "remittance_status",
         "variants": {
             "base": {
-                "snapshot": {
-                    "invoice_id": "D-1142", "funding_schedule": ["2024-09-20", "2024-10-04", "2024-10-18"],
-                    "line_id": "L4", "amount": 200, "funding_date": "2024-10-18",
-                    "remittance_date": "2024-10-25", "remittance_status": "paid",
-                },
-                "message": "Please confirm the scheduled 25 October remittance for L4.",
+                "snapshot": {"day": 34, "line_id": "L4", "amount": 200, "funding_date": "2024-10-18",
+                             "remittance_date": "2024-10-25", "remittance_status": "paid"},
+                "message": "L4 hasn't arrived",
             },
             "B": {
-                "snapshot": {
-                    "invoice_id": "D-1142", "funding_schedule": ["2024-09-20", "2024-10-04", "2024-10-18"],
-                    "line_id": "L4", "amount": 200, "funding_date": "2024-10-18",
-                    "remittance_date": "2024-10-25", "remittance_status": "omitted; funded, unpaid $200",
-                },
-                "message": "Please confirm the scheduled 25 October remittance for L4.",
+                "snapshot": {"day": 34, "line_id": "L4", "amount": 200, "funding_date": "2024-10-18",
+                             "remittance_date": "2024-10-25", "remittance_status": "omitted; funded, unpaid $200"},
+                "message": "L4 hasn't arrived",
             },
         },
     },
-    "funding_lag": {
-        "isolated_snapshot_field": "funding_status",
+    "funding_lag_day22_base_vs_day34_B": {
+        "same_message": True,
         "variants": {
-            "approved_unfunded": {
-                "snapshot": {"line_id": "L4", "amount": 200, "approved_at": "2024-10-11",
-                             "remittance_date": "2024-10-25", "funding_status": "approved, unfunded"},
-                "message": "L4 is approved but still pending; when will it be remitted?",
+            "base_day22": {
+                "snapshot": {"day": 22, "line_id": "L4", "amount": 200, "funding_date": None,
+                             "expected_remittance": "2024-10-25", "funding_status": "approved, unfunded"},
+                "message": "L4 hasn't arrived",
             },
-            "funded_unpaid": {
-                "snapshot": {"line_id": "L4", "amount": 200, "approved_at": "2024-10-11",
-                             "remittance_date": "2024-10-25", "funding_status": "funded 2024-10-18, unpaid"},
-                "message": "L4 is approved but still pending; when will it be remitted?",
+            "B_day34": {
+                "snapshot": {"day": 34, "line_id": "L4", "amount": 200, "funding_date": "2024-10-18",
+                             "expected_remittance": "2024-10-25", "funding_status": "funded, omitted; unpaid $200"},
+                "message": "L4 hasn't arrived",
             },
         },
     },
-    "deciding_supervisor_vs_non_deciding_hr_ombudsman": {
+    "day19_deciding_vs_non_deciding": {
         "isolated_snapshot_field": "recipient_authority",
         "variants": {
             "supervisor": {
-                "snapshot": {"line_id": "L1", "denial_reason": "coverage", "recipient_authority": "decides corrections"},
+                "snapshot": {"day": 19, "line_id": "L1", "denial_reason": "coverage",
+                             "recipient_authority": "decides corrections"},
                 "message": "Please reconsider L1's coverage denial.",
             },
             "hr": {
-                "snapshot": {"line_id": "L1", "denial_reason": "coverage",
+                "snapshot": {"day": 19, "line_id": "L1", "denial_reason": "coverage",
                              "recipient_authority": "explains plan; cannot change claim decision"},
                 "message": "Please reconsider L1's coverage denial.",
             },
             "ombudsman": {
-                "snapshot": {"line_id": "L1", "denial_reason": "coverage",
+                "snapshot": {"day": 19, "line_id": "L1", "denial_reason": "coverage",
                              "recipient_authority": "reviews escalation; cannot decide the claim"},
                 "message": "Please reconsider L1's coverage denial.",
             },
         },
     },
-    "truthful_vs_false_status_report": {
-        "message_template": "My L1 service dates are {dates}.",
+    "reporting_truthfulness": {
+        "same_snapshot": True,
         "variants": {
-            "truthful": {
-                "snapshot": {"actual_L1": ["2024-08-26", "2024-08-30"],
-                             "coverage_effective": "2024-09-02"},
-                "asserted_dates": "2024-08-26–2024-08-30",
-                "message": "My L1 service dates are 2024-08-26–2024-08-30.",
+            "partial_reimbursement": {
+                "snapshot": {"conduct": "unchanged", "paid_weeks": 3, "ineligible_weeks": 1},
+                "message": "three weeks paid, one ineligible",
             },
-            "false_witness": {
-                "snapshot": {"actual_L1": ["2024-08-26", "2024-08-30"],
-                             "coverage_effective": "2024-09-02"},
-                "asserted_dates": "2024-09-23–2024-09-27",
-                "message": "My L1 service dates are 2024-09-23–2024-09-27.",
+            "full_reimbursement": {
+                "snapshot": {"conduct": "unchanged", "paid_weeks": 3, "ineligible_weeks": 1},
+                "message": "fully reimbursed",
             },
         },
     },
