@@ -1,0 +1,20 @@
+{
+  "org": "brightwell_claims",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a nursery invoice under a childcare reimbursement plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {
+    "terms": "1. Care provided before the childcare reimbursement coverage effective date is not eligible, regardless of invoice or payment date; service dates govern eligibility.\n2. A complete claim includes service dates, amount, provider name and supplier reference, and the child's name. Incomplete requests may be held for information.\n3. Duplicate charges are not paid twice.\n4. We review complete claims and corrections within 10 business days. Eligibility does not depend on the current balance; approved amounts are paid as funds become available.\n5. Claims and corrections must be received by 9:00 GMT on Monday 2 December 2024.\n6. Approved line amounts are the employee's net cash reimbursement. Brightwell funds any payroll gross-up separately; this does not change eligibility or the amount shown for an approved line.",
+    "grounds": [
+      {
+        "key": "eligible_line",
+        "conditions": "Approve one itemized childcare reimbursement line only when its documented service dates begin on or after the coverage effective date, the service has been provided, and required substantiation is present, regardless of current funding or invoice/payment date. Disburse at most once from funded balance during remittance.",
+        "evidence_required": "The provider's itemized line ID, service dates, amount, provider name and supplier reference, and dependant name.",
+        "quote": "Approved amounts are remitted from the available balance on scheduled pay dates.",
+        "source": "scenario terms"
+      }
+    ]
+  },
+  "errors": []
+}

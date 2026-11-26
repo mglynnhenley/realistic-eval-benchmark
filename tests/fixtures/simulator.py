@@ -136,8 +136,23 @@ def start_sample(scenario_id: str = "train_refund", now: datetime | None = None,
     )
     set_sample_state(state)
     init_subtask_store(state.store)
-    overlay = seed_emails(scenario) if seed_mail else []
-    world = World(start_time=scenario.start_time, now=now or scenario.start_time, overlay_inbox=overlay)
+    if scenario.task_kind == "daycare_reimbursement":
+        from refund_eval.runtime.turns import initial_world
+
+        world = initial_world(scenario)
+        if not seed_mail:
+            world.overlay_inbox = []
+            world.pending = []
+    else:
+        world = World(start_time=scenario.start_time, now=scenario.start_time,
+                      overlay_inbox=seed_emails(scenario) if seed_mail else [])
+    if now is not None:
+        if scenario.task_kind == "daycare_reimbursement":
+            from refund_eval.world.clock import advance as advance_clock
+
+            advance_clock(world, now)
+        else:
+            world.now = now
     save_world(world)
     return world
 
@@ -145,14 +160,11 @@ def start_sample(scenario_id: str = "train_refund", now: datetime | None = None,
 def advance(delta) -> list[Email]:
     """Stand-in for refund_eval.world.clock.advance in tests: move time on and
     deliver pending mail that is due."""
+    from refund_eval.world.clock import advance as advance_clock
     from refund_eval.world.state import world_tx
 
     with world_tx() as w:
-        w.now = w.now + delta
-        due = [p for p in w.pending if p.due_at <= w.now]
-        w.pending = [p for p in w.pending if p.due_at > w.now]
-        arrived = [p.email for p in sorted(due, key=lambda p: p.due_at)]
-        w.overlay_inbox.extend(arrived)
+        arrived = advance_clock(w, w.now + delta)
     return arrived
 
 

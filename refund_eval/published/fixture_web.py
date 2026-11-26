@@ -45,6 +45,8 @@ class FixturePage:
     policy_url: str | None = None
     form_action: str | None = None
     late_refund_fields: bool = False
+    task_form_fields: tuple[dict[str, Any], ...] = ()
+    form_heading: str | None = None
     body_html: str | None = None
 
 
@@ -63,10 +65,16 @@ def _host(url: str) -> str:
 def _owner(url: str, orgs) -> Org | None:
     """The configured organisation whose website serves this URL, if any."""
     host = _host(url)
-    for org in orgs:
-        if any(host == d.casefold() or host.endswith("." + d.casefold()) for d in org.web_domains):
-            return org
-    return None
+    path = urlsplit(url).path.rstrip("/") or "/"
+    matches = [org for org in orgs
+               if any(host == d.casefold() or host.endswith("." + d.casefold()) for d in org.web_domains)]
+    for org in matches:
+        for configured in (org.policy_url, org.contact_url):
+            if configured and _host(configured) == host:
+                configured_path = urlsplit(configured).path.rstrip("/") or "/"
+                if path == configured_path or path.startswith(configured_path + "/"):
+                    return org
+    return matches[0] if matches else None
 
 
 def _heading(source: str) -> str:
@@ -135,6 +143,12 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
         contact_url = org.contact_url
         # Form submissions are navigation writes intercepted by the simulator.
         form_action = contact_url.rstrip("/") + "/submit" if org.contact_form else None
+        form_schema = getattr(ctx.scenario.task, "published_form_fields", None)
+        task_form_fields = tuple(form_schema(ctx.scenario, org.key)) if callable(form_schema) else ()
+        policy_title_fn = getattr(ctx.scenario.task, "published_policy_title", None)
+        policy_title = policy_title_fn(ctx.scenario, org.key) if callable(policy_title_fn) else None
+        form_heading_fn = getattr(ctx.scenario.task, "published_form_heading", None)
+        form_heading = form_heading_fn(ctx.scenario, org.key) if callable(form_heading_fn) else None
         contact = [org.contact_note or f"Contact {org.name} about an existing booking or account, or a complaint."]
         contact.extend(f"Email: {address}" for address in org.contact_emails)
         contact.extend(f"Telephone: {phone}" for phone in org.phone_numbers)
@@ -142,7 +156,7 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
             contact.append("Use the enquiry form below. We will reply by email.")
         pages.extend([
             FixturePage(
-                policy_url, f"{org.name}: refunds and complaints",
+                policy_url, policy_title or f"{org.name}: refunds and complaints",
                 policy_page_text(org, ctx.scenario.subject, ctx.scenario.orgs),
                 org.key, contact_url=contact_url,
                 body_html=policy_html(org, ctx.scenario.subject, ctx.scenario.orgs),
@@ -151,6 +165,8 @@ def fixture_pages(ctx: ToolContext) -> list[FixturePage]:
                 contact_url, f"Contact {org.name}", "\n\n".join(contact), org.key,
                 policy_url=policy_url, form_action=form_action,
                 late_refund_fields=ctx.scenario.task.uses_refund_form(ctx.scenario, org.key),
+                task_form_fields=task_form_fields,
+                form_heading=form_heading,
             ),
         ])
     return pages
@@ -170,8 +186,33 @@ def _page_html(page: FixturePage) -> str:
     form = ""
     if page.form_action:
         claim_fields = late_refund_inputs() if page.late_refund_fields else ""
+        task_fields = []
+        for field in page.task_form_fields:
+            name = str(field["name"])
+            field_id = re.sub(r"[^a-zA-Z0-9_-]", "-", name)
+            label = esc(str(field["label"]))
+            name_attr = esc(name, quote=True)
+            required = " required" if field.get("required") else ""
+            if field.get("type") == "select":
+                options = "".join(
+                    f'<option value="{esc(str(value), quote=True)}">{esc(str(label))}</option>'
+                    for value, label in field.get("options", [])
+                )
+                control = f'<select id="{field_id}" name="{name_attr}"{required}>{options}</select>'
+            elif field.get("type") == "textarea":
+                placeholder = esc(str(field.get("placeholder", "")), quote=True)
+                placeholder_attr = f' placeholder="{placeholder}"' if placeholder else ""
+                control = (f'<textarea id="{field_id}" name="{name_attr}" rows="4" cols="60"'
+                           f'{required}{placeholder_attr}></textarea>')
+            else:
+                field_type = esc(str(field.get("type", "text")), quote=True)
+                control = f'<input id="{field_id}" name="{name_attr}" type="{field_type}"{required}>'
+            task_fields.append(f'<p><label for="{field_id}">{label}</label><br>{control}</p>')
+        task_fields_html = "\n".join(task_fields)
+        form_heading = page.form_heading or ("Submit the required claim or review details" if task_fields
+                                              else "Send an enquiry")
         form = f"""
-<h2>Send an enquiry</h2>
+<h2>{form_heading}</h2>
 <form action="{esc(page.form_action, quote=True)}" method="post">
   <p><label for="email">Email address</label><br>
   <input id="email" name="email" type="email" required></p>
@@ -182,6 +223,7 @@ def _page_html(page: FixturePage) -> str:
   <p><label for="message">Message</label><br>
   <textarea id="message" name="message" rows="8" cols="60" required></textarea></p>
   {claim_fields}
+  {task_fields_html}
   <button type="submit">Send enquiry</button>
 </form>"""
     return f"""<!doctype html>

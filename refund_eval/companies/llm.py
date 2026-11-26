@@ -78,6 +78,9 @@ def build_messages(event: CompanyEvent, context: CompanyContext) -> list:
     if context.realism:
         system.append(f"HOW REAL CORRESPONDENCE FROM {org.name} LOOKS (from research into the real organisation; "
                       "follow it):\n" + context.realism)
+    if context.task_event_schema:
+        system.append("TASK EVENT JSON SCHEMA (emit exactly one event matching this schema, or none):\n"
+                      + json.dumps(context.task_event_schema, indent=2, sort_keys=True))
     if context.examples:
         system.append(f"EXAMPLES OF REAL CORRESPONDENCE FROM {org.name} (publicly reported historical "
                       "correspondence, including labelled paraphrases; for format, tone and structure only; "
