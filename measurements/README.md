@@ -7,6 +7,27 @@ differences, and writes an auditable JSON summary plus PNG figures. It does not
 modify `refund_eval`; it imports it only to merge a native Harbor trial
 directory into one `.eval` (`refund_eval.runtime.trial_artifacts`).
 
+## Harbor snapshot timing
+
+Run the offline synthetic comparison from a clean checkout and keep its JSON
+evidence outside the repository:
+
+```bash
+uv run --offline --frozen python measurements/harbor_snapshot.py \
+  | tee "$HOME/harbor-snapshot-$(date +%s).json"
+```
+
+The script creates one 5,500,000-byte SQLite event, compares eight full
+integrity-checked publications with eight calls to the current unchanged-state
+path using that same database, and verifies that the source and both snapshots
+have identical logical contents and valid integrity checks. It fails if the
+publication counts are not eight versus one. The JSON records timings, machine
+and SQLite/Python details, commit and source hashes, environment version and
+fingerprint, publication counts, and snapshot digests. Timings vary by machine;
+this measures snapshot work only and does not establish a whole-trial speedup
+or identify the dominant end-to-end delay. It makes no provider calls or live
+trials.
+
 ## Run it
 
 Pass individual `.eval` files, directories (searched recursively), or a mixture.
