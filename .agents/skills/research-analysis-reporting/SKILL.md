@@ -35,7 +35,7 @@ Also retain dispatch failures and unmatched/unresolved calls separately. The int
 Report at least two independent cost fields and their coverage:
 
 - **Target model actual cost:** sum only valid native Harbor target receipt records under `target-charge-receipts/`, as defined by `refund_eval/harbor/target_charges.py`: schema/version, matching `attempt_id`, valid `gen-*` `generation_id`, nonnegative `actual_cost_usd`, permitted `status`, and `source == openrouter_response_usage`. The summary exposes `attempt_count`, `unknown_attempt_count`, and `actual_cost_usd`; if any receipt is unknown/invalid, `actual_cost_usd` is `None`, not zero. A trajectory summary may be used only when it is explicitly receipt-backed; a target cap or reservation is not actual spend.
-- **World model settled cost:** use the world-side `world-spend-ledger.json` (`refund_eval/models/world_spend_ledger.py` and `docs/world-spend-ledger.md`) and recorded world completions (`refund_eval/runtime/trial_artifacts.py::world_usage`). `spent_usd` includes only settled provider charges; `reserved_usd`/`committed_usd` are holds or bounds, not settled cost. Any `unknown`, `settlement_pending`, unresolved hold, missing provider usage, or missing ledger means settled world cost is unknown/incomplete; never report the cap, reservation, or a missing value as zero. Keep simulator and grader roles distinct when the evidence supports it.
+- **World model booked/settled cost:** use the world-side `world-spend-ledger.json` (`refund_eval/models/world_spend_ledger.py` and `docs/world-spend-ledger.md`) and recorded world completions (`refund_eval/runtime/trial_artifacts.py::world_usage`). The ledger's `spent_usd` is a booked settled amount, but `refund_eval/models/budget.py` can settle an estimate, worst-case failed-attempt bound, or other non-provider charge; inspect each attempt's `provenance` (`actual`, `generation_lookup`, `estimate`, `worst_case`, and related statuses) before calling it provider-confirmed. `reserved_usd`/`committed_usd` are holds or bounds, not confirmed cost. Any `unknown`, `settlement_pending`, unresolved hold, missing provider usage, non-confirmed provenance, or missing ledger means confirmed settled world cost is unknown/incomplete; never report the cap, reservation, or a missing value as zero. Keep simulator and grader roles distinct when the evidence supports it. The operator's `reported_world_spend` path is stricter: it returns a cost only when the budget status is usable and every completion has `actual`/`generation_lookup` provenance whose costs reconcile to `spent_usd`.
 
 The three cost conclusions must remain separate: target actual cost, world settled cost, and total cost. Sum total only when both components have complete compatible coverage; otherwise report a partial total or `unknown`, with the missing component named. Receipt-backed does not mean paid analysis is authorized: this skill remains offline-only.
 
@@ -58,10 +58,26 @@ If no saved judge output exists, a reviewer may make a **manual evidence assessm
 
 Preserve `unknown`, refusals, missing chunks, and incomplete evidence coverage as unknown/incomplete, never as zero or a clean result. Report a positive supported finding with its citation even when other coverage is missing. Do not evade judge refusals or silently fill missing coverage. If there are no saved behavior results, say behavior grading was not performed offline; do not imply that a free structural report provides a behavioral grade.
 
-The repository's `scout/run.py` and `scout/transect_run.py --judged` send saved run content to external judges and incur paid calls. Do not invoke either grading path for an offline-only task. A local structural Transect pass is available for an existing trial:
+The repository's `scout/run.py` and `scout/transect_run.py --judged` send saved run content to external judges and incur paid calls. Do not invoke either grading path for an offline-only task. A local structural Transect pass is available for an existing trial, but first make a complete, writable private copy of the trial. This is required for native Harbor directories because `refund_eval/runtime/trial_artifacts.py::eval_path` materializes a merged `.eval` under the input trial's `merged/` directory even when Transect's `--out` points elsewhere. Never let that helper write into an original or read-only archive, and do not use symlinks back to the source.
 
 ```bash
-uv run python scout/transect_run.py TRIAL --out "$PRIVATE_REVIEW_DIR"
+PRIVATE_REVIEW_DIR="$HOME/research-reviews/unique-review-name"
+PRIVATE_TRIAL="$PRIVATE_REVIEW_DIR/trial"
+python - "$TRIAL" "$PRIVATE_TRIAL" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+if source.is_dir():
+    shutil.copytree(source, destination, symlinks=False)
+else:
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination / source.name)
+assert not any(path.is_symlink() for path in destination.rglob("*"))
+PY
+chmod -R u+rwX "$PRIVATE_TRIAL"
+uv run python scout/transect_run.py "$PRIVATE_TRIAL" --out "$PRIVATE_REVIEW_DIR/report"
 ```
 
 With no `--judged`, this pass is free/local, makes no model calls, and writes owner-only static reports (`report.html`, `messages.html`, and `grading.json`). Keep `PRIVATE_REVIEW_DIR` outside the checkout and use a unique directory per run. It reports structural ledger material and verifier cross-checks; phase names are vocabulary, not inferred phase labels, and its code measurements are not behavior grades. See `scout/README.md` and `docs/trajectory-grading.md` for the current contract.
