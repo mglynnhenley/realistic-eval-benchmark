@@ -58,37 +58,13 @@ If no saved judge output exists, a reviewer may make a **manual evidence assessm
 
 Preserve `unknown`, refusals, missing chunks, and incomplete evidence coverage as unknown/incomplete, never as zero or a clean result. Report a positive supported finding with its citation even when other coverage is missing. Do not evade judge refusals or silently fill missing coverage. If there are no saved behavior results, say behavior grading was not performed offline; do not imply that a free structural report provides a behavioral grade.
 
-The repository's `scout/run.py` and `scout/transect_run.py --judged` send saved run content to external judges and incur paid calls. Do not invoke either grading path for an offline-only task. A local structural Transect pass is available for an existing trial, but first make a complete, writable private copy of the trial. This is required for native Harbor directories because `refund_eval/runtime/trial_artifacts.py::eval_path` materializes a merged `.eval` under the input trial's `merged/` directory even when Transect's `--out` points elsewhere. Never let that helper write into an original or read-only archive, and do not use symlinks back to the source.
+The repository's `scout/run.py` and `scout/transect_run.py --judged` send saved run content to external judges and incur paid calls. Do not invoke either grading path for an offline-only task. A local structural Transect pass is available for an existing trial, but first create a fresh owner-only writable work area outside the checkout and copy only the selected complete trial into it. Use a copy operation that dereferences permitted source symlinks (or rejects them), creates no links back to originals, and makes the copied files writable without changing source permissions. Preserve the nearest applicable `run.json` manifest in the copied trial's ancestor path; `scout/transect_run.py` searches that ancestry for environment version/fingerprint metadata. Verify the copied manifest and fingerprint against the source before running. This isolation is required because `refund_eval/runtime/trial_artifacts.py::eval_path` materializes a merged `.eval` under the input trial's `merged/` directory even when Transect's `--out` points elsewhere. Never let that helper write into an original or read-only archive, and do not copy an unrelated batch.
 
 ```bash
-PRIVATE_REVIEW_DIR="$HOME/research-reviews/unique-review-name"
-PRIVATE_TRIAL="$PRIVATE_REVIEW_DIR/trial"
-install -d -m 700 "$PRIVATE_REVIEW_DIR"
-uv run python - "$TRIAL" "$PRIVATE_TRIAL" <<'PY'
-import shutil
-import sys
-from pathlib import Path
-
-source = Path(sys.argv[1]).resolve()
-destination = Path(sys.argv[2]).resolve()
-if source.is_dir():
-    shutil.copytree(source, destination, symlinks=False)
-else:
-    destination.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination / source.name)
-destination.chmod(0o700)
-# Keep the nearest run manifest that scout/transect_run.py uses for versions.
-manifest = next((parent / "run.json" for parent in (source, *source.parents)
-                 if (parent / "run.json").is_file()), None)
-if manifest is not None and manifest.resolve() != (destination / "run.json").resolve():
-    shutil.copy2(manifest, destination / "run.json")
-assert not any(path.is_symlink() for path in destination.rglob("*"))
-PY
-chmod -R u+rwX,go-rwx "$PRIVATE_REVIEW_DIR"
 uv run python scout/transect_run.py "$PRIVATE_TRIAL" --out "$PRIVATE_REVIEW_DIR/report"
 ```
 
-With no `--judged`, this pass is free/local, makes no model calls, and writes owner-only static reports (`report.html`, `messages.html`, and `grading.json`). Keep `PRIVATE_REVIEW_DIR` outside the checkout and use a unique directory per run. Copy only the selected trial and its nearest `run.json` manifest, not an unrelated batch; the copied manifest preserves the environment version/fingerprint lookup. It reports structural ledger material and verifier cross-checks; phase names are vocabulary, not inferred phase labels, and its code measurements are not behavior grades. See `scout/README.md` and `docs/trajectory-grading.md` for the current contract.
+With no `--judged`, this pass is free/local, makes no model calls, and writes owner-only static reports (`report.html`, `messages.html`, and `grading.json`). Keep `PRIVATE_REVIEW_DIR` outside the checkout and use a unique directory per run. It reports structural ledger material and verifier cross-checks; phase names are vocabulary, not inferred phase labels, and its code measurements are not behavior grades. See `scout/README.md` and `docs/trajectory-grading.md` for the current contract.
 
 ## 4. Compare paired controls without inventing support
 
