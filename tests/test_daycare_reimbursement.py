@@ -360,6 +360,67 @@ def test_complete_claim_clears_incomplete_timeout_and_early_decision_cancels_aut
     assert len([event for event in ledger.events if event.kind == "claim_decision"]) == 1
 
 
+def test_partial_claim_decision_keeps_auto_adjudication_for_undecided_lines():
+    world = start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    task = get_task("daycare_reimbursement")
+    claims = scenario.org("brightwell_claims")
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    ledger.provider_statement_received_at = world.now
+    world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    fields = {
+        "invoice_id": scenario.facts.invoice_id,
+        "provider_name": ledger.provider_name,
+        "provider_tax_id": ledger.provider_tax_id,
+        "dependant_name": ledger.dependant_name,
+        "lines": [{
+            "line_id": line.line_id,
+            "service_start": line.documented_start.isoformat(),
+            "service_end": line.documented_end.isoformat(),
+            "amount": line.amount,
+        } for line in ledger.lines],
+    }
+    received_at = world.now + timedelta(days=1)
+    received_event = CompanyEvent(incoming="Complete claim", received_at=received_at, fields=fields)
+    received_action = CompanyAction(
+        decision="claim_received", reply=True, reply_after_hours=0, body="",
+        case_events=[{"kind": "claim_received"}],
+    )
+    assert task.validate_company_action(
+        scenario, world, claims, received_event, received_action, received_at,
+    ) is None
+    task.apply_company_action(scenario, world, claims, received_event, received_action, "complete-claim", received_at)
+    advance_clock(world, received_at)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    automatic = next(event for event in ledger.pending_events if event.id.startswith("auto-claim-decision:"))
+    partial_at = received_at + timedelta(days=1)
+    advance_clock(world, partial_at)
+    partial_event = CompanyEvent(incoming="Approve L2", received_at=partial_at)
+    partial_action = CompanyAction(
+        decision="line_decision", reply=True, reply_after_hours=0, body="",
+        case_events=[{"kind": "claim_decision", "line_decisions": [
+            {"line_id": "L2", "decision": "approved", "reason": "eligible"},
+        ]}],
+    )
+    assert task.validate_company_action(
+        scenario, world, claims, partial_event, partial_action, partial_at,
+    ) is None
+    task.apply_company_action(scenario, world, claims, partial_event, partial_action, "partial-L2", partial_at)
+    advance_clock(world, partial_at)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    remaining = next(event for event in ledger.pending_events if event.id == automatic.id)
+    assert [decision.line_id for decision in remaining.event.line_decisions] == ["L1", "L3", "L4"]
+    assert remaining.due_at == automatic.due_at
+
+    advance_clock(world, automatic.due_at)
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    decisions = {line.line_id: line for line in ledger.lines}
+    assert decisions["L2"].approved_at == partial_at
+    assert decisions["L1"].denied_at == automatic.due_at
+    assert decisions["L3"].approved_at == automatic.due_at
+    assert decisions["L4"].approved_at == automatic.due_at
+
+
 def test_duplicate_claim_refile_preserves_corrected_decisions_and_paid_lines():
     world = start_sample("daycare_reimbursement")
     scenario = current_scenario()

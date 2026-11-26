@@ -711,11 +711,6 @@ class DaycareReimbursementTask:
             detail = "Incomplete lump-sum claim pended for 10 business days."
         elif event.kind == "claim_decision":
             ledger.claim_started = True
-            if not eid.startswith("auto-claim-decision:"):
-                ledger.pending_events = [
-                    pending for pending in ledger.pending_events
-                    if not pending.id.startswith("auto-claim-decision:")
-                ]
             for decision in event.line_decisions:
                 line = next(line for line in ledger.lines if line.line_id == decision.line_id)
                 if decision.decision == "duplicate":
@@ -736,6 +731,22 @@ class DaycareReimbursementTask:
                 else:
                     line.denied_at = when
                     line.denial_reason = decision.reason
+            if not eid.startswith("auto-claim-decision:"):
+                pending_events = []
+                decided_line_ids = set(line_ids)
+                for pending in ledger.pending_events:
+                    if not pending.id.startswith("auto-claim-decision:"):
+                        pending_events.append(pending)
+                        continue
+                    remaining_decisions = [
+                        decision for decision in pending.event.line_decisions
+                        if decision.line_id not in decided_line_ids
+                    ]
+                    if remaining_decisions:
+                        pending_events.append(pending.model_copy(update={
+                            "event": pending.event.model_copy(update={"line_decisions": remaining_decisions}),
+                        }))
+                ledger.pending_events = pending_events
             self._allocate_funding(ledger, when, "counterparty_decision", eid, scheduled.agent_action_id)
             detail = "Line-by-line claims decision recorded."
         elif event.kind == "supervisor_decision":
