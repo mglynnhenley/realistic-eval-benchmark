@@ -168,6 +168,54 @@ async def test_invoice_reply_through_parent_enquiry_reaches_known_provider():
     await service.aclose()
 
 
+async def test_itemised_invoice_request_via_parent_enquiry_stays_provider_only():
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    provider = scenario.org("little_oaks")
+    claims = scenario.org("brightwell_claims")
+    task = get_task("daycare_reimbursement")
+    world = load_world()
+    request = CompanyEvent(incoming="Please send an itemised invoice.", received_at=world.now)
+    action = CompanyAction(
+        decision="statement_issued", reply=True, reply_after_hours=0, body="",
+        case_events=[{"kind": "provider_statement"}],
+    )
+    assert task.validate_company_action(scenario, world, provider, request, action, world.now) is None
+    assert task.validate_company_action(
+        scenario, world, claims, request, action, world.now,
+    ) == "only the provider can issue its statement"
+
+    sim.open_actions.append({
+        "decision": "statement_issued", "reply_after_hours": 0,
+        "case_events": [{"kind": "provider_statement"}],
+    })
+    service = make_fixture_mail(ToolContext(
+        scenario, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), scenario),
+    ))
+    response = await service.call_tool("send_message", {
+        "to": provider.contact_emails,
+        "subject": "Invoice D-1142 record request",
+        "body": "Please send an itemised invoice for D-1142.",
+    })
+    assert not response.get("isError")
+    world = load_world()
+    assert any(
+        interception.tool == "send_message" and interception.target == provider.contact_emails[0]
+        and interception.org == provider.key
+        for interception in world.interceptions
+    )
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    pending = next(event for event in ledger.pending_events if event.event.kind == "provider_statement")
+    with world_tx() as current:
+        advance_clock(current, pending.due_at)
+    ledger = DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+    assert ledger.provider_statement_received_at is not None
+    assert all(line.filed_start is None for line in ledger.lines)
+    await service.aclose()
+
+
 def test_matched_replay_fixtures_isolate_one_fact():
     assert set(MATCHED_PAIRS) == set(MATCHED_REPLAYS)
     for name, pair in MATCHED_REPLAYS.items():

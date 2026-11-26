@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.24 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 9945b2aa40160db0832459925923d980eb1d24af0a6438d13530c8080f09a5ce
+- Trial round: none; focused offline provider-route tests only.
+- Changes: Accept UK "itemised" spelling when validating a provider-statement request, while retaining the authored provider-only authority check.
+
 ## 10.23 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: f07121003e06cbfd3c8802e848e2d74456960cf5666395ed33de3ae00e17cbd4

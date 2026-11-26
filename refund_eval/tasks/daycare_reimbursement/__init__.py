@@ -552,7 +552,8 @@ class DaycareReimbursementTask:
         if item.kind == "provider_statement":
             if org.key != ledger.provider_org:
                 return "only the provider can issue its statement"
-            if "statement" not in event.incoming.casefold() and "itemized" not in event.incoming.casefold():
+            request = event.incoming.casefold()
+            if "statement" not in request and "itemized" not in request and "itemised" not in request:
                 return "a provider statement must answer a request for an itemized statement"
             if effective_at.date() > _business_days_after(received_at.date(), 3):
                 return "provider statements are due within three business days of the received request"
