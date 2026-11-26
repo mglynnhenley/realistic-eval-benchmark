@@ -569,7 +569,7 @@ class RunManager:
 
 
 def scenario_details(scenario) -> dict:
-    return {**scenario.task.dashboard_metadata(scenario),
+    return {"sim_weeks": scenario.sim_weeks, **scenario.task.dashboard_metadata(scenario),
             "organisations": [{"key": org.key, "name": org.name, "kind": org.kind} for org in scenario.orgs]}
 
 
