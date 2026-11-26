@@ -25,12 +25,17 @@ publishing. Stop after the requested local checks. Offline preparation does not
 grant execution approval.
 
 The `scripts/harbor` wrapper starts `uv run --frozen` for the pinned
-`integrations/harbor` environment before `laura_trial` runs, and can provision
-that environment if it is missing. Prefix every offline `prepare` or `verify`
-invocation with `UV_OFFLINE=1` so this outer step cannot download dependencies.
-If pinned dependencies are unavailable offline, stop rather than retrying
-online. The guarded `laura_trial prepare` operation also builds the public
-wheel offline and does not contact Modal or a model provider.
+`integrations/harbor` environment before `laura_trial` runs. When that
+environment is absent, bootstrap it separately with the repository-approved
+`~/.local/bin/uv sync --frozen --project integrations/harbor`; this uses
+lockfile-pinned dependency versions and may contact the package registry, not a
+model provider. Do not pass provider credentials or change the registry or
+lock. Then prefix every offline `prepare` or `verify` invocation with
+`UV_OFFLINE=1` so the wrapper and guarded steps cannot download dependencies.
+If the bootstrap is denied or a pinned dependency cannot be installed, stop and
+report that prerequisite rather than bypassing access controls. The guarded
+`laura_trial prepare` operation also builds the public wheel offline and does
+not contact Modal or a model provider.
 
 ### Explicitly authorized execution
 

@@ -74,7 +74,49 @@ analysis handoff:
    [`canonical rail example spec`](harbor-offline-train-refund-late.example.json)
    is non-authorizing, not the historical private config, and must not be
    launched. A real run still needs its own approved private config.
-   Its guarded rail path uses the existing commands:
+
+   For a clean-checkout no-launch proof, run the approved locked dependency
+   bootstrap separately, then prepare and verify the example with
+   `UV_OFFLINE=1` and inherited credentials cleared. Keep the prepared directory
+   private and outside the checkout; run from the repository root with no
+   `.env` file:
+
+   ```bash
+   env -i PATH="$PATH" HOME="$HOME" UV_PYTHON_DOWNLOADS=never \
+     ~/.local/bin/uv sync --frozen --project integrations/harbor
+   umask 077
+   PREPARED_DIR="$(mktemp -d "$HOME/harbor-rail-prepare.XXXXXX")"
+   env -i PATH="$PATH" HOME="$HOME" UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never \
+     PYTHON_DOTENV_DISABLED=1 HARBOR_TELEMETRY=0 \
+     scripts/harbor python -m scripts.laura_trial prepare \
+       --run-config docs/harbor-offline-train-refund-late.example.json \
+       --prepared-dir "$PREPARED_DIR"
+   env -i PATH="$PATH" HOME="$HOME" UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never \
+     PYTHON_DOTENV_DISABLED=1 HARBOR_TELEMETRY=0 \
+     scripts/harbor python -m scripts.laura_trial verify \
+       --manifest "$PREPARED_DIR/laura-setup.json"
+   sha256sum "$PREPARED_DIR/run.json" "$PREPARED_DIR/job.yaml" \
+     "$PREPARED_DIR/laura-setup.json"
+   ```
+
+   At source revision `316bbef984e0a74255386576ee4531651db5d36f`, the example
+   produced:
+
+   ```text
+   laura_package_prepared=true installed_public_loader=true launch_started=false launch_approval=false
+   laura_setup_verified=identity_and_public_schema public_validation=true startup_validated=false launch_approval=false
+   ```
+
+   These outputs verify a prepared package and saved identity/schema only; they
+   do not represent an actual trial or result. The first cold-cache attempt at
+   `7a035c9ab5f9681f7b39dff3ccfd436040cbb763` failed before `laura_trial`
+   started because `litellm==1.103.3` was not cached. The approved frozen
+   bootstrap above resolved that dependency prerequisite; the same example then
+   prepared and verified with `UV_OFFLINE=1`. Treat the cold-cache failure as
+   environment setup, not evidence that the example config is invalid.
+
+   For a real, separately approved attempt, use the guarded commands below with
+   the owner-approved private run config instead of the public example:
 
    ```bash
    UV_OFFLINE=1 scripts/harbor python -m scripts.laura_trial prepare \
