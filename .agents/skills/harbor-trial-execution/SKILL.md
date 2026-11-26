@@ -62,18 +62,23 @@ not infer either from a previous run or example.
 
 ## Verifier and grading boundary
 
-The native run config's `disable_verifier` field defaults to `false`, so omitting
-it leaves the Harbor verifier enabled. Set `"disable_verifier": true` in the
-private JSON passed to `prepare` for the standard ungraded execution below. This
-is a supported config field, not a `--disable-verifier` CLI option. The setting
-disables Harbor's verifier while preserving trace artifact collection.
+The native `disable_verifier` field defaults to `false`. The Harbor verifier
+runs deterministic code checks over trial artifacts; it can produce task-success,
+containment, event-log/state consistency, and other code scores without calling a
+behavioral judge. Keep it enabled when the approved run specification requires
+these checks, even when no paid behavioral judge is approved.
 
-Trial execution approval must explicitly cover the task's configured
-`grader_model` role and its world budget: it is used by the financial consistency
-checker and is not disabled by `disable_verifier`. Stop if that role is not
-approved and budgeted. Separately, enabling the Harbor verifier, analysis, or
-any post-run grading requires its own explicit owner approval and budget; a
-one-trial authorization alone does not grant it.
+Use `"disable_verifier": true` only when the approved specification explicitly
+excludes deterministic verifier checks or scores. This supported JSON field is
+not a CLI option. It disables those checks while preserving trace artifact
+collection; it does not make skipped or missing checks pass, and does not disable
+the task's `grader_model` role.
+
+The configured `grader_model` is a separate paid world role used during the
+trial, not the Harbor verifier or a post-run behavioral judge. The trial approval
+and world budget must explicitly cover that role; stop if they do not. Paid
+behavioral grading or post-run analysis requires separate owner approval and
+budget.
 
 Use the repository's current Harbor documentation and guarded CLI as authority
 for supported modes and flags. In particular, `train_refund_late` needs an
@@ -89,15 +94,16 @@ logs, or handoff text.
    and `refund_eval/harbor/batch.py`; do not rely on an old launch recipe.
 2. Save a complete native run config in a private location outside tracked
    source. Include the explicitly approved limits and identities, and explicitly
-   set `"disable_verifier": true` as described above. Do not hand-edit a generated
-   `job.yaml` or substitute a wheel after its identity is recorded.
+   set `"disable_verifier"` according to the approved run specification. Use
+   `false` when it requires deterministic verifier checks. Do not hand-edit a
+   generated `job.yaml` or substitute a wheel after its identity is recorded.
 
-   Include this field in the complete JSON config (excerpt, not a standalone
-   run config):
+   For an evidence-required run, include this field in the complete JSON config
+   (excerpt, not a standalone run config):
 
    ```json
    {
-     "disable_verifier": true
+     "disable_verifier": false
    }
    ```
 3. Use a new empty private preparation directory. Prepare through the guarded
@@ -195,13 +201,20 @@ scripts/harbor python -m scripts.laura_trial run \
 ```
 
 The run command prints `laura_setup_verified=...` before starting the guarded
-runner; that marker is not evidence that a job completed. For this ungraded
-workflow, count the attempt as complete only when the final output is
-`guarded_harbor_job=complete grading=disabled` and the Harbor result is
-collected. If it prints `guarded_harbor_job=complete`, treat that as a verifier
-configuration mismatch; do not accept or perform grading without separate
-approval. Preserve and report `guard_failed=...`, `launcher_failed=...`, or
-`guarded_harbor_job=failed ...` as a failed or incomplete attempt.
+runner; that marker is not evidence that a job completed. With the verifier
+enabled, `guarded_harbor_job=complete` means the job finished with a valid
+reward; inspect `verifier/reward.json` and `verifier/details.json` for the
+checks required by the approved specification. If the output is
+`guarded_harbor_job=complete grading=disabled`, the job finished with verifier
+checks skipped; it is not evidence that those checks passed. Missing files or
+score keys are missing/unavailable, not zero or pass. Preserve and report
+`guard_failed=...`, `launcher_failed=...`, or `guarded_harbor_job=failed ...`
+as a failed or incomplete attempt.
+
+The guarded launcher closes its spend monitor in `finally`, but a completion
+marker is not separate evidence that the Harbor sandbox shut down. Record the
+shutdown evidence required by the approved run specification; if it is absent,
+mark it missing rather than inferring success.
 
 Do not start another attempt after a timeout, partial result, launch failure, or
 unknown charge. Preserve the failed or incomplete evidence and report it for an
@@ -209,8 +222,11 @@ owner decision; any retry or replacement needs new explicit authorization.
 
 ## Handoff the run record to analysis
 
-Do not grade or interpret the agent's behavior in this stage. Hand the analysis
-owner one private, evidence-backed record for the authorized attempt, with:
+Do not perform behavioral analysis or paid behavioral grading in this stage.
+The Harbor verifier may produce deterministic scores required by the approved
+run specification; relay them without interpreting the agent's behavior. Hand
+the analysis owner one private, evidence-backed record for the authorized
+attempt, with:
 
 - prepared `run.json`, `laura-setup.json`, job name, exact prepared/output paths,
   and trial ID. For a single task, `run.json.task.source_sha256` identifies the
@@ -220,10 +236,14 @@ owner one private, evidence-backed record for the authorized attempt, with:
   is the launcher source-tree identity checked by `verify`; these hashes are not
   Git commit IDs. Include a Git revision separately only when identified exactly;
 - terminal status, whether Harbor completed, and any failure, timeout, cleanup
-  issue, or missing artifact; say explicitly that no retry or replacement ran;
+  issue, or missing artifact; include the required shutdown evidence or mark it
+  missing, and say explicitly that no retry or replacement ran;
 - `jobs/<job-name>/effective_parameters.json` and the Harbor job/trial
   `result.json` and `usage.json`, plus the trial's `agent/inspect/` `.eval`,
   `agent/trajectory.json`, and `artifacts/world/` state/events/snapshot;
+- `verifier/reward.json` and `verifier/details.json` when enabled. If the
+  verifier was disabled or expected files/keys are absent, list the relevant
+  checks as skipped or missing; never report them as passed or scored;
 - target charge receipts and guard evidence when present, with target and world
   actual charges kept separate from estimates and caps. If receipts are missing,
   partial, or ambiguous, label actual spend unknown rather than estimating it;
@@ -243,8 +263,10 @@ Authorization: [approval reference; one attempt; scenario/model/environment]
 Prepared record: [private run.json path; setup manifest]
 Execution: [job name; trial ID; started/completed/failed/incomplete]
 Outcome evidence: [private result and artifact paths; missing items]
+Verifier: [enabled/disabled per specification; deterministic score/details or checks skipped/missing]
+Shutdown evidence: [artifact/marker and status, or missing]
 Limits: [target/world dollar caps; key guard; total token budget; per-response cap]
-Grading: [Harbor verifier disabled; separate approval reference if enabled]
+Paid behavior judge/analysis: [not performed; separate approval reference if authorized]
 Usage: [actual target/world charges or unknown; estimates separately labeled]
 Integrity: [run.json.task.source_sha256; laura-setup.json.current_source.sha256; environment fingerprint, task and wheel digests; Git revision if known]
 Follow-up: [failure/cleanup notes; no retry or replacement, unless authorized]
