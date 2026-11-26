@@ -320,6 +320,10 @@ attempt, with:
   partial, or ambiguous, label actual spend unknown rather than estimating it;
 - the separately recorded total token budget and per-response output limit,
   plus actual usage where available, so these controls cannot be conflated.
+- the [Harbor timing manifest](../../../docs/harbor-request-to-result.md), with
+  source references and missing-event notes. Maintain it from request receipt
+  through handoff; never backfill a missing timestamp or relabel a simulated
+  step as observed.
 
 Use the repository's private data location or another access-controlled channel;
 share paths and necessary evidence only with the analysis owner. Do not upload,

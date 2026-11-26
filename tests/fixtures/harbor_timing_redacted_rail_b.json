@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "workflow": "harbor-request-to-result",
+  "evidence_class": "redacted_summary",
+  "scenario": "train_refund_late",
+  "run_ref": "redacted-summary-rail-b",
+  "source_evidence": {
+    "reference": "redacted-summary:rail-outcome-sanitized.md:7",
+    "sha256": "332da85a205868b972470ac4da54d93c6cba52aa56b2998860ea9390402181c6"
+  },
+  "events": {
+    "request_received": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a request timestamp."},
+    "authorization_confirmed": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide an authorization timestamp."},
+    "config_frozen": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a configuration-freeze timestamp."},
+    "preparation_started": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a preparation-start timestamp."},
+    "preparation_completed": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a preparation-completion timestamp."},
+    "launch_submitted": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a launch timestamp."},
+    "job_created": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a job-created timestamp."},
+    "job_started": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a job-start timestamp."},
+    "trial_started": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The redacted summary does not provide a trial-start timestamp."},
+    "trial_finished": {"status": "observed", "timestamp_utc": "2026-11-24T19:44:20.212304Z", "source": "redacted-summary:rail-outcome-sanitized.md:7", "note": "Summary-only timestamp; raw trial artifacts were not loaded."},
+    "job_finished": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The summary prints 2026-11-24T19:44:20.786607 without a timezone; retained as ambiguous text and not normalized to UTC."},
+    "artifacts_collected": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The summary does not give an artifact-collection timestamp."},
+    "result_verified": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The summary gives no verification timestamp."},
+    "analysis_handoff_completed": {"status": "missing", "timestamp_utc": null, "source": null, "note": "The summary does not provide an analysis-handoff timestamp."}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "workflow": "harbor-request-to-result",
+  "evidence_class": "synthetic_fixture",
+  "scenario": "train_refund_late",
+  "run_ref": "synthetic-no-launch",
+  "source_evidence": {
+    "reference": "hand-authored fixture; no Harbor or provider operation"
+  },
+  "events": {
+    "request_received": {"status": "simulated", "timestamp_utc": "2026-01-01T00:00:00Z", "source": "synthetic fixture", "note": "Invented event; no request was received."},
+    "authorization_confirmed": {"status": "simulated", "timestamp_utc": "2026-01-01T00:01:00Z", "source": "synthetic fixture", "note": "Invented event; no authorization was given."},
+    "config_frozen": {"status": "simulated", "timestamp_utc": "2026-01-01T00:02:00Z", "source": "synthetic fixture", "note": "Invented event; no config was prepared."},
+    "preparation_started": {"status": "simulated", "timestamp_utc": "2026-01-01T00:03:00Z", "source": "synthetic fixture", "note": "Invented event; no preparation ran."},
+    "preparation_completed": {"status": "simulated", "timestamp_utc": "2026-01-01T00:04:00Z", "source": "synthetic fixture", "note": "Invented event; no preparation ran."},
+    "launch_submitted": {"status": "simulated", "timestamp_utc": "2026-01-01T00:05:00Z", "source": "synthetic fixture", "note": "Invented event; no launch was submitted."},
+    "job_created": {"status": "simulated", "timestamp_utc": "2026-01-01T00:06:00Z", "source": "synthetic fixture", "note": "Invented event; no Harbor job was created."},
+    "job_started": {"status": "simulated", "timestamp_utc": "2026-01-01T00:07:00Z", "source": "synthetic fixture", "note": "Invented event; no Harbor job was started."},
+    "trial_started": {"status": "simulated", "timestamp_utc": "2026-01-01T00:08:00Z", "source": "synthetic fixture", "note": "Invented event; no trial was started."},
+    "trial_finished": {"status": "simulated", "timestamp_utc": "2026-01-01T00:09:00Z", "source": "synthetic fixture", "note": "Invented event; no trial was run."},
+    "job_finished": {"status": "simulated", "timestamp_utc": "2026-01-01T00:10:00Z", "source": "synthetic fixture", "note": "Invented event; no Harbor job finished."},
+    "artifacts_collected": {"status": "simulated", "timestamp_utc": "2026-01-01T00:11:00Z", "source": "synthetic fixture", "note": "Invented event; no artifacts were collected."},
+    "result_verified": {"status": "simulated", "timestamp_utc": "2026-01-01T00:12:00Z", "source": "synthetic fixture", "note": "Invented event; no result was verified."},
+    "analysis_handoff_completed": {"status": "simulated", "timestamp_utc": "2026-01-01T00:13:00Z", "source": "synthetic fixture", "note": "Invented event; no handoff occurred."}
+  }
+}

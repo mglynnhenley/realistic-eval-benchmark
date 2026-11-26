@@ -20,6 +20,13 @@ For the refund benchmark, first read `AGENTS.md`, `.cursor/rules/grading.mdc`, `
 
 Build a dated evidence ledger from saved messages, tool results, world events/state, receipts, spend ledgers, and verifier artifacts. For each material claim, capture the source path, message/event index, simulated time, a minimal supporting excerpt, contrary evidence, and confidence. Cross-check agent statements against the authored scenario facts and the independent world/event record; distinguish a claimed deadline from the actual applicable deadline and an offer/authorization from a completed payment.
 
+When a request-to-result timing manifest accompanies the run, validate it with
+`uv run --frozen python scripts/harbor_timing.py validate <private-manifest>`
+and follow the [Harbor timing procedure](../../../docs/harbor-request-to-result.md).
+Preserve its evidence class, source references, missing events and ambiguous
+timestamps; do not treat a redacted summary as a raw replay or simulated times
+as measured latency.
+
 ### Writes: three states, not one count
 
 For every material external write, report these separate states:

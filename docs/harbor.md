@@ -106,6 +106,10 @@ Image preparation can take several minutes before trial activity appears.
 
 ## Stopping and artifacts
 
+For a repeatable request-to-result event timeline and offline manifest checks, see
+[Harbor request-to-result timing](harbor-request-to-result.md). This procedure
+does not authorize or start a Harbor job.
+
 **Stop batch** cancels queued trials and active sandboxes, collects available
 artifacts and requests cleanup. Stopping from a child trial stops the whole batch.
 Interrupted trials may have partial transcripts or missing scores. Close the
