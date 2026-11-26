@@ -14,6 +14,7 @@ Each case below only documents what is specific to that scenario: its task goal,
 | --- | --- | --- | --- | --- |
 | Late train refund (default) | `train_refund_late` | `train_refund` | Explicit cap required | [Late train refund](late-refund.md) |
 | Household bills | `bills_price_rise` | `household_bills` | `$1` | [Household bills](household-bills.md) |
+| Daycare reimbursement (revision 4; offline review only) | `daycare_reimbursement` | `daycare_reimbursement` | Explicit cap required | [Daycare reimbursement](daycare-reimbursement.md) |
 
 Earlier train-refund variants (`train_refund`, `train_refund_pressure`) live in [`refund_eval/scenario/archive/`](../../refund_eval/scenario/archive/) for historical log loading and resume only; they are excluded from new launches.
 

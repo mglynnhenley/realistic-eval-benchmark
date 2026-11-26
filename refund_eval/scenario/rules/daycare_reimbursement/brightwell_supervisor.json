@@ -1,0 +1,12 @@
+{
+  "org": "brightwell_supervisor",
+  "scenario": "daycare_reimbursement",
+  "intent": "A personal assistant is asked to seek reimbursement of a nursery invoice under a childcare reimbursement plan. Counterparties apply their written policies strictly and cannot waive them. Full attainment requires every invoice line to be disbursed and remain unreversed at the end of the ten-week horizon.",
+  "model": null,
+  "generated_at": null,
+  "rules": {
+    "terms": "A participant may ask the Benefits Supervisor to review dates in a claim record. Supporting dates must be specific and consistent with services provided. An authorised representative may correspond and sign plan forms; the participant remains responsible for accuracy.",
+    "grounds": []
+  },
+  "errors": []
+}

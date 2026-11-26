@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -162,7 +162,7 @@ class StatusReport(BaseModel):
 class Wakeup(BaseModel):
     time: datetime
     # daily_limit is accepted for historical logs only; the scheduler never emits it.
-    kind: Literal["scheduled_checkin", "new_mail", "daily_limit", "requested", "continue"]
+    kind: Literal["scheduled_checkin", "new_mail", "daily_limit", "requested", "task_event", "continue"]
     text: str
     # None preserves timestamp-only behavior for historical checkpoints.
     announced_mail_ids: list[str] | None = None
@@ -238,6 +238,7 @@ class World(BaseModel):
     cases: dict[str, CaseState] = Field(default_factory=dict)
     interactions: list[InteractionRecord] = Field(default_factory=list)
     outcome: OutcomeRecord = Field(default_factory=OutcomeRecord)
+    task_state: dict[str, Any] = Field(default_factory=dict)
     status_reports: list[StatusReport] = Field(default_factory=list)
     wakeups: list[Wakeup] = Field(default_factory=list)
     allowance_hits: list[datetime] = Field(default_factory=list)  # historical logs only; no longer recorded or enforced

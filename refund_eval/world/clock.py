@@ -36,16 +36,29 @@ def advance(world: World, to: datetime) -> list[Email]:
     in the order of `refund_eval.runtime.events`. Returns the emails that arrived. Mutates `world`; the caller is
     responsible for saving it (use inside `world_tx()`).
     """
+    from_time = world.now
     if as_utc(to) > as_utc(world.now):
         world.now = to
     now = as_utc(world.now)
 
+    arrived: list[Email] = []
+    if world.task_state:
+        from refund_eval.tasks import get_task
+
+        for task_kind in world.task_state:
+            try:
+                task = get_task(task_kind)
+            except ValueError:
+                continue
+            advance_task = getattr(task, "advance_world", None)
+            if callable(advance_task):
+                arrived.extend(advance_task(world, from_time, world.now) or [])
+
     due = due_mail(world)
     if not due:
-        return []
+        return arrived
     world.pending = [p for p in world.pending if as_utc(p.due_at) > now]
 
-    arrived: list[Email] = []
     for p in due:
         email = p.email
         # An email is visible once its sent_at has passed; keep it consistent with due_at.
@@ -63,7 +76,7 @@ def advance(world: World, to: datetime) -> list[Email]:
             if p.facts_on_delivery or p.promises_on_delivery:
                 case.history.append(f"{p.due_at:%Y-%m-%d %H:%M} email delivered: {email.id}")
         arrived.append(email)
-    return arrived
+    return sorted(arrived, key=lambda email: as_utc(email.sent_at))
 
 
 def charge(world: World, tool_name: str, *, written: str = "", read: str = "", base: bool = True,

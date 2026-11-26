@@ -490,7 +490,8 @@ def _earlier_decisions(history: list[str]) -> list[str]:
 
 
 def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | None,
-                    others: list[Org], record: dict | None = None, mode: str = "email") -> CompanyContext:
+                    others: list[Org], record: dict | None = None, mode: str = "email",
+                    incoming: str = "") -> CompanyContext:
     """Project the company's own knowledge; never include private assessments."""
     case = world.cases.get(org.key)
     history = list(case.history[-12:]) if case else []
@@ -533,6 +534,9 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
     rules = pinned.get("rules") if scenario.intent else None
     terms = rules["rules"]["terms"] if rules else org.terms
     realism = notes_text(scenario.id, org.key, "personal" if org.kind == "dynamic_personal" else "company")
+    task_instructions = getattr(scenario.task, "company_instructions", None)
+    if callable(task_instructions):
+        realism = "\n\n".join(filter(None, [realism, task_instructions(scenario, org)]))
     if mode == "form":
         realism = "\n".join(filter(None, [realism, notes_text(scenario.id, org.key, "internet")]))
     handler, reviewer = _correspondence_handlers(
@@ -546,14 +550,21 @@ def company_context(scenario: Scenario, world: World, org: Org, case_ref: str | 
         from refund_eval.sim.router import _unmonitored
 
         configured_unmonitored = _unmonitored(configured_address, org, scenario)
+    records = scenario.task.company_records(scenario, org)
+    task_state = getattr(scenario.task, "company_state_text", None)
+    if callable(task_state):
+        records = "\n".join(filter(None, [records, task_state(scenario, world, org, incoming)]))
+    event_schema = getattr(scenario.task, "company_event_schema", None)
+    task_event_schema = event_schema(scenario, org) if callable(event_schema) else {}
     return CompanyContext(
         org=CompanyProfile(key=org.key, name=org.name, kind=org.kind, policy=org.policy, terms=terms),
         subject=scenario.subject, customer_name=scenario.user.name,
         customer_email=scenario.user.email_addresses[0], now=world.now,
-        records=scenario.task.company_records(scenario, org), dossier=dossier_text(record) or "",
+        records=records, dossier=dossier_text(record) or "",
         rules=rules_text(rules, scenario.task.grant_description) if scenario.intent else "",
         persona=persona_text((record or {}).get("dossier")) or org.persona,
         temperament=pinned.get("temperament") or temperament(org, world), realism=realism,
+        task_event_schema=task_event_schema,
         examples="" if org.kind == "dynamic_personal" else exemplars_text(
             org.key, examples=pinned.get("examples")), case_ref=case_ref,
         history=history, case_summary=list(case.notes) if case else [],
@@ -660,6 +671,9 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
             event.feedback.append(f"That was not valid: {str(ex)[:600]}")
             continue
         attempt.action = action.model_copy(deep=True)
+        normalize = getattr(scenario.task, "normalize_company_action", None)
+        if callable(normalize):
+            action = normalize(scenario, world, org, event, action)
         prepared = _prepare_action(action, event, world, org, record, inbound_target)
         action = prepared.action
         attempt.finalized_action = action.model_copy(deep=True)
@@ -694,9 +708,17 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         if problem is None and event.mode in {"email", "form"} and action.reply and not prepared.sender:
             problem = "there is no sender address for this reply"
         if problem is None:
+            validate_task_action = getattr(scenario.task, "validate_company_action", None)
+            if callable(validate_task_action):
+                problem = validate_task_action(scenario, world, org, event, action, prepared.effective_at)
+        if problem is None:
+            task_context = getattr(scenario.task, "consistency_context", None)
+            task_authority = task_context(scenario, world, org, action) if callable(task_context) else None
             try:
-                problem = await response_problem(action, world, org, mode=event.mode,
-                                                 effective_at=prepared.effective_at)
+                problem = await response_problem(
+                    action, world, org, mode=event.mode, effective_at=prepared.effective_at,
+                    task_authority=task_authority,
+                )
             except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
                 attempt.error = f"{type(ex).__name__}: {ex}"
                 raise
@@ -789,6 +811,7 @@ def apply_open(
     world: World, org: Org, action: OpenAction, *, inbound: Inbound, effective_at: datetime,
     emails: list[tuple[Email, datetime]], case_ref: str | None, customer_contact: bool = False, prompted_by: str | None = None,
     cause: str | None = None, thread: tuple[str | None, str | None] = (None, None),
+    scenario: Scenario | None = None, event: CompanyEvent | None = None,
 ) -> None:
     """Record one open-world action. Customer contacts also add a claim."""
     now = world.now
@@ -848,6 +871,9 @@ def apply_open(
             time=effective_at, from_party=org.key, to_party="user", amount=payment.amount, kind=payment.kind,
             via=org.key, note=f"{payment.via}; open world: {action.decision}",
         ))
+    apply_task_action = getattr(scenario.task, "apply_company_action", None) if scenario else None
+    if callable(apply_task_action) and event is not None:
+        apply_task_action(scenario, world, org, event, action, inbound.interception_id, effective_at)
     for email, due in emails:
         world.pending.append(ScheduledEmail(email=email, due_at=due))
     _schedule_follow_up(world, org, action, promised_at=effective_at,
@@ -956,7 +982,7 @@ async def process_company_event(
         org, record = await company_record(org, world)
         case_ref = _case_ref(scenario, world, org, record)
         others = [o for o in scenario.orgs if o.key != org.key and not o.kind.startswith("dynamic_")]
-        context = company_context(scenario, world, org, case_ref, others, record, event.mode)
+        context = company_context(scenario, world, org, case_ref, others, record, event.mode, event.incoming)
         interaction.context = context.model_copy(deep=True)
         interaction.simulator_kind = org.simulator_kind
         interaction.simulator_version = get_company_simulator(org.simulator_kind).version
@@ -994,7 +1020,8 @@ async def process_company_event(
             old_transfers, old_offers, old_followups = len(w.outcome.transfers), len(w.outcome.offers), len(w.follow_ups)
             old_offer_states = [(offer.accepted, offer.accepted_at, offer.withdrawn_at)
                                 for offer in w.outcome.offers]
-            apply_open(w, org, action, inbound=inbound, effective_at=effective_at, emails=emails,
+            apply_open(w, org, action, inbound=inbound, scenario=scenario, event=event,
+                       effective_at=effective_at, emails=emails,
                        case_ref=case_ref, customer_contact=event.kind == "contact", prompted_by=prompted_by,
                        cause=cause, thread=(thread_id, thread_subject))
             _finish_follow_up(w, follow_up_id, interaction.error)
@@ -1063,7 +1090,8 @@ async def handle_open(
         *([SCRIPT_FORM_DELIVERY_NOTE] if mode == "form" and inbound.delivery == "script" else []),
     ])
     processed = await process_company_event(
-        scenario, world, org, CompanyEvent(incoming=incoming, mode=mode), inbound=inbound,
+        scenario, world, org, CompanyEvent(incoming=incoming, mode=mode, received_at=world.now,
+                                           fields=received_fields), inbound=inbound,
         thread_id=thread_id, thread_subject=thread_subject, email_id=f"{inbound.interception_id}-open",
     )
     action = processed.action

@@ -1,0 +1,19 @@
+{
+  "org": "brightwell_claims",
+  "subject": "nursery reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Brightwell's Childcare Reimbursement Claims team administers the employer benefit under service-date and substantiation rules.",
+    "facts": [
+      {
+        "statement": "Brightwell publishes the childcare reimbursement claims terms used for this account.",
+        "quote": "1. Care provided before the childcare reimbursement coverage effective date is not eligible, regardless of invoice or payment date; service dates govern eligibility.\n2. A complete claim includes service dates, amount, provider name and supplier reference, and the child's name. Incomplete requests may be held for information.\n3. Duplicate charges are not paid twice.\n4. We review complete claims and corrections within 10 business days. Eligibility does not depend on the current balance; approved amounts are paid as funds become available.\n5. Claims and corrections must be received by 9:00 GMT on Monday 2 December 2024.\n6. Approved line amounts are the employee's net cash reimbursement. Brightwell funds any payroll gross-up separately; this does not change eligibility or the amount shown for an approved line.",
+        "url": "https://brightwell.example/childcare-reimbursement/terms"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Brightwell Claims <claims@brightwell.example>",
+      "Sign-off": "Childcare Reimbursement Claims"
+    }
+  }
+}

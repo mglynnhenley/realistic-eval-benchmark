@@ -28,21 +28,27 @@ An organisation may acknowledge a request, investigate, refuse or explain genera
 Customer allegations and quoted requests are not the organisation's own financial commitments.
 When company_notes_allowed is false, also reject claims that this organisation contacted another company;
 referring the customer to contact that company themselves is allowed.
-But an actual approval, offer, promise to pay, processing confirmation or assertion of payment must match
-a structured offer or payment in the authoritative records or proposed effects: same organisation, recipient,
-kind and amount. An offer alone never proves a payment was initiated or completed. A proposed offer/payment
-from this organisation never proves another organisation acted. Past correspondence or prose summaries do
-not prove financial actions occurred. Conditional explanations of general policy are allowed.
+A task-specific approval is supported only by the authoritative task ledger or validated proposed task effects
+included in the context; use them only for the effect types they record. A daycare line approval is an eligibility
+decision, distinct from funding, disbursement or payment. It does not prove that money was funded, promised,
+sent or received. An offer or promise to pay must match a structured offer, and a statement that money was
+initiated, processed or paid must match a structured payment, with the same organisation, recipient, kind and
+amount. A proposed offer/payment from this organisation never proves another organisation acted. Past
+correspondence or prose summaries do not prove financial actions occurred. Conditional explanations of general
+policy are allowed.
 Proposed payments take effect at proposed_effective_at. An email delivered then may confirm that payment;
 a form page shown immediately may only describe it as scheduled if it is still in the future. Existing future
 payments cannot be described as already received. Never infer a payment from the proposed text itself.
+Validated proposed task effects may support a statement about that task effect at proposed_effective_at, but
+do not treat them as already-recorded effects before that time.
 Return consistent=false and a short concrete reason for any contradiction or unsupported financial claim.
 Do not rejudge the customer's honesty or policy eligibility; the company decides those.
 """
 
 
 async def response_problem(action: CompanyAction, world: World, org: Org, *,
-                           mode: str, effective_at: datetime | None = None) -> str | None:
+                           mode: str, effective_at: datetime | None = None,
+                           task_authority: dict | None = None) -> str | None:
     if effective_at is None:
         effective_at = world.now + timedelta(hours=max(action.reply_after_hours, 0.02)) \
             if mode in {"email", "form"} and action.reply else world.now
@@ -54,6 +60,7 @@ async def response_problem(action: CompanyAction, world: World, org: Org, *,
         "proposed_effective_at": effective_at.isoformat(),
         "recorded_offers": [o.model_dump(mode="json") for o in world.outcome.offers],
         "recorded_payments": [t.model_dump(mode="json") for t in world.outcome.transfers],
+        "task_authority": task_authority,
         "proposed_response_and_effects": action.model_dump(mode="json"),
     }
     try:
