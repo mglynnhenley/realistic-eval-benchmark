@@ -440,6 +440,37 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
     assert result_record == expected
 
 
+def test_native_daycare_run_config_requires_explicit_target_cap(tmp_path, monkeypatch, capsys):
+    native = _native_run_input(tmp_path, scenario="daycare_reimbursement")
+    implicit = {
+        **native.values,
+        "openrouter_key_mode": "shared_roles",
+        "shared_allowance_usd": 10.0,
+        "agent_max_output_tokens": 4096,
+        "sim_weeks": 10.0,
+    }
+    implicit.pop("cost_limit")
+    native.input_path.write_text(json.dumps(implicit), encoding="utf-8")
+
+    def unexpected_prepare(*args, **kwargs):
+        pytest.fail("implicit daycare target cap reached native preparation")
+
+    monkeypatch.setattr(laura_trial.batch, "prepare", unexpected_prepare)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "daycare-implicit-cap",
+    ]) == 2
+    assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"
+    assert not native.prepared_dir.exists()
+
+    explicit = laura_trial.batch.NativeBatchConfig.model_validate_json(json.dumps({
+        **implicit, "cost_limit": 5.0, "shared_allowance_usd": 15.0,
+    }))
+    assert explicit.cost_limit == 5.0
+    assert explicit.world_cost_limit == 10.0
+    assert explicit.shared_allowance_usd == 15.0
+
+
 def test_split_launcher_succeeds_and_reuses_saved_setup_with_sanitized_effective_records(
     tmp_path, monkeypatch
 ):

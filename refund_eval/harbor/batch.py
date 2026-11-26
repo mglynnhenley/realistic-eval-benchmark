@@ -106,6 +106,8 @@ class NativeBatchConfig(RunConfig):
                 raise ValueError(
                     f"{mode} mode supports only guarded scenarios: {', '.join(sorted(GUARDED_SCENARIOS))}"
                 )
+            if self.scenario == "daycare_reimbursement" and "cost_limit" not in self.model_fields_set:
+                raise ValueError("daycare_reimbursement strict role mode requires an explicit cost_limit")
             if self.execution != "modal":
                 raise ValueError(f"{mode} mode requires Modal execution")
             if self.agent_max_output_tokens is None:
