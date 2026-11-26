@@ -25,12 +25,17 @@ publishing. Stop after the requested local checks. Offline preparation does not
 grant execution approval.
 
 The `scripts/harbor` wrapper starts `uv run --frozen` for the pinned
-`integrations/harbor` environment before `laura_trial` runs, and can provision
-that environment if it is missing. Prefix every offline `prepare` or `verify`
-invocation with `UV_OFFLINE=1` so this outer step cannot download dependencies.
-If pinned dependencies are unavailable offline, stop rather than retrying
-online. The guarded `laura_trial prepare` operation also builds the public
-wheel offline and does not contact Modal or a model provider.
+`integrations/harbor` environment before `laura_trial` runs. When that
+environment is absent, bootstrap it separately with the repository-approved
+`~/.local/bin/uv sync --frozen --project integrations/harbor`; this uses
+lockfile-pinned dependency versions and may contact the package registry, not a
+model provider. Do not pass provider credentials or change the registry or
+lock. Then prefix every offline `prepare` or `verify` invocation with
+`UV_OFFLINE=1` so the wrapper and guarded steps cannot download dependencies.
+If the bootstrap is denied or a pinned dependency cannot be installed, stop and
+report that prerequisite rather than bypassing access controls. The guarded
+`laura_trial prepare` operation also builds the public wheel offline and does
+not contact Modal or a model provider.
 
 ### Explicitly authorized execution
 
@@ -165,6 +170,11 @@ not evidence that the cap was respected.
    set `"disable_verifier"` according to the approved run specification. Use
    `false` when it requires deterministic verifier checks. Do not hand-edit a
    generated `job.yaml` or substitute a wheel after its identity is recorded.
+
+   For a no-credential, no-launch code-path check only, see the clearly labeled
+   [`canonical rail example spec`](../../../docs/harbor-offline-train-refund-late.example.json).
+   It is not a historical config or launch approval; actual preparation still
+   requires its own private approved config.
 
    For an evidence-required run, include this field in the complete JSON config
    (excerpt, not a standalone run config):
@@ -320,6 +330,10 @@ attempt, with:
   partial, or ambiguous, label actual spend unknown rather than estimating it;
 - the separately recorded total token budget and per-response output limit,
   plus actual usage where available, so these controls cannot be conflated.
+- the [Harbor timing manifest](../../../docs/harbor-request-to-result.md), with
+  source references and missing-event notes. Maintain it from request receipt
+  through handoff; never backfill a missing timestamp or relabel a simulated
+  step as observed.
 
 Use the repository's private data location or another access-controlled channel;
 share paths and necessary evidence only with the analysis owner. Do not upload,
