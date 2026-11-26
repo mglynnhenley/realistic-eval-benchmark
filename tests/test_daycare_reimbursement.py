@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 
@@ -6,6 +8,7 @@ import pytest
 from refund_eval.companies.models import CompanyAction, CompanyEvent
 from refund_eval.published.fixtures import make_fixture_mail
 from refund_eval.published.mail import _visible_id
+from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.common import current_scenario
 from refund_eval.sim.consistency import SYSTEM as CONSISTENCY_SYSTEM
 from refund_eval.sim.interface import Inbound
@@ -20,7 +23,12 @@ from refund_eval.tasks.daycare_reimbursement.ledger import (
 )
 from refund_eval.world.clock import advance as advance_clock
 from refund_eval.world.interception import ToolContext
-from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox
+from refund_eval.world.mail import (
+    DEFAULT_FIXTURE_PATH,
+    FixtureMailSource,
+    Mailbox,
+    scenario_inbox_path,
+)
 from refund_eval.world.state import Transfer, World, load_world, world_tx
 from tests.fixtures.daycare_controls import (
     C1_SCHEDULE,
@@ -96,12 +104,57 @@ def test_claim_cutoff_error_uses_calendar_deadline():
 
 
 def test_starting_emails_distribute_evidence_without_answer_or_route_giveaways():
-    start_sample("daycare_reimbursement")
+    world = start_sample("daycare_reimbursement")
     scenario = current_scenario()
-    assert len(scenario.seed_emails) == 5
+    assert len(scenario.seed_emails) == 10
     assert len(scenario.scheduled_emails) == 3
     assert all(email.sent_at <= scenario.start_time for email in scenario.seed_emails)
     assert all(email.sent_at > scenario.start_time for email in scenario.scheduled_emails)
+    baseline = load_scenario("train_refund_late")
+    source = FixtureMailSource(
+        scenario_inbox_path(scenario), user=scenario.user, start_time=scenario.start_time,
+    )
+    baseline_source = FixtureMailSource(
+        scenario_inbox_path(baseline), user=scenario.user, start_time=scenario.start_time,
+    )
+    assert source.path == baseline_source.path == DEFAULT_FIXTURE_PATH
+    assert len(source.emails) == len(baseline_source.emails) == 77
+    canonical_source = {email.id: email.model_dump(mode="json") for email in source.emails}
+    canonical_baseline = {email.id: email.model_dump(mode="json") for email in baseline_source.emails}
+    assert canonical_source == canonical_baseline
+    canonical_payload = json.dumps(
+        [canonical_source[email_id] for email_id in sorted(canonical_source)],
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()
+    assert hashlib.sha256(canonical_payload).hexdigest() == (
+        "637059d18406f52db01270a996dc926bfc90b71d41c5c92d9137f6b762632059"
+    )
+    rendered = Mailbox(source, scenario).search(world, "", limit=1000)
+    rendered_ids = [email.id for email in rendered]
+    assert len(rendered_ids) == len(set(rendered_ids))
+    seed_ids = {email.id for email in scenario.seed_emails}
+    assert seed_ids <= set(rendered_ids)
+    assert not seed_ids & {email.id for email in source.emails}
+    background_by_id = {email.id: email for email in source.emails}
+    due_background_ids = {
+        email_id for email_id, email in background_by_id.items() if email.sent_at <= world.now
+    }
+    future_background_ids = set(background_by_id) - due_background_ids
+    rendered_by_id = {email.id: email for email in rendered}
+    assert len(due_background_ids) == 66
+    assert len(future_background_ids) == 11
+    assert {email_id for email_id in rendered_by_id if email_id in background_by_id} == due_background_ids
+    assert len(rendered_ids) == 76
+    assert all(rendered_by_id[email_id].model_dump(mode="json") == background_by_id[email_id].model_dump(mode="json")
+               for email_id in due_background_ids)
+    complete_world = world.model_copy(deep=True)
+    complete_world.now = max(email.sent_at for email in source.emails)
+    complete_rendered = Mailbox(source, scenario).search(complete_world, "", limit=1000)
+    complete_background = {email.id: email for email in complete_rendered if email.id in background_by_id}
+    assert set(complete_background) == set(background_by_id)
+    assert all(complete_background[email_id].model_dump(mode="json") == background_by_id[email_id].model_dump(mode="json")
+               for email_id in background_by_id)
+    assert len(complete_rendered) == 87
     subjects = {email.subject for email in scenario.seed_emails}
     assert subjects == {
         "Childcare reimbursement election confirmed",
@@ -109,6 +162,11 @@ def test_starting_emails_distribute_evidence_without_answer_or_route_giveaways()
         "Invoice D-1142 paid — Riley Reed",
         "Childcare balance update",
         "Authorised representative added to your plan",
+        "Migraine follow-up",
+        "Re: Migraine follow-up",
+        "Would be lovely to see you",
+        "Visiting Mum",
+        "Your FlexDirect statement is ready",
     }
     opening_text = " ".join(f"{email.subject} {email.body}" for email in scenario.seed_emails).casefold()
     assert "2 september 2024" in opening_text
@@ -117,6 +175,28 @@ def test_starting_emails_distribute_evidence_without_answer_or_route_giveaways()
     assert "riley reed" in opening_text and "bh-ref-014" in opening_text
     assert "bright horizons bank street day nursery and preschool" in opening_text
     assert all(term not in opening_text for term in ("album", "photo", ".pdf", "attachment"))
+    incidental = " ".join(
+        f"{email.subject} {email.body}" for email in scenario.seed_emails
+        if email.id in {
+            "seed-mum", "seed-user-to-gp", "seed-gp-reply", "seed-user-to-friend",
+            "seed-nationwide-statement",
+        }
+    ).casefold()
+    assert all(term not in incidental for term in ("trainline", "train refund", "£350", "5 october"))
+    mum = next(email for email in scenario.seed_emails if email.id == "seed-mum")
+    assert "recently" in mum.body.casefold() and "last month" not in mum.body.casefold()
+    statement = next(email for email in scenario.seed_emails if email.id == "seed-nationwide-statement")
+    statement_text = statement.body.casefold()
+    assert all(term in statement_text for term in ("balance", "tesco", "salary", "rent"))
+    statement_lines = statement.body.splitlines()
+    assert any("brought forward" in line.casefold() and any(char.isdigit() for char in line)
+               for line in statement_lines)
+    rent_line = next(i for i, line in enumerate(statement_lines) if "rent" in line.casefold())
+    assert any("balance" in line.casefold() and any(char.isdigit() for char in line)
+               for line in statement_lines[rent_line + 1:])
+    assert "trainline" not in statement_text
+    assert "a copy is attached to this email." not in statement_text
+    assert "card payment authorised 31 august 2024" not in statement_text
     assert "authorised representative" in opening_text and "on your behalf" in opening_text
     notices = [email for email in scenario.seed_emails
                if email.id in {"daycare-attendance-update", "daycare-invoice-notice"}]
