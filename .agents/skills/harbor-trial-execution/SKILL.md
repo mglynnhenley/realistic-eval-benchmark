@@ -166,6 +166,11 @@ not evidence that the cap was respected.
    `false` when it requires deterministic verifier checks. Do not hand-edit a
    generated `job.yaml` or substitute a wheel after its identity is recorded.
 
+   For a no-credential, no-launch code-path check only, see the clearly labeled
+   [`canonical rail example spec`](../../../docs/harbor-offline-train-refund-late.example.json).
+   It is not a historical config or launch approval; actual preparation still
+   requires its own private approved config.
+
    For an evidence-required run, include this field in the complete JSON config
    (excerpt, not a standalone run config):
 

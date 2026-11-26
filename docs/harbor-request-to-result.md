@@ -70,6 +70,10 @@ analysis handoff:
 2. **Select one case and prepare offline.** Follow the case-selection and
    preparation sections in
    [`harbor-trial-execution`](../.agents/skills/harbor-trial-execution/SKILL.md).
+   For code-path demonstration only, the tracked
+   [`canonical rail example spec`](harbor-offline-train-refund-late.example.json)
+   is non-authorizing, not the historical private config, and must not be
+   launched. A real run still needs its own approved private config.
    Its guarded rail path uses the existing commands:
 
    ```bash
