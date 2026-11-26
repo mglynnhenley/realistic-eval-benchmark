@@ -103,11 +103,36 @@ class HarborTimingCliTests(unittest.TestCase):
             rejected_order = run_cli("validate", str(manifest))
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
-        self.assertIn("timestamp_order=PASS observed_pairs=7", allowed.stdout)
+        self.assertIn("timestamp_order=PASS", allowed.stdout)
         self.assertEqual(rejected_order.returncode, 0, rejected_order.stdout + rejected_order.stderr)
         self.assertIn(
-            "timestamp_order=REVIEW pairs=authorization_confirmed->launch_submitted observed_pairs=7",
+            "timestamp_order=REVIEW pairs=authorization_confirmed->launch_submitted",
             rejected_order.stdout,
+        )
+
+    def test_missing_milestone_does_not_hide_transitive_order_violation(self):
+        data = json.loads((FIXTURES / "harbor_timing_synthetic.json").read_text(encoding="utf-8"))
+        data["evidence_class"] = "operator_capture"
+        for event in data["events"].values():
+            event.update(status="missing", timestamp_utc=None, source=None, note="not captured")
+        observed = {
+            "request_received": "2026-11-26T12:00:00Z",
+            "authorization_confirmed": "2026-11-26T12:04:00Z",
+            "job_created": "2026-11-26T12:03:00Z",
+        }
+        for name, timestamp in observed.items():
+            data["events"][name].update(status="observed", timestamp_utc=timestamp, source="test", note="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "missing-launch.json"
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            result = run_cli("validate", str(manifest))
+
+        self.assertEqual(data["events"]["launch_submitted"]["status"], "missing")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "timestamp_order=REVIEW pairs=authorization_confirmed->job_created",
+            result.stdout,
         )
 
     def test_empty_capture_does_not_claim_timestamp_order_pass(self):

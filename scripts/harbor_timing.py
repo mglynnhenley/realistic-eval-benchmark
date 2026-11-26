@@ -275,17 +275,30 @@ def _event_timestamp(event: dict[str, Any]) -> datetime | None:
 def _timestamp_order(manifest: dict[str, Any]) -> tuple[list[str], int]:
     if manifest["evidence_class"] == "synthetic_fixture":
         return [], 0
+    precedence = set(ORDER_CONSTRAINTS)
+    for intermediate in EVENTS:
+        predecessors = [name for name in EVENTS if (name, intermediate) in precedence]
+        successors = [name for name in EVENTS if (intermediate, name) in precedence]
+        precedence.update(
+            (earlier, later)
+            for earlier in predecessors
+            for later in successors
+            if earlier != later
+        )
     issues = []
     compared_pairs = 0
     events = manifest["events"]
-    for earlier, later in ORDER_CONSTRAINTS:
-        earlier_timestamp = _event_timestamp(events[earlier])
-        later_timestamp = _event_timestamp(events[later])
-        if earlier_timestamp is None or later_timestamp is None:
-            continue
-        compared_pairs += 1
-        if later_timestamp < earlier_timestamp:
-            issues.append(f"{earlier}->{later}")
+    for earlier in EVENTS:
+        for later in EVENTS:
+            if (earlier, later) not in precedence:
+                continue
+            earlier_timestamp = _event_timestamp(events[earlier])
+            later_timestamp = _event_timestamp(events[later])
+            if earlier_timestamp is None or later_timestamp is None:
+                continue
+            compared_pairs += 1
+            if later_timestamp < earlier_timestamp:
+                issues.append(f"{earlier}->{later}")
     return issues, compared_pairs
 
 
