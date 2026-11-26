@@ -852,6 +852,16 @@ def test_form_parser_keeps_other_formats_and_unparsed_multipart_fallback(request
     assert form_fields(request_data, text) == expected
 
 
+def test_form_parser_ignores_sparse_nested_indices():
+    from refund_eval.published.network import form_fields
+
+    fields = form_fields(
+        {"headers": {"content-type": "application/x-www-form-urlencoded"}},
+        "lines[50000][line_id]=L1",
+    )
+    assert fields == {}
+
+
 @pytest.mark.parametrize("navigation", [True, False])
 async def test_multipart_complete_fields_reach_simulator_and_raw_request_stays_exact(ctx, monkeypatch, navigation):
     async def forbidden(request):

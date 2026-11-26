@@ -311,6 +311,9 @@ def background_form_submission(request: dict, text: str) -> dict | None:
     return None
 
 
+_MAX_NESTED_FORM_INDEX = 255
+
+
 def _collect(pairs) -> dict:
     flat: list[tuple[str, str]] = []
     nested: dict[str, list[dict[str, str]]] = {}
@@ -320,8 +323,12 @@ def _collect(pairs) -> dict:
             flat.append((key, value))
             continue
         name, raw_index, child = match.groups()
-        values = nested.setdefault(name, [])
+        if len(raw_index) > 3:
+            continue
         index = int(raw_index)
+        if index > _MAX_NESTED_FORM_INDEX:
+            continue
+        values = nested.setdefault(name, [])
         while len(values) <= index:
             values.append({})
         values[index][child] = value
