@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor trial execution"
+  short_description: "Prepare offline or execute one authorized Harbor trial"
+  default_prompt: "Use $harbor-trial-execution in the requested mode: prepare and validate offline, or execute exactly one explicitly authorized Harbor attempt and hand its record privately to analysis; do not run suites or switch runners."
