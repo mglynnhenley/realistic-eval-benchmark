@@ -2958,6 +2958,216 @@ async def test_inspect_snapshotter_backup_respects_sqlite_busy_timeout(tmp_path)
     assert not list(destination.parent.glob(".active-samples-*"))
 
 
+def test_inspect_snapshotter_only_republishes_changed_sqlite_state(tmp_path, monkeypatch):
+    import sqlite3
+
+    from refund_eval.harbor import inspect_snapshotter
+
+    database_path = tmp_path / "active-samples.db"
+    destination = tmp_path / "snapshot" / "active-samples.sqlite"
+    database = sqlite3.connect(database_path)
+    database.execute("PRAGMA journal_mode = WAL")
+    database.execute("CREATE TABLE events (data TEXT)")
+    database.execute("INSERT INTO events VALUES (?)", ('{"event":"first"}',))
+    database.commit()
+
+    published = []
+    publish = inspect_snapshotter._publish
+
+    def count_publications(source, target):
+        published.append(source)
+        publish(source, target)
+
+    monkeypatch.setattr(inspect_snapshotter, "_publish", count_publications)
+    source = sqlite3.connect(database_path, timeout=0)
+    data_version = inspect_snapshotter._publish_if_changed(database_path, destination, source, None)
+    data_version = inspect_snapshotter._publish_if_changed(database_path, destination, source, data_version)
+    assert len(published) == 1
+
+    database.execute("INSERT INTO events VALUES (?)", ('{"event":"second"}',))
+    database.commit()
+    updated = inspect_snapshotter._publish_if_changed(database_path, destination, source, data_version)
+    assert updated != data_version
+    assert len(published) == 2
+    with sqlite3.connect(destination) as snapshot:
+        assert snapshot.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+
+    destination.unlink()
+    inspect_snapshotter._publish_if_changed(database_path, destination, source, updated)
+    assert len(published) == 3
+    source.close()
+    database.close()
+
+
+def test_inspect_snapshotter_detects_same_size_wal_update(tmp_path, monkeypatch):
+    import sqlite3
+    import time
+
+    from refund_eval.harbor import inspect_snapshotter
+
+    database_path = tmp_path / "active-samples.db"
+    destination = tmp_path / "snapshot" / "active-samples.sqlite"
+    database = sqlite3.connect(database_path)
+    database.execute("PRAGMA journal_mode = WAL")
+    database.execute("PRAGMA wal_autocheckpoint = 0")
+    database.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, data TEXT)")
+    database.execute("INSERT INTO events VALUES (?, ?)", (1, "one"))
+    database.commit()
+    checkpoint = database.execute("PRAGMA wal_checkpoint(RESTART)").fetchone()
+    assert checkpoint is not None and checkpoint[0] == 0
+
+    published = []
+    publish = inspect_snapshotter._publish
+
+    def count_publications(source, target):
+        published.append(source)
+        publish(source, target)
+
+    monkeypatch.setattr(inspect_snapshotter, "_publish", count_publications)
+    source = sqlite3.connect(database_path, timeout=0)
+    data_version = inspect_snapshotter._publish_if_changed(database_path, destination, source, None)
+    sizes_before = (database_path.stat().st_size, Path(f"{database_path}-wal").stat().st_size)
+
+    time.sleep(0.02)
+    database.execute("UPDATE events SET data = ? WHERE id = ?", ("two", 1))
+    database.commit()
+    sizes_after = (database_path.stat().st_size, Path(f"{database_path}-wal").stat().st_size)
+    assert sizes_after == sizes_before
+
+    updated = inspect_snapshotter._publish_if_changed(database_path, destination, source, data_version)
+    assert updated != data_version
+    assert len(published) == 2
+    with sqlite3.connect(destination) as snapshot:
+        assert snapshot.execute("SELECT data FROM events WHERE id = 1").fetchone()[0] == "two"
+    source.close()
+    database.close()
+
+
+def test_inspect_snapshotter_waits_for_wal_commit_when_stats_collide(tmp_path, monkeypatch):
+    import sqlite3
+
+    from refund_eval.harbor import inspect_snapshotter
+
+    database_path = tmp_path / "active-samples.db"
+    destination = tmp_path / "snapshot" / "active-samples.sqlite"
+    database = sqlite3.connect(database_path)
+    database.execute("PRAGMA journal_mode = WAL")
+    database.execute("PRAGMA wal_autocheckpoint = 0")
+    database.execute("PRAGMA cache_size = 16")
+    database.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, data TEXT)")
+    database.executemany("INSERT INTO events VALUES (?, ?)", ((i, "a" * 800) for i in range(1, 2049)))
+    database.commit()
+    checkpoint = database.execute("PRAGMA wal_checkpoint(RESTART)").fetchone()
+    assert checkpoint is not None and checkpoint[0] == 0
+
+    wal_path = Path(f"{database_path}-wal")
+    reader = sqlite3.connect(database_path, timeout=0)
+    published = []
+    publish = inspect_snapshotter._publish
+
+    def count_publications(source, target):
+        published.append(source)
+        publish(source, target)
+
+    monkeypatch.setattr(inspect_snapshotter, "_publish", count_publications)
+    data_version = inspect_snapshotter._publish_if_changed(database_path, destination, reader, None)
+    before_wal = wal_path.read_bytes()
+
+    real_stat = Path.stat
+    source_paths = {database_path, wal_path}
+    timestamps = {
+        path: (real_stat(path).st_mtime_ns, real_stat(path).st_ctime_ns)
+        for path in source_paths
+    }
+
+    def coarse_stat(path, *args, **kwargs):
+        stat = real_stat(path, *args, **kwargs)
+        if path in source_paths:
+            mtime_ns, ctime_ns = timestamps[path]
+            return SimpleNamespace(
+                st_dev=stat.st_dev, st_ino=stat.st_ino, st_size=stat.st_size,
+                st_mtime_ns=mtime_ns, st_ctime_ns=ctime_ns,
+            )
+        return stat
+
+    monkeypatch.setattr(Path, "stat", coarse_stat)
+    database.execute("BEGIN IMMEDIATE")
+    database.execute("UPDATE events SET data = replace(data, 'a', 'b')")
+    uncommitted_wal = wal_path.read_bytes()
+    assert uncommitted_wal != before_wal
+
+    with pytest.raises(sqlite3.OperationalError):
+        inspect_snapshotter._publish_if_changed(database_path, destination, reader, data_version)
+    assert len(published) == 1
+
+    uncommitted_size = wal_path.stat().st_size
+    uncommitted_stats = tuple(
+        (path.stat().st_size, path.stat().st_mtime_ns, path.stat().st_ctime_ns)
+        for path in (database_path, wal_path)
+    )
+    database.commit()
+    committed_wal = wal_path.read_bytes()
+    assert committed_wal != uncommitted_wal
+    assert wal_path.stat().st_size == uncommitted_size
+    committed_stats = tuple(
+        (path.stat().st_size, path.stat().st_mtime_ns, path.stat().st_ctime_ns)
+        for path in (database_path, wal_path)
+    )
+    assert committed_stats == uncommitted_stats
+
+    committed_version = inspect_snapshotter._publish_if_changed(
+        database_path, destination, reader, data_version,
+    )
+    assert committed_version != data_version
+    assert len(published) == 2
+    with sqlite3.connect(destination) as snapshot:
+        assert snapshot.execute("SELECT data FROM events WHERE id = 1").fetchone()[0] == "b" * 800
+    reader.close()
+    database.close()
+
+
+def test_inspect_snapshotter_retries_failed_publication(tmp_path, monkeypatch):
+    import sqlite3
+
+    from refund_eval.harbor import inspect_snapshotter
+
+    database_path = tmp_path / "active-samples.db"
+    with sqlite3.connect(database_path) as database:
+        database.execute("CREATE TABLE events (data TEXT)")
+        database.execute("INSERT INTO events VALUES (?)", ('{"event":"first"}',))
+
+    attempts = 0
+    publish = inspect_snapshotter._publish
+
+    def fail_once(source, target):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise sqlite3.OperationalError("temporary database lock")
+        publish(source, target)
+
+    owner_checks = 0
+
+    def check_owner(_pid, _signal):
+        nonlocal owner_checks
+        owner_checks += 1
+        if owner_checks == 2:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(inspect_snapshotter, "_database", lambda *_: database_path)
+    monkeypatch.setattr(inspect_snapshotter, "_publish", fail_once)
+    monkeypatch.setattr(inspect_snapshotter.os, "kill", check_owner)
+    monkeypatch.setattr(inspect_snapshotter.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(inspect_snapshotter.time, "sleep", lambda _interval: None)
+
+    inspect_snapshotter._snapshot_loop(tmp_path, tmp_path, tmp_path / "snapshotter.ready", 12345, 0.5)
+
+    destination = inspect_snapshotter.snapshot_path(tmp_path)
+    assert attempts == 2
+    with sqlite3.connect(destination) as snapshot:
+        assert snapshot.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+
+
 async def test_native_partial_traces_survive_short_run_cancellation_and_collection_failure(tmp_path):
     from refund_eval.harbor.private_traces import (
         PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
