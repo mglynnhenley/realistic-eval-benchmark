@@ -38,7 +38,8 @@ COPY --from=browser-node /usr/local/bin/node /usr/local/bin/node
 COPY --from=browser-node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers NODE_ENV=production
-COPY --from=ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a /uv /usr/local/bin/uv
+# uv 0.11.7 (use a digest-only reference for Modal).
+COPY --from=ghcr.io/astral-sh/uv@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy UV_PYTHON=3.12 TIKTOKEN_CACHE_DIR=/opt/tiktoken
 RUN printf '%s\\n' 'Types: deb' 'URIs: https://snapshot.debian.org/archive/debian/20261118T000000Z/' 'Suites: bookworm bookworm-updates' 'Components: main' 'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' 'Types: deb' 'URIs: https://snapshot.debian.org/archive/debian-security/20261118T000000Z/' 'Suites: bookworm-security' 'Components: main' 'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' > /etc/apt/sources.list.d/debian.sources
 WORKDIR /app
