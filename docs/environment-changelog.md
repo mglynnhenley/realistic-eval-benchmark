@@ -46,7 +46,7 @@ this was not a second version or trial round.
 - Kind: trivial batch
 - Fingerprint: 77f20c57ee7c13b3c51f7bdf2bcc4c7186ab5fc5c366838fa5bf0ce85c4be86b
 - Trial round: none; offline tests only.
-- Changes: Block beacon `ping` requests and JSON-looking script-sent bodies that are not one JSON object (newline-delimited analytics batches) as page telemetry instead of answering them as customer forms with a made-up organisation (MAT-225).
+- Changes: block beacon `ping` requests and JSON-looking script-sent bodies that are not one JSON object (newline-delimited analytics batches) as page telemetry instead of answering them as customer forms with a made-up organisation (MAT-225).
 
 ## 10.5 — 2026-11-25
 - Kind: trivial batch
