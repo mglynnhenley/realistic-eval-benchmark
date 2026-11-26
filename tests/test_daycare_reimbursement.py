@@ -431,6 +431,18 @@ def test_daycare_email_field_parser_ignores_sparse_nested_indices():
         assert _submitted_fields(event) == {}
 
 
+def test_daycare_email_field_parser_keeps_first_structured_duplicate():
+    from refund_eval.tasks.daycare_reimbursement import _submitted_fields
+
+    event = CompanyEvent(incoming=(
+        "request_type=service_date_dispute, request_type=remittance_query\n"
+        "corrections[0][service_start]=2024-09-23, corrections[0][service_start]=2024-09-30"
+    ))
+    fields = _submitted_fields(event)
+    assert fields["request_type"] == "service_date_dispute"
+    assert fields["corrections"][0]["service_start"] == "2024-09-23"
+
+
 def test_duplicate_claim_refile_preserves_corrected_decisions_and_paid_lines():
     world = start_sample("daycare_reimbursement")
     scenario = current_scenario()
@@ -886,6 +898,15 @@ async def test_daycare_email_supervisor_accepts_key_value_signed_corrections(inl
             "corrections[0][service_start]=2024-09-23\n"
             "corrections[0][service_end]=2024-09-27"
         )
+    body += (
+        "\nPrior message follows:\n"
+        "> request_type=remittance_query\n"
+        "> signed_by=former representative\n"
+        '> signed_statement="I attest these dates are true and correct."\n'
+        "> corrections[0][line_id]=L1\n"
+        "> corrections[0][service_start]=2024-09-30\n"
+        "> corrections[0][service_end]=2024-10-04"
+    )
 
     await dispatch(Inbound(
         channel="email", tool="send_message", target=supervisor.contact_emails[0], org=supervisor.key,

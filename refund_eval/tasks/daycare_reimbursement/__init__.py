@@ -86,7 +86,9 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
     )
     assignment = re.compile(rf"(?<![\w])(?P<name>{field_name})\s*[:=]\s*", re.IGNORECASE)
     result: dict[str, Any] = {}
+    structured_block_started = False
     for line in event.incoming.splitlines():
+        line = line.strip()
         assignments = []
         quote = None
         escaped = False
@@ -105,15 +107,34 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
             if quote is None:
                 assignments.append(match)
             position = match.end()
+        if not assignments or assignments[0].start() != 0:
+            if structured_block_started:
+                break
+            continue
+        parsed_fields = []
+        valid_line = True
         for assignment_index, match in enumerate(assignments):
             end = assignments[assignment_index + 1].start() if assignment_index + 1 < len(assignments) else len(line)
-            value = line[match.end():end].strip()
+            raw_value = line[match.end():end]
             if assignment_index + 1 < len(assignments):
-                value = re.sub(r"(?:[,;]\s*)?(?:and\s*)?$", "", value, flags=re.IGNORECASE)
-            value = value.strip().rstrip(",;").strip()
+                separator = re.search(r"(?:[,;]\s*(?:and\s*)?|\s+and\s+)$", raw_value, flags=re.IGNORECASE)
+                if separator is None:
+                    valid_line = False
+                    break
+                raw_value = raw_value[:separator.start()]
+            value = raw_value.strip().rstrip(",;").strip()
+            if not value:
+                valid_line = False
+                break
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
-            name = match.group("name")
+            parsed_fields.append((match.group("name"), value))
+        if not valid_line:
+            if structured_block_started:
+                break
+            continue
+        structured_block_started = True
+        for name, value in parsed_fields:
             nested = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
             if nested:
                 root, raw_index, child = nested.groups()
@@ -125,9 +146,9 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
                 items = result.setdefault(root, [])
                 while len(items) <= index:
                     items.append({})
-                items[index][child] = value
+                items[index].setdefault(child, value)
             else:
-                result[name] = value
+                result.setdefault(name, value)
     return result or fields
 
 
