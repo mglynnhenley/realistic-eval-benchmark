@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.14 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: fdbb4b564f50d12b823042ad09645250b620c9c5b19c2b3dca160696b51a0ba8
+- Trial round: none; offline tests only.
+- Changes: Disable the legacy train refund form on daycare contact pages; daycare-specific fields remain supplied by the task form schema. No live grading or pilot results.
+
 ## 10.13 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 34efa29a6a56c531e5a54c8f86631525b576d3b0cfeaf38116ff0826c518978b

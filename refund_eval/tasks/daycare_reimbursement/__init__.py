@@ -250,7 +250,7 @@ class DaycareReimbursementTask:
         return {"invoice_total": scenario.facts.invoice_total, "currency": scenario.facts.currency}
 
     def uses_refund_form(self, scenario: Scenario, org_key: str) -> bool:
-        return org_key in {"brightwell_claims", "brightwell_supervisor"}
+        return False
 
     def published_form_fields(self, scenario: Scenario, org_key: str) -> list[dict[str, Any]]:
         if org_key == "brightwell_claims":

@@ -184,6 +184,11 @@ def test_daycare_claim_and_attestation_fields_are_visible_on_retrievable_forms(c
     claims_form = BeautifulSoup(_page_html(claims), "html.parser")
     supervisor_form = BeautifulSoup(_page_html(supervisor), "html.parser")
 
+    assert not scenario.task.uses_refund_form(scenario, "brightwell_claims")
+    assert not scenario.task.uses_refund_form(scenario, "brightwell_supervisor")
+    for form in (claims_form, supervisor_form):
+        assert not form.select_one('input[name="earlier_claim_date"]')
+        assert not form.select_one('input[name="accuracy_terms_confirmation"]')
     assert claims_form.select_one('input[name="invoice_id"]')
     assert claims_form.select_one('input[name="provider_name"]')
     assert claims_form.select_one('input[name="provider_tax_id"]')
