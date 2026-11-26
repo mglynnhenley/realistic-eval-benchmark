@@ -48,6 +48,32 @@ def _database(data_home: Path, log_dir: Path) -> Path | None:
     return max(databases, key=lambda path: (path.stat().st_mtime_ns, path.name))
 
 
+def _database_signature(database: Path) -> tuple[object, ...]:
+    def file_signature(path: Path) -> tuple[int, int, int, int, int] | None:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return None
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    return (
+        str(database),
+        file_signature(database),
+        file_signature(Path(f"{database}-wal")),
+        file_signature(Path(f"{database}-journal")),
+    )
+
+
+def _publish_if_changed(
+    database: Path, destination: Path, last_signature: tuple[object, ...] | None,
+) -> tuple[object, ...]:
+    signature = _database_signature(database)
+    if signature == last_signature and destination.is_file():
+        return signature
+    _publish(database, destination)
+    return signature
+
+
 def _publish(database: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(destination.parent, 0o700)
@@ -111,10 +137,11 @@ def _snapshot_loop(data_home: Path, log_dir: Path, ready_file: Path, owner_pid: 
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    last_signature = None
     while True:
         if database := _database(data_home, log_dir):
             try:
-                _publish(database, target)
+                last_signature = _publish_if_changed(database, target, last_signature)
             except (OSError, sqlite3.Error, TimeoutError, RuntimeError):
                 pass
         owner_alive = True
