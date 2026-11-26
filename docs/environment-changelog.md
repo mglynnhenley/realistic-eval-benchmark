@@ -36,11 +36,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 10.5 — 2026-11-25
+## 10.7 — 2026-11-25
 - Kind: trivial batch
-- Fingerprint: 93411145c6b938fd855e439e6444d6d2bc6860e88414ca9ae7ee98f842663981
+- Fingerprint: d717ec47e9ddd11b7ad7b9b7b7afa86567ca459e032f73b7fa5bf73679cab274
 - Trial round: none. Image build checks only; no model calls.
 - Changes: Use digest-only uv image references in Harbor Dockerfiles for Modal compatibility, retaining uv 0.11.7.
+
+## 10.6 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 77f20c57ee7c13b3c51f7bdf2bcc4c7186ab5fc5c366838fa5bf0ce85c4be86b
+- Trial round: none; offline tests only.
+- Changes: Block beacon `ping` requests and JSON-looking script-sent bodies that are not one JSON object (newline-delimited analytics batches) as page telemetry instead of answering them as customer forms with a made-up organisation (MAT-225).
+
+## 10.5 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: d8a747cc68c8ccde49026fd6f5a9272a0d1902415587bbcaa5c73b3b5b3c08fa
+- Trial round: none. Offline checks only; no paid execution.
+- Changes: Native Harbor records a trial error when the world stops with `model_limit` or `model_request_rejected` (MAT-224).
 
 ## 10.4 — 2026-11-25
 - Kind: trivial batch

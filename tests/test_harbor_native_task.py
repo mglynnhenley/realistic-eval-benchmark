@@ -2199,6 +2199,11 @@ class Environment:
             await self.on_run(self)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
+    async def service_download_file(self, source, destination, *, service):
+        if (service, source) != ("world", "/var/log/world/state.json"):
+            raise FileNotFoundError(source)
+        destination.write_text('{"stop_reason": null}')
+
 
 async def test_trace_generation_keeps_last_manifest_target_on_pointer_failure(tmp_path, monkeypatch):
     from refund_eval.harbor.private_traces import (

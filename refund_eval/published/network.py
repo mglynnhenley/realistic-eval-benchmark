@@ -276,6 +276,13 @@ def _typed_value(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _json_object(text: str) -> bool:
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
+
+
 def background_form_submission(request: dict, text: str) -> dict | None:
     """The fields of a script-sent write that carries form input (many sites log in and
     submit forms with fetch/XHR instead of a page navigation), else None.
@@ -283,8 +290,14 @@ def background_form_submission(request: dict, text: str) -> dict | None:
     A form-looking key alone is not form input: error loggers post `message` and
     `stack` fields, with the message often empty, to a `/log` endpoint on every page
     load. Those are page telemetry, blocked like any other background write, never a
-    customer contact for the organisation's simulator to answer."""
-    if request.get("is_navigation") is True:
+    customer contact for the organisation's simulator to answer.
+
+    A `ping` (sendBeacon or `<a ping>`) is fire-and-forget, so no page shows its reply,
+    and a JSON-looking body that is not one JSON object (an analytics event batch,
+    often newline-delimited) is not form-encoded: both are telemetry."""
+    if request.get("is_navigation") is True or request.get("resource_type") == "ping":
+        return None
+    if text.lstrip()[:1] in {"{", "["} and not _json_object(text):
         return None
     if str(request.get("method", "")).upper() in {"GET", "HEAD"} and not text:
         return None

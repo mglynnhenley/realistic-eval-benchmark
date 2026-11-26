@@ -63,5 +63,8 @@ node_modules/
 !/.agents/skills/
 /.agents/skills/*
 !/.agents/skills/realism-loop/
+!/.agents/skills/harbor-trial-execution/
+!/.agents/skills/benchmark-task-design/
+!/.agents/skills/research-analysis-reporting/
 /.gstack/
 /skills-lock.json

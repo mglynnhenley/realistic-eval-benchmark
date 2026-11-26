@@ -25,11 +25,13 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+import tempfile
 from contextlib import suppress
 from datetime import date
+from pathlib import Path
 
 from harbor.agents.capabilities import AgentCapabilities
-from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.installed.base import ApiError, BaseInstalledAgent
 from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext, ModelUsage
@@ -39,7 +41,9 @@ from refund_eval.config import BudgetNotice, RunConfig
 from refund_eval.harbor.luna_status import NativeStatus
 from refund_eval.harbor.private_traces import (
     PRIVATE_AGENT_BUFFER_ROOT,
+    PRIVATE_WORLD_LOGS_ROOT,
     PrivateTraceCapture,
+    has_private_world_bind,
     private_inspect_data_home,
 )
 from refund_eval.harbor.target_charges import (
@@ -151,6 +155,21 @@ class RefundInstalledAgent(BaseInstalledAgent):
                 f"> {logs}/inspect.log 2>&1; status=$?; "
                 f"{' '.join(convert)} >> {logs}/inspect.log 2>&1; exit $status")
 
+    async def _check_world_stop(self, environment: BaseEnvironment) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            try:
+                async with asyncio.timeout(5):
+                    if has_private_world_bind(environment):
+                        await environment.download_file(f"{PRIVATE_WORLD_LOGS_ROOT}/{state.name}", state)
+                    else:
+                        await environment.service_download_file(f"/var/log/world/{state.name}", state, service="world")
+                    reason = json.loads(state.read_bytes())["stop_reason"]
+            except Exception as exc:  # noqa: BLE001
+                raise ApiError(f"Could not read final world stop reason ({type(exc).__name__})") from None
+        if reason in ("model_limit", "model_request_rejected"):
+            raise ApiError(f"World stopped: {reason}")
+
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         if reason := kill_reason():
             raise RuntimeError(f"Trial blocked by kill switch: {reason}")
@@ -175,6 +194,7 @@ class RefundInstalledAgent(BaseInstalledAgent):
                     killed = True
                 await asyncio.wait({execution}, timeout=0.5)
             await execution
+            await self._check_world_stop(environment)
         except asyncio.CancelledError:
             terminal_status = "cancelled"
             raise
