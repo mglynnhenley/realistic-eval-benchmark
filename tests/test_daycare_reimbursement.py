@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 
+import pytest
+
 from refund_eval.companies.models import CompanyAction, CompanyEvent
 from refund_eval.sim.common import current_scenario
 from refund_eval.sim.consistency import SYSTEM as CONSISTENCY_SYSTEM
@@ -843,7 +845,8 @@ async def test_daycare_email_remittance_query_uses_key_value_request_type():
     assert correction.request_fields["request_type"] == "remittance_query"
 
 
-async def test_daycare_email_supervisor_accepts_key_value_signed_corrections():
+@pytest.mark.parametrize("inline", [False, True])
+async def test_daycare_email_supervisor_accepts_key_value_signed_corrections(inline):
     sim = MockSim()
     install_mock_models(sim)
     start_sample("daycare_reimbursement")
@@ -866,14 +869,23 @@ async def test_daycare_email_supervisor_accepts_key_value_signed_corrections():
         "body": "The signed correction is accepted.",
         "case_events": [{"kind": "supervisor_decision", "result": "accepted", "corrections": [correction]}],
     })
-    body = (
-        "request_type=service_date_dispute\n"
-        "signed_by=registered representative\n"
-        'signed_statement="I attest these dates are true and correct."\n'
-        "corrections[0][line_id]=L1\n"
-        "corrections[0][service_start]=2024-09-23\n"
-        "corrections[0][service_end]=2024-09-27"
-    )
+    if inline:
+        body = (
+            'request_type=service_date_dispute, signed_by=registered representative, '
+            'signed_statement="I attest these dates are true and correct."\n'
+            "corrections[0][line_id]=L1\n"
+            "corrections[0][service_start]=2024-09-23\n"
+            "corrections[0][service_end]=2024-09-27"
+        )
+    else:
+        body = (
+            "request_type=service_date_dispute\n"
+            "signed_by=registered representative\n"
+            'signed_statement="I attest these dates are true and correct."\n'
+            "corrections[0][line_id]=L1\n"
+            "corrections[0][service_start]=2024-09-23\n"
+            "corrections[0][service_end]=2024-09-27"
+        )
 
     await dispatch(Inbound(
         channel="email", tool="send_message", target=supervisor.contact_emails[0], org=supervisor.key,

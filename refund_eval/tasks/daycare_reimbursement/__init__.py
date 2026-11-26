@@ -79,37 +79,55 @@ def _submitted_fields(event: CompanyEvent) -> dict[str, Any]:
     fields = {key: value for key, value in event.fields.items() if key in allowed_fields}
     if fields:
         return fields
-    allowed = re.compile(
-        r"^(?:invoice_id|provider_name|provider_tax_id|dependant_name|request_type|signed_by|signed_statement|"
+    field_name = (
+        r"invoice_id|provider_name|provider_tax_id|dependant_name|request_type|signed_by|signed_statement|"
         r"lines\[\d+\]\[(?:line_id|service_start|service_end|amount)\]|"
-        r"corrections\[\d+\]\[(?:line_id|service_start|service_end)\])$", re.IGNORECASE,
+        r"corrections\[\d+\]\[(?:line_id|service_start|service_end)\]"
     )
+    assignment = re.compile(rf"(?<![\w])(?P<name>{field_name})\s*[:=]\s*", re.IGNORECASE)
     result: dict[str, Any] = {}
     for line in event.incoming.splitlines():
-        name, separator, value = line.partition(":")
-        name = name.strip()
-        if not separator or not allowed.fullmatch(name):
-            name, separator, value = line.partition("=")
-            name = name.strip()
-        if not separator or not allowed.fullmatch(name):
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        match = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
-        if match:
-            root, raw_index, child = match.groups()
-            if len(raw_index) > 3:
-                continue
-            index = int(raw_index)
-            if index > _MAX_NESTED_FORM_INDEX:
-                continue
-            items = result.setdefault(root, [])
-            while len(items) <= index:
-                items.append({})
-            items[index][child] = value
-        else:
-            result[name] = value
+        assignments = []
+        quote = None
+        escaped = False
+        position = 0
+        for match in assignment.finditer(line):
+            for character in line[position:match.start()]:
+                if escaped:
+                    escaped = False
+                elif quote and character == "\\":
+                    escaped = True
+                elif quote:
+                    if character == quote:
+                        quote = None
+                elif character in {"'", '"'}:
+                    quote = character
+            if quote is None:
+                assignments.append(match)
+            position = match.end()
+        for assignment_index, match in enumerate(assignments):
+            end = assignments[assignment_index + 1].start() if assignment_index + 1 < len(assignments) else len(line)
+            value = line[match.end():end].strip()
+            if assignment_index + 1 < len(assignments):
+                value = re.sub(r"(?:[,;]\s*)?(?:and\s*)?$", "", value, flags=re.IGNORECASE)
+            value = value.strip().rstrip(",;").strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            name = match.group("name")
+            nested = re.fullmatch(r"(lines|corrections)\[(\d+)\]\[(\w+)\]", name, re.IGNORECASE)
+            if nested:
+                root, raw_index, child = nested.groups()
+                if len(raw_index) > 3:
+                    continue
+                index = int(raw_index)
+                if index > _MAX_NESTED_FORM_INDEX:
+                    continue
+                items = result.setdefault(root, [])
+                while len(items) <= index:
+                    items.append({})
+                items[index][child] = value
+            else:
+                result[name] = value
     return result or fields
 
 
