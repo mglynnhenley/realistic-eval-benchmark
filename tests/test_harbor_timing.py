@@ -129,6 +129,50 @@ class HarborTimingCliTests(unittest.TestCase):
         self.assertIn("events=observed:1 simulated:0 missing:13", validated.stdout)
         self.assertIn("interval.request_to_result=UNAVAILABLE missing=result_verified", validated.stdout)
 
+    def test_concurrent_marks_preserve_every_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "capture.json"
+            created = run_cli(
+                "init",
+                "--manifest",
+                str(manifest),
+                "--scenario",
+                "train_refund_late",
+                "--run-ref",
+                "concurrent-test",
+            )
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            event_names = json.loads(manifest.read_text(encoding="utf-8"))["events"]
+            processes = [
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(SCRIPT),
+                        "mark",
+                        "--manifest",
+                        str(manifest),
+                        "--event",
+                        event_name,
+                        "--source",
+                        f"concurrent test: {event_name}",
+                        "--at-utc",
+                        "2026-11-26T12:00:00Z",
+                    ],
+                    cwd=ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                for event_name in event_names
+            ]
+            results = [(process, process.communicate()) for process in processes]
+            validated = run_cli("validate", str(manifest))
+
+        failures = [output for process, output in results if process.returncode != 0]
+        self.assertFalse(failures, failures)
+        self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+        self.assertIn("events=observed:14 simulated:0 missing:0", validated.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

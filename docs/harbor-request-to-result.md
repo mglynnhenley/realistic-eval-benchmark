@@ -6,9 +6,11 @@ handoff. It is an operator event ledger, not a performance benchmark or a
 promise of Harbor phase durations.
 
 The timing helper has no Harbor, Modal, model-provider or network integration.
-`init`, `mark` and `validate` only read or write a local JSON manifest. A
-manifest may contain private run references; write it under an access-controlled
-path (or the ignored `.context/` directory), and do not commit or publish it.
+`init`, `mark` and `validate` operate only on local files; `mark` keeps a
+mode-0600 lock file next to the manifest to serialize concurrent updates. A
+manifest may contain private run references; keep both files under an
+access-controlled path (or the ignored `.context/` directory), and do not
+commit or publish them.
 
 ## Event record
 

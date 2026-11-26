@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -213,6 +214,41 @@ def _replace_manifest(path: Path, manifest: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _mark_event(
+    path: Path, event_name: str, source: str, timestamp: str | None, note: str
+) -> str:
+    lock_path = path.with_name(f"{path.name}.lock")
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            manifest = _load_manifest(path)
+            errors = validate_manifest(manifest)
+            if errors:
+                raise ValueError("manifest_invalid: " + "; ".join(errors))
+            if manifest["evidence_class"] != "operator_capture":
+                raise ValueError("mark only updates operator_capture manifests")
+            event = manifest["events"][event_name]
+            if event["status"] != "missing":
+                raise ValueError(f"event already recorded: {event_name}")
+            if not source.strip():
+                raise ValueError("source must be non-empty")
+            if timestamp is None:
+                timestamp = datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            _parse_utc(timestamp)
+            event.update(status="observed", timestamp_utc=timestamp, source=source, note=note)
+            errors = validate_manifest(manifest)
+            if errors:
+                raise ValueError("manifest_invalid_after_mark: " + "; ".join(errors))
+            _replace_manifest(path, manifest)
+            return timestamp
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
 def _event_timestamp(event: dict[str, Any]) -> datetime | None:
     if event["status"] == "missing":
         return None
@@ -314,31 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "mark":
-            manifest = _load_manifest(args.manifest)
-            errors = validate_manifest(manifest)
-            if errors:
-                raise ValueError("manifest_invalid: " + "; ".join(errors))
-            if manifest["evidence_class"] != "operator_capture":
-                raise ValueError("mark only updates operator_capture manifests")
-            event = manifest["events"][args.event]
-            if event["status"] != "missing":
-                raise ValueError(f"event already recorded: {args.event}")
-            if not args.source.strip():
-                raise ValueError("source must be non-empty")
-            timestamp = args.at_utc
-            if timestamp is None:
-                timestamp = datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-            _parse_utc(timestamp)
-            event.update(
-                status="observed",
-                timestamp_utc=timestamp,
-                source=args.source,
-                note=args.note,
-            )
-            errors = validate_manifest(manifest)
-            if errors:
-                raise ValueError("manifest_invalid_after_mark: " + "; ".join(errors))
-            _replace_manifest(args.manifest, manifest)
+            timestamp = _mark_event(args.manifest, args.event, args.source, args.at_utc, args.note)
             print(f"event={args.event} status=observed timestamp_utc={timestamp}")
             return 0
 
