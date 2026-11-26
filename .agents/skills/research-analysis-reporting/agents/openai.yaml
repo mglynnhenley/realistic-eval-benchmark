@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research analysis and reporting"
+  short_description: "Analyze runs and prepare redacted evidence handoffs"
+  default_prompt: "Use $research-analysis-reporting to analyze saved runs offline, distinguish write/cost evidence, assess behavior, compare paired controls, and prepare a redacted handoff without paid grading or publication."
