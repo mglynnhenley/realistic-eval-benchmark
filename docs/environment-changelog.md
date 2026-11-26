@@ -36,9 +36,9 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 10.16 — 2026-11-25
+## 10.16 — 2026-11-26
 - Kind: trivial batch
-- Fingerprint: 6432840048ff96cab4fc1c27c590ee19887eb39efbc3d075762d99705c5a01ac
+- Fingerprint: f3f0150d3e92f1ab6a1e939b51c39f98299270f7111b540c4ea8b400fb213d0b
 - Trial round: none; offline tests only.
 - Changes: Bound sparse form and email-field indices, align daycare remittance wakes with ledger processing, preserve automatic decisions for undecided lines, and parse advertised equality-delimited email request/correction fields through the sent-message route. No live grading or pilot results.
 
