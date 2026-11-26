@@ -174,22 +174,23 @@ seed_emails:
     sent_at: 2024-08-21T14:00:00Z
   - id: daycare-attendance-update
     org: little_oaks
-    sender: Bank Street attendance update <notifications@example.test>
+    sender: Bright Horizons Parent Enquiries <parentenquiry@brighthorizons.com>
     to: [maya.reed@example.test]
     subject: Bank Street attendance update, 27–30 August
     body: >-
       Riley is recorded as attending four morning sessions: Tuesday 27, Wednesday 28, Thursday 29 and Friday 30 August.
-      Please keep this update with your nursery account records.
+      This update was sent through Parent Enquiries on behalf of the Bank Street centre.
     sent_at: 2024-08-31T12:00:00Z
   - id: daycare-invoice-notice
     org: little_oaks
-    sender: Bank Street account update <notifications@example.test>
+    sender: Bright Horizons Parent Enquiries <parentenquiry@brighthorizons.com>
     to: [maya.reed@example.test]
     subject: Invoice D-1142 paid — Riley Reed
     body: >-
       Bright Horizons Bank Street Day Nursery and Preschool has recorded payment of £800 for invoice D-1142
       on 20 September. The booked nursery period is 27 August to 20 September for Riley Reed, covering morning
-      sessions; supplier reference BH-REF-014. The account notice shows the total only.
+      sessions; supplier reference BH-REF-014. The account notice shows the total only. This notice was sent through
+      Parent Enquiries on behalf of the Bank Street centre; replies will be passed to the centre team.
     sent_at: 2024-09-20T10:00:00Z
   - id: daycare-balance-update
     org: brightwell_claims

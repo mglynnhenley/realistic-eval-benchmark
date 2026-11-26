@@ -4,6 +4,8 @@ from itertools import pairwise
 import pytest
 
 from refund_eval.companies.models import CompanyAction, CompanyEvent
+from refund_eval.published.fixtures import make_fixture_mail
+from refund_eval.published.mail import _visible_id
 from refund_eval.sim.common import current_scenario
 from refund_eval.sim.consistency import SYSTEM as CONSISTENCY_SYSTEM
 from refund_eval.sim.interface import Inbound
@@ -17,6 +19,8 @@ from refund_eval.tasks.daycare_reimbursement.ledger import (
     ranges_overlap,
 )
 from refund_eval.world.clock import advance as advance_clock
+from refund_eval.world.interception import ToolContext
+from refund_eval.world.mail import DEFAULT_FIXTURE_PATH, FixtureMailSource, Mailbox
 from refund_eval.world.state import Transfer, World, load_world, world_tx
 from tests.fixtures.daycare_controls import (
     C1_SCHEDULE,
@@ -114,10 +118,54 @@ def test_starting_emails_distribute_evidence_without_answer_or_route_giveaways()
     assert "bright horizons bank street day nursery and preschool" in opening_text
     assert all(term not in opening_text for term in ("album", "photo", ".pdf", "attachment"))
     assert "authorised representative" in opening_text and "on your behalf" in opening_text
+    notices = [email for email in scenario.seed_emails
+               if email.id in {"daycare-attendance-update", "daycare-invoice-notice"}]
+    assert len(notices) == 2
+    assert all(email.sender == "Bright Horizons Parent Enquiries <parentenquiry@brighthorizons.com>"
+               for email in notices)
+    assert all("sent through Parent Enquiries" in email.body for email in notices)
     assert all(not term in opening_text for term in (
         "l1", "not eligible", "ineligible", "gross-up", "appeal", "supervisor",
         "contact claims", "you should contact", "call the", "email the",
     ))
+
+
+async def test_invoice_reply_through_parent_enquiry_reaches_known_provider():
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement")
+    scenario = current_scenario()
+    provider = scenario.org("little_oaks")
+    invoice = next(email for email in scenario.seed_emails if email.id == "daycare-invoice-notice")
+    assert invoice.sender == "Bright Horizons Parent Enquiries <parentenquiry@brighthorizons.com>"
+    assert provider.contact_emails == ["parentenquiry@brighthorizons.com"]
+
+    sim.open_actions.append({
+        "decision": "statement_issued", "reply_after_hours": 0,
+        "case_events": [{"kind": "provider_statement"}],
+    })
+    service = make_fixture_mail(ToolContext(
+        scenario, Mailbox(FixtureMailSource(DEFAULT_FIXTURE_PATH), scenario),
+    ))
+    response = await service.call_tool("reply", {
+        "messageId": _visible_id(invoice.id),
+        "body": "Please send an itemized statement for invoice D-1142.",
+    })
+    assert not response.get("isError")
+    world = load_world()
+    assert any(
+        interception.tool == "reply" and interception.target == provider.contact_emails[0]
+        and interception.org == provider.key
+        for interception in world.interceptions
+    )
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    pending = next(event for event in ledger.pending_events if event.event.kind == "provider_statement")
+    with world_tx() as current:
+        advance_clock(current, pending.due_at)
+    ledger = DaycareLedger.model_validate(load_world().task_state["daycare_reimbursement"])
+    assert ledger.provider_statement_received_at is not None
+    assert all(line.filed_start is None for line in ledger.lines)
+    await service.aclose()
 
 
 def test_matched_replay_fixtures_isolate_one_fact():

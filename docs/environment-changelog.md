@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.23 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: f07121003e06cbfd3c8802e848e2d74456960cf5666395ed33de3ae00e17cbd4
+- Trial round: none; focused offline integration only.
+- Changes: Use the published general Parent Enquiry address for synthetic Bank Street attendance and invoice notices, with a fictional account-notice forwarding context. The address remains a general enquiry contact, not a verified billing address.
+
 ## 10.22 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: acd5e8e7cdcad80a7b52d82ed2b5c2ef432d206523c5fe09f82d8eb151fb52da
