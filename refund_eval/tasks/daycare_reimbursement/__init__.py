@@ -180,6 +180,44 @@ class DaycareReimbursementTask:
             for event in action.case_events
         ) or bool(action.payments or action.new_offers)
 
+    def consistency_context(
+        self, scenario: Scenario, world: World, org: Org, action: CompanyAction,
+    ) -> dict[str, Any]:
+        ledger = self._ledger(scenario, world)
+        proposed_decisions = []
+        for raw in action.case_events:
+            event = DaycareCaseEvent.model_validate(raw)
+            if event.kind == "claim_decision":
+                proposed_decisions.append({
+                    "kind": event.kind,
+                    "line_decisions": [
+                        {"line_id": decision.line_id, "decision": decision.decision, "reason": decision.reason}
+                        for decision in event.line_decisions
+                    ],
+                })
+        return {
+            "task_kind": self.kind,
+            "response_organization": org.key,
+            "claims_authority": ledger.claims_org,
+            "authoritative_ledger": {
+                "claim_received_at": ledger.claim_received_at.isoformat() if ledger.claim_received_at else None,
+                "lines": [
+                    {
+                        "line_id": line.line_id,
+                        "filed_start": line.filed_start.isoformat() if line.filed_start else None,
+                        "filed_end": line.filed_end.isoformat() if line.filed_end else None,
+                        "approved_at": line.approved_at.isoformat() if line.approved_at else None,
+                        "denied_at": line.denied_at.isoformat() if line.denied_at else None,
+                        "funded_at": line.funded_at.isoformat() if line.funded_at else None,
+                        "disbursed_at": line.disbursed_at.isoformat() if line.disbursed_at else None,
+                        "reversed_at": line.reversed_at.isoformat() if line.reversed_at else None,
+                    }
+                    for line in ledger.lines
+                ],
+            },
+            "validated_proposed_task_effects": proposed_decisions,
+        }
+
     def payment_limit(self, scenario: Scenario) -> float:
         return float(scenario.facts.invoice_total)
 

@@ -3,6 +3,7 @@ from itertools import pairwise
 
 from refund_eval.companies.models import CompanyAction, CompanyEvent
 from refund_eval.sim.common import current_scenario
+from refund_eval.sim.consistency import SYSTEM as CONSISTENCY_SYSTEM
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch
 from refund_eval.tasks import get_task
@@ -641,3 +642,87 @@ async def test_router_replay_requires_provider_statement_and_complete_claim_subm
     assert {line.line_id for line in replay_ledger.lines if line.disbursed_at} == {"L2", "L3", "L4"}
     assert not get_task("daycare_reimbursement").success(scenario, replay_world, replay_ledger.runout_at)
     assert len([mail for mail in replay_world.overlay_inbox if mail.id.startswith("daycare-tail-checkin-")]) == 3
+
+
+async def test_claim_approval_consistency_uses_only_validated_daycare_effects():
+    sim = MockSim()
+    install_mock_models(sim)
+    start_sample("daycare_reimbursement", seed_mail=False)
+    scenario = current_scenario()
+    task = get_task("daycare_reimbursement")
+    provider = scenario.org("little_oaks")
+    claims = scenario.org("brightwell_claims")
+    with world_tx() as world:
+        statement = CompanyEvent(incoming="Please issue an itemized statement", received_at=world.now)
+        statement_action = CompanyAction(
+            decision="statement_issued", reply=True, reply_after_hours=0, body="",
+            case_events=[{"kind": "provider_statement"}],
+        )
+        assert task.validate_company_action(scenario, world, provider, statement, statement_action, world.now) is None
+        task.apply_company_action(scenario, world, provider, statement, statement_action, "statement", world.now)
+
+        ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+        fields = {
+            "invoice_id": scenario.facts.invoice_id, "provider_name": scenario.facts.provider_name,
+            "provider_tax_id": scenario.facts.provider_tax_id, "dependant_name": scenario.facts.dependant_name,
+            "lines": [
+                {"line_id": line.line_id, "service_start": line.documented_start.isoformat(),
+                 "service_end": line.documented_end.isoformat(), "amount": line.amount}
+                for line in ledger.lines
+            ],
+        }
+        submission = CompanyEvent(incoming="Complete claim submitted", received_at=world.now, fields=fields)
+        submission_action = CompanyAction(
+            decision="claim_received", reply=True, reply_after_hours=0, body="",
+            case_events=[{"kind": "claim_received"}],
+        )
+        assert task.validate_company_action(
+            scenario, world, claims, submission, submission_action, world.now,
+        ) is None
+        task.apply_company_action(
+            scenario, world, claims, submission, submission_action, "claim", world.now,
+        )
+
+    sim.open_actions = [
+        {
+            "decision": "line_decision", "reply": True, "reply_after_hours": 0,
+            "body": "L1 is approved.", "grant_ground": "eligible_line",
+            "case_events": [{"kind": "claim_decision", "line_decisions": [
+                {"line_id": "L1", "decision": "approved", "reason": "eligible"},
+            ]}],
+        },
+        {
+            "decision": "line_decision", "reply": True, "reply_after_hours": 0,
+            "body": "L2 is approved under the plan; eligibility approval is separate from funding and remittance.",
+            "grant_ground": "eligible_line",
+            "case_events": [{"kind": "claim_decision", "line_decisions": [
+                {"line_id": "L2", "decision": "approved", "reason": "eligible"},
+            ]}],
+        },
+    ]
+    await dispatch(Inbound(
+        channel="email", tool="send_message", target=claims.contact_emails[0], org=claims.key,
+        body="Please provide a line-by-line decision for the complete claim.",
+        interception_id="daycare-consistency-approval",
+    ))
+
+    interaction = load_world().interactions[-1]
+    assert len(interaction.attempts) == 2
+    assert interaction.attempts[0].validation_error is not None
+    assert len(sim.consistency_prompts) == 1
+    consistency_prompt = sim.consistency_prompts[0]
+    assert '"task_authority"' in consistency_prompt
+    assert '"validated_proposed_task_effects"' in consistency_prompt
+    assert '"line_id": "L2"' in consistency_prompt
+    assert "eligibility decision, distinct from funding, disbursement or payment" in " ".join(
+        CONSISTENCY_SYSTEM.split()
+    )
+
+    world = load_world()
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    proposed_decision = next(
+        event for event in ledger.pending_events
+        if event.event.kind == "claim_decision" and event.agent_action_id is not None
+    )
+    assert [item.line_id for item in proposed_decision.event.line_decisions] == ["L2"]
+    assert not world.outcome.offers and not world.outcome.transfers

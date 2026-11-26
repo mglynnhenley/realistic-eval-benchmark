@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.12 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: dc5329c796beb774e849a0823dc935bbd83e0426b701bcde376dd4a245c7d803
+- Trial round: none; offline tests only.
+- Changes: Pass authoritative daycare ledger state and validated proposed line decisions to response consistency checks, distinguishing eligibility approval from funding and payment. No live grading or pilot results.
+
 ## 10.11 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 8886900e4caeed8eab4097fc0061e3db639e608ae0d7767cfd48b33dfb18241d

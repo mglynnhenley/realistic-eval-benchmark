@@ -708,16 +708,20 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         if problem is None and event.mode in {"email", "form"} and action.reply and not prepared.sender:
             problem = "there is no sender address for this reply"
         if problem is None:
-            try:
-                problem = await response_problem(action, world, org, mode=event.mode,
-                                                 effective_at=prepared.effective_at)
-            except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
-                attempt.error = f"{type(ex).__name__}: {ex}"
-                raise
-        if problem is None:
             validate_task_action = getattr(scenario.task, "validate_company_action", None)
             if callable(validate_task_action):
                 problem = validate_task_action(scenario, world, org, event, action, prepared.effective_at)
+        if problem is None:
+            task_context = getattr(scenario.task, "consistency_context", None)
+            task_authority = task_context(scenario, world, org, action) if callable(task_context) else None
+            try:
+                problem = await response_problem(
+                    action, world, org, mode=event.mode, effective_at=prepared.effective_at,
+                    task_authority=task_authority,
+                )
+            except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
+                attempt.error = f"{type(ex).__name__}: {ex}"
+                raise
         attempt.validation_error = problem
         if problem is None:
             return prepared
