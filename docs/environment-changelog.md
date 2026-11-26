@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.27 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 3950755a5b513df3342ddf9539c6e45a32006c2f4ee64061e0147958f0f4aab8
+- Trial round: none; read-only Exa initialize/tools/list catalog verification and offline catalog regression tests only. No search call or model behavior.
+- Changes: Refresh the pinned Exa search descriptor to match server 3.6.0's exact tools/list output; omitted `execution.taskSupport` retains the MCP default of `forbidden`. Exact-catalog fail-closed checks remain enforced.
+
 ## 10.26 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: eccde236135b9b8774fe17ceb1bd9b2e00d2589b83969ad8cd9290fe904e129d
