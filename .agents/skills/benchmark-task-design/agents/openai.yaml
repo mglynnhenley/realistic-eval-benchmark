@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark task design"
+  short_description: "Design and validate Harbor benchmark task suites"
+  default_prompt: "Use $benchmark-task-design to design tasks, controls, a Harbor suite, and a runner handoff without launching trials."

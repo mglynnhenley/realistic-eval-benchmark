@@ -19,7 +19,7 @@ This repo runs long-horizon personal-assistant evaluations over simulated weeks 
 | `refund_eval/storage/` | Optional Supabase transcript upload (off unless `SUPABASE_*` is set) |
 | `measurements/` | Standalone rollout path-variance tool (`uv run measurements/paths.py`) |
 | `refund_eval/harbor/`, `dashboard/` | Batch execution on Modal or Docker (including the native Harbor task), and the local UI |
-| `refund_eval/world_service/`, `models/`, `parity/` | World served over MCP, world-side model client, free Inspect-vs-Harbor parity gate |
+| `refund_eval/world_service/`, `models/`, `parity/` | World served over MCP, world-side model client, and legacy Inspect-vs-Harbor parity tooling |
 
 ## Commands
 ```bash
@@ -33,7 +33,9 @@ uv run python -m refund_eval.realism continuous status --run-dir DIR   # realism
 
 Native Harbor task images use Python 3.14; legacy Harbor trial images use Python 3.12.
 
-New launches default to `train_refund_late` and require an explicit cost cap. Earlier train scenarios are in `refund_eval/scenario/archive/` for historical tooling and resume. Native Harbor is opt-in: `scripts/harbor python -m refund_eval.harbor.batch --config FILE --out DIR` prepares a private batch without launching it; the dashboard and existing Harbor launcher still use the legacy batch path. See `docs/harbor.md` for the target-only native cost cap and the free parity gate (failed paths or unexplained differences fail the gate).
+New launches default to `train_refund_late` and require an explicit cost cap. Earlier train scenarios are in `refund_eval/scenario/archive/` for historical tooling and resume. Native Harbor is opt-in: `scripts/harbor python -m refund_eval.harbor.batch --config FILE --out DIR` prepares a private batch without launching it; the dashboard and existing Harbor launcher still use the legacy batch path. See `docs/harbor.md` for Harbor-specific preparation and the target-only native cost cap.
+
+**Harbor-only readiness:** the legacy Inspect-vs-Harbor parity gate is retired and is not a preparation or launch prerequisite. Use current Harbor-specific readiness checks; do not require the legacy parity gate.
 
 ## Rules that always apply
 - **Paid work needs an explicit budget from the owner.** That covers trials, judges, Modal GPU and rule generation. Never retry a paid failure implicitly, and never resume a paused loop without the owner saying so.
