@@ -8,20 +8,23 @@ old logs load unchanged:
   no payload is the catch-up notice: mail delivered during active work that the
   agent has not yet been told about (see `unannounced_mail_ids`).
 - `follow_up`: a counterparty acts on a promise (`World.follow_ups` still pending).
+- `task_event`: the task's next scheduled event, such as a claim decision, payroll
+  deposit, incomplete-claim timeout or remittance.
 - `wakeup`: the agent's requested wake-up (`World.requested_wakeup`).
 - `checkin`: the fallback check-in at the next CHECKIN_HOURS London time. It is
-  queued only when there is no mail, catch-up or wake-up request, so a request
-  for Wednesday sleeps through Tuesday's check-in.
+  queued only when there is no mail, catch-up or wake-up request; it may coexist
+  with task events so an earlier fallback check-in is not hidden.
 
 Order is (due_at, priority, seq), with due_at compared as an absolute instant.
 due_at is the scheduled time, or now if that has passed: overdue events happen
-now. Priorities at the same instant: mail 0, follow_up 1, wakeup 2, checkin 3.
-seq is the catch-up notice first, then each kind by scheduled time and position
-in its World list, so equal times keep the order they were added in.
+now. Priorities at the same instant: mail 0, follow_up 1, task_event and wakeup
+2, checkin 3. seq is the catch-up notice first, then each kind by scheduled time
+and position in its World list, so equal times keep the order they were added in.
 
-The agent is woken by the first mail, wakeup or checkin event, after every
-follow-up due at or before that instant has run. Each follow-up may schedule
-mail that brings the wake-up forward, so the queue is rebuilt after each one.
+The agent is woken by the first mail, task_event, wakeup or checkin event, after
+every follow-up due at or before that instant has run. Each follow-up may
+schedule mail that brings the wake-up forward, so the queue is rebuilt after
+each one.
 Consequences, all as before this module existed:
 
 - Mail due at the same instant as a follow-up is delivered before it runs; the
@@ -53,6 +56,7 @@ CHECKIN_HOURS = (9,)
 class EventKind(StrEnum):
     MAIL = "mail"
     FOLLOW_UP = "follow_up"
+    TASK_EVENT = "task_event"
     WAKEUP = "wakeup"
     CHECKIN = "checkin"
 
@@ -60,10 +64,11 @@ class EventKind(StrEnum):
 PRIORITY: dict[EventKind, int] = {
     EventKind.MAIL: 0,
     EventKind.FOLLOW_UP: 1,
+    EventKind.TASK_EVENT: 2,
     EventKind.WAKEUP: 2,
     EventKind.CHECKIN: 3,
 }
-WAKE_KINDS = frozenset({EventKind.MAIL, EventKind.WAKEUP, EventKind.CHECKIN})
+WAKE_KINDS = frozenset({EventKind.MAIL, EventKind.TASK_EVENT, EventKind.WAKEUP, EventKind.CHECKIN})
 
 
 @dataclass(frozen=True, eq=False)
@@ -136,9 +141,22 @@ def queue(world: World, checkin_hours: tuple[int, ...] = CHECKIN_HOURS) -> list[
     for promise in sorted((f for f in world.follow_ups if follow_up_pending(f, now)),
                           key=lambda f: as_utc(f.due_at)):
         add(EventKind.FOLLOW_UP, promise.due_at, promise)
+    if world.task_state:
+        from refund_eval.tasks import get_task
+
+        for task_kind in world.task_state:
+            try:
+                task = get_task(task_kind)
+            except ValueError:
+                continue
+            next_scheduled_event = getattr(task, "next_scheduled_event", None)
+            if callable(next_scheduled_event):
+                scheduled = next_scheduled_event(world)
+                if scheduled is not None:
+                    add(EventKind.TASK_EVENT, scheduled)
     if world.requested_wakeup is not None:
         add(EventKind.WAKEUP, world.requested_wakeup)
-    if not any(e.kind in WAKE_KINDS for e in events):
+    if not any(e.kind in {EventKind.MAIL, EventKind.WAKEUP} for e in events):
         add(EventKind.CHECKIN, next_checkin(now, checkin_hours))
     return sorted(events)
 

@@ -36,10 +36,11 @@ from refund_eval.world.timeutil import LONDON, as_utc  # noqa: F401 - LONDON re-
 from refund_eval.world.timeutil import as_aware as aware  # noqa: F401 - re-exported
 from refund_eval.world.timeutil import to_london as london
 
-WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "continue"]
+WakeupKind = Literal["scheduled_checkin", "new_mail", "requested", "task_event", "continue"]
 
 WAKE_KIND: dict[EventKind, WakeupKind] = {
     EventKind.MAIL: "new_mail",
+    EventKind.TASK_EVENT: "task_event",
     EventKind.WAKEUP: "requested",
     EventKind.CHECKIN: "scheduled_checkin",
 }
@@ -48,6 +49,7 @@ _LABELS: dict[str, str] = {
     "scheduled_checkin": "Scheduled check-in",
     "new_mail": "New email",
     "requested": "Scheduled wake-up",
+    "task_event": "Task event",
     "continue": "Continue",
 }
 

@@ -77,6 +77,17 @@ def resolve_org(scenario: Scenario, target: str) -> str | None:
         return None
     raw = target.strip()
 
+    parts = urlsplit(raw)
+    if parts.hostname:
+        path = parts.path.rstrip("/")
+        for org in scenario.orgs:
+            contact = urlsplit(org.contact_url or "")
+            contact_path = contact.path.rstrip("/")
+            if (contact.hostname and parts.hostname.casefold() == contact.hostname.casefold()
+                    and parts.port == contact.port and contact_path
+                    and (path == contact_path or path.startswith(contact_path + "/"))):
+                return org.key
+
     addr = parse_address(raw)
     if addr:
         for org in scenario.orgs:

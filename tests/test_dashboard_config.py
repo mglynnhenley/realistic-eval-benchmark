@@ -62,9 +62,13 @@ def test_scenario_organisation_labels_are_available_to_dashboard():
 
 
 def test_each_scenario_choice_carries_its_own_fare():
-    fares = {item["name"]: item["fare"] for item in server.public_config()["scenarios"]}
+    choices = server.public_config()["scenarios"]
+    fares = {item["name"]: item["fare"] for item in choices if "fare" in item}
     assert fares["train_refund_late"] == 350.0
     assert set(fares) == {"train_refund_late", "bills_price_rise"}
+    daycare = next(item for item in choices if item["name"] == "daycare_reimbursement")
+    assert daycare["invoice_total"] == 800
+    assert daycare["sim_weeks"] == 10
 
 
 def test_scenario_picker_loads_api_choices_before_presets_and_preserves_selection():
@@ -147,7 +151,8 @@ const $ = (id) => {
   if (!elements.has(id)) elements.set(id, {value: '', dataset: {}, addEventListener: (_, cb) => { onChange = cb; }});
   return elements.get(id);
 };
-vm.runInNewContext(change, {$, modelCostLimits: new Map(), updateBatchSettings() {}, markPresetCustom() {}});
+vm.runInNewContext(change, {$, state: {config: {scenarios: [{name: 'train_refund_late', sim_weeks: 6}]}},
+  modelCostLimits: new Map(), updateBatchSettings() {}, markPresetCustom() {}});
 $('scenario').value = 'train_refund_late';
 const modes = ['auto', 'saved'].map(mode => {
   $('research-mode').value = mode;
@@ -158,6 +163,44 @@ process.stdout.write(JSON.stringify(modes));
 """], capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
     )
     assert json.loads(result.stdout) == ["auto", "saved"]
+
+
+def test_selecting_scenario_applies_its_simulated_horizon_default():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to exercise dashboard scenario selection")
+    result = subprocess.run(
+        [node, "-e", """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync('./refund_eval/dashboard/static/app.js', 'utf8');
+const change = source.slice(source.indexOf('  $("scenario").addEventListener("change"'),
+                            source.indexOf('  $("run-preset").addEventListener("change"'));
+const elements = new Map();
+let onChange;
+const $ = (id) => {
+  if (!elements.has(id)) elements.set(id, {value: '', addEventListener: (_, cb) => { onChange = cb; }});
+  return elements.get(id);
+};
+const config = {scenarios: [
+  {name: 'daycare_reimbursement', sim_weeks: 10},
+  {name: 'train_refund_late', sim_weeks: 6},
+]};
+vm.runInNewContext(change, {$, state: {config}, modelCostLimits: new Map(),
+  updateBatchSettings() {}, markPresetCustom() {}});
+$('scenario').value = 'daycare_reimbursement';
+onChange();
+const selectedDefault = $('sim-weeks').value;
+$('sim-weeks').value = '7';
+const manuallyEdited = $('sim-weeks').value;
+$('scenario').value = 'train_refund_late';
+onChange();
+process.stdout.write(JSON.stringify({selectedDefault, manuallyEdited, nextDefault: $('sim-weeks').value}));
+"""], capture_output=True, text=True, cwd=ROOT, check=True, timeout=10,
+    )
+    assert json.loads(result.stdout) == {
+        "selectedDefault": "10", "manuallyEdited": "7", "nextDefault": "6",
+    }
 
 
 def test_openrouter_key_launches_all_default_roles(tmp_path, monkeypatch):

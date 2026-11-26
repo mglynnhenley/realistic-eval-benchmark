@@ -36,11 +36,118 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 10.7 — 2026-11-26
+## 10.25 — 2026-11-26
 - Kind: trivial batch
-- Fingerprint: fe2f5d0a5def0352513e97599bae44d118bd20fca7d3523a8717dcefe221161d
+- Fingerprint: ed8e43eaf528cd71ee8606e8b8be78fe4f538c29c79d694e4f4de84ebfd78ec0
 - Trial round: none; offline checks only, no paid execution.
 - Changes: Skip repeat integrity-checked private trace snapshots while the Inspect sample-buffer database and its journal files are unchanged; keep publishing and validating every changed snapshot.
+
+## 10.24 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 9945b2aa40160db0832459925923d980eb1d24af0a6438d13530c8080f09a5ce
+- Trial round: none; focused offline provider-route tests only.
+- Changes: Accept UK "itemised" spelling when validating a provider-statement request, while retaining the authored provider-only authority check.
+
+## 10.23 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: f07121003e06cbfd3c8802e848e2d74456960cf5666395ed33de3ae00e17cbd4
+- Trial round: none; focused offline integration only.
+- Changes: Use the published general Parent Enquiry address for synthetic Bank Street attendance and invoice notices, with a fictional account-notice forwarding context. The address remains a general enquiry contact, not a verified billing address.
+
+## 10.22 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: acd5e8e7cdcad80a7b52d82ed2b5c2ef432d206523c5fe09f82d8eb151fb52da
+- Trial round: none; Round 3 used offline checks only. No model behavior was tested.
+- Changes: Restore the exact daycare reimbursement request, make scheduled owner status requests use the existing self-addressed mailbox transport, and document that transport limitation. Provider records now distinguish four versus five booked morning sessions without implying full-day care or published fee rates. Protected eligibility, dates and payment outcomes are unchanged.
+
+## 10.21 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: c0a86a7fce5b4ad2ad0d473180d32082524caa847e310a38b483632d8c5a273b
+- Trial round: none; Round 2 used offline integration and focused tests only.
+- Changes: Remove runtime provenance labels and inaccessible attachment references, add retrievable inline evidence, make calendar deadline and form copy customer-facing, render co-hosted employer policy pages correctly, and retain the impossible-honest goal and net-payment witness. Form options use customer-facing line labels while preserving submitted ledger values. No model behavior was tested.
+
+## 10.20 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: d440bbe94802e09edbef5ada713a04eef11412debf1c307eaab94de3b387824e
+- Trial round: none; Round 1 used offline fixture checks only.
+- Changes: Move the daycare case to fictional London employer childcare reimbursement, align dated evidence and controls with 27–30 August care and GBP, preserve net cash through a fictional employer gross-up, and revise planted-email evidence distribution. No live trial or model behavior was tested.
+
+## 10.19 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: ba5e642dce04446924a0f4d62b3b7ac6a8289ae921cb1fe0b009a2be0d82a796
+- Trial round: none; focused offline tests only.
+- Changes: Explicitly state in Brightwell Claims' public terms and saved rules that care before the coverage effective date is ineligible regardless of invoice or payment date; add reviewer-facing explanation of the existing rule. No eligibility behavior change or agent pilot.
+
+## 10.18 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: bcf11afa18722723436606c43a04aefaa9c48a34e63006c057ef0d6461fd83e4
+- Trial round: none; offline tests only.
+- Changes: Treat blank lines between structured daycare email fields as separators, preserving complete signed corrections in spaced messages. No live grading or pilot results.
+
+## 10.17 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 52dd04a2c7898aa04887d8b0bdef536afab718723da7c1ec47f351db9f898a1d
+- Trial round: none; offline tests only.
+- Changes: Parse only deliberate structured email-field blocks, stop at commentary or quoted replies, and preserve the first submitted value for duplicate fields. No live grading or pilot results.
+
+## 10.16 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: f3f0150d3e92f1ab6a1e939b51c39f98299270f7111b540c4ea8b400fb213d0b
+- Trial round: none; offline tests only.
+- Changes: Bound sparse form and email-field indices, align daycare remittance wakes with ledger processing, preserve automatic decisions for undecided lines, and parse advertised equality-delimited email request/correction fields through the sent-message route. No live grading or pilot results.
+
+## 10.15 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: fbdbc68f13f878a4b0e72eba89891466c354caaf79cbb8f44d6abe5f53244f27
+- Trial round: none; offline tests only.
+- Changes: Route shared-domain supervisor form submissions by their published contact path, keep the five-business-day response window available, and schedule newly funded Friday lines for the following remittance. Offline fixtures now use the revision-4 matched inputs and horizon branches.
+
+## 10.14 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: fdbb4b564f50d12b823042ad09645250b620c9c5b19c2b3dca160696b51a0ba8
+- Trial round: none; offline tests only.
+- Changes: Disable the legacy train refund form on daycare contact pages; daycare-specific fields remain supplied by the task form schema. No live grading or pilot results.
+
+## 10.13 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 34efa29a6a56c531e5a54c8f86631525b576d3b0cfeaf38116ff0826c518978b
+- Trial round: none; offline tests only.
+- Changes: Add task-scheduled daycare events to the runtime wake queue for claim decisions, incomplete timeouts, payroll deposits and remittances. No live grading or pilot results.
+
+## 10.12 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: dc5329c796beb774e849a0823dc935bbd83e0426b701bcde376dd4a245c7d803
+- Trial round: none; offline tests only.
+- Changes: Pass authoritative daycare ledger state and validated proposed line decisions to response consistency checks, distinguishing eligibility approval from funding and payment. No live grading or pilot results.
+
+## 10.11 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 8886900e4caeed8eab4097fc0061e3db639e608ae0d7767cfd48b33dfb18241d
+- Trial round: none; offline tests only.
+- Changes: Add stable scalar ordering for same-time daycare events so scheduled replies never compare payload models. No live grading or pilot results.
+
+## 10.10 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 04db04ff5635160f505e4b3d6a9a3865c8827176653764cd1537679d2d7e97ec
+- Trial round: none; offline tests only.
+- Changes: Schedule initial claim adjudication ten business days after receipt, clear superseded incomplete-claim timeouts, and preserve prior line dates, decisions and payouts on refiling. Duplicate decisions include denied lines and remain idempotent. No live grading or pilot results.
+
+## 10.9 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 153ed2b152b6cc857d2be653a680770c9f9c13b8eec271213dab62f6a31c3fc9
+- Trial round: none; offline published-form replay and tests only.
+- Changes: Expose daycare claim and service-date attestation fields on the retrievable portal and preserve nested form submissions through the shared claims queue. No live grading or pilot results.
+
+## 10.8 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: d282e1f35877a210dd0d7443a480d59d7e7c7bfd4f4f226208a87cc19ae45413
+- Trial round: none; offline simulated-company replays and tests only.
+- Changes: Separate daycare provider statements from complete claim submissions; bind supervisor corrections to signed submitted fields, enforce request-time deadlines, separate funding from remittance, and cover truthful controls, Variant B and the full tail. No live grading or pilot results.
+
+## 10.7 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 6b24ddb2db75cc2e45c88fba9fadd3350937e23ef19c88e5638e9e0480847b62
+- Offline fictional daycare reimbursement case and revision 4 fixture integration; no trial round.
 
 ## 10.6 — 2026-11-25
 - Kind: trivial batch

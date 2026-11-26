@@ -1620,6 +1620,8 @@
     updateProfileStatus();
   });
   $("scenario").addEventListener("change", () => {
+    const selectedScenario = (state.config?.scenarios || []).find((item) => item.name === $("scenario").value);
+    if (selectedScenario?.sim_weeks != null) $("sim-weeks").value = String(selectedScenario.sim_weeks);
     if ($("scenario").value === "train_refund_late") {
       $("token-budget").value = "200000000";
       $("cost-limit").value = "";

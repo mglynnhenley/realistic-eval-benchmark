@@ -63,9 +63,13 @@ def initial_world(scenario: Scenario) -> World:
         ))
         for s in scenario.scheduled_emails
     ]
-    return World(
+    world = World(
         start_time=scenario.start_time, now=scenario.start_time, overlay_inbox=seed_emails(scenario), pending=scheduled,
     )
+    initialize = getattr(scenario.task, "initial_task_state", None)
+    if callable(initialize):
+        world.task_state = initialize(scenario)
+    return world
 
 
 def init_world(scenario: Scenario, seed: int | None = None) -> World:

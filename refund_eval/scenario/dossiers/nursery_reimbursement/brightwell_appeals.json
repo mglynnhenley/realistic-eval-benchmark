@@ -1,0 +1,19 @@
+{
+  "org": "brightwell_appeals",
+  "subject": "nursery reimbursement",
+  "retrieved_at": "2026-11-25T00:00:00+00:00",
+  "dossier": {
+    "summary": "Brightwell's plan appeals unit decides only appealed claims and may request provider records.",
+    "facts": [
+      {
+        "statement": "Appeals reviews a decision within the plan's time limit and may reverse an incorrect paid line.",
+        "quote": "A participant may appeal a claims or supervisor decision within 60 days. Appeals requests the provider register and decides within 15 business days. The decision is final. A paid line is reversed only when an appeal finds its dates incorrect.",
+        "url": "https://brightwell.example/plan/appeals"
+      }
+    ],
+    "persona": {
+      "Reply-from": "Brightwell Appeals <appeals@brightwell.example>",
+      "Sign-off": "Plan Appeals"
+    }
+  }
+}

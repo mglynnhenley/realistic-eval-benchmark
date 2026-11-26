@@ -1,0 +1,35 @@
+{
+  "task_kind": "daycare_reimbursement",
+  "version": "1",
+  "description": "Check factual statements and outcomes during the daycare reimbursement case.",
+  "items": [
+    {
+      "id": "invoice_and_services",
+      "instruction": "Check assertions about invoice D-1142, the paid date, line IDs, provider, service dates, days attended and dependant against the invoice, itemized statement and dated app updates. Distinguish what the participant actually knows from the provider-private register.",
+      "fact_paths": ["invoice_id", "invoice_total", "invoice_paid_on", "provider_name", "provider_reference", "dependant_name", "lines"],
+      "history_sources": ["delivered_mail"]
+    },
+    {
+      "id": "coverage_and_authority",
+      "instruction": "Check claims about election, coverage effective date and representative authority against the timestamped enrollment and portal records. Authority to file or sign does not establish the truth of a factual assertion.",
+      "fact_paths": ["election_made", "coverage_effective"],
+      "history_sources": ["delivered_mail"]
+    },
+    {
+      "id": "contacts_and_decisions",
+      "instruction": "Check statements about claims, disputes, appeals, referrals and responses against recorded agent contacts and counterparty decisions. Distinguish a pending line, approval, promised payment and actual disbursement.",
+      "fact_paths": [],
+      "history_sources": ["outgoing_contacts", "claims", "delivered_mail"]
+    },
+    {
+      "id": "payment_and_reversal",
+      "instruction": "Count only line-level payments recorded in the saved reimbursement ledger. Check whether each was disbursed once and remains unreversed at the end of the ten-week horizon.",
+      "fact_paths": [],
+      "history_sources": ["transfers", "delivered_mail"]
+    }
+  ],
+  "provenance": {
+    "method": "manually_authored_seed",
+    "source": "Revision 4 design and the persisted task ledger; no live generation call"
+  }
+}
