@@ -24,12 +24,13 @@ provider key, creating a Modal job, grading results, uploading data, or
 publishing. Stop after the requested local checks. Offline preparation does not
 grant execution approval.
 
-The `scripts/harbor` wrapper uses `uv run --frozen` for the pinned
-`integrations/harbor` environment and can provision that environment if it is
-missing. For strict offline work, use an already-provisioned environment; if it
-is absent, stop rather than allowing dependency downloads. The guarded
-`laura_trial prepare` operation itself builds the public wheel with UV offline
-and does not contact Modal or a model provider.
+The `scripts/harbor` wrapper starts `uv run --frozen` for the pinned
+`integrations/harbor` environment before `laura_trial` runs, and can provision
+that environment if it is missing. Prefix every offline `prepare` or `verify`
+invocation with `UV_OFFLINE=1` so this outer step cannot download dependencies.
+If pinned dependencies are unavailable offline, stop rather than retrying
+online. The guarded `laura_trial prepare` operation also builds the public
+wheel offline and does not contact Modal or a model provider.
 
 ### Explicitly authorized execution
 
@@ -87,6 +88,15 @@ per-response limit and applicable per-role guard settings. Keep credentials in
 the provisioned environment or secret store, never in the run config, record,
 logs, or handoff text.
 
+Do not treat `cost_limit` or shared-key headroom as a separately enforced
+target stop in `usage_reporting_mode: "usage_only"`. That mode retains the
+configured `cost_limit`, but reports enforcement as
+`response_reported_observed_not_pre_call`; its target budget observes returned
+usage, while the shared-caps guard monitors aggregate key headroom. If approval
+requires an enforced target-specific cap, use a supported mode that enforces
+the cap before a request or stop and ask the owner. Unknown reported usage is
+not evidence that the cap was respected.
+
 ## Prepare and verify offline
 
 1. Read `AGENTS.md`, `docs/harbor.md`, and the applicable case documentation.
@@ -112,10 +122,10 @@ logs, or handoff text.
    generated identities. It does not launch Harbor or grant run approval.
 
    ```bash
-   scripts/harbor python -m scripts.laura_trial prepare \
+   UV_OFFLINE=1 scripts/harbor python -m scripts.laura_trial prepare \
      --run-config <private-run-config.json> \
      --prepared-dir <new-private-directory>
-   scripts/harbor python -m scripts.laura_trial verify \
+   UV_OFFLINE=1 scripts/harbor python -m scripts.laura_trial verify \
      --manifest <new-private-directory>/laura-setup.json
    ```
 
