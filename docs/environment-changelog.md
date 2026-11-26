@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.17 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 52dd04a2c7898aa04887d8b0bdef536afab718723da7c1ec47f351db9f898a1d
+- Trial round: none; offline tests only.
+- Changes: Parse only deliberate structured email-field blocks, stop at commentary or quoted replies, and preserve the first submitted value for duplicate fields. No live grading or pilot results.
+
 ## 10.16 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: f3f0150d3e92f1ab6a1e939b51c39f98299270f7111b540c4ea8b400fb213d0b
