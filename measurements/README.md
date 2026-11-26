@@ -13,9 +13,13 @@ Run the offline synthetic comparison from a clean checkout and keep its JSON
 evidence outside the repository:
 
 ```bash
+set -o pipefail
 uv run --offline --frozen python measurements/harbor_snapshot.py \
   | tee "$HOME/harbor-snapshot-$(date +%s).json"
 ```
+
+Run the standard project setup first so locked dependencies are installed or
+available in the local cache. Offline mode does not download missing packages.
 
 The script creates one 5,500,000-byte SQLite event, compares eight full
 integrity-checked publications with eight calls to the current unchanged-state
