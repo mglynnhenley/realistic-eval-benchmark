@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.26 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: ee2160ab40f1e961b39a9d8aa19d95e6c0d35530f3667f9fa05127f2ba51b44a
+- Trial round: none; offline guarded launcher preparation and identity checks only.
+- Changes: Extend the native guarded path to the exact `daycare_reimbursement` identity while retaining saved task/wheel binding, strict-role validation, rejection behavior, and spend guards.
+
 ## 10.25 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: 893190eaad52b2c2f25d365905188f5ca979404ba514e88d91e396d14b395136

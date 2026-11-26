@@ -32,6 +32,8 @@ from refund_eval.models.shared_role_spend_ledger import (
 from refund_eval.output_paths import validate_private_output
 from refund_eval.scenario.schema import scenario_names
 
+GUARDED_SCENARIOS = frozenset({"daycare_reimbursement", "train_refund_late"})
+
 
 class NativeSuiteEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -100,8 +102,10 @@ class NativeBatchConfig(RunConfig):
             raise ValueError("Set trial_spend_cap_usd and key_spend_cap_usd together")
         if self.openrouter_key_mode in {"split", "shared_roles", "shared_caps"}:
             mode = self.openrouter_key_mode
-            if self.scenario != "train_refund_late":
-                raise ValueError(f"{mode} mode supports only train_refund_late")
+            if self.scenario not in GUARDED_SCENARIOS:
+                raise ValueError(
+                    f"{mode} mode supports only guarded scenarios: {', '.join(sorted(GUARDED_SCENARIOS))}"
+                )
             if self.execution != "modal":
                 raise ValueError(f"{mode} mode requires Modal execution")
             if self.agent_max_output_tokens is None:

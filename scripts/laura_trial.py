@@ -56,7 +56,6 @@ from scripts.offline_spend_guard import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST_SCHEMA = 2
-_LAURA_SCENARIO = "train_refund_late"
 _PUBLIC_VALIDATION_CHECKER = "refund_eval.scenario.schema.AgentScenario.model_validate"
 _CACHE_SUFFIXES = {".pyc", ".pyo"}
 _SOURCE_DIRECTORIES = ("refund_eval", "scripts", "scout")
@@ -363,7 +362,7 @@ def _job_path_exists(config: JobConfig, job_name: str) -> bool:
     return path.exists() or path.is_symlink()
 
 
-def _validate_with_fresh_name(config: JobConfig) -> None:
+def _validate_with_fresh_name(config: JobConfig, *, saved_identity_verified: bool = False) -> None:
     for _ in range(3):
         name = f"laura-verify-{uuid4().hex}"
         if _job_path_exists(config, name):
@@ -371,7 +370,7 @@ def _validate_with_fresh_name(config: JobConfig) -> None:
         candidate = config.model_copy(deep=True)
         candidate.job_name = name
         try:
-            guarded_harbor.validate_job_config(candidate)
+            guarded_harbor.validate_job_config(candidate, saved_identity_verified=saved_identity_verified)
             return
         except guarded_harbor.LauncherFailure:
             raise SetupFailure from None
@@ -398,7 +397,10 @@ def _public_validation_result(task_path: Path) -> dict[str, str]:
         task_metadata = tomllib.loads(task_manifest_path.read_text(encoding="utf-8"))["metadata"]
         if not isinstance(wheel_manifest, dict) or set(wheel_manifest) != {"filename", "sha256"}:
             raise SetupFailure
-        if not isinstance(task_metadata, dict) or task_metadata.get("scenario") != _LAURA_SCENARIO:
+        if not isinstance(task_metadata, dict):
+            raise SetupFailure
+        scenario_name = task_metadata.get("scenario")
+        if not isinstance(scenario_name, str) or scenario_name not in batch.GUARDED_SCENARIOS:
             raise SetupFailure
         filename = wheel_manifest["filename"]
         expected_sha256 = wheel_manifest["sha256"]
@@ -505,10 +507,10 @@ def _manifest_document(
     if config.jobs_dir == task_path or task_path in config.jobs_dir.parents:
         raise SetupFailure
     guarded_harbor.require_pinned_harbor()
-    _validate_with_fresh_name(config)
     task_identity = _task_identity(task_path)
     public_validation = _public_validation_result(task_path)
     _require_task_wheel_match(task_identity, public_validation)
+    _validate_with_fresh_name(config, saved_identity_verified=True)
     return {
         "schema_version": _MANIFEST_SCHEMA,
         "path_base": str(path_base),
@@ -605,14 +607,15 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     }
     if not isinstance(public_validation, dict) or set(public_validation) != validation_keys:
         raise SetupFailure
+    scenario = public_validation["scenario"]
     if (public_validation["status"] != "passed"
             or public_validation["checker"] != _PUBLIC_VALIDATION_CHECKER
-            or public_validation["scenario"] != _LAURA_SCENARIO):
+            or not isinstance(scenario, str) or scenario not in batch.GUARDED_SCENARIOS):
         raise SetupFailure
     if (not isinstance(public_validation["wheel_path"], str)
             or Path(public_validation["wheel_path"]).is_absolute()
             or ".." in Path(public_validation["wheel_path"]).parts
-            or public_validation["scenario_member"] != f"refund_eval/scenario/{_LAURA_SCENARIO}.yaml"):
+            or public_validation["scenario_member"] != f"refund_eval/scenario/{scenario}.yaml"):
         raise SetupFailure
     for key in ("wheel_sha256", "scenario_sha256"):
         if (not isinstance(public_validation[key], str)
@@ -648,7 +651,7 @@ def verify_setup(manifest_path: Path) -> JobConfig:
     if _runtime_identity() != document["runtime"]:
         raise SetupFailure
     guarded_harbor.require_pinned_harbor()
-    _validate_with_fresh_name(config)
+    _validate_with_fresh_name(config, saved_identity_verified=True)
     return config
 
 
@@ -663,7 +666,7 @@ def prepare_fresh_job(manifest_path: Path, job_name: str) -> JobConfig:
     except (OSError, ValueError):
         raise SetupFailure from None
     try:
-        guarded_harbor.validate_job_config(fresh)
+        guarded_harbor.validate_job_config(fresh, saved_identity_verified=True)
     except guarded_harbor.LauncherFailure:
         raise SetupFailure from None
     return fresh
@@ -1129,8 +1132,10 @@ def _saved_effective_parameters(
         world_env.get("WORLD_STRICT_BUDGET") != "true"
     ):
         raise SetupFailure("saved_split_key_routing_or_strict_budget_missing")
+    scenario = task_metadata.get("scenario")
     native_task = (
-        task_metadata.get("scenario") == _LAURA_SCENARIO
+        isinstance(scenario, str)
+        and scenario in batch.GUARDED_SCENARIOS
         and isinstance(task_metadata.get("agent_wheel_sha256"), str)
     )
 
@@ -1501,11 +1506,11 @@ def prepare_trial(run_config: Path, out: Path) -> None:
     if spec.trial_spend_cap_usd is not None:
         raise SetupFailure("combined_planning_caps_unsupported_by_manifest_runner")
     if (
-        spec.scenario != _LAURA_SCENARIO or spec.execution != "modal" or spec.suite is not None
+        spec.scenario not in batch.GUARDED_SCENARIOS or spec.execution != "modal" or spec.suite is not None
         or spec.trials != 1 or spec.concurrency != 1 or spec.identity_lock is not None
         or spec.resume_log is not None or spec.inbox_snapshot is not None
     ):
-        raise SetupFailure("prepare_requires_one_fresh_late_refund_modal_trial")
+        raise SetupFailure("prepare_requires_one_fresh_guarded_modal_trial")
     if spec.openrouter_key_mode == "shared":
         _native_effective_parameters(spec, Thresholds(KEY_CEILING, KEY_CEILING))
     else:
@@ -1530,13 +1535,16 @@ def prepare_trial(run_config: Path, out: Path) -> None:
         record_path = batch.prepare(out, spec)
         job_path = record_path.with_name("job.yaml")
         _, _, job = _load_config(job_path, Path.cwd())
-        _validate_with_fresh_name(job)
-        task_path = job.tasks[0].path
-        _validate_prepared_limits(job, task_path, spec)
+        task_path = job.tasks[0].path if job.tasks else None
+        if task_path is None:
+            raise SetupFailure("packaged_task_missing")
         try:
             validation = _public_validation_result(task_path)
         except SetupFailure:
             raise SetupFailure("packaged_public_descriptor_invalid") from None
+        _require_task_wheel_match(_task_identity(task_path), validation)
+        _validate_with_fresh_name(job, saved_identity_verified=True)
+        _validate_prepared_limits(job, task_path, spec)
         agent_dir = task_path / "environment" / "agent"
         interpreter = str(venv / "bin" / "python")
         _prepare_step(
@@ -1721,6 +1729,7 @@ def main(argv: list[str] | None = None) -> int:
         on_sandbox_created=_print_modal_dashboard,
         before_job_run=lambda job: _record_effective_parameters(job, config, effective_parameters),
         on_guard_ready=on_guard_ready,
+        saved_identity_verified=True,
         total_time_limit_seconds=total_time_limit,
     )
 

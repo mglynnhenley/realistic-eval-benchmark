@@ -51,8 +51,19 @@ def _args(path, out):
     return ["prepare", "--run-config", str(path), "--prepared-dir", str(out)]
 
 
-def test_offline_prepare_command_packages_and_loads_exact_public_wheel(saved_spec, monkeypatch):
+@pytest.mark.parametrize("scenario", ["train_refund_late", "daycare_reimbursement"])
+def test_offline_prepare_command_packages_and_loads_exact_public_wheel(saved_spec, monkeypatch, scenario):
     path, out, values = saved_spec
+    values["scenario"] = scenario
+    if scenario == "daycare_reimbursement":
+        values.update(
+            requested_deadline=None,
+            sim_weeks=10,
+            cost_limit=5.0,
+            world_cost_limit=10.0,
+            shared_allowance_usd=15.0,
+        )
+    path.write_text(json.dumps(values), encoding="utf-8")
     original_spec = path.read_bytes()
     warmed_cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, text=True, check=True).stdout.strip()
     python_dir = subprocess.run(["uv", "python", "dir"], capture_output=True, text=True, check=True).stdout.strip()
@@ -111,6 +122,19 @@ def test_prepare_rejects_planning_caps_the_manifest_runner_would_not_read(saved_
     path.write_text(json.dumps(values), encoding="utf-8")
     assert laura_trial.main(_args(path, out)) == 2
     assert "combined_planning_caps_unsupported_by_manifest_runner" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_prepare_rejects_unsupported_guarded_scenario(saved_spec, monkeypatch, capsys):
+    path, out, values = saved_spec
+    for key in ("agent_max_output_tokens", "requested_deadline", "shared_allowance_usd"):
+        del values[key]
+    values.update(scenario="bills_price_rise", openrouter_key_mode="shared", cost_limit=1, world_cost_limit=1)
+    path.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setattr(adapter, "copy_source", lambda *_: pytest.fail("started building an unsupported spec"))
+
+    assert laura_trial.main(_args(path, out)) == 2
+    assert "prepare_requires_one_fresh_guarded_modal_trial" in capsys.readouterr().err
     assert not out.exists()
 
 

@@ -1615,7 +1615,7 @@ def test_batch_rejects_untrackable_inputs_before_writing(tmp_path, approved_whee
 
 def test_split_batch_rejects_bills_scenario_before_preparation(approved_split_budget_wheel):
     wheel, digest = approved_split_budget_wheel
-    with pytest.raises(ValueError, match="split mode supports only train_refund_late"):
+    with pytest.raises(ValueError, match="split mode supports only guarded scenarios"):
         batch.NativeBatchConfig(
             scenario="bills_price_rise", execution="modal", data_mode="fixture", research_mode="saved",
             model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
