@@ -162,7 +162,7 @@ class StatusReport(BaseModel):
 class Wakeup(BaseModel):
     time: datetime
     # daily_limit is accepted for historical logs only; the scheduler never emits it.
-    kind: Literal["scheduled_checkin", "new_mail", "daily_limit", "requested", "continue"]
+    kind: Literal["scheduled_checkin", "new_mail", "daily_limit", "requested", "task_event", "continue"]
     text: str
     # None preserves timestamp-only behavior for historical checkpoints.
     announced_mail_ids: list[str] | None = None

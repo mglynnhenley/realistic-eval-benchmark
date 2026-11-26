@@ -218,6 +218,28 @@ class DaycareReimbursementTask:
             "validated_proposed_task_effects": proposed_decisions,
         }
 
+    def next_scheduled_event(self, world: World) -> datetime | None:
+        saved = world.task_state.get(self.kind)
+        if saved is None:
+            return None
+        ledger = DaycareLedger.model_validate(saved)
+        scheduled = [event.due_at for event in ledger.pending_events]
+        if ledger.incomplete_claim_status == "pended" and ledger.incomplete_claim_due_at is not None:
+            scheduled.append(ledger.incomplete_claim_due_at)
+
+        deposit_day = ledger.initial_deposit_on + timedelta(days=ledger.deposit_interval_days)
+        deposit_at = _at(deposit_day, 9, ledger.start_time.tzinfo)
+        while as_utc(deposit_at) <= as_utc(ledger.last_processed_at):
+            deposit_day += timedelta(days=ledger.deposit_interval_days)
+            deposit_at = _at(deposit_day, 9, ledger.start_time.tzinfo)
+        scheduled.append(deposit_at)
+        scheduled.extend(
+            line.next_remittance_at
+            for line in ledger.lines
+            if line.next_remittance_at is not None and line.disbursed_at is None and line.reversed_at is None
+        )
+        return min(scheduled, key=as_utc) if scheduled else None
+
     def payment_limit(self, scenario: Scenario) -> float:
         return float(scenario.facts.invoice_total)
 

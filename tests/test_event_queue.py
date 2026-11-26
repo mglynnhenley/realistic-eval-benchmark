@@ -1,6 +1,6 @@
 """The event queue's order: ties across and within kinds, the session cap, old worlds."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from inspect_ai.util._store import Store, init_subtask_store
@@ -11,11 +11,20 @@ from refund_eval.runtime.events import (
     EventKind,
     due_mail,
     follow_up_before_wake,
+    next_checkin,
     next_follow_up,
     next_wake,
     queue,
 )
+from refund_eval.runtime.turns import wake
 from refund_eval.scenario.schema import load_scenario
+from refund_eval.tasks import get_task
+from refund_eval.tasks.daycare_reimbursement.ledger import (
+    DaycareCaseEvent,
+    DaycareLedger,
+    DaycareLineDecision,
+    ScheduledDaycareEvent,
+)
 from refund_eval.world.clock import advance
 from refund_eval.world.state import (
     Email,
@@ -45,6 +54,13 @@ def promise(fid: str, due: datetime, **extra) -> FollowUp:
 
 def world(**fields) -> World:
     return World(start_time=START, now=START, **fields)
+
+
+def daycare_world() -> World:
+    scenario = load_scenario("daycare_reimbursement")
+    task = get_task("daycare_reimbursement")
+    return World(start_time=scenario.start_time, now=scenario.start_time,
+                 task_state=task.initial_task_state(scenario))
 
 
 def kinds(w: World) -> list[str]:
@@ -97,6 +113,80 @@ def test_wakeup_at_the_checkin_time_is_a_requested_wakeup():
     assert next_event(w) == (checkin, "requested")
     w.requested_wakeup = None
     assert next_event(w) == (checkin, "scheduled_checkin")
+
+
+def test_claim_decision_task_event_wakes_before_later_requested_wakeup():
+    w = daycare_world()
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    first_payroll = datetime.combine(
+        ledger.initial_deposit_on + timedelta(days=ledger.deposit_interval_days),
+        time(9), tzinfo=ledger.start_time.tzinfo,
+    )
+    advance(w, first_payroll)
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    decision_at = datetime.combine(w.start_time.date() + timedelta(days=14), time(17), tzinfo=w.now.tzinfo)
+    ledger.claim_received_at = w.start_time
+    ledger.pending_events = [ScheduledDaycareEvent(
+        id="auto-claim-decision:claim", due_at=decision_at, agent_action_id=None,
+        org_key=ledger.claims_org, received_at=w.start_time,
+        event=DaycareCaseEvent(kind="claim_decision", line_decisions=[
+            DaycareLineDecision(line_id="L2", decision="approved", reason="eligible"),
+        ]),
+    )]
+    w.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    w.requested_wakeup = decision_at + timedelta(days=2)
+
+    event = next_wake(w)
+    assert event is not None and event.kind is EventKind.TASK_EVENT and event.due_at == decision_at
+    assert next_event(w) == (decision_at, "task_event")
+    wakeup = wake(w, sim_weeks=10)
+    assert wakeup is not None and wakeup.kind == "task_event" and wakeup.time == decision_at
+    assert any(email.subject == "Claims decision" for email in w.overlay_inbox)
+
+
+def test_incomplete_timeout_is_a_task_wakeup_before_later_request():
+    w = daycare_world()
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    timeout_at = w.now + timedelta(days=3)
+    ledger.incomplete_claim_status = "pended"
+    ledger.incomplete_claim_due_at = timeout_at
+    w.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    w.requested_wakeup = timeout_at + timedelta(days=2)
+
+    assert next_event(w) == (timeout_at, "task_event")
+
+
+def test_payroll_deposit_is_a_task_wakeup_and_does_not_hide_fallback_checkin():
+    w = daycare_world()
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    payroll_at = datetime.combine(
+        ledger.initial_deposit_on + timedelta(days=ledger.deposit_interval_days),
+        time(9), tzinfo=ledger.start_time.tzinfo,
+    )
+    w.requested_wakeup = payroll_at + timedelta(days=1)
+
+    assert next_event(w) == (payroll_at, "task_event")
+    w.requested_wakeup = None
+    assert next_event(w) == (next_checkin(w.now), "scheduled_checkin")
+
+
+def test_friday_remittance_is_a_task_wakeup_before_later_request():
+    w = daycare_world()
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    line = ledger.lines[1]
+    line.approved_at = w.now
+    line.funded_at = w.now
+    friday = w.now.date() + timedelta(days=(4 - w.now.weekday()) % 7)
+    remittance_at = datetime.combine(friday, time(17), tzinfo=w.now.tzinfo)
+    if remittance_at <= w.now:
+        remittance_at += timedelta(days=7)
+    line.next_remittance_at = remittance_at
+    w.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    w.requested_wakeup = remittance_at + timedelta(days=2)
+
+    event = next_wake(w)
+    assert event is not None and event.kind is EventKind.TASK_EVENT and event.due_at == remittance_at
+    assert next_event(w) == (remittance_at, "task_event")
 
 
 def test_checkin_is_queued_only_without_mail_or_request_and_follow_ups_precede_it():

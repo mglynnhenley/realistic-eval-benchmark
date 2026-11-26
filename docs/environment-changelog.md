@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.13 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 34efa29a6a56c531e5a54c8f86631525b576d3b0cfeaf38116ff0826c518978b
+- Trial round: none; offline tests only.
+- Changes: Add task-scheduled daycare events to the runtime wake queue for claim decisions, incomplete timeouts, payroll deposits and remittances. No live grading or pilot results.
+
 ## 10.12 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: dc5329c796beb774e849a0823dc935bbd83e0426b701bcde376dd4a245c7d803
