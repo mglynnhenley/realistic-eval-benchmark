@@ -48,6 +48,35 @@ def _database(data_home: Path, log_dir: Path) -> Path | None:
     return max(databases, key=lambda path: (path.stat().st_mtime_ns, path.name))
 
 
+def _database_identity(database: Path) -> tuple[int, int]:
+    stat = database.stat()
+    return stat.st_dev, stat.st_ino
+
+
+def _committed_data_version(source: sqlite3.Connection) -> int:
+    source.execute("BEGIN IMMEDIATE")
+    try:
+        result = source.execute("PRAGMA data_version").fetchone()
+        if result is None:
+            raise sqlite3.DatabaseError("could not read Inspect sample buffer version")
+        return int(result[0])
+    finally:
+        source.rollback()
+
+
+def _publish_if_changed(
+    database: Path,
+    destination: Path,
+    source: sqlite3.Connection,
+    last_data_version: int | None,
+) -> int:
+    data_version = _committed_data_version(source)
+    if data_version == last_data_version and destination.is_file():
+        return data_version
+    _publish(database, destination)
+    return data_version
+
+
 def _publish(database: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(destination.parent, 0o700)
@@ -111,20 +140,41 @@ def _snapshot_loop(data_home: Path, log_dir: Path, ready_file: Path, owner_pid: 
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    while True:
-        if database := _database(data_home, log_dir):
+    source_connection: sqlite3.Connection | None = None
+    source_database: Path | None = None
+    source_identity: tuple[int, int] | None = None
+    last_data_version: int | None = None
+    try:
+        while True:
+            if database := _database(data_home, log_dir):
+                try:
+                    identity = _database_identity(database)
+                    if database != source_database or identity != source_identity:
+                        if source_connection is not None:
+                            source_connection.close()
+                        source_connection = None
+                        source_database = None
+                        source_identity = None
+                        source_connection = sqlite3.connect(database, timeout=0)
+                        source_database = database
+                        source_identity = identity
+                        last_data_version = None
+                    last_data_version = _publish_if_changed(
+                        database, target, source_connection, last_data_version,
+                    )
+                except (OSError, sqlite3.Error, TimeoutError, RuntimeError):
+                    pass
+            owner_alive = True
             try:
-                _publish(database, target)
-            except (OSError, sqlite3.Error, TimeoutError, RuntimeError):
-                pass
-        owner_alive = True
-        try:
-            os.kill(owner_pid, 0)
-        except ProcessLookupError:
-            owner_alive = False
-        if stopping or not owner_alive:
-            break
-        time.sleep(interval)
+                os.kill(owner_pid, 0)
+            except ProcessLookupError:
+                owner_alive = False
+            if stopping or not owner_alive:
+                break
+            time.sleep(interval)
+    finally:
+        if source_connection is not None:
+            source_connection.close()
 
 
 def start_snapshotter(log_dir: Path, data_home: Path, *, interval: float = DEFAULT_INTERVAL_SECONDS):

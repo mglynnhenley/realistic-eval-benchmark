@@ -36,17 +36,23 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.27 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: a9efa13cc1246f2fa7d4e0dfaf841f0d0ff7eb9361ff1371d7d123a0920ce201
+- Trial round: none; offline guarded package preparation, identity checks and explicit target-cap validation only.
+- Changes: Extend the native guarded path to the exact `daycare_reimbursement` identity while retaining saved task/wheel binding and spend guards; require an explicit target cost cap for strict-role native runs.
+
 ## 10.26 — 2026-11-26
 - Kind: trivial batch
-- Fingerprint: eccde236135b9b8774fe17ceb1bd9b2e00d2589b83969ad8cd9290fe904e129d
-- Trial round: none; offline guarded launcher preparation and identity checks only.
-- Changes: Extend the native guarded path to the exact `daycare_reimbursement` identity while retaining saved task/wheel binding, strict-role validation, rejection behavior, and spend guards.
+- Fingerprint: 1f9dd134e0c0902075c88d4b4218d4e8bab2214e972afe5ec481cd8a41d5e708
+- Trial round: none; offline rendered-mailbox parity only. No model or paid run.
+- Changes: Preserve the five incidental refund-baseline correspondence threads in the London fixture with profile/date substitutions and no train-case-specific details. The five London-specific seed emails and three scheduled check-ins remain scenario-specific.
 
 ## 10.25 — 2026-11-26
 - Kind: trivial batch
-- Fingerprint: 893190eaad52b2c2f25d365905188f5ca979404ba514e88d91e396d14b395136
-- Trial round: none; offline rendered-mailbox parity only. No model or paid run.
-- Changes: Preserve the five incidental refund-baseline correspondence threads in the London fixture with profile/date substitutions and no train-case-specific details. The five London-specific seed emails and three scheduled check-ins remain scenario-specific.
+- Fingerprint: 51048a4e3b15563bbc8664e5d0203b72a9ef75903ed4a752903cb5bd43e8ab4d
+- Trial round: none; offline checks only, no paid execution.
+- Changes: Use SQLite's committed data version to skip repeat integrity-checked snapshots; briefly acquire a write reservation to avoid caching uncommitted WAL spills, and keep publishing and validating every committed change.
 
 ## 10.24 — 2026-11-26
 - Kind: trivial batch
