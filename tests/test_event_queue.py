@@ -189,6 +189,27 @@ def test_friday_remittance_is_a_task_wakeup_before_later_request():
     assert next_event(w) == (remittance_at, "task_event")
 
 
+def test_daycare_remittance_wakes_at_the_authoritative_clock_time():
+    w = daycare_world()
+    w.start_time = datetime(2024, 9, 23, 9, 0, tzinfo=BST)
+    w.now = datetime(2024, 10, 25, 16, 59, tzinfo=BST)
+    ledger = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    ledger.last_processed_at = w.now
+    line = next(item for item in ledger.lines if item.line_id == "L4")
+    line.approved_at = datetime(2024, 10, 17, 9, 0, tzinfo=BST)
+    line.funded_at = datetime(2024, 10, 18, 9, 0, tzinfo=BST)
+    line.next_remittance_at = datetime(2024, 10, 25, 17, 0, tzinfo=BST)
+    ledger.balance = line.amount
+    w.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    actual_remittance_at = datetime(2024, 10, 25, 18, 0, tzinfo=BST)
+
+    wakeup = wake(w, sim_weeks=10)
+
+    assert wakeup is not None and wakeup.time == actual_remittance_at
+    paid = DaycareLedger.model_validate(w.task_state["daycare_reimbursement"])
+    assert next(item for item in paid.lines if item.line_id == "L4").disbursed_at == actual_remittance_at
+
+
 def test_checkin_is_queued_only_without_mail_or_request_and_follow_ups_precede_it():
     checkin = START + timedelta(days=1)
     w = world(follow_ups=[promise("f", checkin)])

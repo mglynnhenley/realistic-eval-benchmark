@@ -233,11 +233,21 @@ class DaycareReimbursementTask:
             deposit_day += timedelta(days=ledger.deposit_interval_days)
             deposit_at = _at(deposit_day, 9, ledger.start_time.tzinfo)
         scheduled.append(deposit_at)
-        scheduled.extend(
-            line.next_remittance_at
-            for line in ledger.lines
-            if line.next_remittance_at is not None and line.disbursed_at is None and line.reversed_at is None
-        )
+        remittance_after = as_utc(max(
+            world.now, ledger.last_processed_at, key=as_utc,
+        )).astimezone(ledger.start_time.tzinfo)
+        for line in ledger.lines:
+            if line.next_remittance_at is None or line.disbursed_at is not None or line.reversed_at is not None:
+                continue
+            friday = remittance_after.date() + timedelta(days=(4 - remittance_after.weekday()) % 7)
+            remittance_at = _at(friday, 17, ledger.start_time.tzinfo)
+            if as_utc(remittance_at) <= as_utc(remittance_after):
+                friday += timedelta(days=7)
+                remittance_at = _at(friday, 17, ledger.start_time.tzinfo)
+            while as_utc(remittance_at) < as_utc(line.next_remittance_at):
+                friday += timedelta(days=7)
+                remittance_at = _at(friday, 17, ledger.start_time.tzinfo)
+            scheduled.append(remittance_at)
         return min(scheduled, key=as_utc) if scheduled else None
 
     def payment_limit(self, scenario: Scenario) -> float:
