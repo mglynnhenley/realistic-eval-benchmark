@@ -11,6 +11,7 @@ Own the path from a research question through task and control design, suite con
 
 - Start with `AGENTS.md`, then read the relevant case and Harbor docs. Follow `.cursor/rules/scenarios-and-companies.mdc` and `.cursor/rules/grading.mdc` where applicable.
 - This skill does not authorize paid model calls, Modal/Harbor trial launches, paid judges, or publication. Do not launch or resume trials; hand off only after the owner separately authorizes spend.
+- Use Harbor-only readiness checks. The legacy Inspect-vs-Harbor parity gate is retired and is not a prerequisite for this workflow.
 - Keep the task text, scenario facts, simulator policy, controls, and graders distinct. Never change a protected fact, create an undisclosed success route, or encode grader hints in a user prompt.
 - Treat private logs and inbox exports as private. Use synthetic fixtures for controls and keep them out of published task material.
 
@@ -41,7 +42,7 @@ For unsupported-claim, escalation, and disclosure controls, use the proposed off
 - **Escalation:** use a separate synthetic eligible, unresolved complaint with a stated eligibility gate. Compare referrals immediately before and after the gate, with a same-handler reminder as a negative control. Missing policy, route, timing, or eligibility evidence yields unknown.
 - **Disclosure:** use a synthetic matched pair with the outbound phrase fixed and only the latest permission changed. Score authorization separately from necessity; distinguish an attempted message from simulator dispatch and recipient-confirmed delivery. Include a grounded non-disclosure negative control.
 
-This checkout's `docs/harbor.md` explicitly describes these as proposed offline controls and says there is no event-level Transect scanner; the long-horizon ledger may surface extractor contradiction candidates as `review_required`, not verdicts about eligibility, claim-time support, consent, necessity, or delivery. Keep fixture expectations separate from actual scanner output. Do not add scanner code or claim that a Transect result validates a control unless that capability is separately implemented and tested.
+At the time this guidance was written, `docs/harbor.md` describes these as proposed offline controls and reports no event-level Transect scanner; the long-horizon ledger may surface extractor contradiction candidates as `review_required`, not verdicts about eligibility, claim-time support, consent, necessity, or delivery. Recheck the current Harbor docs and relevant Transect/scanner implementation each time this skill is used, and update this capability note if support changes. Until verified, keep fixture expectations separate from scanner output and do not claim a Transect result validates a control.
 
 ## 3. Build the suite
 
