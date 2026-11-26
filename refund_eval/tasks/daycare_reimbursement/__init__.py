@@ -5,6 +5,7 @@ from __future__ import annotations
 import heapq
 import re
 from datetime import date, datetime, time, timedelta
+from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -724,33 +725,36 @@ class DaycareReimbursementTask:
         ledger = DaycareLedger.model_validate(saved)
         start = max(as_utc(from_time), as_utc(ledger.last_processed_at))
         end = as_utc(to_time)
-        candidates: list[tuple[datetime, int, str, Any]] = []
+        candidates: list[tuple[datetime, int, str, str, int, Any]] = []
+        sequence = count()
         for pending in ledger.pending_events:
             due = as_utc(pending.due_at)
             if start < due <= end:
-                candidates.append((due, 1, "company", pending))
+                candidates.append((due, 1, "company", pending.id, next(sequence), pending))
         first = ledger.initial_deposit_on + timedelta(days=ledger.deposit_interval_days)
         deposit_day = first
         while _at(deposit_day, 9, ledger.start_time.tzinfo).date() <= to_time.date():
             due = _at(deposit_day, 9, ledger.start_time.tzinfo)
             if start < as_utc(due) <= end:
-                candidates.append((as_utc(due), 0, "deposit", due))
+                candidates.append((as_utc(due), 0, "deposit", due.isoformat(), next(sequence), due))
             deposit_day += timedelta(days=ledger.deposit_interval_days)
         friday = ledger.start_time.date() + timedelta(days=(4 - ledger.start_time.weekday()) % 7)
         while friday <= to_time.date():
             due = _at(friday, 17, ledger.start_time.tzinfo)
             if start < as_utc(due) <= end:
-                candidates.append((as_utc(due), 2, "remittance", due))
+                candidates.append((as_utc(due), 2, "remittance", due.isoformat(), next(sequence), due))
             friday += timedelta(days=7)
         if ledger.incomplete_claim_due_at:
             due = as_utc(ledger.incomplete_claim_due_at)
             if start < due <= end and ledger.incomplete_claim_status == "pended":
-                candidates.append((due, 1, "timeout", ledger.incomplete_claim_due_at))
+                candidates.append((
+                    due, 1, "timeout", due.isoformat(), next(sequence), ledger.incomplete_claim_due_at,
+                ))
         arrived = []
         heapq.heapify(candidates)
-        queued_ids = {payload.id for _, _, kind, payload in candidates if kind == "company"}
+        queued_ids = {payload.id for _, _, kind, _, _, payload in candidates if kind == "company"}
         while candidates:
-            _, _, kind, payload = heapq.heappop(candidates)
+            _, _, kind, _, _, payload = heapq.heappop(candidates)
             if kind == "company":
                 if not any(item.id == payload.id for item in ledger.pending_events):
                     continue
@@ -778,7 +782,9 @@ class DaycareReimbursementTask:
                 for pending in ledger.pending_events:
                     due = as_utc(pending.due_at)
                     if pending.id not in queued_ids and start < due <= end:
-                        heapq.heappush(candidates, (due, 1, "company", pending))
+                        heapq.heappush(
+                            candidates, (due, 1, "company", pending.id, next(sequence), pending),
+                        )
                         queued_ids.add(pending.id)
             elif kind == "deposit":
                 self._deposit(ledger, payload)

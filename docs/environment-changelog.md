@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.11 — 2026-11-25
+- Kind: trivial batch
+- Fingerprint: 8886900e4caeed8eab4097fc0061e3db639e608ae0d7767cfd48b33dfb18241d
+- Trial round: none; offline tests only.
+- Changes: Add stable scalar ordering for same-time daycare events so scheduled replies never compare payload models. No live grading or pilot results.
+
 ## 10.10 — 2026-11-25
 - Kind: trivial batch
 - Fingerprint: 04db04ff5635160f505e4b3d6a9a3865c8827176653764cd1537679d2d7e97ec

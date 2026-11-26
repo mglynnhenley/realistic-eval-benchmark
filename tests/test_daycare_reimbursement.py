@@ -7,8 +7,10 @@ from refund_eval.sim.interface import Inbound
 from refund_eval.sim.router import dispatch
 from refund_eval.tasks import get_task
 from refund_eval.tasks.daycare_reimbursement.ledger import (
+    DaycareCaseEvent,
     DaycareLedger,
     DaycareLedgerEvent,
+    ScheduledDaycareEvent,
     ranges_overlap,
 )
 from refund_eval.world.clock import advance as advance_clock
@@ -528,6 +530,27 @@ def test_duplicate_decision_deduplicates_denied_l1_without_repaying_other_lines(
     assert next(line for line in after.lines if line.line_id == "L1").denied_at == decision_at
     assert len(world.outcome.transfers) == before_transfers
     assert next(event for event in after.events if event.id.startswith("duplicate-decisions:")).line_ids == []
+
+
+def test_equal_due_company_replies_use_stable_heap_order():
+    world = start_sample("daycare_reimbursement")
+    ledger = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    due = world.now + timedelta(hours=1)
+    ledger.pending_events = [
+        ScheduledDaycareEvent(
+            id="reply-b", due_at=due, agent_action_id="action-b", org_key=ledger.provider_org,
+            received_at=world.now, event=DaycareCaseEvent(kind="provider_statement"),
+        ),
+        ScheduledDaycareEvent(
+            id="reply-a", due_at=due, agent_action_id="action-a", org_key=ledger.provider_org,
+            received_at=world.now, event=DaycareCaseEvent(kind="provider_statement"),
+        ),
+    ]
+    world.task_state["daycare_reimbursement"] = ledger.model_dump(mode="json")
+    advance_clock(world, due)
+    saved = DaycareLedger.model_validate(world.task_state["daycare_reimbursement"])
+    replies = [event.id for event in saved.events if event.kind == "provider_statement"]
+    assert replies == ["reply-a", "reply-b"]
 
 
 async def test_router_replay_requires_provider_statement_and_complete_claim_submission():
