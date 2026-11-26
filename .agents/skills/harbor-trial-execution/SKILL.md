@@ -87,6 +87,15 @@ per-response limit and applicable per-role guard settings. Keep credentials in
 the provisioned environment or secret store, never in the run config, record,
 logs, or handoff text.
 
+Do not treat `cost_limit` or shared-key headroom as a separately enforced
+target stop in `usage_reporting_mode: "usage_only"`. That mode retains the
+configured `cost_limit`, but reports enforcement as
+`response_reported_observed_not_pre_call`; its target budget observes returned
+usage, while the shared-caps guard monitors aggregate key headroom. If approval
+requires an enforced target-specific cap, use a supported mode that enforces
+the cap before a request or stop and ask the owner. Unknown reported usage is
+not evidence that the cap was respected.
+
 ## Prepare and verify offline
 
 1. Read `AGENTS.md`, `docs/harbor.md`, and the applicable case documentation.
