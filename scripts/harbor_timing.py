@@ -29,6 +29,23 @@ EVENTS = (
     "result_verified",
     "analysis_handoff_completed",
 )
+ORDER_CONSTRAINTS = (
+    ("request_received", "authorization_confirmed"),
+    ("request_received", "config_frozen"),
+    ("request_received", "preparation_started"),
+    ("config_frozen", "preparation_started"),
+    ("preparation_started", "preparation_completed"),
+    ("preparation_completed", "launch_submitted"),
+    ("authorization_confirmed", "launch_submitted"),
+    ("launch_submitted", "job_created"),
+    ("job_created", "job_started"),
+    ("job_started", "trial_started"),
+    ("trial_started", "trial_finished"),
+    ("trial_finished", "job_finished"),
+    ("job_finished", "artifacts_collected"),
+    ("artifacts_collected", "result_verified"),
+    ("result_verified", "analysis_handoff_completed"),
+)
 EVIDENCE_CLASSES = {"operator_capture", "redacted_summary", "synthetic_fixture"}
 STATUSES = {"observed", "simulated", "missing"}
 SOURCE_HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -258,19 +275,17 @@ def _event_timestamp(event: dict[str, Any]) -> datetime | None:
 def _timestamp_order(manifest: dict[str, Any]) -> tuple[list[str], int]:
     if manifest["evidence_class"] == "synthetic_fixture":
         return [], 0
-    previous: tuple[str, datetime] | None = None
     issues = []
     compared_pairs = 0
-    for name in EVENTS:
-        event = manifest["events"][name]
-        timestamp = _event_timestamp(event)
-        if timestamp is None:
+    events = manifest["events"]
+    for earlier, later in ORDER_CONSTRAINTS:
+        earlier_timestamp = _event_timestamp(events[earlier])
+        later_timestamp = _event_timestamp(events[later])
+        if earlier_timestamp is None or later_timestamp is None:
             continue
-        if previous is not None:
-            compared_pairs += 1
-            if timestamp < previous[1]:
-                issues.append(f"{previous[0]}->{name}")
-        previous = (name, timestamp)
+        compared_pairs += 1
+        if later_timestamp < earlier_timestamp:
+            issues.append(f"{earlier}->{later}")
     return issues, compared_pairs
 
 

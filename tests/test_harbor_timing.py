@@ -77,6 +77,39 @@ class HarborTimingCliTests(unittest.TestCase):
         self.assertIn("interval.trial_to_job_finish=REVIEW negative_duration_seconds=", result.stdout)
         self.assertEqual(written["events"]["trial_finished"]["timestamp_utc"], original_trial_finish)
 
+    def test_authorization_may_follow_offline_preparation_but_not_launch(self):
+        data = json.loads((FIXTURES / "harbor_timing_synthetic.json").read_text(encoding="utf-8"))
+        data["evidence_class"] = "operator_capture"
+        for event in data["events"].values():
+            event.update(status="missing", timestamp_utc=None, source=None, note="not captured")
+        observed = {
+            "request_received": "2026-11-26T12:00:00Z",
+            "config_frozen": "2026-11-26T12:01:00Z",
+            "preparation_started": "2026-11-26T12:02:00Z",
+            "preparation_completed": "2026-11-26T12:03:00Z",
+            "authorization_confirmed": "2026-11-26T12:04:00Z",
+            "launch_submitted": "2026-11-26T12:05:00Z",
+        }
+        for name, timestamp in observed.items():
+            data["events"][name].update(status="observed", timestamp_utc=timestamp, source="test", note="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "late-authorization.json"
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            allowed = run_cli("validate", str(manifest))
+
+            data["events"]["authorization_confirmed"]["timestamp_utc"] = "2026-11-26T12:06:00Z"
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            rejected_order = run_cli("validate", str(manifest))
+
+        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+        self.assertIn("timestamp_order=PASS observed_pairs=7", allowed.stdout)
+        self.assertEqual(rejected_order.returncode, 0, rejected_order.stdout + rejected_order.stderr)
+        self.assertIn(
+            "timestamp_order=REVIEW pairs=authorization_confirmed->launch_submitted observed_pairs=7",
+            rejected_order.stdout,
+        )
+
     def test_empty_capture_does_not_claim_timestamp_order_pass(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "capture.json"

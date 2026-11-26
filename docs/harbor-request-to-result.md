@@ -43,7 +43,9 @@ The helper validates UTC syntax and reports observed durations for the request,
 preparation, queue, trial, finalization and handoff boundaries when both ends
 are observed. It flags out-of-order timestamps for review without rewriting
 them. UTC wall clocks can differ across hosts; retain the source reference and
-report suspected clock skew rather than adjusting timestamps. Existing
+report suspected clock skew rather than adjusting timestamps. Chronology checks
+enforce only required stage dependencies: authorization may follow config
+freeze and offline preparation, but must precede launch. Existing
 per-host monotonic lifecycle anchors in
 [`bounded-trial-lifecycle.md`](bounded-trial-lifecycle.md) are engineering
 deadlines, not measured request-to-result events; do not sum those bounds as
