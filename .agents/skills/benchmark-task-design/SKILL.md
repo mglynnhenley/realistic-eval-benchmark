@@ -58,15 +58,17 @@ When proposing suite changes:
 
 ## 4. Validate offline
 
-Run checks that do not execute trials or make paid judge calls. For this suite, the relevant repository checks are:
+Run checks that do not execute trials or make paid judge calls. The root project and Harbor integration use separate dependency environments. Native Harbor test modules use `pytest.importorskip`, so running them with root `uv` can return success while silently skipping the module. Keep the root and Harbor tests separate:
 
 ```bash
 uv run --frozen pytest -q tests/test_scenario_late.py tests/test_household_bills_task.py \
-  tests/test_task_instruction_override.py tests/test_harbor_native_task.py \
-  tests/test_transect_grading.py
+  tests/test_task_instruction_override.py tests/test_transect_grading.py
+scripts/harbor python -m pytest -v -rs tests/test_harbor_native_task.py tests/test_harbor_wheel_install.py
 uv run ruff check .
 git diff --check
 ```
+
+Require the Harbor test output to show `test_native_suite_prepares_ten_distinct_tasks` as passed. A skipped module or skipped suite-preparation test is not readiness validation; resolve the Harbor environment issue before handoff.
 
 If a suite config and verified wheel are available, the preparation command documented in `docs/harbor.md` creates private batch artifacts without launching trials:
 
