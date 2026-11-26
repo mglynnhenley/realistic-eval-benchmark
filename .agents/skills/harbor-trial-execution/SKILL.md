@@ -41,10 +41,61 @@ covers one attempt only, not a suite, resume, retry, replacement, different job,
 or wider scope. Keep the analysis handoff private; do not publish or upload raw
 trial data.
 
-If the case is not supported by the guarded `train_refund_late` path, or a
-required limit, input identity, credential, or approval is missing or conflicts
-with the prepared record, stop and ask the owner rather than falling back to a
-batch, Docker, or another runner.
+If the case is not supported by the guarded execution path, or a required limit,
+input identity, credential, or approval is missing or conflicts with the
+prepared record, stop and ask the owner. Do not launch through the legacy batch,
+native batch, Docker, or another runner as a fallback.
+
+## Select one case from a design handoff
+
+The design skill may hand off a multi-case catalog such as
+`docs/harbor-long-horizon-suite.json`. Treat it as an input catalog, not
+execution authorization. Freeze its exact revision and SHA-256, then select
+exactly one entry. Compute the selected-entry SHA-256 from its canonical JSON
+encoding (sorted keys, compact separators, UTF-8), separately from the raw
+catalog-file SHA-256. The case-specific approval and private selection record
+must name both hashes, `task_id`, scenario, exact `task_text`, any
+`sim_weeks` override, frozen scenario/inbox/rules and environment inputs,
+model, limits, and private output location. Do not edit or reassign the selected
+entry after approval. Preserve the source catalog and all
+unselected entries unchanged; do not prepare or launch them. A suite-level
+approval is not approval for any individual case.
+
+The guarded `laura_trial prepare` path accepts one fresh Modal
+`train_refund_late` trial with no suite. It does not consume a design
+`task_id` or custom `task_text`: without a suite, native batch preparation
+uses the scenario's canonical task text and scenario ID. It is usable for a
+selected rail entry only when its scenario and task text exactly match that
+supported input. Keep the design `task_id`, catalog SHA, and selected-entry
+digest in the private selection record and handoff; do not imply that the
+launcher records the design ID. The native `suite` field requires ten entries,
+and `laura_trial` rejects suites with
+`prepare_requires_one_fresh_late_refund_modal_trial`. For a custom one-entry
+variant, stop with the precise reason that the guarded launcher cannot consume
+a single suite entry; do not silently substitute the scenario default.
+
+For the active `bills_price_rise` case, offline native preparation is available
+without a suite and launches nothing:
+
+```bash
+UV_OFFLINE=1 scripts/harbor python -m refund_eval.harbor.batch \
+  --config <private-bills-run-config.json> \
+  --out <new-private-batch-directory>
+```
+
+Use this only to prepare the canonical bills scenario from a private explicit
+`RunConfig` with `scenario: "bills_price_rise"`, `trials: 1`,
+`concurrency: 1`, no suite, and the selected case's explicitly specified
+limits; do not rely on config defaults. Preparation launches nothing and grants
+no execution approval. This path does not preserve a design-suite task's custom
+`task_text`. The guarded `laura_trial` path rejects `bills_price_rise`
+because it requires one fresh `train_refund_late` trial.
+Although the legacy Harbor batch can run bills, it is not the guarded
+single-case path for this skill. Stop with
+`unsupported_guarded_scenario=bills_price_rise` rather than launching through
+that or any other fallback. A custom bills suite entry is also unsupported as a
+single case: the native suite requires ten entries, while the guarded launcher
+rejects suites.
 
 ## Establish the one-attempt authorization
 
@@ -64,10 +115,11 @@ not infer either from a previous run or example.
 ## Verifier and grading boundary
 
 The native `disable_verifier` field defaults to `false`. The Harbor verifier
-runs deterministic code checks over trial artifacts; it can produce task-success,
-containment, event-log/state consistency, and other code scores without calling a
-behavioral judge. Keep it enabled when the approved run specification requires
-these checks, even when no paid behavioral judge is approved.
+computes deterministic scores from saved artifacts without calling a model. It
+can produce `task_success`, `containment`, `event_log_matches_state`, and
+other code scores; this is distinct from paid behavioral grading. Keep it enabled
+when the approved run specification requires these checks, even when no paid
+behavioral judge is approved.
 
 Use `"disable_verifier": true` only when the approved specification explicitly
 excludes deterministic verifier checks or scores. This supported JSON field is
@@ -245,6 +297,9 @@ attempt, with:
   environment, packaged task, and agent wheel. `laura-setup.json.current_source.sha256`
   is the launcher source-tree identity checked by `verify`; these hashes are not
   Git commit IDs. Include a Git revision separately only when identified exactly;
+- the private selection record mapping the authorized design `task_id` and
+  catalog/entry digests to the prepared scenario and task inputs; state that
+  every unselected case was left unchanged and unprepared;
 - terminal status, whether Harbor completed, and any failure, timeout, cleanup
   issue, or missing artifact; include the required shutdown evidence or mark it
   missing, and say explicitly that no retry or replacement ran;
@@ -270,6 +325,7 @@ publication.
 
 ```text
 Authorization: [approval reference; one attempt; scenario/model/environment]
+Task selection: [catalog SHA; task_id; selected-entry digest; exact frozen inputs; unselected cases untouched]
 Prepared record: [private run.json path; setup manifest]
 Execution: [job name; trial ID; started/completed/failed/incomplete]
 Outcome evidence: [private result and artifact paths; missing items]
