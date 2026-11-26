@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.25 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: 51048a4e3b15563bbc8664e5d0203b72a9ef75903ed4a752903cb5bd43e8ab4d
+- Trial round: none; offline checks only, no paid execution.
+- Changes: Use SQLite's committed data version to skip repeat integrity-checked snapshots; briefly acquire a write reservation to avoid caching uncommitted WAL spills, and keep publishing and validating every committed change.
+
 ## 10.24 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: 9945b2aa40160db0832459925923d980eb1d24af0a6438d13530c8080f09a5ce
