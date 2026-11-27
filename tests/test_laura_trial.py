@@ -47,6 +47,7 @@ _PUBLIC_SCENARIO = {
 def _write_test_only_wheel(
     directory: Path, *, scenario=None, include_scenario=True, duplicate_scenario=False,
     alias_scenario=False, raw_wheel=None, scenario_files: dict[str, bytes] | None = None,
+    scenario_name: str = "train_refund_late",
 ) -> tuple[Path, str]:
     """Create inert dummy wheel bytes for offline fixture preparation only."""
     directory.mkdir(parents=True)
@@ -58,16 +59,15 @@ def _write_test_only_wheel(
         f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: offline-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n",
     }
     files.update({name: b'"""Inert offline wheel fixture."""\n' for name in adapter.REQUIRED_AGENT_WHEEL_MEMBERS})
+    scenario_member = f"refund_eval/scenario/{scenario_name}.yaml"
     if scenario_files is not None:
         for name, content in scenario_files.items():
             files[f"refund_eval/scenario/{name}.yaml"] = content
     elif include_scenario:
         public_scenario = _PUBLIC_SCENARIO if scenario is None else scenario
-        files[_PUBLIC_SCENARIO_MEMBER] = yaml.safe_dump(public_scenario, sort_keys=False).encode()
+        files[scenario_member] = yaml.safe_dump(public_scenario, sort_keys=False).encode()
         if alias_scenario:
-            files[f"synthetic_agent-0.0.0.data/purelib/{_PUBLIC_SCENARIO_MEMBER}"] = files[
-                _PUBLIC_SCENARIO_MEMBER
-            ]
+            files[f"synthetic_agent-0.0.0.data/purelib/{scenario_member}"] = files[scenario_member]
     record_name = f"{dist_info}/RECORD"
     rows = []
     for name, content in files.items():
@@ -84,14 +84,14 @@ def _write_test_only_wheel(
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, content in files.items():
             archive.writestr(name, content)
-            if duplicate_scenario and name == _PUBLIC_SCENARIO_MEMBER:
+            if duplicate_scenario and name == scenario_member:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
                     archive.writestr(name, content)
     return wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()
 
 
-def _write_public_split_wheel(directory: Path) -> tuple[Path, str]:
+def _write_public_split_wheel(directory: Path, scenario_name="train_refund_late") -> tuple[Path, str]:
     from refund_eval.scenario.schema import load_scenario
 
     source = directory / "source"
@@ -100,8 +100,8 @@ def _write_public_split_wheel(directory: Path) -> tuple[Path, str]:
     adapter.stage_agent(
         source,
         public_source,
-        load_scenario("train_refund_late"),
-        scenario_name="train_refund_late",
+        load_scenario(scenario_name),
+        scenario_name=scenario_name,
     )
     build_dir = directory / "built-wheel"
     subprocess.run(
@@ -158,17 +158,19 @@ def _source_repo(root: Path, monkeypatch) -> Path:
 
 def _native_setup(
     tmp_path: Path, monkeypatch, *, scenario=None, include_scenario=True,
-    duplicate_scenario=False, alias_scenario=False, raw_wheel=None,
+    duplicate_scenario=False, alias_scenario=False, raw_wheel=None, scenario_id="train_refund_late", sim_weeks=6,
 ) -> SimpleNamespace:
     source_root = _source_repo(tmp_path / "source-root", monkeypatch)
+    public_scenario = {**_PUBLIC_SCENARIO, "id": scenario_id} if scenario is None else scenario
     wheel, wheel_sha256 = _write_test_only_wheel(
-        tmp_path / "wheel", scenario=scenario, include_scenario=include_scenario,
-        duplicate_scenario=duplicate_scenario, alias_scenario=alias_scenario, raw_wheel=raw_wheel,
+        tmp_path / "wheel", scenario=public_scenario, scenario_name=scenario_id,
+        include_scenario=include_scenario, duplicate_scenario=duplicate_scenario,
+        alias_scenario=alias_scenario, raw_wheel=raw_wheel,
     )
     config = NativeBatchConfig.model_validate(
         {
             "execution": "modal",
-            "scenario": "train_refund_late",
+            "scenario": scenario_id,
             "data_mode": "fixture",
             "research_mode": "saved",
             "model": "openrouter/test-model",
@@ -176,7 +178,7 @@ def _native_setup(
             "cost_limit": {"openrouter/test-model": 10.0},
             "world_cost_limit": 10.0,
             "max_turns": 50,
-            "sim_weeks": 6,
+            "sim_weeks": sim_weeks,
             "time_limit": 120,
             "history_tokens": 0,
             "budget_notice": "daily",
@@ -254,11 +256,11 @@ def _run_args(bundle: SimpleNamespace, job_name: str = "laura-fresh") -> list[st
     ]
 
 
-def _native_run_input(tmp_path: Path) -> SimpleNamespace:
+def _native_run_input(tmp_path: Path, scenario="train_refund_late") -> SimpleNamespace:
     wheel, wheel_sha256 = _write_test_only_wheel(tmp_path / "native-wheel")
     values = {
         "execution": "modal",
-        "scenario": "train_refund_late",
+        "scenario": scenario,
         "data_mode": "fixture",
         "research_mode": "saved",
         "model": "openrouter/target-test",
@@ -436,6 +438,37 @@ def test_native_run_prepares_distinct_roles_and_records_effective_parameters(
     )
     assert run_record["effective_parameters"] == expected
     assert result_record == expected
+
+
+def test_native_daycare_run_config_requires_explicit_target_cap(tmp_path, monkeypatch, capsys):
+    native = _native_run_input(tmp_path, scenario="daycare_reimbursement")
+    implicit = {
+        **native.values,
+        "openrouter_key_mode": "shared_roles",
+        "shared_allowance_usd": 10.0,
+        "agent_max_output_tokens": 4096,
+        "sim_weeks": 10.0,
+    }
+    implicit.pop("cost_limit")
+    native.input_path.write_text(json.dumps(implicit), encoding="utf-8")
+
+    def unexpected_prepare(*args, **kwargs):
+        pytest.fail("implicit daycare target cap reached native preparation")
+
+    monkeypatch.setattr(laura_trial.batch, "prepare", unexpected_prepare)
+    assert laura_trial.main([
+        "run", "--run-config", str(native.input_path), "--prepared-dir", str(native.prepared_dir),
+        "--job-name", "daycare-implicit-cap",
+    ]) == 2
+    assert capsys.readouterr().err == "laura_setup_failed=identity_or_job_validation\n"
+    assert not native.prepared_dir.exists()
+
+    explicit = laura_trial.batch.NativeBatchConfig.model_validate_json(json.dumps({
+        **implicit, "cost_limit": 5.0, "shared_allowance_usd": 15.0,
+    }))
+    assert explicit.cost_limit == 5.0
+    assert explicit.world_cost_limit == 10.0
+    assert explicit.shared_allowance_usd == 15.0
 
 
 def test_split_launcher_succeeds_and_reuses_saved_setup_with_sanitized_effective_records(
@@ -648,19 +681,26 @@ def test_actual_native_launcher_keeps_cleanup_after_shared_caps_guard_failure(tm
     assert not (native.prepared_dir / "runtime-inputs" / "mat-197-cleanup-fixture").exists()
 
 
+@pytest.mark.parametrize("scenario", ["train_refund_late", "daycare_reimbursement"])
 def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, scenario
 ):
     source_root = _source_repo(tmp_path / "source-root", monkeypatch)
-    native = _native_run_input(tmp_path)
-    wheel, digest = _write_public_split_wheel(tmp_path / "shared-role-wheel")
+    native = _native_run_input(tmp_path, scenario)
+    wheel, digest = _write_public_split_wheel(tmp_path / "shared-role-wheel", scenario)
+    expected_deadline = "2027-02-04" if scenario == "train_refund_late" else None
+    expected_target_cap = 50.0 if scenario == "train_refund_late" else 5.0
+    expected_world_cap = 100.0 if scenario == "train_refund_late" else 10.0
+    expected_allowance = 90.0 if scenario == "train_refund_late" else 15.0
+    expected_role_caps = {"target": str(expected_target_cap), "world": str(expected_world_cap)}
     native.values.update({
         "openrouter_key_mode": "shared_roles",
-        "shared_allowance_usd": 90,
+        "shared_allowance_usd": expected_allowance,
         "agent_max_output_tokens": 2048,
-        "requested_deadline": "2027-02-04",
-        "cost_limit": 50,
-        "world_cost_limit": 100,
+        "requested_deadline": expected_deadline,
+        "cost_limit": expected_target_cap,
+        "world_cost_limit": expected_world_cap,
+        "sim_weeks": 10 if scenario == "daycare_reimbursement" else native.values["sim_weeks"],
         "agent_wheel": str(wheel),
         "agent_wheel_sha256": digest,
     })
@@ -671,12 +711,27 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
 
     def guarded_run(config, thresholds, **hooks):
         guarded_calls.append(config.job_name)
-        assert thresholds.shared_allowance_usd == 90
-        laura_trial.guarded_harbor.validate_job_config(config, expected_shared_roles=True)
-        assert config.agents[0].kwargs["requested_deadline"].isoformat() == "2027-02-04"
+        assert thresholds.shared_allowance_usd == expected_allowance
+        saved_identity_verified = hooks["saved_identity_verified"]
+        assert saved_identity_verified is True
+        if scenario == "daycare_reimbursement":
+            with pytest.raises(
+                laura_trial.guarded_harbor.LauncherFailure,
+                match="daycare_reimbursement_requires_saved_identity",
+            ):
+                laura_trial.guarded_harbor.validate_job_config(config, expected_shared_roles=True)
+        laura_trial.guarded_harbor.validate_job_config(
+            config, expected_shared_roles=True, saved_identity_verified=saved_identity_verified
+        )
+        if expected_deadline is None:
+            assert config.agents[0].kwargs.get("requested_deadline") is None
+        else:
+            assert config.agents[0].kwargs["requested_deadline"].isoformat() == expected_deadline
         assert config.agents[0].env["OPENROUTER_API_KEY"] == "${OPENROUTER_API_KEY}"
         assert "OPENROUTER_AGENT_API_KEY" not in config.agents[0].env
         task_path = Path(config.tasks[0].path)
+        task_env = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8"))["environment"]["env"]
+        assert float(task_env["WORLD_SIM_WEEKS"]) == native.values["sim_weeks"]
         compose = yaml.safe_load((task_path / "environment" / "docker-compose.yaml").read_bytes())
         main_mounts = compose["services"]["main"].get("volumes", [])
         world_mounts = compose["services"]["world"].get("volumes", [])
@@ -722,11 +777,12 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     effective_record = native.prepared_dir / "jobs" / "shared-role-fresh" / "effective_parameters.json"
     initial_effective = json.loads(effective_record.read_text(encoding="utf-8"))
     assert initial_effective["openrouter_key_mode"] == "shared_roles"
-    assert initial_effective["shared_allowance_usd"] == "90.0"
-    assert initial_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
+    assert initial_effective["shared_allowance_usd"] == str(expected_allowance)
+    assert initial_effective["role_caps_usd"] == expected_role_caps
     assert initial_effective["runtime_metadata_confirmed"] is True
     assert initial_effective["shared_allowance_source"] == "operator_attested_allocation"
-    assert initial_effective["requested_deadline"] == "2027-02-04"
+    assert initial_effective.get("requested_deadline") == expected_deadline
+    assert initial_effective["sim_weeks"] == native.values["sim_weeks"]
     assert initial_effective["key_limit_usd"] == "120"
     assert initial_effective["key_remaining_usd"] == "120"
     assert initial_effective["key_usage_baseline_usd"] == "0"
@@ -734,9 +790,9 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
     assert initial_effective["effective_budget_remaining_usd"] is None
     run_effective = json.loads(run_record.read_text(encoding="utf-8"))["effective_parameters"]
     assert run_effective["openrouter_key_mode"] == "shared_roles"
-    assert run_effective["shared_allowance_usd"] == "90.0"
-    assert run_effective["role_caps_usd"] == {"target": "50.0", "world": "100.0"}
-    assert run_effective["requested_deadline"] == "2027-02-04"
+    assert run_effective["shared_allowance_usd"] == str(expected_allowance)
+    assert run_effective["role_caps_usd"] == expected_role_caps
+    assert run_effective.get("requested_deadline") == expected_deadline
     for artifact in (manifest, run_record, effective_record):
         assert "fake-shared-role-key" not in artifact.read_text(encoding="utf-8")
 
@@ -750,8 +806,8 @@ def test_shared_roles_routes_one_key_and_rejects_stale_saved_source_before_guard
         )
     )
     assert reused_effective["openrouter_key_mode"] == "shared_roles"
-    assert reused_effective["shared_allowance_usd"] == "90.0"
-    assert reused_effective["requested_deadline"] == "2027-02-04"
+    assert reused_effective["shared_allowance_usd"] == str(expected_allowance)
+    assert reused_effective.get("requested_deadline") == expected_deadline
     assert reused_effective == initial_effective
     assert manifest.read_bytes() == manifest_bytes
 
@@ -1393,6 +1449,45 @@ def test_public_validation_rejects_mismatched_public_scenario_id(tmp_path, monke
     with pytest.raises(laura_trial.SetupFailure):
         laura_trial.save_setup(bundle.config_path, bundle.manifest_path)
     assert not bundle.manifest_path.exists()
+
+
+def test_daycare_public_scenario_identity_roundtrips_through_manifest(tmp_path, monkeypatch):
+    bundle = _native_setup(tmp_path, monkeypatch, scenario_id="daycare_reimbursement", sim_weeks=10)
+    _save(bundle)
+
+    public_validation = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))["public_validation"]
+    assert public_validation["scenario"] == "daycare_reimbursement"
+    assert public_validation["scenario_member"] == "refund_eval/scenario/daycare_reimbursement.yaml"
+    task_env = tomllib.loads((bundle.task_path / "task.toml").read_text(encoding="utf-8"))["environment"]["env"]
+    assert float(task_env["WORLD_SIM_WEEKS"]) == 10
+    raw_config = laura_trial.guarded_harbor.load_job_config(bundle.config_path)
+    with pytest.raises(
+        laura_trial.guarded_harbor.LauncherFailure,
+        match="daycare_reimbursement_requires_saved_identity",
+    ):
+        laura_trial.guarded_harbor.validate_job_config(raw_config)
+    laura_trial.verify_setup(bundle.manifest_path)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "scenario_member"),
+    [
+        ("unapproved_scenario", "refund_eval/scenario/unapproved_scenario.yaml"),
+        ("train_refund_late", _PUBLIC_SCENARIO_MEMBER),
+    ],
+)
+def test_manifest_rejects_tampered_daycare_scenario_identity(
+    tmp_path, monkeypatch, scenario, scenario_member
+):
+    bundle = _native_setup(tmp_path, monkeypatch, scenario_id="daycare_reimbursement", sim_weeks=10)
+    _save(bundle)
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    manifest["public_validation"]["scenario"] = scenario
+    manifest["public_validation"]["scenario_member"] = scenario_member
+    bundle.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(laura_trial.SetupFailure):
+        laura_trial.verify_setup(bundle.manifest_path)
 
 
 def test_public_validation_rejects_wheel_purelib_scenario_alias(tmp_path, monkeypatch):

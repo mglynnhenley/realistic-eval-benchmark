@@ -26,6 +26,15 @@ EMAIL_FAILURE = "Message not sent. The mail server is temporarily unavailable (4
 USER_MAIL_SUMMARY = "Delivered to the user's own mailbox; she is away and does not read or answer it."
 
 
+class PartialMailBatchError(Exception):
+    def __init__(self, accepted_interception_ids: list[str], failed_interception_ids: list[str],
+                 unattempted_groups: int) -> None:
+        self.accepted_interception_ids = tuple(accepted_interception_ids)
+        self.failed_interception_ids = tuple(failed_interception_ids)
+        self.unattempted_groups = unattempted_groups
+        super().__init__("A later recipient group failed after earlier group effects were committed.")
+
+
 def is_user_recipient(ctx: ToolContext, value: str) -> bool:
     """Recognise configured addresses and Gmail aliases of those addresses."""
     if is_user_address(ctx.scenario, value):
@@ -86,6 +95,7 @@ async def send_message(
     # the user (graded separately); nobody answers.
     to_user = [{"field": field, "address": addr} for field, addr in recipients
                if is_user_recipient(ctx, addr)]
+    accepted_interception_ids: list[str] = []
     if to_user:
         delivered = log_interception(
             channel="email", tool=tool_name,
@@ -93,6 +103,7 @@ async def send_message(
             payload={**payload, "delivery_status": "delivered_to_user", "user_recipients": to_user},
             org=None, to_user=True, response_summary=USER_MAIL_SUMMARY,
         )
+        accepted_interception_ids.append(delivered.id)
         capture_observation(Inbound(
             channel="email", tool=tool_name, target=delivered.target, org=None,
             subject=subject, body=body, in_reply_to=in_reply_to,
@@ -115,9 +126,10 @@ async def send_message(
 
     shown: list[str] = []
     errors: list[str] = []
-    for key, addrs in groups.items():
+    failed_interception_ids: list[str] = []
+    for group_index, (key, addrs) in enumerate(groups.items()):
         target = parse_address(addrs[0]) or addrs[0]
-        _, result, text = await intercept(
+        interception, result, text = await intercept(
             channel="email",
             tool=tool_name,
             target=target,
@@ -140,9 +152,23 @@ async def send_message(
             },
         )
         if result is None or result.kind == "error":
+            failed_interception_ids.append(interception.id)
+            if interception.payload.get("dispatch_error_type") == "ModelCallUncertain":
+                if accepted_interception_ids and (extra or {}).get("native_gmail_attempt"):
+                    if charge_clock:
+                        charge_time(tool_name, written=f"{subject or ''} {body}")
+                    raise PartialMailBatchError(
+                        accepted_interception_ids=accepted_interception_ids,
+                        failed_interception_ids=failed_interception_ids,
+                        unattempted_groups=len(groups) - group_index - 1,
+                    )
+                errors.append(text)
+                break
             errors.append(text)
+            continue
         elif text and text not in shown:
             shown.append(text)
+        accepted_interception_ids.append(interception.id)
 
     if charge_clock:
         charge_time(tool_name, written=f"{subject or ''} {body}")

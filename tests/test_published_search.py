@@ -33,7 +33,7 @@ def exa_server(*, catalog=None, result=None, error=None):
             return httpx.Response(202)
         if message["method"] == "initialize":
             response = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                "serverInfo": {"name": "exa-search-server", "version": "3.2.1"}}
+                "serverInfo": {"name": "exa-search-server", "version": "3.6.0"}}
         elif message["method"] == "tools/list":
             response = catalog if catalog is not None else PINNED_EXA_SEARCH_CATALOG
         elif message["method"] == "tools/call":
@@ -63,9 +63,10 @@ async def test_exa_uses_exact_discovered_catalog_and_forwards_native_result():
         catalog = await service.list_tools()
         assert catalog == PINNED_EXA_SEARCH_CATALOG
         assert catalog["tools"][0]["inputSchema"]["required"] == ["query", "objective"]
-        assert PINNED_EXA_SEARCH_CATALOG_SHA256 == "424bba669c95a5fc0dd48e9456903c73bb40d1ff1a0eee09207098a2dbee657b"
+        assert "execution" not in catalog["tools"][0]
+        assert PINNED_EXA_SEARCH_CATALOG_SHA256 == "53ab053b672b7ac9d7722a7ce765601b0d59d8b66434594bac2cfb7a5557a2b6"
         assert await service.call_tool("web_search_exa", ARGUMENTS) == NATIVE_RESULT
-        assert service.server_info == {"name": "exa-search-server", "version": "3.2.1"}
+        assert service.server_info == {"name": "exa-search-server", "version": "3.6.0"}
         assert service.initialization_result["capabilities"] == {"tools": {}}
     assert checked == [{"name": "web_search_exa", "arguments": ARGUMENTS}]
     calls = [m for _, m in seen if m["method"] == "tools/call"]

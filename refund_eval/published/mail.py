@@ -287,13 +287,16 @@ class GmailService:
                 result[email.id] = email, {}
         for interception in world.interceptions:
             p = interception.payload
-            if not p.get("native_gmail_accepted"):
+            delivered_to_user = (
+                interception.to_user and p.get("native_gmail_group_disposition") == "delivered_to_user"
+            )
+            if not p.get("native_gmail_accepted") and not delivered_to_user:
                 continue
             mid = p["message_id"]
             result[mid] = Email(
                 id=mid, thread_id=p["thread_id"], sender=p["from"], to=p["to"], cc=p["cc"],
                 subject=p["subject"], body=p["body"], sent_at=interception.time, source="real",
-            ), p
+            ), {**p, "mailbox_delivered_to_user": interception.to_user}
         for email, meta in result.values():
             mid = _visible_id(email.id)
             self._message_times[mid] = email.sent_at
@@ -318,7 +321,8 @@ class GmailService:
         own = self.ctx.mailbox.user_addresses
         sent = extra.get("native_gmail_accepted") or parse_address(email.sender) in own
         labels = ["SENT"] if sent else ["INBOX"]
-        if sent and any(parse_address(address) in own for address in [*email.to, *email.cc]):
+        if sent and (extra.get("mailbox_delivered_to_user")
+                     or any(parse_address(address) in own for address in [*email.to, *email.cc])):
             labels.append("INBOX")
         if not sent and self._unread(email):
             labels.append("UNREAD")
@@ -429,7 +433,9 @@ class GmailService:
             return self._search_page(key_args, saved[1], saved[2], size, saved[3])
         world = load_world()
         match_ctx = MatchContext(user_addresses=self.ctx.mailbox.user_addresses, now=world.now,
-                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}))
+                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}),
+                                 inbox_ids={email.id for email, meta in locals_
+                                            if meta.get("mailbox_delivered_to_user")})
         merged: dict[str, dict[str, Any]] = {}
         request = dict(arguments)
         # Collect a complete native snapshot independently of outward page size.
@@ -501,7 +507,11 @@ class GmailService:
         return self._result("search_threads", data, template)
 
     async def _write(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        from refund_eval.sim.mail import is_user_recipient, send_message
+        from refund_eval.sim.mail import (
+            PartialMailBatchError,
+            is_user_recipient,
+            send_message,
+        )
 
         if arguments.get("draftId"):
             return _error("Sending an existing draft is unavailable in this mailbox connection.")
@@ -564,6 +574,39 @@ class GmailService:
                 thread_id=raw_tid, in_reply_to=raw_original_id if local_original else original_id,
                 extra=extra, charge_clock=False,
             )
+        except PartialMailBatchError as partial:
+            accepted = len(partial.accepted_interception_ids)
+            failed = len(partial.failed_interception_ids)
+            unattempted = partial.unattempted_groups
+            partial_text = (
+                f"Partial delivery: accepted recipient groups={accepted}, "
+                f"failed-not-accepted groups={failed}, unattempted groups={unattempted}. "
+                "Accepted deliveries remain intact. Do not retry the full batch."
+            )
+            accepted_ids = set(partial.accepted_interception_ids)
+            failed_ids = set(partial.failed_interception_ids)
+            with world_tx() as world:
+                for interception in world.interceptions:
+                    payload = interception.payload
+                    if payload.get("message_id") != mid or not payload.get("native_gmail_attempt"):
+                        continue
+                    payload.update({
+                        "native_gmail_accepted": False,
+                        "native_gmail_batch_disposition": "partial",
+                        "native_gmail_batch_accepted_groups": accepted,
+                        "native_gmail_batch_failed_not_accepted_groups": failed,
+                        "native_gmail_batch_unattempted_groups": unattempted,
+                    })
+                    if interception.id in accepted_ids:
+                        if interception.to_user:
+                            payload["native_gmail_group_disposition"] = "delivered_to_user"
+                        else:
+                            payload["native_gmail_group_disposition"] = "accepted_by_simulator"
+                            interception.response_summary = "Recipient group accepted by simulator; batch disposition is partial."
+                    elif interception.id in failed_ids:
+                        payload["native_gmail_group_disposition"] = "failed_not_accepted"
+                        interception.response_summary = partial_text
+            return _error(partial_text)
         except Exception as exc:
             # Interception and simulator errors must never become successful
             # Sent entries. Inspect limits are deliberately propagated.

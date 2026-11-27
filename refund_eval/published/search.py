@@ -2,15 +2,16 @@
 
 This is infrastructure, not a replacement agent tool: descriptors and call
 results come from the upstream MCP server and are forwarded unchanged. The
-catalog below was captured with initialize/tools/list (no search) on 2026-09-30
-(server 3.2.1) and re-reviewed on 2026-10-27 (server 3.5.0 added only a display title).
-The hosted server's schema differs from GitHub main, notably
-by requiring ``objective``. A changed catalog fails closed until reviewed.
+catalog below was verified with initialize/tools/list (no search) on 2026-11-26
+(server 3.6.0). Its exact response omits optional ``execution.taskSupport``; the
+2025-11-25 Tools spec says its default is ``forbidden``. A changed catalog fails
+closed until reviewed. The hosted schema notably requires ``objective``.
 
 Sources:
 https://exa.ai/docs/get-started/exa-mcp
 https://mcp.exa.ai/mcp?tools=web_search_exa
 https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+https://modelcontextprotocol.io/specification/2025-11-25/server/tools
 
 Only the search tool is selected. Exa's remote fetch and research tools cannot
 be controlled by a local browser proxy and are deliberately not exposed here.
@@ -38,12 +39,12 @@ from refund_eval.scenario.schema import Scenario
 EXA_SEARCH_ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_exa"
 EXA_SEARCH_TOOL = "web_search_exa"
 MCP_PROTOCOL_VERSION = "2025-06-18"
-EXA_CATALOG_CAPTURED_AT = "2026-10-27"
-EXA_CATALOG_SERVER_VERSION = "3.5.0"
+EXA_CATALOG_CAPTURED_AT = "2026-11-26"
+EXA_CATALOG_SERVER_VERSION = "3.6.0"
 MAX_RESPONSE_BYTES = 8_000_000
 
 # Exact upstream tools/list result, not a hand-written tool implementation.
-PINNED_EXA_SEARCH_CATALOG: dict[str, Any] = json.loads(r'''{"tools":[{"name":"web_search_exa","description":"Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering questions about any topic.\n      Returns: Clean text content from top search results.\n\n      Query tips:\n      describe the ideal page, not keywords. \"blog post comparing React and Vue performance\" not \"React vs Vue\".\n      Use category:people / category:company to search through Linkedin profiles / companies respectively.\n      If highlights are insufficient, follow up with web_fetch_exa on the best URLs.","inputSchema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Natural language search query. Should be a semantically rich description of the ideal page, not just keywords. Optionally include category:<type> (company, people) to focus results — e.g. 'category:people John Doe software engineer'."},"numResults":{"type":"number","description":"Number of search results to return (default: 10)."},"objective":{"type":"string","minLength":1,"maxLength":4096,"description":"Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them."}},"required":["query","objective"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":true,"idempotentHint":true},"execution":{"taskSupport":"forbidden"},"title":"Web Search"}]}''')
+PINNED_EXA_SEARCH_CATALOG: dict[str, Any] = json.loads(r'''{"tools":[{"name":"web_search_exa","description":"Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering questions about any topic.\n      Returns: Clean text content from top search results.\n\n      Query tips:\n      describe the ideal page, not keywords. \"blog post comparing React and Vue performance\" not \"React vs Vue\".\n      Use category:people / category:company to search through Linkedin profiles / companies respectively.\n      If highlights are insufficient, follow up with web_fetch_exa on the best URLs.","inputSchema":{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Natural language search query. Should be a semantically rich description of the ideal page, not just keywords. Optionally include category:<type> (company, people) to focus results — e.g. 'category:people John Doe software engineer'."},"numResults":{"type":"number","description":"Number of search results to return (default: 10)."},"objective":{"type":"string","minLength":1,"maxLength":4096,"description":"Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them."}},"required":["query","objective"],"additionalProperties":false,"$schema":"http://json-schema.org/draft-07/schema#"},"annotations":{"readOnlyHint":true,"destructiveHint":false,"openWorldHint":true,"idempotentHint":true},"title":"Web Search"}]}''')
 
 
 def catalog_sha256(catalog: dict[str, Any]) -> str:

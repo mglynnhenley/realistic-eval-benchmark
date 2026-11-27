@@ -36,17 +36,19 @@ from openai import AsyncOpenAI
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.models import budget as world_budget
 from refund_eval.models import client as models
+from refund_eval.models import replay as world_replay
 from refund_eval.models.budget import WORLD_BUDGET_KEY, BudgetedWorldModels
 from refund_eval.models.client import (
     Completion,
     Message,
+    ModelCallUncertain,
     ModelLimitExceeded,
     ModelRequestRejected,
     OutputSchema,
     Usage,
 )
 from refund_eval.models.openrouter import OpenRouterClient
-from refund_eval.models.replay import RECORDINGS_KEY
+from refund_eval.models.replay import RECORDINGS_KEY, RecordingModelClient
 from refund_eval.models.world_spend_ledger import (
     WorldSpendLedger,
     WorldSpendLedgerError,
@@ -624,6 +626,315 @@ async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path, monkey
     assert "SENT" not in sent.content[0].text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario_name", ["train_refund_late", "daycare_reimbursement"])
+async def test_ambiguous_simulator_failure_is_an_unaccepted_tool_error_and_later_work_proceeds(
+        tmp_path, monkeypatch, scenario_name):
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class MissingOnce(FakeModels):
+        missing = False
+
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            if role == "simulator" and schema and schema.name == "open_world_action" and not self.missing:
+                self.missing = True
+                self.calls.append((role, schema.name))
+                raise NotFoundError("synthetic unavailable route")
+            completion = await super().complete(role, messages, schema=schema, **kwargs)
+            completion.usage = Usage(cost=0.02)
+            return completion
+
+    fake = MissingOnce()
+    recipients = ([AVANTI] if scenario_name == "train_refund_late"
+                  else load_scenario(scenario_name).org("little_oaks").contact_emails)
+    async with (WorldTrial(settings(
+            tmp_path, scenario=scenario_name, world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=fake) as trial, session(trial) as (client, _, _)):
+        failed = await client.call_tool("send_message", {
+            "to": recipients, "subject": "First independent request", "body": "Please review this request."})
+        assert failed.isError
+        assert "Message sent" not in failed.content[0].text
+
+        first_data = trial.data()
+        [tool_call] = [item for item in first_data["store"][ACTIVITY_KEY]
+                       if item.get("tool") == "send_message"]
+        assert tool_call["status"] == "error"
+        first_world = load_world()
+        [failed_interaction] = first_world.interactions
+        assert failed_interaction.status == "failed" and failed_interaction.action is None
+        assert len(failed_interaction.attempts) == 1
+        assert not failed_interaction.effects
+        [failed_interception] = [item for item in first_world.interceptions
+                                 if item.payload.get("subject") == "First independent request"]
+        assert failed_interception.payload["native_gmail_accepted"] is False
+        assert "Message not sent" in failed_interception.response_summary
+        [failed_record] = [record for record in first_data["store"][RECORDINGS_KEY]
+                           if record["role"] == "simulator" and "error" in record]
+        assert failed_record["role"] == "simulator"
+        assert failed_record["error"]["type"] == "NotFoundError"
+        assert failed_record["error"]["http_status"] == 404
+        assert "response" not in failed_record
+        assert first_data["store"][WORLD_BUDGET_KEY]["status"] == "unknown"
+        assert fake.calls.count(("simulator", "open_world_action")) == 1
+
+        later = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Separate later request", "body": "A different new request."})
+        assert not later.isError, later.content
+
+        final_world = load_world()
+        assert [item.status for item in final_world.interactions] == ["failed", "applied"]
+        assert len(final_world.interactions[0].attempts) == 1
+        [later_interception] = [item for item in final_world.interceptions
+                                if item.payload.get("subject") == "Separate later request"]
+        assert later_interception.payload["native_gmail_accepted"] is True
+        assert fake.calls.count(("simulator", "open_world_action")) == 2
+        final_data = trial.data()
+        assert final_data["store"][WORLD_BUDGET_KEY]["status"] == "available"
+        final_records = [record for record in final_data["store"][RECORDINGS_KEY]
+                         if record["role"] == "simulator"]
+        assert len(final_records) == 2
+        assert final_records[0]["request"] != final_records[1]["request"]
+        assert final_records[0]["error"]["type"] == "NotFoundError"
+        assert final_records[0]["error"]["http_status"] == 404
+        assert "response" not in final_records[0]
+        from refund_eval.runtime.trial_artifacts import world_usage
+
+        _, final_roles = world_usage(final_data["store"])
+        assert final_roles["simulator"].total_cost is None
+
+
+@pytest.mark.asyncio
+async def test_published_gmail_partial_batch_reports_group_dispositions(tmp_path, monkeypatch):
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class MissingSecond(FakeModels):
+        def __init__(self):
+            super().__init__()
+            self.open_action_calls = 0
+
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            if role == "simulator" and schema and schema.name == "open_world_action":
+                self.open_action_calls += 1
+                if self.open_action_calls == 2:
+                    self.calls.append((role, schema.name))
+                    raise NotFoundError("synthetic unavailable route")
+            completion = await super().complete(role, messages, schema=schema, **kwargs)
+            completion.usage = Usage(cost=0.02)
+            return completion
+
+    scenario = load_scenario("train_refund_late")
+    recipients = [scenario.org(key).contact_emails[0] for key in ("avanti", "nationwide", "rail_ombudsman")]
+    fake = MissingSecond()
+    async with (WorldTrial(settings(
+            tmp_path, scenario="train_refund_late", world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=fake) as trial, session(trial) as (client, _, _)):
+        result = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Three-group request", "body": "Please review this request."})
+        world = load_world()
+        data = trial.data()
+
+    assert result.isError
+    message = result.content[0].text
+    assert "accepted recipient groups=1" in message
+    assert "failed-not-accepted groups=1" in message and "unattempted groups=1" in message
+    assert "Do not retry the full batch" in message
+    assert "Message not sent" not in message
+    assert not any(term in message.lower() for term in ("simulator", "model", "charge", "cost"))
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    assert len(world.interactions) == 2
+    accepted, failed = world.interactions
+    assert accepted.status == "applied" and accepted.effects and world.pending
+    assert failed.status == "failed" and not failed.effects and len(failed.attempts) == 1
+    interceptions = [item for item in world.interceptions if item.payload.get("subject") == "Three-group request"]
+    assert len(interceptions) == 2
+    assert [item.payload["native_gmail_group_disposition"] for item in interceptions] == [
+        "accepted_by_simulator", "failed_not_accepted",
+    ]
+    assert all(item.payload["native_gmail_batch_disposition"] == "partial" for item in interceptions)
+    assert all(item.payload["native_gmail_batch_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_failed_not_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_unattempted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)
+    assert "Partial delivery" in interceptions[1].response_summary
+    assert fake.open_action_calls == 2
+    assert data["store"][WORLD_BUDGET_KEY]["status"] == "unknown"
+    [record] = [item for item in data["store"][RECORDINGS_KEY]
+                if item["role"] == "simulator" and "error" in item]
+    assert record["error"]["type"] == "NotFoundError"
+    assert record["error"]["http_status"] == 404 and "response" not in record
+
+
+@pytest.mark.asyncio
+async def test_published_gmail_partial_counts_prior_generic_failure(tmp_path, monkeypatch):
+    from refund_eval.models.client import ModelCallUncertain
+    from refund_eval.sim.interface import SimResult
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    scenario = load_scenario("train_refund_late")
+    org_keys = ("avanti", "nationwide", "rail_ombudsman", "orr")
+    recipients = [scenario.org(key).contact_emails[0] for key in org_keys]
+    dispatched = []
+
+    async def dispatch(inbound):
+        dispatched.append(inbound.org)
+        if inbound.org == org_keys[0]:
+            return SimResult(immediate_text="Synthetic generic failure.", kind="error")
+        if inbound.org == org_keys[1]:
+            return SimResult(immediate_text="Message sent.")
+        if inbound.org == org_keys[2]:
+            raise ModelCallUncertain()
+        raise AssertionError("The fourth recipient group must remain unattempted.")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    async with (WorldTrial(settings(
+            tmp_path, scenario="train_refund_late", world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=FakeModels()) as trial, session(trial) as (client, _, _)):
+        result = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Mixed-failure request", "body": "Please review this request."})
+        world = load_world()
+
+    assert dispatched == list(org_keys[:3])
+    assert result.isError
+    message = result.content[0].text
+    assert "accepted recipient groups=1" in message
+    assert "failed-not-accepted groups=2" in message and "unattempted groups=1" in message
+    assert "Do not retry the full batch" in message
+    assert "Message not sent" not in message
+    assert not any(term in message.lower() for term in ("simulator", "model", "charge", "cost"))
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    interceptions = [item for item in world.interceptions
+                     if item.payload.get("subject") == "Mixed-failure request"]
+    assert len(interceptions) == 3
+    assert [item.payload["native_gmail_group_disposition"] for item in interceptions] == [
+        "failed_not_accepted", "accepted_by_simulator", "failed_not_accepted",
+    ]
+    assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)
+    assert all(item.payload["native_gmail_batch_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_failed_not_accepted_groups"] == 2 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_unattempted_groups"] == 1 for item in interceptions)
+    assert all("Partial delivery" in item.response_summary for item in (interceptions[0], interceptions[2]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("field", "use_alias"), [
+    ("to", False), ("cc", False), ("bcc", False), ("to", True),
+], ids=["to", "cc", "bcc", "normalized-gmail-alias"])
+async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path, monkeypatch, field, use_alias):
+    import json
+
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class MissingFirst(FakeModels):
+        def __init__(self):
+            super().__init__()
+            self.open_action_calls = 0
+
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            if role == "simulator" and schema and schema.name == "open_world_action":
+                self.open_action_calls += 1
+                if self.open_action_calls == 1:
+                    self.calls.append((role, schema.name))
+                    raise NotFoundError("synthetic unavailable route")
+            return await super().complete(role, messages, schema=schema, **kwargs)
+
+    scenario = load_scenario("train_refund_late")
+    recipient = scenario.user.email_addresses[0]
+    if use_alias:
+        local, domain = recipient.split("@", 1)
+        assert domain in {"gmail.com", "googlemail.com"}
+        recipient = f"{local.replace('.', '')}+updates@{domain}"
+    to = [AVANTI]
+    cc = []
+    bcc = []
+    if field == "to":
+        to.insert(0, recipient)
+    elif field == "cc":
+        cc.append(recipient)
+    else:
+        bcc.append(recipient)
+    fake = MissingFirst()
+    async with (WorldTrial(settings(
+            tmp_path, scenario="train_refund_late", world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=fake) as trial, session(trial) as (client, _, _)):
+        result = await client.call_tool("send_message", {
+            "to": to, "cc": cc, "bcc": bcc,
+            "subject": "Self-copy with external request", "body": "Please review this request."})
+        found = await client.call_tool("search_threads", {
+            "query": 'in:inbox subject:"Self-copy with external request"'})
+        assert not found.isError
+        search_data = json.loads(found.content[0].text)
+        [copy_in_inbox] = [message for thread in search_data["threads"]
+                           for message in thread["messages"]
+                           if message.get("subject") == "Self-copy with external request"]
+        read = await client.call_tool("get_message", {"messageId": copy_in_inbox["id"]})
+        assert not read.isError
+        inbox_copy = json.loads(read.content[0].text)
+        world = load_world()
+        data = trial.data()
+
+    assert result.isError
+    assert "accepted recipient groups=1" in result.content[0].text
+    assert "failed-not-accepted groups=1" in result.content[0].text
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    assert "INBOX" in inbox_copy["labelIds"]
+    assert inbox_copy["plaintextBody"] == "Please review this request."
+    assert inbox_copy["toRecipients"] == to and inbox_copy["ccRecipients"] == cc
+    assert "bccRecipients" not in inbox_copy
+    if field == "bcc":
+        assert recipient not in inbox_copy["toRecipients"] + inbox_copy["ccRecipients"]
+    message = result.content[0].text
+    assert "accepted recipient groups=1" in message
+    assert "failed-not-accepted groups=1" in message and "unattempted groups=0" in message
+    assert "Do not retry the full batch" in message
+    assert "Message not sent" not in message
+    assert not any(term in message.lower() for term in ("simulator", "model", "charge", "cost"))
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    assert fake.open_action_calls == 1
+    interceptions = [item for item in world.interceptions
+                     if item.payload.get("subject") == "Self-copy with external request"]
+    assert len(interceptions) == 2
+    self_copy, failed = interceptions
+    assert self_copy.to_user and self_copy.payload["delivery_status"] == "delivered_to_user"
+    assert self_copy.payload["user_recipients"] == [{"field": field, "address": recipient}]
+    assert self_copy.payload["native_gmail_group_disposition"] == "delivered_to_user"
+    assert failed.payload["native_gmail_group_disposition"] == "failed_not_accepted"
+    assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)
+    assert all(item.payload["native_gmail_batch_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_failed_not_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_unattempted_groups"] == 0 for item in interceptions)
+    [failed_interaction] = [item for item in world.interactions if item.status == "failed"]
+    assert len(failed_interaction.attempts) == 1 and not failed_interaction.effects
+    assert data["store"][WORLD_BUDGET_KEY]["status"] == "unknown"
+    [record] = [item for item in data["store"][RECORDINGS_KEY]
+                if item["role"] == "simulator" and "error" in item]
+    assert record["error"]["type"] == "NotFoundError"
+    assert record["error"]["http_status"] == 404 and "response" not in record
+
+
 @pytest.mark.parametrize("accounting", ["reserved", "legacy"])
 @pytest.mark.parametrize("charge_known", [True, False], ids=["known-charge", "unknown-charge"])
 async def test_structured_invalid_request_from_list_contact_stops_once(
@@ -941,6 +1252,41 @@ async def test_model_request_rejection_during_follow_up_stops_distinctly(tmp_pat
     async with WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial:
         result = await trial.turn(ended=True, text="Waiting.")
     assert result["stop_reason"] == "model_request_rejected"
+
+
+async def test_uncertain_follow_up_does_not_abort_turn_or_starve_later_follow_up(tmp_path, monkeypatch):
+    from refund_eval.sim import router
+    from refund_eval.world.state import FollowUp, load_world, world_tx
+
+    stub_browser(monkeypatch)
+    calls = []
+
+    async def follow_up(item):
+        calls.append(item.id)
+        with world_tx() as world:
+            next(value for value in world.follow_ups if value.id == item.id).status = (
+                "failed" if item.id == "uncertain" else "done")
+        if item.id == "uncertain":
+            raise ModelCallUncertain()
+
+    monkeypatch.setattr(router, "follow_up", follow_up)
+    async with (WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial,
+                session(trial) as (_, base, _), httpx.AsyncClient() as http):
+        now = load_world().now
+        with world_tx() as world:
+            world.follow_ups.extend([
+                FollowUp(id="uncertain", org="trainline", promised_at=now, due_at=now + timedelta(minutes=1),
+                         plan="Send the promised update."),
+                FollowUp(id="independent", org="avanti", promised_at=now, due_at=now + timedelta(minutes=2),
+                         plan="Send a separate promised update."),
+            ])
+        response = await http.post(f"{base}/turn", json={"ended": True, "text": "Waiting."},
+                                   headers={"Authorization": f"Bearer {TURN}"})
+        assert response.status_code == 200, response.text
+        statuses = {item.id: item.status for item in load_world().follow_ups}
+
+    assert calls == ["uncertain", "independent"]
+    assert statuses == {"uncertain": "failed", "independent": "done"}
 
 
 async def test_world_allowance_during_recipient_identification_stops_without_a_bounce(tmp_path, monkeypatch):
@@ -1421,10 +1767,27 @@ async def test_usage_only_disabled_price_cutoffs_observe_costs_without_stopping(
 
 
 @pytest.mark.asyncio
-async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypatch):
-    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+@pytest.mark.parametrize("failure_boundary", ["raised", "returned"])
+async def test_usage_only_disabled_price_cutoffs_record_unknown_failures_and_allow_next_call(
+        monkeypatch, failure_boundary):
+    class MemoryStore:
+        def __init__(self):
+            self.values = {}
 
-    class FailedRecorded:
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = copy.deepcopy(value)
+
+    store = MemoryStore()
+    monkeypatch.setattr(world_budget, "world_store", lambda: store)
+    monkeypatch.setattr(world_replay, "world_store", lambda: store)
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class FailOnce:
         calls = 0
 
         def model_name(self, role):
@@ -1432,22 +1795,38 @@ async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypa
 
         async def complete(self, role, messages, **settings):
             self.calls += 1
-            return Completion(
-                text="", message=Message("assistant", ""), usage=Usage(cost=None), failed=True,
-                error={"type": "provider_error"},
-            )
+            if self.calls == 1 and failure_boundary == "raised":
+                raise NotFoundError("synthetic unavailable route")
+            if self.calls == 1:
+                return Completion(
+                    text="", message=Message("assistant", ""), usage=Usage(cost=None), failed=True,
+                    error={"type": "provider_error"},
+                )
+            return Completion(text="independent reply", message=Message("assistant", "independent reply"),
+                              usage=Usage(cost=0.02))
 
-    recorded = FailedRecorded()
+    recorded = FailOnce()
     budget = BudgetedWorldModels(
-        recorded, 100, lambda: None, prices={}, usage_reporting_only=True,
+        RecordingModelClient(recorded), 100, lambda: None, prices={}, usage_reporting_only=True,
         disable_application_price_cutoffs=True,
     )
-    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+    with pytest.raises(ModelCallUncertain, match="unknown charge"):
         await budget.complete("simulator", [Message("user", "hello")])
     assert recorded.calls == 1
-    with pytest.raises(ModelLimitExceeded, match="allowance is failed"):
-        await budget.complete("simulator", [Message("user", "later tool call")])
-    assert recorded.calls == 1
+    assert budget.status == "unknown"
+    assert len(store.get(RECORDINGS_KEY)) == 1
+    if failure_boundary == "raised":
+        record = store.get(RECORDINGS_KEY)[0]
+        assert record["error"]["type"] == "NotFoundError"
+        assert record["error"]["http_status"] == 404
+        assert "response" not in record
+    else:
+        assert store.get(RECORDINGS_KEY)[0]["response"]["failed"] is True
+
+    completion = await budget.complete("simulator", [Message("user", "independent later work")])
+    assert completion.text == "independent reply"
+    assert recorded.calls == 2 and budget.status == "available"
+    assert len(store.get(RECORDINGS_KEY)) == 2
 
 
 @pytest.mark.asyncio

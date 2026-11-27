@@ -55,6 +55,7 @@ class MatchContext:
     starred: set[str] = field(default_factory=set)
     labels: dict[str, set[str]] = field(default_factory=dict)  # email id -> labels (lowercase)
     unread: Callable[[Email], bool] = lambda e: False
+    inbox_ids: set[str] = field(default_factory=set)
 
     def is_sent(self, e: Email) -> bool:
         return parse_address(e.sender) in self.user_addresses
@@ -93,7 +94,7 @@ class Pred:
             if v == "sent":
                 return ctx.is_sent(e)
             if v == "inbox":
-                return (not ctx.is_sent(e) or _addressed_to_user(e, ctx)) and e.id not in ctx.archived
+                return (not ctx.is_sent(e) or e.id in ctx.inbox_ids or _addressed_to_user(e, ctx)) and e.id not in ctx.archived
             if v in ("trash", "bin"):
                 return e.id in ctx.trashed
             if v in ("anywhere", "all"):

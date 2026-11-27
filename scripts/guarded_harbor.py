@@ -50,6 +50,7 @@ from refund_eval.harbor.adapter import (
     verify_split_budget_task_sources,
     verify_split_budget_wheel,
 )
+from refund_eval.harbor.batch import GUARDED_SCENARIOS
 from refund_eval.harbor.private_traces import (
     PRIVATE_AGENT_BUFFER_ROOT,
     PRIVATE_WORLD_BIND_ENABLED_ATTRIBUTE,
@@ -411,7 +412,8 @@ def _shared_roles_compose_values(
 
 def validate_job_config(config: JobConfig, *, expected_split: bool | None = None,
                         expected_shared_roles: bool | None = None, expected_shared_caps: bool | None = None,
-                        expected_shared_caps_allowance: Decimal | None = None) -> None:
+                        expected_shared_caps_allowance: Decimal | None = None,
+                        saved_identity_verified: bool = False) -> None:
     if (
         config.n_attempts != 1
         or config.n_concurrent_trials != 1
@@ -504,8 +506,7 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             raise LauncherFailure("shared_roles agent caps or budget configuration are invalid") from None
         if (not cap.is_finite() or cap <= 0 or cap != declared_cap or output_cap <= 0
                 or role_config.role_limits_usd["target"] != cap
-                or (shared_caps and (role_config.role_limits_usd["world"] != WORLD_ROLE_CAP_CEILING_USD
-                    or not Decimal(0) < role_config.allowance_usd <= cap + WORLD_ROLE_CAP_CEILING_USD))):
+                or (shared_caps and not Decimal(0) < role_config.allowance_usd <= cap + WORLD_ROLE_CAP_CEILING_USD)):
             raise LauncherFailure("shared-role target cap or output bound is invalid")
         expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
                               "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
@@ -553,6 +554,9 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
         task_metadata = tomllib.loads((task_path / "task.toml").read_text(encoding="utf-8")).get("metadata", {})
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         raise LauncherFailure("task metadata is invalid") from None
+    task_scenario = task_metadata.get("scenario") if isinstance(task_metadata, dict) else None
+    if task_scenario == "daycare_reimbursement" and not saved_identity_verified:
+        raise LauncherFailure("daycare_reimbursement_requires_saved_identity")
     task_mode = task_metadata.get("openrouter_key_mode") if isinstance(task_metadata, dict) else None
     expected_task_mode = "split" if split else "shared_caps" if shared_caps else "shared_roles" if shared_roles else "shared"
     task_usage_reporting_mode = (
@@ -560,6 +564,13 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     )
     if task_usage_reporting_mode != usage_reporting_mode:
         raise LauncherFailure("task usage reporting mode does not match the agent configuration")
+    disable_application_price_cutoffs = (
+        isinstance(task_metadata, dict)
+        and task_metadata.get("disable_application_price_cutoffs") == "true"
+    )
+    if (shared_caps and not (usage_reporting_mode == "usage_only" and disable_application_price_cutoffs)
+            and role_config.role_limits_usd["world"] != WORLD_ROLE_CAP_CEILING_USD):
+        raise LauncherFailure("shared_caps mode requires a $100 world role cap")
     if task_mode in {"split", "shared_roles", "shared_caps"} and task_mode != expected_task_mode:
         raise LauncherFailure("task budget mode does not match guarded key routing")
     if (split or shared_roles or shared_caps) and task_mode != expected_task_mode:
@@ -635,11 +646,13 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
                     or (shared_roles and (allowance != role_config.allowance_usd
                         or allowance > target_cap + world_cap))
                     or (shared_caps and (allowance != target_cap + world_cap
-                        or world_cap != WORLD_ROLE_CAP_CEILING_USD
+                        or (world.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS") != "true"
+                            and world_cap != WORLD_ROLE_CAP_CEILING_USD)
                         or not Decimal(0) < role_config.allowance_usd <= target_cap + world_cap))
                     or (shared_caps and expected_shared_caps_allowance is not None
                         and role_config.allowance_usd != expected_shared_caps_allowance)
-                    or metadata.get("scenario") != role_config.scenario or metadata.get("scenario") != "train_refund_late"
+                    or metadata.get("scenario") != role_config.scenario
+                    or metadata.get("scenario") not in GUARDED_SCENARIOS
                     or role_config.models != {"target": agent.model_name,
                         "simulator": world.get("WORLD_SIMULATOR_MODEL"), "grader": world.get("WORLD_GRADER_MODEL")}
                     or task_env.get("REFUND_EVAL_SHARED_ROLE_BUDGET_CONFIG")
@@ -686,6 +699,7 @@ async def run_guarded_job(
     on_sandbox_created: Callable[[Any], None] | None = None,
     before_job_run: Callable[[Any], None] | None = None,
     on_guard_ready: Callable[[dict[str, Any]], None] | None = None,
+    saved_identity_verified: bool = False,
     total_time_limit_seconds: int | None = None,
 ) -> JobResult:
     if total_time_limit_seconds is not None:
@@ -695,7 +709,7 @@ async def run_guarded_job(
     shared_roles = isinstance(thresholds, SharedRoleThresholds)
     shared_caps = isinstance(thresholds, SharedCapsThresholds)
     validate_job_config(config, expected_split=split, expected_shared_roles=shared_roles,
-                        expected_shared_caps=shared_caps)
+                        expected_shared_caps=shared_caps, saved_identity_verified=saved_identity_verified)
     controller = guard or (SplitSpendGuard(thresholds) if split else
                            SharedCapsSpendGuard(thresholds) if shared_caps else
                            SharedRoleSpendGuard(thresholds) if shared_roles else SpendGuard(thresholds))
@@ -718,7 +732,8 @@ async def run_guarded_job(
                 raise
             if isinstance(controller, SharedCapsSpendGuard):
                 validate_job_config(config, expected_shared_caps=True,
-                                     expected_shared_caps_allowance=controller.effective_allowance_usd)
+                                     expected_shared_caps_allowance=controller.effective_allowance_usd,
+                                     saved_identity_verified=saved_identity_verified)
         with install_modal_hooks(controller, on_sandbox_created=on_sandbox_created):
             await controller.ensure_healthy()
             if job_factory is None:
@@ -796,6 +811,7 @@ def run_guarded_config(
     on_sandbox_created: Callable[[Any], None] | None = None,
     before_job_run: Callable[[Any], None] | None = None,
     on_guard_ready: Callable[[dict[str, Any]], None] | None = None,
+    saved_identity_verified: bool = False,
     total_time_limit_seconds: int | None = None,
 ) -> int:
     if total_time_limit_seconds is not None:
@@ -814,7 +830,8 @@ def run_guarded_config(
         require_pinned_harbor()
         validate_job_config(config, expected_split=isinstance(thresholds, SplitThresholds),
                             expected_shared_roles=isinstance(thresholds, SharedRoleThresholds),
-                            expected_shared_caps=isinstance(thresholds, SharedCapsThresholds))
+                            expected_shared_caps=isinstance(thresholds, SharedCapsThresholds),
+                            saved_identity_verified=saved_identity_verified)
         hooks = {}
         if on_job_created is not None:
             hooks["on_job_created"] = on_job_created
@@ -826,7 +843,9 @@ def run_guarded_config(
             hooks["on_guard_ready"] = on_guard_ready
         with private_world_bind_mount_adapter():
             trial_failure = _trial_failure_reason(
-                asyncio.run(run_guarded_job(config, thresholds, **hooks)),
+                asyncio.run(run_guarded_job(
+                    config, thresholds, saved_identity_verified=saved_identity_verified, **hooks
+                )),
                 verifier_disabled=config.verifier.disable,
             )
     except GuardFailure as failure:

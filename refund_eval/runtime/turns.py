@@ -19,6 +19,7 @@ from refund_eval.agent.schedule import (
     sim_deadline,
     wakeup_text,
 )
+from refund_eval.models.client import ModelCallUncertain
 from refund_eval.runtime.events import (
     CHECKIN_HOURS,
     follow_up_before_wake,
@@ -169,7 +170,10 @@ async def follow_ups_before_wake(sim_weeks: float, checkin_hours: tuple[int, ...
             return
         with world_tx() as w:
             _advance(w, max(aware(item.due_at), aware(w.now)))
-        await follow_up(item)
+        try:
+            await follow_up(item)
+        except ModelCallUncertain:
+            continue
 
 
 class WakeupRequestError(ValueError):

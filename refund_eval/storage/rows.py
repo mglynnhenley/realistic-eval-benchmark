@@ -34,8 +34,8 @@ def _dumped(values: dict[str, Any] | None) -> dict[str, Any]:
 
 def _total_cost(sample: EvalSample) -> float | None:
     # Usage per model already includes every role that model played.
-    costs = [usage.total_cost for usage in sample.model_usage.values() if usage.total_cost is not None]
-    return sum(costs) if costs else None
+    costs = [usage.total_cost for usage in sample.model_usage.values()]
+    return sum(cost for cost in costs if cost is not None) if costs and all(cost is not None for cost in costs) else None
 
 
 def run_row(log: EvalLog, sample: EvalSample, *, eval_log_path: str | None = None,
