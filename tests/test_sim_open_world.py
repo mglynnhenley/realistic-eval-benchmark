@@ -1008,6 +1008,44 @@ async def test_personal_referral_remains_linked_when_target_processing_exceeds_b
     assert "trainline" not in world.cases
 
 
+async def test_personal_referral_uncertainty_does_not_reject_original_mail(sim, monkeypatch):
+    from refund_eval.models.client import ModelCallUncertain
+    from refund_eval.sim import mail, open_world
+    from refund_eval.world.interception import ToolContext
+
+    sim.profile = {"name": "A Friend", "role": "personal", "reason": "Knows the customer."}
+    sim.open_actions.append({
+        "decision": "referred", "body": "I asked Trainline to review your claim.",
+        "notes_to_others": [{"to": "Trainline", "message": "Please review the claim."}],
+    })
+    sim.consistency_results = [{"consistent": True, "reason": "No unsupported promise."}]
+    response_problem = open_world.response_problem
+
+    async def uncertain_referral(action, world, org, **kwargs):
+        if org.key == "trainline":
+            raise ModelCallUncertain()
+        return await response_problem(action, world, org, **kwargs)
+
+    monkeypatch.setattr(open_world, "response_problem", uncertain_referral)
+
+    result = await mail.send_message(
+        ToolContext(SC, mailbox=None), tool_name="send_message", to=["friend@outlook.com"], cc=[], bcc=[],
+        subject="Can you help?", body="Please check whether Trainline can refund me.", charge_clock=False,
+    )
+
+    world = load_world()
+    assert result == "Email sent."
+    assert len(world.interactions) == 2
+    original, referral = world.interactions
+    assert original.status == "applied" and original.action.notes_to_others
+    assert referral.status == "failed" and referral.event.kind == "note"
+    assert "ModelCallUncertain" in referral.error
+    assert any(effect.kind == "note" and effect.id == referral.id for effect in original.effects)
+    assert len(world.pending) == 1
+    [interception] = world.interceptions
+    assert interception.response_summary == "Email sent."
+
+
 async def test_silent_internal_decision_is_not_recorded_as_a_delivered_response(sim):
     import json
 

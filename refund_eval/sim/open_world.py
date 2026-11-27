@@ -1071,7 +1071,10 @@ async def process_company_event(
                     saved.effects.append(InteractionEffect(
                         id=f"{note_inbound.interception_id}:{target.key}:note", kind="note", delivery_at=world.now,
                     ))
-                await _react_to_note(scenario, note_inbound, org, target, note.message)
+                try:
+                    await _react_to_note(scenario, note_inbound, org, target, note.message)
+                except ModelCallUncertain:
+                    break
     return ProcessedCompanyEvent(action, effective_at, emails, interaction.status)
 
 
