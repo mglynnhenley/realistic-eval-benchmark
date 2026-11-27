@@ -38,9 +38,9 @@ this was not a second version or trial round.
 
 ## 10.28 — 2026-11-27
 - Kind: trivial batch
-- Fingerprint: 1dc1b9d13ba8743abb98b357220198d8411210c9df3b24d55d6b9d67699e1715
-- Trial round: none; focused offline regression and guarded launcher preparation only.
-- Changes: Keep ambiguous world-call charges explicitly unknown in terminal usage reports and allow independent later work only in usage-only reporting with application cutoffs disabled.
+- Fingerprint: 26bc16cea9bfd5d58c084bd68d08a9aa59581e5ff072b719d292b0f923fbc185
+- Trial round: none; focused offline regressions, guarded launcher preparation, read-only Exa initialize/tools/list catalog verification and catalog regression tests only. No model behavior, search call or paid run.
+- Changes: Keep ambiguous world-call charges explicitly unknown in terminal usage reports and allow independent later work only in usage-only reporting with application cutoffs disabled. Refresh the pinned Exa search descriptor to the exact server 3.6.0 tools/list output; the omitted `execution.taskSupport` retains the MCP default of `forbidden`, and exact-catalog fail-closed checks remain enforced.
 
 ## 10.27 — 2026-11-26
 - Kind: trivial batch
