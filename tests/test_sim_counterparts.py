@@ -8,6 +8,7 @@ from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import get_model
 from inspect_ai.util import store
 
+from refund_eval.models.client import ModelCallUncertain
 from refund_eval.claims import (
     OBSERVATIONS_KEY,
     ClaimFinding,
@@ -57,6 +58,23 @@ async def test_new_counterpart_gets_scenario_and_only_its_own_history(sim):
     assert not world.outcome.transfers and not world.outcome.offers
     reply = world.pending[-1].email.body
     assert "SIMULATOR-ONLY" not in reply and "scenario" not in reply
+
+
+async def test_uncertain_counterpart_profile_is_not_retried(sim, monkeypatch):
+    from refund_eval.sim import counterparts
+
+    calls = []
+
+    class UncertainClient:
+        async def complete(self, *args, **kwargs):
+            calls.append(1)
+            raise ModelCallUncertain()
+
+    monkeypatch.setattr(counterparts, "client", lambda: UncertainClient())
+    with pytest.raises(ModelCallUncertain):
+        await counterparts.create_counterpart(SC, contact())
+    assert len(calls) == 1
+    assert not registered_orgs()
 
 
 async def test_identity_and_case_reused_across_email_and_chat(sim):
