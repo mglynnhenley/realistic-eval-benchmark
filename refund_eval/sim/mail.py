@@ -141,6 +141,7 @@ async def send_message(
         )
         if result is None or result.kind == "error":
             errors.append(text)
+            break
         elif text and text not in shown:
             shown.append(text)
 
