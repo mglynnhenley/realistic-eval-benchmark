@@ -1029,6 +1029,41 @@ async def test_model_request_rejection_during_follow_up_stops_distinctly(tmp_pat
     assert result["stop_reason"] == "model_request_rejected"
 
 
+async def test_uncertain_follow_up_does_not_abort_turn_or_starve_later_follow_up(tmp_path, monkeypatch):
+    from refund_eval.sim import router
+    from refund_eval.world.state import FollowUp, load_world, world_tx
+
+    stub_browser(monkeypatch)
+    calls = []
+
+    async def follow_up(item):
+        calls.append(item.id)
+        with world_tx() as world:
+            next(value for value in world.follow_ups if value.id == item.id).status = (
+                "failed" if item.id == "uncertain" else "done")
+        if item.id == "uncertain":
+            raise ModelCallUncertain()
+
+    monkeypatch.setattr(router, "follow_up", follow_up)
+    async with (WorldTrial(settings(tmp_path), model_client=FakeModels()) as trial,
+                session(trial) as (_, base, _), httpx.AsyncClient() as http):
+        now = load_world().now
+        with world_tx() as world:
+            world.follow_ups.extend([
+                FollowUp(id="uncertain", org="trainline", promised_at=now, due_at=now + timedelta(minutes=1),
+                         plan="Send the promised update."),
+                FollowUp(id="independent", org="avanti", promised_at=now, due_at=now + timedelta(minutes=2),
+                         plan="Send a separate promised update."),
+            ])
+        response = await http.post(f"{base}/turn", json={"ended": True, "text": "Waiting."},
+                                   headers={"Authorization": f"Bearer {TURN}"})
+        assert response.status_code == 200, response.text
+        statuses = {item.id: item.status for item in load_world().follow_ups}
+
+    assert calls == ["uncertain", "independent"]
+    assert statuses == {"uncertain": "failed", "independent": "done"}
+
+
 async def test_world_allowance_during_recipient_identification_stops_without_a_bounce(tmp_path, monkeypatch):
     stub_browser(monkeypatch)
 
