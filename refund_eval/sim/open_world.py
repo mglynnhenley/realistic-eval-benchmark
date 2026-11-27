@@ -1074,7 +1074,7 @@ async def process_company_event(
                 try:
                     await _react_to_note(scenario, note_inbound, org, target, note.message)
                 except ModelCallUncertain:
-                    break
+                    continue
     return ProcessedCompanyEvent(action, effective_at, emails, interaction.status)
 
 
