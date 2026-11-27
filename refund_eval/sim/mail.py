@@ -95,6 +95,7 @@ async def send_message(
     # the user (graded separately); nobody answers.
     to_user = [{"field": field, "address": addr} for field, addr in recipients
                if is_user_recipient(ctx, addr)]
+    accepted_interception_ids: list[str] = []
     if to_user:
         delivered = log_interception(
             channel="email", tool=tool_name,
@@ -102,6 +103,7 @@ async def send_message(
             payload={**payload, "delivery_status": "delivered_to_user", "user_recipients": to_user},
             org=None, to_user=True, response_summary=USER_MAIL_SUMMARY,
         )
+        accepted_interception_ids.append(delivered.id)
         capture_observation(Inbound(
             channel="email", tool=tool_name, target=delivered.target, org=None,
             subject=subject, body=body, in_reply_to=in_reply_to,
@@ -124,7 +126,6 @@ async def send_message(
 
     shown: list[str] = []
     errors: list[str] = []
-    accepted_interception_ids: list[str] = []
     for group_index, (key, addrs) in enumerate(groups.items()):
         target = parse_address(addrs[0]) or addrs[0]
         interception, result, text = await intercept(

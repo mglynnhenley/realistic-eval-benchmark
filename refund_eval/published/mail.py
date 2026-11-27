@@ -590,8 +590,11 @@ class GmailService:
                         "native_gmail_batch_unattempted_groups": unattempted,
                     })
                     if interception.id in accepted_ids:
-                        payload["native_gmail_group_disposition"] = "accepted_by_simulator"
-                        interception.response_summary = "Recipient group accepted by simulator; batch disposition is partial."
+                        if interception.to_user:
+                            payload["native_gmail_group_disposition"] = "delivered_to_user"
+                        else:
+                            payload["native_gmail_group_disposition"] = "accepted_by_simulator"
+                            interception.response_summary = "Recipient group accepted by simulator; batch disposition is partial."
                     elif interception.id == partial.failed_interception_id:
                         payload["native_gmail_group_disposition"] = "failed_not_accepted"
                         interception.response_summary = partial_text
