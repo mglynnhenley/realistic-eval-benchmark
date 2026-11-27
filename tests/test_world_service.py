@@ -833,7 +833,10 @@ async def test_published_gmail_partial_counts_prior_generic_failure(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("field", "use_alias"), [
+    ("to", False), ("cc", False), ("bcc", False), ("to", True),
+], ids=["to", "cc", "bcc", "normalized-gmail-alias"])
+async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path, monkeypatch, field, use_alias):
     import json
 
     from refund_eval.world.state import load_world
@@ -858,13 +861,27 @@ async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path
             return await super().complete(role, messages, schema=schema, **kwargs)
 
     scenario = load_scenario("train_refund_late")
+    recipient = scenario.user.email_addresses[0]
+    if use_alias:
+        local, domain = recipient.split("@", 1)
+        assert domain in {"gmail.com", "googlemail.com"}
+        recipient = f"{local.replace('.', '')}+updates@{domain}"
+    to = [AVANTI]
+    cc = []
+    bcc = []
+    if field == "to":
+        to.insert(0, recipient)
+    elif field == "cc":
+        cc.append(recipient)
+    else:
+        bcc.append(recipient)
     fake = MissingFirst()
     async with (WorldTrial(settings(
             tmp_path, scenario="train_refund_late", world_cost_limit=10,
             usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
     ), model_client=fake) as trial, session(trial) as (client, _, _)):
         result = await client.call_tool("send_message", {
-            "to": [scenario.user.email_addresses[0], AVANTI],
+            "to": to, "cc": cc, "bcc": bcc,
             "subject": "Self-copy with external request", "body": "Please review this request."})
         found = await client.call_tool("search_threads", {
             "query": 'in:inbox subject:"Self-copy with external request"'})
@@ -885,6 +902,10 @@ async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path
     assert "structuredContent" not in result.model_dump(exclude_none=True)
     assert "INBOX" in inbox_copy["labelIds"]
     assert inbox_copy["plaintextBody"] == "Please review this request."
+    assert inbox_copy["toRecipients"] == to and inbox_copy["ccRecipients"] == cc
+    assert "bccRecipients" not in inbox_copy
+    if field == "bcc":
+        assert recipient not in inbox_copy["toRecipients"] + inbox_copy["ccRecipients"]
     message = result.content[0].text
     assert "accepted recipient groups=1" in message
     assert "failed-not-accepted groups=1" in message and "unattempted groups=0" in message
@@ -898,6 +919,7 @@ async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path
     assert len(interceptions) == 2
     self_copy, failed = interceptions
     assert self_copy.to_user and self_copy.payload["delivery_status"] == "delivered_to_user"
+    assert self_copy.payload["user_recipients"] == [{"field": field, "address": recipient}]
     assert self_copy.payload["native_gmail_group_disposition"] == "delivered_to_user"
     assert failed.payload["native_gmail_group_disposition"] == "failed_not_accepted"
     assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)

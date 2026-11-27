@@ -296,7 +296,7 @@ class GmailService:
             result[mid] = Email(
                 id=mid, thread_id=p["thread_id"], sender=p["from"], to=p["to"], cc=p["cc"],
                 subject=p["subject"], body=p["body"], sent_at=interception.time, source="real",
-            ), p
+            ), {**p, "mailbox_delivered_to_user": interception.to_user}
         for email, meta in result.values():
             mid = _visible_id(email.id)
             self._message_times[mid] = email.sent_at
@@ -321,7 +321,8 @@ class GmailService:
         own = self.ctx.mailbox.user_addresses
         sent = extra.get("native_gmail_accepted") or parse_address(email.sender) in own
         labels = ["SENT"] if sent else ["INBOX"]
-        if sent and any(parse_address(address) in own for address in [*email.to, *email.cc]):
+        if sent and (extra.get("mailbox_delivered_to_user")
+                     or any(parse_address(address) in own for address in [*email.to, *email.cc])):
             labels.append("INBOX")
         if not sent and self._unread(email):
             labels.append("UNREAD")
@@ -432,7 +433,9 @@ class GmailService:
             return self._search_page(key_args, saved[1], saved[2], size, saved[3])
         world = load_world()
         match_ctx = MatchContext(user_addresses=self.ctx.mailbox.user_addresses, now=world.now,
-                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}))
+                                 unread=lambda e: "UNREAD" in self._local_labels(e, {}),
+                                 inbox_ids={email.id for email, meta in locals_
+                                            if meta.get("mailbox_delivered_to_user")})
         merged: dict[str, dict[str, Any]] = {}
         request = dict(arguments)
         # Collect a complete native snapshot independently of outward page size.
