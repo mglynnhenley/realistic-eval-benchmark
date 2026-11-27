@@ -834,6 +834,8 @@ async def test_published_gmail_partial_counts_prior_generic_failure(tmp_path, mo
 
 @pytest.mark.asyncio
 async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path, monkeypatch):
+    import json
+
     from refund_eval.world.state import load_world
 
     stub_browser(monkeypatch)
@@ -864,10 +866,25 @@ async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path
         result = await client.call_tool("send_message", {
             "to": [scenario.user.email_addresses[0], AVANTI],
             "subject": "Self-copy with external request", "body": "Please review this request."})
+        found = await client.call_tool("search_threads", {
+            "query": 'in:inbox subject:"Self-copy with external request"'})
+        assert not found.isError
+        search_data = json.loads(found.content[0].text)
+        [copy_in_inbox] = [message for thread in search_data["threads"]
+                           for message in thread["messages"]
+                           if message.get("subject") == "Self-copy with external request"]
+        read = await client.call_tool("get_message", {"messageId": copy_in_inbox["id"]})
+        assert not read.isError
+        inbox_copy = json.loads(read.content[0].text)
         world = load_world()
         data = trial.data()
 
     assert result.isError
+    assert "accepted recipient groups=1" in result.content[0].text
+    assert "failed-not-accepted groups=1" in result.content[0].text
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    assert "INBOX" in inbox_copy["labelIds"]
+    assert inbox_copy["plaintextBody"] == "Please review this request."
     message = result.content[0].text
     assert "accepted recipient groups=1" in message
     assert "failed-not-accepted groups=1" in message and "unattempted groups=0" in message

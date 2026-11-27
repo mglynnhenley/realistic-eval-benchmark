@@ -287,7 +287,10 @@ class GmailService:
                 result[email.id] = email, {}
         for interception in world.interceptions:
             p = interception.payload
-            if not p.get("native_gmail_accepted"):
+            delivered_to_user = (
+                interception.to_user and p.get("native_gmail_group_disposition") == "delivered_to_user"
+            )
+            if not p.get("native_gmail_accepted") and not delivered_to_user:
                 continue
             mid = p["message_id"]
             result[mid] = Email(
