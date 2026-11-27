@@ -9,7 +9,12 @@ from pydantic import BaseModel
 
 from refund_eval.companies.models import CompanyAction
 from refund_eval.model_io import generate_structured
-from refund_eval.models.client import ModelCallUncertain, ModelLimitExceeded, ModelRequestRejected, client
+from refund_eval.models.client import (
+    ModelCallUncertain,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+    client,
+)
 from refund_eval.scenario.schema import Org
 from refund_eval.world.state import World
 

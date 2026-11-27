@@ -9,7 +9,8 @@ from inspect_ai.util import LimitExceededError
 
 from refund_eval.models.client import ModelCallUncertain
 from refund_eval.scenario.schema import load_scenario
-from refund_eval.sim import consistency, rules as sim_rules
+from refund_eval.sim import consistency
+from refund_eval.sim import rules as sim_rules
 from refund_eval.sim.consistency import response_problem
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.open_world import OpenAction, _react_to_note, fire_follow_up

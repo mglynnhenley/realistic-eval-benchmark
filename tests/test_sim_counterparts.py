@@ -8,13 +8,13 @@ from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.model import get_model
 from inspect_ai.util import store
 
-from refund_eval.models.client import ModelCallUncertain
 from refund_eval.claims import (
     OBSERVATIONS_KEY,
     ClaimFinding,
     ClaimObservation,
     assess_observation,
 )
+from refund_eval.models.client import ModelCallUncertain
 from refund_eval.scenario.schema import load_scenario
 from refund_eval.sim.counterparts import REGISTRY_KEY, registered_orgs
 from refund_eval.sim.interface import Inbound
