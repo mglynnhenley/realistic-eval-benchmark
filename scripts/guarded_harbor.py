@@ -506,8 +506,7 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
             raise LauncherFailure("shared_roles agent caps or budget configuration are invalid") from None
         if (not cap.is_finite() or cap <= 0 or cap != declared_cap or output_cap <= 0
                 or role_config.role_limits_usd["target"] != cap
-                or (shared_caps and (role_config.role_limits_usd["world"] != WORLD_ROLE_CAP_CEILING_USD
-                    or not Decimal(0) < role_config.allowance_usd <= cap + WORLD_ROLE_CAP_CEILING_USD))):
+                or (shared_caps and not Decimal(0) < role_config.allowance_usd <= cap + WORLD_ROLE_CAP_CEILING_USD)):
             raise LauncherFailure("shared-role target cap or output bound is invalid")
         expected_agent_env = {"OPENROUTER_API_KEY", "REFUND_EVAL_AGENT_DOLLAR_CAP",
                               "REFUND_EVAL_AGENT_MAX_OUTPUT_TOKENS", "REFUND_EVAL_SHARED_ROLE_MODE",
@@ -565,6 +564,13 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
     )
     if task_usage_reporting_mode != usage_reporting_mode:
         raise LauncherFailure("task usage reporting mode does not match the agent configuration")
+    disable_application_price_cutoffs = (
+        isinstance(task_metadata, dict)
+        and task_metadata.get("disable_application_price_cutoffs") == "true"
+    )
+    if (shared_caps and not (usage_reporting_mode == "usage_only" and disable_application_price_cutoffs)
+            and role_config.role_limits_usd["world"] != WORLD_ROLE_CAP_CEILING_USD):
+        raise LauncherFailure("shared_caps mode requires a $100 world role cap")
     if task_mode in {"split", "shared_roles", "shared_caps"} and task_mode != expected_task_mode:
         raise LauncherFailure("task budget mode does not match guarded key routing")
     if (split or shared_roles or shared_caps) and task_mode != expected_task_mode:
@@ -640,7 +646,8 @@ def validate_job_config(config: JobConfig, *, expected_split: bool | None = None
                     or (shared_roles and (allowance != role_config.allowance_usd
                         or allowance > target_cap + world_cap))
                     or (shared_caps and (allowance != target_cap + world_cap
-                        or world_cap != WORLD_ROLE_CAP_CEILING_USD
+                        or (world.get("REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS") != "true"
+                            and world_cap != WORLD_ROLE_CAP_CEILING_USD)
                         or not Decimal(0) < role_config.allowance_usd <= target_cap + world_cap))
                     or (shared_caps and expected_shared_caps_allowance is not None
                         and role_config.allowance_usd != expected_shared_caps_allowance)

@@ -7,7 +7,10 @@ import pytest
 from fixtures.simulator import MockSim, install_mock_models, start_sample
 from inspect_ai.util import LimitExceededError
 
+from refund_eval.models.client import ModelCallUncertain
 from refund_eval.scenario.schema import load_scenario
+from refund_eval.sim import consistency
+from refund_eval.sim import rules as sim_rules
 from refund_eval.sim.consistency import response_problem
 from refund_eval.sim.interface import Inbound
 from refund_eval.sim.open_world import OpenAction, _react_to_note, fire_follow_up
@@ -126,6 +129,42 @@ async def test_checker_sees_authoritative_amounts_and_effective_times(sim):
     assert (SC.start_time + timedelta(hours=12)).isoformat() in prompt
     assert '"recorded_payments": []' in prompt and '"mode": "form"' in prompt
     assert f'"amount": {FARE}' in prompt
+
+
+async def test_uncertain_consistency_check_fails_interaction_without_retry(sim, monkeypatch):
+    calls = []
+
+    async def uncertain(*args, **kwargs):
+        calls.append(1)
+        raise ModelCallUncertain()
+
+    monkeypatch.setattr(consistency, "generate_structured", uncertain)
+    sim.open_actions = [{"decision": "declined", "body": "We cannot approve this request."}]
+    with pytest.raises(ModelCallUncertain):
+        await dispatch(contact())
+
+    [interaction] = load_world().interactions
+    assert interaction.status == "failed" and interaction.action is None
+    assert len(interaction.attempts) == 1 and len(calls) == 1
+    assert len(sim.open_prompts) == 1
+
+
+async def test_uncertain_rules_generation_is_not_retried(sim, monkeypatch):
+    class Model:
+        def model_name(self, role):
+            return "fake/simulator"
+
+    calls = []
+
+    async def uncertain(*args, **kwargs):
+        calls.append(1)
+        raise ModelCallUncertain()
+
+    monkeypatch.setattr(sim_rules, "client", lambda: Model())
+    monkeypatch.setattr(sim_rules, "_generate_rules_once", uncertain)
+    with pytest.raises(ModelCallUncertain):
+        await sim_rules.generate_rules(SC, SC.org("trainline"), None)
+    assert len(calls) == 1
 
 
 async def test_consistency_check_propagates_budget_limits(sim):

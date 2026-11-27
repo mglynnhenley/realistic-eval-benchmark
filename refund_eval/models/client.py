@@ -31,6 +31,13 @@ class ModelRequestRejected(Exception):
                          "rejected field unavailable.")
 
 
+class ModelCallUncertain(Exception):
+    """A failed provider call has unknown cost and must not be retried as the same interaction."""
+
+    def __init__(self) -> None:
+        super().__init__("Provider call failed with unknown charge; this interaction will not be retried")
+
+
 @dataclass(frozen=True)
 class ToolCall:
     id: str

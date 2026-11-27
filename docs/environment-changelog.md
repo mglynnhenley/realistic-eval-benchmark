@@ -36,6 +36,18 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.29 — 2026-11-27
+- Kind: trivial batch
+- Fingerprint: 3dfb11737f92d016aeece0cc60e41bb9b54628b22905e195ab4b221b2661d931
+- Trial round: none; offline focused regressions only. No provider call, search call or paid run.
+- Changes: Keep usage-only, disabled-cutoff unknown charges explicit in terminal accounting and allow independent later work without changing strict/enforced guards. Propagate typed uncertain failures through scheduled follow-ups and helper paths without retrying the same interaction. Stop multi-recipient processing on typed uncertain failures and report accurate accepted, failed-not-accepted and unattempted group counts without rolling back earlier effects or fabricating a successful whole-batch receipt; generic-only failures still continue. Preserve committed personal-contact mail when a descendant referral fails uncertainly, continue later independent referrals, and expose delivered self-copies in local Gmail reads and Inbox search from authoritative mailbox membership without changing visible recipient headers.
+
+## 10.28 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: b22932c27c4e5e7af793690d7aba9c6cad9ae39effcf17689cb5b40f49714f27
+- Trial round: none; read-only Exa initialize/tools/list catalog verification and offline catalog regression tests only. No search call or model behavior.
+- Changes: Refresh the pinned Exa search descriptor to match server 3.6.0's exact tools/list output; omitted `execution.taskSupport` retains the MCP default of `forbidden`. Exact-catalog fail-closed checks remain enforced.
+
 ## 10.27 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: a9efa13cc1246f2fa7d4e0dfaf841f0d0ff7eb9361ff1371d7d123a0920ce201

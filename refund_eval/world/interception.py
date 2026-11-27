@@ -22,7 +22,11 @@ from typing import Any
 from inspect_ai.tool import ToolError
 from inspect_ai.util import LimitExceededError
 
-from refund_eval.models.client import ModelLimitExceeded, ModelRequestRejected
+from refund_eval.models.client import (
+    ModelCallUncertain,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+)
 from refund_eval.scenario.schema import Scenario
 from refund_eval.sim.interface import Inbound, SimResult
 from refund_eval.world import clock, event_log
@@ -307,6 +311,11 @@ async def intercept(
         shown = ex.message
         result = SimResult(immediate_text=shown, kind="error")
     except Exception as ex:
+        if isinstance(ex, ModelCallUncertain):
+            icpt.payload["dispatch_error_type"] = "ModelCallUncertain"
+            with world_tx() as world:
+                saved = next(item for item in world.interceptions if item.id == icpt.id)
+                saved.payload["dispatch_error_type"] = "ModelCallUncertain"
         logger.exception("dispatch failed for %s %s", tool, icpt.id)
         _note({"dispatch_error": f"{type(ex).__name__}: {ex}", "interception_id": icpt.id, "tool": tool})
         shown = failure_text

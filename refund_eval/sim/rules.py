@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from refund_eval.config import DEFAULT_ROLE_MODEL
 from refund_eval.models.client import (
     Message,
+    ModelCallUncertain,
     ModelLimitExceeded,
     ModelRequestRejected,
     OutputSchema,
@@ -254,7 +255,7 @@ async def generate_rules(scenario: Scenario, org: Org, dossier_record: dict[str,
             record["rules"] = rules.model_dump()
             record["examples"] = kept_examples
             return record
-        except (ModelLimitExceeded, ModelRequestRejected):
+        except (ModelCallUncertain, ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - the whole generation is retried once
             record["errors"].append(f"generation attempt {attempt + 1}: {ex}"[:300])

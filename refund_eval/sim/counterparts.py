@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from refund_eval.models.client import (
     Message,
+    ModelCallUncertain,
     ModelLimitExceeded,
     ModelRequestRejected,
     OutputSchema,
@@ -129,7 +130,7 @@ async def create_counterpart(scenario: Scenario, inbound: Inbound) -> Org | None
                 "Unverified identity and limited role of a new counterpart."))
             profile = CounterpartProfile.model_validate(output.json())
             break
-        except (ModelLimitExceeded, ModelRequestRejected):
+        except (ModelCallUncertain, ModelLimitExceeded, ModelRequestRejected):
             raise
         except Exception as ex:  # noqa: BLE001 - say what was wrong and ask once more
             logger.warning("counterpart profile unavailable: %s", ex)
