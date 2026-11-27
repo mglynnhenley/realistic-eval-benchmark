@@ -501,7 +501,11 @@ class GmailService:
         return self._result("search_threads", data, template)
 
     async def _write(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        from refund_eval.sim.mail import is_user_recipient, send_message
+        from refund_eval.sim.mail import (
+            PartialMailBatchError,
+            is_user_recipient,
+            send_message,
+        )
 
         if arguments.get("draftId"):
             return _error("Sending an existing draft is unavailable in this mailbox connection.")
@@ -564,6 +568,34 @@ class GmailService:
                 thread_id=raw_tid, in_reply_to=raw_original_id if local_original else original_id,
                 extra=extra, charge_clock=False,
             )
+        except PartialMailBatchError as partial:
+            accepted = len(partial.accepted_interception_ids)
+            unattempted = partial.unattempted_groups
+            partial_text = (
+                f"Partial delivery: accepted recipient groups={accepted}, "
+                f"failed-not-accepted groups=1, unattempted groups={unattempted}. "
+                "Accepted deliveries remain intact. Do not retry the full batch."
+            )
+            accepted_ids = set(partial.accepted_interception_ids)
+            with world_tx() as world:
+                for interception in world.interceptions:
+                    payload = interception.payload
+                    if payload.get("message_id") != mid or not payload.get("native_gmail_attempt"):
+                        continue
+                    payload.update({
+                        "native_gmail_accepted": False,
+                        "native_gmail_batch_disposition": "partial",
+                        "native_gmail_batch_accepted_groups": accepted,
+                        "native_gmail_batch_failed_not_accepted_groups": 1,
+                        "native_gmail_batch_unattempted_groups": unattempted,
+                    })
+                    if interception.id in accepted_ids:
+                        payload["native_gmail_group_disposition"] = "accepted_by_simulator"
+                        interception.response_summary = "Recipient group accepted by simulator; batch disposition is partial."
+                    elif interception.id == partial.failed_interception_id:
+                        payload["native_gmail_group_disposition"] = "failed_not_accepted"
+                        interception.response_summary = partial_text
+            return _error(partial_text)
         except Exception as exc:
             # Interception and simulator errors must never become successful
             # Sent entries. Inspect limits are deliberately propagated.

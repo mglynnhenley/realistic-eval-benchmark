@@ -309,6 +309,41 @@ async def test_multi_recipient_mail_stops_after_unknown_dispatch_failure(case, m
     ]
 
 
+async def test_multi_recipient_generic_dispatch_error_keeps_processing(case, monkeypatch):
+    from inspect_ai.tool import ToolError
+
+    from refund_eval.sim import mail
+    from refund_eval.sim.interface import SimResult
+    from refund_eval.world.interception import ToolContext
+    from refund_eval.world.orgs import resolve_org
+
+    scenario, _ = case
+    recipients = {}
+    for org in scenario.orgs:
+        for address in org.contact_emails:
+            key = resolve_org(scenario, address)
+            if key:
+                recipients.setdefault(key, address)
+    keys = list(recipients)[:3]
+    assert len(keys) == 3
+    calls = []
+
+    async def dispatch(inbound):
+        calls.append(inbound.org)
+        if len(calls) == 1:
+            return SimResult(immediate_text="Unavailable", kind="error")
+        return SimResult(immediate_text="Message sent.")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    ctx = ToolContext(scenario, mailbox=None)
+    with pytest.raises(ToolError, match="Unavailable"):
+        await mail.send_message(ctx, tool_name="send_message", to=[recipients[key] for key in keys],
+                                cc=[], bcc=[], subject="Generic failure", body="Please review.",
+                                charge_clock=False)
+
+    assert calls == keys
+
+
 @pytest.mark.parametrize("kind,address,contacts,seed_sender,expected", [
     ("bank", "noreply@bank.example", [], False, True),
     ("bank", "statements@bank.example", [], True, True),

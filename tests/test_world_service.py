@@ -710,6 +710,74 @@ async def test_ambiguous_simulator_failure_is_an_unaccepted_tool_error_and_later
         assert final_roles["simulator"].total_cost is None
 
 
+@pytest.mark.asyncio
+async def test_published_gmail_partial_batch_reports_group_dispositions(tmp_path, monkeypatch):
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class MissingSecond(FakeModels):
+        def __init__(self):
+            super().__init__()
+            self.open_action_calls = 0
+
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            if role == "simulator" and schema and schema.name == "open_world_action":
+                self.open_action_calls += 1
+                if self.open_action_calls == 2:
+                    self.calls.append((role, schema.name))
+                    raise NotFoundError("synthetic unavailable route")
+            completion = await super().complete(role, messages, schema=schema, **kwargs)
+            completion.usage = Usage(cost=0.02)
+            return completion
+
+    scenario = load_scenario("train_refund_late")
+    recipients = [scenario.org(key).contact_emails[0] for key in ("avanti", "nationwide", "rail_ombudsman")]
+    fake = MissingSecond()
+    async with (WorldTrial(settings(
+            tmp_path, scenario="train_refund_late", world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=fake) as trial, session(trial) as (client, _, _)):
+        result = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Three-group request", "body": "Please review this request."})
+        world = load_world()
+        data = trial.data()
+
+    assert result.isError
+    message = result.content[0].text
+    assert "accepted recipient groups=1" in message
+    assert "failed-not-accepted groups=1" in message and "unattempted groups=1" in message
+    assert "Do not retry the full batch" in message
+    assert "Message not sent" not in message
+    assert not any(term in message.lower() for term in ("simulator", "model", "charge", "cost"))
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    assert len(world.interactions) == 2
+    accepted, failed = world.interactions
+    assert accepted.status == "applied" and accepted.effects and world.pending
+    assert failed.status == "failed" and not failed.effects and len(failed.attempts) == 1
+    interceptions = [item for item in world.interceptions if item.payload.get("subject") == "Three-group request"]
+    assert len(interceptions) == 2
+    assert [item.payload["native_gmail_group_disposition"] for item in interceptions] == [
+        "accepted_by_simulator", "failed_not_accepted",
+    ]
+    assert all(item.payload["native_gmail_batch_disposition"] == "partial" for item in interceptions)
+    assert all(item.payload["native_gmail_batch_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_failed_not_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_unattempted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)
+    assert "Partial delivery" in interceptions[1].response_summary
+    assert fake.open_action_calls == 2
+    assert data["store"][WORLD_BUDGET_KEY]["status"] == "unknown"
+    [record] = [item for item in data["store"][RECORDINGS_KEY]
+                if item["role"] == "simulator" and "error" in item]
+    assert record["error"]["type"] == "NotFoundError"
+    assert record["error"]["http_status"] == 404 and "response" not in record
+
+
 @pytest.mark.parametrize("accounting", ["reserved", "legacy"])
 @pytest.mark.parametrize("charge_known", [True, False], ids=["known-charge", "unknown-charge"])
 async def test_structured_invalid_request_from_list_contact_stops_once(

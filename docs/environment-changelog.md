@@ -36,11 +36,17 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
-## 10.28 — 2026-11-27
+## 10.29 — 2026-11-27
 - Kind: trivial batch
-- Fingerprint: 78d497f39971475ab4027c951c883ccb1f7f4b798c20bbbb7faa92a7511fd8b3
-- Trial round: none; focused offline regressions, guarded launcher preparation, read-only Exa initialize/tools/list catalog verification and catalog regression tests only. No model behavior, search call or paid run.
-- Changes: Keep ambiguous world-call charges explicitly unknown in terminal usage reports and allow independent later work only in usage-only reporting with application cutoffs disabled. Refresh the pinned Exa search descriptor to the exact server 3.6.0 tools/list output; the omitted `execution.taskSupport` retains the MCP default of `forbidden`, and exact-catalog fail-closed checks remain enforced.
+- Fingerprint: c431acaa06bd2b510ee7f35b088c0e204eec8b5a7eaba671e5ae6aaaaf6ac53b
+- Trial round: none; offline focused regressions only. No provider call, search call or paid run.
+- Changes: Keep usage-only, disabled-cutoff unknown charges explicit in terminal accounting and allow independent later work without changing strict/enforced guards. Propagate typed uncertain failures through scheduled follow-ups and helper paths without retrying the same interaction. Stop multi-recipient processing on typed uncertain failures and report typed partial batches with accepted, failed-not-accepted and unattempted groups without rolling back earlier effects or fabricating a successful whole-batch receipt.
+
+## 10.28 — 2026-11-26
+- Kind: trivial batch
+- Fingerprint: b22932c27c4e5e7af793690d7aba9c6cad9ae39effcf17689cb5b40f49714f27
+- Trial round: none; read-only Exa initialize/tools/list catalog verification and offline catalog regression tests only. No search call or model behavior.
+- Changes: Refresh the pinned Exa search descriptor to match server 3.6.0's exact tools/list output; omitted `execution.taskSupport` retains the MCP default of `forbidden`. Exact-catalog fail-closed checks remain enforced.
 
 ## 10.27 — 2026-11-26
 - Kind: trivial batch
