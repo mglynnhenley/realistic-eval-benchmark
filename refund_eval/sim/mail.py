@@ -27,10 +27,10 @@ USER_MAIL_SUMMARY = "Delivered to the user's own mailbox; she is away and does n
 
 
 class PartialMailBatchError(Exception):
-    def __init__(self, accepted_interception_ids: list[str], failed_interception_id: str,
+    def __init__(self, accepted_interception_ids: list[str], failed_interception_ids: list[str],
                  unattempted_groups: int) -> None:
         self.accepted_interception_ids = tuple(accepted_interception_ids)
-        self.failed_interception_id = failed_interception_id
+        self.failed_interception_ids = tuple(failed_interception_ids)
         self.unattempted_groups = unattempted_groups
         super().__init__("A later recipient group failed after earlier group effects were committed.")
 
@@ -126,6 +126,7 @@ async def send_message(
 
     shown: list[str] = []
     errors: list[str] = []
+    failed_interception_ids: list[str] = []
     for group_index, (key, addrs) in enumerate(groups.items()):
         target = parse_address(addrs[0]) or addrs[0]
         interception, result, text = await intercept(
@@ -151,14 +152,14 @@ async def send_message(
             },
         )
         if result is None or result.kind == "error":
+            failed_interception_ids.append(interception.id)
             if interception.payload.get("dispatch_error_type") == "ModelCallUncertain":
-                if (accepted_interception_ids and not errors
-                        and (extra or {}).get("native_gmail_attempt")):
+                if accepted_interception_ids and (extra or {}).get("native_gmail_attempt"):
                     if charge_clock:
                         charge_time(tool_name, written=f"{subject or ''} {body}")
                     raise PartialMailBatchError(
                         accepted_interception_ids=accepted_interception_ids,
-                        failed_interception_id=interception.id,
+                        failed_interception_ids=failed_interception_ids,
                         unattempted_groups=len(groups) - group_index - 1,
                     )
                 errors.append(text)

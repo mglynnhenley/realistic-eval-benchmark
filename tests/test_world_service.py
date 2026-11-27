@@ -779,6 +779,60 @@ async def test_published_gmail_partial_batch_reports_group_dispositions(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_published_gmail_partial_counts_prior_generic_failure(tmp_path, monkeypatch):
+    from refund_eval.models.client import ModelCallUncertain
+    from refund_eval.sim.interface import SimResult
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+    scenario = load_scenario("train_refund_late")
+    org_keys = ("avanti", "nationwide", "rail_ombudsman", "orr")
+    recipients = [scenario.org(key).contact_emails[0] for key in org_keys]
+    dispatched = []
+
+    async def dispatch(inbound):
+        dispatched.append(inbound.org)
+        if inbound.org == org_keys[0]:
+            return SimResult(immediate_text="Synthetic generic failure.", kind="error")
+        if inbound.org == org_keys[1]:
+            return SimResult(immediate_text="Message sent.")
+        if inbound.org == org_keys[2]:
+            raise ModelCallUncertain()
+        raise AssertionError("The fourth recipient group must remain unattempted.")
+
+    monkeypatch.setattr("refund_eval.world.interception.call_simulator", dispatch)
+    async with (WorldTrial(settings(
+            tmp_path, scenario="train_refund_late", world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=FakeModels()) as trial, session(trial) as (client, _, _)):
+        result = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Mixed-failure request", "body": "Please review this request."})
+        world = load_world()
+
+    assert dispatched == list(org_keys[:3])
+    assert result.isError
+    message = result.content[0].text
+    assert "accepted recipient groups=1" in message
+    assert "failed-not-accepted groups=2" in message and "unattempted groups=1" in message
+    assert "Do not retry the full batch" in message
+    assert "Message not sent" not in message
+    assert not any(term in message.lower() for term in ("simulator", "model", "charge", "cost"))
+    assert "structuredContent" not in result.model_dump(exclude_none=True)
+    interceptions = [item for item in world.interceptions
+                     if item.payload.get("subject") == "Mixed-failure request"]
+    assert len(interceptions) == 3
+    assert [item.payload["native_gmail_group_disposition"] for item in interceptions] == [
+        "failed_not_accepted", "accepted_by_simulator", "failed_not_accepted",
+    ]
+    assert all(item.payload["native_gmail_accepted"] is False for item in interceptions)
+    assert all(item.payload["native_gmail_batch_accepted_groups"] == 1 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_failed_not_accepted_groups"] == 2 for item in interceptions)
+    assert all(item.payload["native_gmail_batch_unattempted_groups"] == 1 for item in interceptions)
+    assert all("Partial delivery" in item.response_summary for item in (interceptions[0], interceptions[2]))
+
+
+@pytest.mark.asyncio
 async def test_published_gmail_self_copy_is_counted_in_partial_delivery(tmp_path, monkeypatch):
     from refund_eval.world.state import load_world
 

@@ -570,13 +570,15 @@ class GmailService:
             )
         except PartialMailBatchError as partial:
             accepted = len(partial.accepted_interception_ids)
+            failed = len(partial.failed_interception_ids)
             unattempted = partial.unattempted_groups
             partial_text = (
                 f"Partial delivery: accepted recipient groups={accepted}, "
-                f"failed-not-accepted groups=1, unattempted groups={unattempted}. "
+                f"failed-not-accepted groups={failed}, unattempted groups={unattempted}. "
                 "Accepted deliveries remain intact. Do not retry the full batch."
             )
             accepted_ids = set(partial.accepted_interception_ids)
+            failed_ids = set(partial.failed_interception_ids)
             with world_tx() as world:
                 for interception in world.interceptions:
                     payload = interception.payload
@@ -586,7 +588,7 @@ class GmailService:
                         "native_gmail_accepted": False,
                         "native_gmail_batch_disposition": "partial",
                         "native_gmail_batch_accepted_groups": accepted,
-                        "native_gmail_batch_failed_not_accepted_groups": 1,
+                        "native_gmail_batch_failed_not_accepted_groups": failed,
                         "native_gmail_batch_unattempted_groups": unattempted,
                     })
                     if interception.id in accepted_ids:
@@ -595,7 +597,7 @@ class GmailService:
                         else:
                             payload["native_gmail_group_disposition"] = "accepted_by_simulator"
                             interception.response_summary = "Recipient group accepted by simulator; batch disposition is partial."
-                    elif interception.id == partial.failed_interception_id:
+                    elif interception.id in failed_ids:
                         payload["native_gmail_group_disposition"] = "failed_not_accepted"
                         interception.response_summary = partial_text
             return _error(partial_text)
