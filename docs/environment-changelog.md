@@ -38,9 +38,9 @@ this was not a second version or trial round.
 
 ## 10.29 — 2026-11-27
 - Kind: trivial batch
-- Fingerprint: c3b69e00a18a0286bb85b9e78fea56c6d88ad497ddcf40f962d08ecd48d55959
+- Fingerprint: c3ef0309b9e83f57cbb17b7daddc74617c3d5840b207f24ba258a1fdd09df617
 - Trial round: none; offline focused regressions only. No provider call, search call or paid run.
-- Changes: Keep usage-only, disabled-cutoff unknown charges explicit in terminal accounting and allow independent later work without changing strict/enforced guards. Propagate typed uncertain failures through scheduled follow-ups and helper paths without retrying the same interaction. Stop multi-recipient processing on typed uncertain failures and report accurate accepted, failed-not-accepted and unattempted group counts without rolling back earlier effects or fabricating a successful whole-batch receipt; generic-only failures still continue. Preserve committed personal-contact mail when a descendant referral fails uncertainly, and include delivered self-copies among accepted groups without marking the whole batch accepted.
+- Changes: Keep usage-only, disabled-cutoff unknown charges explicit in terminal accounting and allow independent later work without changing strict/enforced guards. Propagate typed uncertain failures through scheduled follow-ups and helper paths without retrying the same interaction. Stop multi-recipient processing on typed uncertain failures and report accurate accepted, failed-not-accepted and unattempted group counts without rolling back earlier effects or fabricating a successful whole-batch receipt; generic-only failures still continue. Preserve committed personal-contact mail when a descendant referral fails uncertainly, continue later independent referrals, and expose delivered self-copies in local Gmail reads without marking the batch accepted.
 
 ## 10.28 — 2026-11-26
 - Kind: trivial batch
