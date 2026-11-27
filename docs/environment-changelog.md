@@ -36,6 +36,12 @@ version is also the environment version. The 1.0 baseline fingerprint below was
 [corrected in PR #45](https://github.com/mglynnhenley/realistic-eval-benchmark/pull/45);
 this was not a second version or trial round.
 
+## 10.28 — 2026-11-27
+- Kind: trivial batch
+- Fingerprint: 1dc1b9d13ba8743abb98b357220198d8411210c9df3b24d55d6b9d67699e1715
+- Trial round: none; focused offline regression and guarded launcher preparation only.
+- Changes: Keep ambiguous world-call charges explicitly unknown in terminal usage reports and allow independent later work only in usage-only reporting with application cutoffs disabled.
+
 ## 10.27 — 2026-11-26
 - Kind: trivial batch
 - Fingerprint: a9efa13cc1246f2fa7d4e0dfaf841f0d0ff7eb9361ff1371d7d123a0920ce201

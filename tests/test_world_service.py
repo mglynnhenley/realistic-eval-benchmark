@@ -36,17 +36,19 @@ from openai import AsyncOpenAI
 from refund_eval.agent.world_mode import TURN_TOKEN_ENV
 from refund_eval.models import budget as world_budget
 from refund_eval.models import client as models
+from refund_eval.models import replay as world_replay
 from refund_eval.models.budget import WORLD_BUDGET_KEY, BudgetedWorldModels
 from refund_eval.models.client import (
     Completion,
     Message,
+    ModelCallUncertain,
     ModelLimitExceeded,
     ModelRequestRejected,
     OutputSchema,
     Usage,
 )
 from refund_eval.models.openrouter import OpenRouterClient
-from refund_eval.models.replay import RECORDINGS_KEY
+from refund_eval.models.replay import RECORDINGS_KEY, RecordingModelClient
 from refund_eval.models.world_spend_ledger import (
     WorldSpendLedger,
     WorldSpendLedgerError,
@@ -622,6 +624,90 @@ async def test_model_client_limit_during_a_send_stops_the_trial(tmp_path, monkey
         world = trial.data()["world"]
     assert world["stop_reason"] == "model_limit"
     assert "SENT" not in sent.content[0].text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario_name", ["train_refund_late", "daycare_reimbursement"])
+async def test_ambiguous_simulator_failure_is_an_unaccepted_tool_error_and_later_work_proceeds(
+        tmp_path, monkeypatch, scenario_name):
+    from refund_eval.world.state import load_world
+
+    stub_browser(monkeypatch)
+    monkeypatch.setenv("REFUND_EVAL_SHARED_ROLE_MODE", "shared_caps")
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class MissingOnce(FakeModels):
+        missing = False
+
+        async def complete(self, role, messages, *, schema=None, **kwargs):
+            if role == "simulator" and schema and schema.name == "open_world_action" and not self.missing:
+                self.missing = True
+                self.calls.append((role, schema.name))
+                raise NotFoundError("synthetic unavailable route")
+            completion = await super().complete(role, messages, schema=schema, **kwargs)
+            completion.usage = Usage(cost=0.02)
+            return completion
+
+    fake = MissingOnce()
+    recipients = ([AVANTI] if scenario_name == "train_refund_late"
+                  else load_scenario(scenario_name).org("little_oaks").contact_emails)
+    async with (WorldTrial(settings(
+            tmp_path, scenario=scenario_name, world_cost_limit=10,
+            usage_reporting_mode="usage_only", disable_application_price_cutoffs=True,
+    ), model_client=fake) as trial, session(trial) as (client, _, _)):
+        failed = await client.call_tool("send_message", {
+            "to": recipients, "subject": "First independent request", "body": "Please review this request."})
+        assert failed.isError
+        assert "Message sent" not in failed.content[0].text
+
+        first_data = trial.data()
+        [tool_call] = [item for item in first_data["store"][ACTIVITY_KEY]
+                       if item.get("tool") == "send_message"]
+        assert tool_call["status"] == "error"
+        first_world = load_world()
+        [failed_interaction] = first_world.interactions
+        assert failed_interaction.status == "failed" and failed_interaction.action is None
+        assert len(failed_interaction.attempts) == 1
+        assert not failed_interaction.effects
+        [failed_interception] = [item for item in first_world.interceptions
+                                 if item.payload.get("subject") == "First independent request"]
+        assert failed_interception.payload["native_gmail_accepted"] is False
+        assert "Message not sent" in failed_interception.response_summary
+        [failed_record] = [record for record in first_data["store"][RECORDINGS_KEY]
+                           if record["role"] == "simulator" and "error" in record]
+        assert failed_record["role"] == "simulator"
+        assert failed_record["error"]["type"] == "NotFoundError"
+        assert failed_record["error"]["http_status"] == 404
+        assert "response" not in failed_record
+        assert first_data["store"][WORLD_BUDGET_KEY]["status"] == "unknown"
+        assert fake.calls.count(("simulator", "open_world_action")) == 1
+
+        later = await client.call_tool("send_message", {
+            "to": recipients, "subject": "Separate later request", "body": "A different new request."})
+        assert not later.isError, later.content
+
+        final_world = load_world()
+        assert [item.status for item in final_world.interactions] == ["failed", "applied"]
+        assert len(final_world.interactions[0].attempts) == 1
+        [later_interception] = [item for item in final_world.interceptions
+                                if item.payload.get("subject") == "Separate later request"]
+        assert later_interception.payload["native_gmail_accepted"] is True
+        assert fake.calls.count(("simulator", "open_world_action")) == 2
+        final_data = trial.data()
+        assert final_data["store"][WORLD_BUDGET_KEY]["status"] == "available"
+        final_records = [record for record in final_data["store"][RECORDINGS_KEY]
+                         if record["role"] == "simulator"]
+        assert len(final_records) == 2
+        assert final_records[0]["request"] != final_records[1]["request"]
+        assert final_records[0]["error"]["type"] == "NotFoundError"
+        assert final_records[0]["error"]["http_status"] == 404
+        assert "response" not in final_records[0]
+        from refund_eval.runtime.trial_artifacts import world_usage
+
+        _, final_roles = world_usage(final_data["store"])
+        assert final_roles["simulator"].total_cost is None
 
 
 @pytest.mark.parametrize("accounting", ["reserved", "legacy"])
@@ -1421,10 +1507,27 @@ async def test_usage_only_disabled_price_cutoffs_observe_costs_without_stopping(
 
 
 @pytest.mark.asyncio
-async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypatch):
-    monkeypatch.setattr(world_budget, "world_store", lambda: SimpleNamespace(set=lambda *_args: None))
+@pytest.mark.parametrize("failure_boundary", ["raised", "returned"])
+async def test_usage_only_disabled_price_cutoffs_record_unknown_failures_and_allow_next_call(
+        monkeypatch, failure_boundary):
+    class MemoryStore:
+        def __init__(self):
+            self.values = {}
 
-    class FailedRecorded:
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value):
+            self.values[key] = copy.deepcopy(value)
+
+    store = MemoryStore()
+    monkeypatch.setattr(world_budget, "world_store", lambda: store)
+    monkeypatch.setattr(world_replay, "world_store", lambda: store)
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    class FailOnce:
         calls = 0
 
         def model_name(self, role):
@@ -1432,22 +1535,38 @@ async def test_usage_only_disabled_price_cutoffs_keep_provider_failures(monkeypa
 
         async def complete(self, role, messages, **settings):
             self.calls += 1
-            return Completion(
-                text="", message=Message("assistant", ""), usage=Usage(cost=None), failed=True,
-                error={"type": "provider_error"},
-            )
+            if self.calls == 1 and failure_boundary == "raised":
+                raise NotFoundError("synthetic unavailable route")
+            if self.calls == 1:
+                return Completion(
+                    text="", message=Message("assistant", ""), usage=Usage(cost=None), failed=True,
+                    error={"type": "provider_error"},
+                )
+            return Completion(text="independent reply", message=Message("assistant", "independent reply"),
+                              usage=Usage(cost=0.02))
 
-    recorded = FailedRecorded()
+    recorded = FailOnce()
     budget = BudgetedWorldModels(
-        recorded, 100, lambda: None, prices={}, usage_reporting_only=True,
+        RecordingModelClient(recorded), 100, lambda: None, prices={}, usage_reporting_only=True,
         disable_application_price_cutoffs=True,
     )
-    with pytest.raises(ModelLimitExceeded, match="automatic retries are disabled"):
+    with pytest.raises(ModelCallUncertain, match="unknown charge"):
         await budget.complete("simulator", [Message("user", "hello")])
     assert recorded.calls == 1
-    with pytest.raises(ModelLimitExceeded, match="allowance is failed"):
-        await budget.complete("simulator", [Message("user", "later tool call")])
-    assert recorded.calls == 1
+    assert budget.status == "unknown"
+    assert len(store.get(RECORDINGS_KEY)) == 1
+    if failure_boundary == "raised":
+        record = store.get(RECORDINGS_KEY)[0]
+        assert record["error"]["type"] == "NotFoundError"
+        assert record["error"]["http_status"] == 404
+        assert "response" not in record
+    else:
+        assert store.get(RECORDINGS_KEY)[0]["response"]["failed"] is True
+
+    completion = await budget.complete("simulator", [Message("user", "independent later work")])
+    assert completion.text == "independent reply"
+    assert recorded.calls == 2 and budget.status == "available"
+    assert len(store.get(RECORDINGS_KEY)) == 2
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ import anyio
 from refund_eval.models.client import (
     Completion,
     Message,
+    ModelCallUncertain,
     ModelClient,
     ModelLimitExceeded,
     ModelRequestRejected,
@@ -329,6 +330,10 @@ class BudgetedWorldModels:
                 self.persist()
                 raise
             except Exception as error:  # noqa: BLE001 - retain MAT-144 failure accounting
+                if self.usage_reporting_only and self.disable_application_price_cutoffs:
+                    self._mark("unknown")
+                    self.persist()
+                    raise ModelCallUncertain() from None
                 worst_case = self._worst_case(role, messages, settings)
                 completion = Completion(
                     text="", message=Message("assistant", ""),
@@ -353,11 +358,8 @@ class BudgetedWorldModels:
                     self._reject_request()
                 if self.usage_reporting_only:
                     if completion.failed and self.disable_application_price_cutoffs:
-                        self._mark("failed")
                         self.persist()
-                        raise ModelLimitExceeded(
-                            "Usage-only world request failed; automatic retries are disabled"
-                        )
+                        raise ModelCallUncertain() from None
                     self.persist()
                     return completion
                 raise ModelLimitExceeded("World model request did not report a valid charge")

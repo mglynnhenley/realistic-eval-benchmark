@@ -148,6 +148,11 @@ def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unk
         "total_steps": len(steps),
         "extra": {"model_usage": {name: u.model_dump(mode="json") for name, u in sample.model_usage.items()}},
     }
+    cost_status = (getattr(sample, "metadata", None) or {}).get("cost_status")
+    if cost_status:
+        final_metrics["extra"]["cost_status"] = cost_status
+    elif costs and any(cost is None for cost in costs):
+        final_metrics["extra"]["cost_status"] = "unknown"
     if costs and all(cost is not None for cost in costs):
         if openrouter:
             final_metrics["extra"]["inspect_estimated_cost_usd"] = sum(costs)
@@ -163,7 +168,7 @@ def convert(log: Any, *, agent_name: str = AGENT_NAME, agent_version: str = "unk
     if openrouter:
         receipts = target_charge_summary(receipt_dir)
         extra["target_charges"] = receipts
-        if receipts["actual_cost_usd"] is not None:
+        if receipts["actual_cost_usd"] is not None and not (costs and any(cost is None for cost in costs)):
             final_metrics["total_cost_usd"] = receipts["actual_cost_usd"]
     return {
         "schema_version": SCHEMA_VERSION,

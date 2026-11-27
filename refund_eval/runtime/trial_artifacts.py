@@ -125,32 +125,58 @@ def _apply_world_settings(log: EvalLog, settings: dict[str, Any]) -> None:
 
 
 def world_usage(store: dict[str, Any]) -> tuple[dict[str, ModelUsage], dict[str, ModelUsage]]:
-    """World-side model usage by model and by role, summed from the store's recorded completions
-    (`models.replay`: each finished call's usage and cost as the world's model client counted them)."""
+    """World-side model usage by model and role, retaining unknown costs from failed calls."""
     by_model: dict[str, ModelUsage] = {}
     by_role: dict[str, ModelUsage] = {}
+    unknown_models: set[str] = set()
+    unknown_roles: set[str] = set()
     for call in store.get(RECORDINGS_KEY) or []:
+        if not isinstance(call, dict):
+            continue
         response = call.get("response") if isinstance(call, dict) else None
         usage = response.get("usage") if isinstance(response, dict) else None
+        model = call.get("model_name") or (response.get("model") if isinstance(response, dict) else None) or "unknown"
+        role = call.get("role") or "unknown"
         if not isinstance(usage, dict):
-            continue  # failed or unfinished: no usage recorded
+            if (call.get("error") or {}).get("limit") is True:
+                continue
+            unknown_models.add(model)
+            unknown_roles.add(role)
+            by_model.setdefault(model, ModelUsage())
+            by_role.setdefault(role, ModelUsage())
+            continue
         counted = ModelUsage(**{k: v for k, v in usage.items() if k in ModelUsage.model_fields and v is not None},
                              total_cost=usage.get("cost"))
-        model, role = call.get("model_name") or response.get("model") or "unknown", call.get("role") or "unknown"
         by_model[model] = by_model.get(model, ModelUsage()) + counted
         by_role[role] = by_role.get(role, ModelUsage()) + counted
+        if usage.get("cost") is None:
+            unknown_models.add(model)
+            unknown_roles.add(role)
+    for model in unknown_models:
+        by_model[model] = by_model[model].model_copy(update={"total_cost": None})
+    for role in unknown_roles:
+        by_role[role] = by_role[role].model_copy(update={"total_cost": None})
     return by_model, by_role
 
 
 def _cost(usage: dict[str, ModelUsage]) -> float | None:
-    costs = [u.total_cost for u in usage.values() if u.total_cost is not None]
-    return sum(costs) if costs else None
+    costs = [u.total_cost for u in usage.values()]
+    return sum(cost for cost in costs if cost is not None) if costs and all(cost is not None for cost in costs) else None
+
+
+def _cost_status(usage: dict[str, ModelUsage]) -> str:
+    if any(value.total_cost is None for value in usage.values()):
+        return "unknown"
+    return "reported" if usage else "not_reported"
 
 
 def _plus(usage: dict[str, ModelUsage] | None, extra: dict[str, ModelUsage]) -> dict[str, ModelUsage]:
     merged = dict(usage or {})
     for name, value in extra.items():
-        merged[name] = merged[name] + value if name in merged else value
+        existing = merged.get(name)
+        merged[name] = existing + value if existing is not None else value
+        if value.total_cost is None or (existing is not None and existing.total_cost is None):
+            merged[name] = merged[name].model_copy(update={"total_cost": None})
     return merged
 
 
@@ -207,7 +233,9 @@ def read_trial_log(path: str | Path, **kwargs: Any) -> EvalLog:
         sample.scores = {**(sample.scores or {}), **scores} or None
         if models:
             sample.metadata = {**(sample.metadata or {}),
-                               "cost_usd": {"agent": _cost(sample.model_usage), "world": _cost(roles)}}
+                               "cost_usd": {"agent": _cost(sample.model_usage), "world": _cost(roles)},
+                               "cost_status": {"agent": _cost_status(sample.model_usage),
+                                               "world": _cost_status(roles)}}
             sample.model_usage = _plus(sample.model_usage, models)
             sample.role_usage = _plus(sample.role_usage, roles)
     return log

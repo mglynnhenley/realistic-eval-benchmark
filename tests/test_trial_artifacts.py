@@ -318,7 +318,7 @@ def test_harbor_trial_cost_adds_the_worlds_simulator_and_grader_spend(tmp_path):
                                                    total_cost=2.0)})
     (trial / "artifacts/world").mkdir(parents=True)
     (trial / "artifacts/world/state.json").write_text(json.dumps(
-        {"settings": {}, "store": {WORLD_KEY: {"turn": 1}, "model_completions": WORLD_CALLS}}))
+        {"settings": {}, "store": {WORLD_KEY: {"turn": 1}, "model_completions": WORLD_CALLS[:-1]}}))
 
     log = read_trial_log(trial)
     [sample] = log.samples
@@ -332,6 +332,38 @@ def test_harbor_trial_cost_adds_the_worlds_simulator_and_grader_spend(tmp_path):
     [merged] = read_eval_log(str(eval_path(trial))).samples
     assert merged.metadata["cost_usd"] == {"agent": 2.0, "world": 0.875}
     assert sum(usage.total_cost for usage in merged.model_usage.values()) == 2.875
+
+
+def test_harbor_trial_keeps_unknown_world_cost_after_a_later_success(tmp_path, monkeypatch):
+    from inspect_ai.model import ModelUsage
+
+    from refund_eval.harbor import atif
+
+    trial = tmp_path / "jobs/job/trial__1"
+    _synthetic_log(trial / "agent/inspect/agent.eval", model_usage={TARGET: ModelUsage(total_cost=2.0)})
+    (trial / "artifacts/world").mkdir(parents=True)
+    failed = {"n": 0, "role": "simulator", "model_name": SIMULATOR, "request": "x",
+              "error": {"type": "NotFoundError", "message": "synthetic unavailable route", "limit": False,
+                        "http_status": 404}}
+    later_success = _recorded(1, "simulator", SIMULATOR, 0.02)
+    (trial / "artifacts/world/state.json").write_text(json.dumps(
+        {"settings": {}, "store": {WORLD_KEY: {"turn": 1}, "model_completions": [failed, later_success]}}))
+
+    log = read_trial_log(trial)
+    [sample] = log.samples
+    assert sample.store["model_completions"][0]["error"]["type"] == "NotFoundError"
+    assert sample.metadata["cost_usd"] == {"agent": 2.0, "world": None}
+    assert sample.metadata["cost_status"] == {"agent": "reported", "world": "unknown"}
+    assert sample.model_usage[SIMULATOR].total_cost is None
+    assert sample.role_usage["simulator"].total_cost is None
+    assert run_row(log, sample)["total_cost"] is None
+
+    monkeypatch.setattr(atif, "target_charge_summary", lambda _: {"actual_cost_usd": 2.0})
+    trajectory = atif.convert(log, receipt_dir=tmp_path / "receipts")
+    assert trajectory["final_metrics"]["extra"]["cost_status"] == sample.metadata["cost_status"]
+    assert "total_cost_usd" not in trajectory["final_metrics"]
+    assert trajectory["extra"]["target_charges"]["actual_cost_usd"] == 2.0
+    assert trajectory["final_metrics"]["extra"]["model_usage"][SIMULATOR]["total_cost"] is None
 
 
 def test_native_log_cost_is_unchanged_by_its_recorded_completions(tmp_path):

@@ -30,7 +30,11 @@ from refund_eval.companies import (
 from refund_eval.companies.exemplars import EXEMPLARS_DIR, exemplars_text
 from refund_eval.companies.models import CompanyModelRefusal
 from refund_eval.formatting import long_date, money
-from refund_eval.models.client import ModelLimitExceeded, ModelRequestRejected
+from refund_eval.models.client import (
+    ModelCallUncertain,
+    ModelLimitExceeded,
+    ModelRequestRejected,
+)
 from refund_eval.realism.notes import notes_text
 from refund_eval.runtime.events import follow_up_pending as _follow_up_pending
 from refund_eval.runtime.events import next_follow_up  # noqa: F401 - re-exported
@@ -659,6 +663,9 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
         try:
             proposed = await simulator.respond(event, context)
             action = OpenAction.model_validate(proposed)
+        except ModelCallUncertain as ex:
+            attempt.error = f"{type(ex).__name__}: {ex}"
+            raise
         except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
             attempt.error = f"{type(ex).__name__}: {ex}"
             raise
@@ -719,6 +726,9 @@ async def _choose_action(scenario: Scenario, world: World, org: Org, event: Comp
                     action, world, org, mode=event.mode, effective_at=prepared.effective_at,
                     task_authority=task_authority,
                 )
+            except ModelCallUncertain as ex:
+                attempt.error = f"{type(ex).__name__}: {ex}"
+                raise
             except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
                 attempt.error = f"{type(ex).__name__}: {ex}"
                 raise
@@ -992,7 +1002,7 @@ async def process_company_event(
         if prepared is None:
             last = interaction.attempts[-1] if interaction.attempts else None
             interaction.error = ((last.validation_error or last.error) if last else None) or "No valid company action."
-    except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected) as ex:
+    except (LimitExceededError, ModelLimitExceeded, ModelRequestRejected, ModelCallUncertain) as ex:
         interaction.status = "failed"
         interaction.error = f"{type(ex).__name__}: {ex}"
         with world_tx() as w:

@@ -128,7 +128,8 @@ class NativeBatchConfig(RunConfig):
             else:
                 if agent <= 0 or world <= 0 or world > WORLD_ROLE_CAP_CEILING_USD:
                     raise ValueError(f"{mode} world cap exceeds supported ${WORLD_ROLE_CAP_CEILING_USD} ceiling")
-            if mode == "shared_caps" and world != WORLD_ROLE_CAP_CEILING_USD:
+            if (mode == "shared_caps" and not self.disable_application_price_cutoffs
+                    and world != WORLD_ROLE_CAP_CEILING_USD):
                 raise ValueError(f"shared_caps mode requires a ${WORLD_ROLE_CAP_CEILING_USD} world role cap")
             if mode == "shared_roles":
                 if self.shared_allowance_usd is None:

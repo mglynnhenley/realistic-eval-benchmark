@@ -62,7 +62,9 @@ from refund_eval.scenario.schema import (
     load_scenario,
 )
 from refund_eval.sim import company_store
+from scripts.laura_trial import _native_effective_parameters
 from scripts.laura_trial import main as laura_trial_main
+from scripts.offline_spend_guard import SharedCapsThresholds
 
 
 @pytest.fixture(autouse=True)
@@ -1107,12 +1109,22 @@ def test_usage_only_can_disable_application_price_cutoffs_under_shared_caps(
     config = batch.NativeBatchConfig(
         scenario="train_refund_late", execution="modal", data_mode="hybrid", research_mode="auto",
         model="openrouter/target", simulator_model="openrouter/simulator", grader_model="openrouter/grader",
-        cost_limit=50, world_cost_limit=100, max_turns=3000, sim_weeks=365 / 7, time_limit=36000,
+        cost_limit=5, world_cost_limit=10, max_turns=3000, sim_weeks=365 / 7, time_limit=36000,
         openrouter_key_mode="shared_caps", agent_max_output_tokens=4096,
         requested_deadline=date(2027, 2, 4), usage_reporting_mode="usage_only",
         disable_application_price_cutoffs=True, disable_verifier=True, trials=1, concurrency=1,
         agent_wheel=wheel, agent_wheel_sha256=digest,
     )
+    native_parameters = _native_effective_parameters(
+        config,
+        SharedCapsThresholds(
+            disable_application_price_cutoffs=True, aggregate_ceiling_usd=Decimal(15),
+        ),
+    )
+    assert native_parameters["disable_application_price_cutoffs"] is True
+    assert native_parameters["cost_limit_enforcement"] == "disabled"
+    assert native_parameters["agent_cost_limit_usd"] is None
+    assert native_parameters["world_cost_limit_usd"] is None
     record_path = batch.prepare(out, config)
     record = json.loads(record_path.read_text(encoding="utf-8"))
     task = Task(out / "train_refund_late")
@@ -1125,24 +1137,31 @@ def test_usage_only_can_disable_application_price_cutoffs_under_shared_caps(
     assert config.disable_application_price_cutoffs is True
     assert metadata["disable_application_price_cutoffs"] == "true"
     assert world_env["REFUND_EVAL_DISABLE_APPLICATION_PRICE_CUTOFFS"] == "true"
-    assert world_env["WORLD_COST_LIMIT"] == "100.0"
-    assert agent.kwargs["cost_limit"] == 50
+    assert world_env["WORLD_COST_LIMIT"] == "10.0"
+    assert agent.kwargs["cost_limit"] == 5
     assert agent.env["REFUND_EVAL_USAGE_REPORTING_MODE"] == "usage_only"
     assert record["effective_parameters"]["effective_application_price_cutoffs_usd"] == {
         "agent": None, "world": None,
     }
     assert record["effective_parameters"]["shared_caps_guard_role_limits_usd"] == {
-        "agent": 50, "world": 100,
+        "agent": 5, "world": 10,
     }
     assert record["target_cost_limits_usd"] is None
     assert record["world_cost_limit_usd_per_trial"] is None
-    assert record["shared_caps_guard_role_limits_usd"] == {"agent": 50, "world": 100}
+    assert record["shared_caps_guard_role_limits_usd"] == {"agent": 5, "world": 10}
     assert job.retry.max_retries == 0
     assert job.verifier.disable is True
 
     manifest = tmp_path / "usage-only-no-price-cutoffs-manifest.json"
     assert laura_trial_main(["save", "--config", str(out / "job.yaml"), "--manifest", str(manifest)]) == 0
     assert laura_trial_main(["verify", "--manifest", str(manifest)]) == 0
+
+    for usage_reporting_mode in ("strict", "usage_only"):
+        with pytest.raises(ValueError, match=r"shared_caps mode requires a \$100 world role cap"):
+            batch.NativeBatchConfig.model_validate(config.model_dump() | {
+                "world_cost_limit": 10, "usage_reporting_mode": usage_reporting_mode,
+                "disable_application_price_cutoffs": False,
+            })
 
 
 def test_shared_caps_and_shared_roles_allow_per_run_target_cap_while_keeping_100_world_ceiling(

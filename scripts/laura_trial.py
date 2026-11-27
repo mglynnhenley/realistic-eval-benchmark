@@ -888,7 +888,8 @@ def _native_effective_parameters(
             if (allowance is None or allowance != thresholds.shared_allowance_usd
                     or allowance > agent_cost + world_cost):
                 raise SetupFailure("shared_roles_allowance_does_not_match_role_caps")
-        if shared_caps and (agent_cost <= 0 or world_cost != WORLD_ROLE_CAP_CEILING_USD):
+        if shared_caps and (agent_cost <= 0 or (
+                not config.disable_application_price_cutoffs and world_cost != WORLD_ROLE_CAP_CEILING_USD)):
             raise SetupFailure("shared_caps_requires_positive_target_and_100_world_caps")
     else:
         assert isinstance(thresholds, Thresholds)
@@ -1236,7 +1237,8 @@ def _saved_effective_parameters(
                 or shared_config.role_limits_usd["world"] != world_amount
                 or not allowance_matches
                 or _amount(task_metadata.get("shared_allowance_usd")) != shared_config.allowance_usd
-                or (shared_caps and (world_amount != WORLD_ROLE_CAP_CEILING_USD
+                or (shared_caps and ((not disable_application_price_cutoffs
+                    and world_amount != WORLD_ROLE_CAP_CEILING_USD)
                     or agent_amount + world_amount != thresholds.aggregate_ceiling_usd))
                 or agent_output_tokens is None or agent_output_tokens <= 0):
             raise SetupFailure("saved_shared_role_scope_or_caps_mismatch")
